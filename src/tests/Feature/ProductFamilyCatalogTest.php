@@ -905,34 +905,6 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertSame(3, $uncategorized->pagination->total);
     }
 
-    public function test_admin_dashboard_groups_every_product_as_a_collapsed_family_and_retains_product_actions(): void
-    {
-        $admin = User::factory()->create(['role' => UserRole::Admin]);
-        $family = ProductFamily::factory()->create(['name' => 'Netflix', 'sort_order' => 1]);
-        $member = Product::factory()->create([
-            'name' => 'Netflix Individual',
-            'product_family_id' => $family->id,
-            'family_sort_order' => 1,
-            'family_option_label' => 'Individual',
-        ]);
-        $standalone = Product::factory()->create(['name' => 'Standalone Product', 'product_family_id' => null]);
-
-        $this->actingAs($admin)
-            ->get('/admin?tab=produk')
-            ->assertOk()
-            ->assertSee('Daftar Product Family')
-            ->assertSee('Netflix')
-            ->assertSee('Individual')
-            ->assertSee('Standalone Product')
-            ->assertSee('admin-product-family-group-product-'.$standalone->id, false)
-            ->assertSee('familyExpanded: false', false)
-            ->assertDontSee('Product standalone')
-            ->assertSee('Edit family')
-            ->assertSee('Simpan grouping')
-            ->assertSee(route('admin.products.update', $member), false)
-            ->assertSee('Stok');
-    }
-
     public function test_invalid_family_create_reopens_management_modal_with_dedicated_errors(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

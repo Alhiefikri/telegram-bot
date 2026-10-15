@@ -164,11 +164,14 @@ final class ProductFamilyManagementService
         return $result;
     }
 
-    public function updateMembership(Product $product, ?int $familyId, int $sortOrder, ?string $optionLabel, User $user, ?string $ip = null): Product
+    public function updateMembership(Product $product, ?int $familyId, int $sortOrder, ?string $optionLabel, User $user, ?string $ip = null, ?string $expectedVersion = null): Product
     {
-        return DB::transaction(function () use ($product, $familyId, $sortOrder, $optionLabel, $user, $ip): Product {
+        return DB::transaction(function () use ($product, $familyId, $sortOrder, $optionLabel, $user, $ip, $expectedVersion): Product {
             $lockedState = $this->coherence->lockForMembership($product, $familyId);
             $lockedProduct = $lockedState['product'];
+            if ($expectedVersion !== null) {
+                abort_unless(hash_equals($this->coherence->membershipVersion($lockedProduct), $expectedVersion), 409, 'Grouping ini telah berubah. Muat ulang sebelum menyimpan.');
+            }
             $targetFamily = $lockedState['family'];
             $oldValues = [
                 'product_family_id' => $lockedProduct->product_family_id,

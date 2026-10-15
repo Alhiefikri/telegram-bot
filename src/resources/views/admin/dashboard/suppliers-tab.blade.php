@@ -73,7 +73,7 @@
 
     <x-admin-dashboard.card as="section" id="admin-supplier-products" padding="none" shadow="sm" class="scroll-mt-6 overflow-hidden" aria-labelledby="supplier-products-title">
         <header class="flex flex-wrap items-start justify-between gap-3 border-b border-admin-line p-5 sm:p-6">
-            <div class="max-w-2xl"><p class="text-xs font-medium text-admin-muted">Katalog toko</p><h2 id="supplier-products-title" class="mt-1 text-lg font-semibold text-admin-ink">Sumber supplier &amp; kebijakan harga produk</h2><p class="mt-1 text-sm leading-6 text-admin-muted">Atur sumber stok dan harga jual per produk. Nama, deskripsi, dan status publik diedit melalui tab Produk. Impor selalu menghasilkan draft nonaktif tanpa menyalin deskripsi supplier.</p></div>
+            <div class="max-w-2xl"><p class="text-xs font-medium text-admin-muted">Katalog toko</p><h2 id="supplier-products-title" class="mt-1 text-lg font-semibold text-admin-ink">Produk dengan sumber supplier</h2><p class="mt-1 text-sm leading-6 text-admin-muted">Kelola sumber, harga, stok lokal, dan detail dalam satu workspace produk. Impor selalu menghasilkan draft nonaktif tanpa menyalin deskripsi supplier.</p></div>
             <x-admin-dashboard.badge>{{ $suppliersTab['products']->total() }} produk</x-admin-dashboard.badge>
         </header>
         @php($productFilters = $suppliersTab['productFilters'] ?? ['search' => '', 'status' => 'all', 'source' => 'all', 'sourceOptions' => collect()])
@@ -150,7 +150,7 @@
                                 </dd>
                             </div>
                         </dl>
-                        <x-admin-dashboard.button :href="route('admin.products.suppliers', $supplierProduct)" variant="neutral" size="sm" aria-label="Atur supplier dan harga {{ $supplierProduct->name }}">Atur supplier &amp; harga <span aria-hidden="true">→</span></x-admin-dashboard.button>
+                        <x-admin-dashboard.button :href="route('admin.products.workspace', ['product' => $supplierProduct, 'section' => 'supplier'])" variant="neutral" size="sm" aria-label="Kelola supplier {{ $supplierProduct->name }}">Kelola produk &amp; supplier</x-admin-dashboard.button>
                     </article>
                 @empty
                     <div class="p-3 text-center sm:col-span-2" role="status">

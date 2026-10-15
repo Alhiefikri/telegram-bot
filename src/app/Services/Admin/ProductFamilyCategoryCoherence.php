@@ -8,9 +8,19 @@ use App\Models\Product;
 use App\Models\ProductFamily;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Validation\ValidationException;
 
 final class ProductFamilyCategoryCoherence
 {
+    public function membershipVersion(Product $product): string
+    {
+        return hash('sha256', json_encode([
+            'product_family_id' => $product->product_family_id,
+            'family_sort_order' => (int) $product->family_sort_order,
+            'family_option_label' => $product->family_option_label,
+        ], JSON_THROW_ON_ERROR));
+    }
+
     /**
      * Lock the family, all of its members, and relevant categories before a
      * Product category or membership mutation. Family rows are always locked
@@ -46,11 +56,12 @@ final class ProductFamilyCategoryCoherence
             $lockedProduct = $products->firstWhere('id', $productId);
         }
 
-        $this->lockCategories($this->categoryIds($products, $lockedProduct, $lockedProduct->category_id));
+        $categories = $this->lockCategories($this->categoryIds($products, $lockedProduct, $lockedProduct->category_id));
+        $this->assertCategoryAvailable($lockedProduct->category_id === null ? null : (int) $lockedProduct->category_id, $categories);
         $family = $targetFamilyId === null ? null : $families->get($targetFamilyId);
 
         if ($family instanceof ProductFamily) {
-            $this->assertCompatible($lockedProduct, $family, $products);
+            $this->assertCompatible($lockedProduct, $family, $products, $lockedProduct->category_id === null ? null : (int) $lockedProduct->category_id);
         }
 
         return [
@@ -88,7 +99,8 @@ final class ProductFamilyCategoryCoherence
             $products = $this->lockProducts($this->memberIds($familyIds, $productId));
             $lockedProduct = $products->firstWhere('id', $productId);
         }
-        $this->lockCategories($this->categoryIds($products, $lockedProduct, $newCategoryId));
+        $categories = $this->lockCategories($this->categoryIds($products, $lockedProduct, $newCategoryId));
+        $this->assertCategoryAvailable($newCategoryId, $categories);
         $family = $resolvedFamilyId === null ? null : $families->get($resolvedFamilyId);
 
         if ($family instanceof ProductFamily) {
@@ -150,9 +162,8 @@ final class ProductFamilyCategoryCoherence
     /**
      * @param  Collection<int, Product>  $products
      */
-    private function assertCompatible(Product $product, ProductFamily $family, Collection $products, ?int $candidateCategoryId = null): void
+    private function assertCompatible(Product $product, ProductFamily $family, Collection $products, ?int $candidateCategoryId): void
     {
-        $candidateCategoryId ??= $product->category_id === null ? null : (int) $product->category_id;
         $members = $products->filter(fn (Product $member): bool => (int) $member->product_family_id === (int) $family->getKey());
 
         if (! $this->compatible($candidateCategoryId, $members, $product->getKey())) {
@@ -258,11 +269,33 @@ final class ProductFamilyCategoryCoherence
         return $products;
     }
 
-    /** @param list<int> $ids */
-    private function lockCategories(array $ids): void
+    /**
+     * @param  list<int>  $ids
+     * @return Collection<int, Category>
+     */
+    private function lockCategories(array $ids): Collection
     {
+        $categories = new Collection;
         foreach (collect($ids)->filter(fn (mixed $id): bool => $id !== null)->map(fn (mixed $id): int => (int) $id)->unique()->sort() as $id) {
-            Category::withTrashed()->whereKey($id)->lockForUpdate()->first();
+            $category = Category::withTrashed()->whereKey($id)->lockForUpdate()->first();
+            if ($category instanceof Category) {
+                $categories->put($id, $category);
+            }
+        }
+
+        return $categories;
+    }
+
+    /** @param Collection<int, Category> $categories */
+    private function assertCategoryAvailable(?int $categoryId, Collection $categories): void
+    {
+        if ($categoryId === null) {
+            return;
+        }
+
+        $category = $categories->get($categoryId);
+        if (! $category instanceof Category || $category->trashed()) {
+            throw ValidationException::withMessages(['category_id' => 'Kategori tidak valid atau sudah dihapus.']);
         }
     }
 

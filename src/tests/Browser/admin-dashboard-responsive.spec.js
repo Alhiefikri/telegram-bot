@@ -101,7 +101,7 @@ test("paid stock credentials can be copied and selected without becoming editabl
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
   const card = await getAdminProductCard(page, "Browser Paid Invoice Product");
-  await card.getByRole("button", { name: "Kelola", exact: true }).click();
+  await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
   const modal = page.locator("#manage-stock-modal");
   const copyButtons = modal.getByRole("button", {
     name: "Salin kredensial",
@@ -156,7 +156,7 @@ test("paid stock credentials can be copied and selected without becoming editabl
   await expect(modal).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(modal).toBeHidden();
-  await card.getByRole("button", { name: "Kelola", exact: true }).click();
+  await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.evaluate(() => {
@@ -178,7 +178,7 @@ test("paid stock credentials can be copied and selected without becoming editabl
   expect(await page.evaluate(() => window.stockCopyCalls)).toBe(1);
   await page.keyboard.press("Escape");
   await expect(modal).toBeHidden();
-  await card.getByRole("button", { name: "Kelola", exact: true }).click();
+  await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
   await expect(copyButtons.last()).toBeEnabled();
   await page.evaluate(async () => {
     window.rejectStockCopy(new Error("late clipboard rejection"));
@@ -3398,11 +3398,6 @@ async function adminProductModalCases(page) {
           .click(),
     },
     {
-      name: "Edit produk",
-      open: () =>
-        productCard.getByRole("button", { name: "Ubah", exact: true }).click(),
-    },
-    {
       name: "Kelola Product Family",
       open: () =>
         section.getByRole("button", { name: /Kelola Product Family/ }).click(),
@@ -3415,13 +3410,15 @@ async function adminProductModalCases(page) {
     {
       name: "Tambah stok",
       open: () =>
-        productCard.getByRole("button", { name: "Stok", exact: true }).click(),
+        productCard
+          .getByRole("button", { name: "Tambah stok", exact: true })
+          .click(),
     },
     {
       name: "Kelola stok",
       open: () =>
         productCard
-          .getByRole("button", { name: "Kelola", exact: true })
+          .getByRole("button", { name: "Kelola akun", exact: true })
           .click(),
     },
   ];
@@ -4126,7 +4123,9 @@ test("supplier catalog forms preserve draft import, mapping and pricing without 
   await importForm
     .getByRole("button", { name: "Impor draft nonaktif" })
     .click();
-  await expect(page).toHaveURL(`${baseUrl}/admin?tab=suppliers`);
+  await expect(page).toHaveURL(
+    /\/admin\/products\/\d+\/workspace(?:\?section=detail)?$/
+  );
   const draft = JSON.parse(
     runArtisan([
       "tinker",
@@ -4156,18 +4155,25 @@ test("supplier catalog forms preserve draft import, mapping and pricing without 
     .selectOption(String(invoiceFixtures.supplierProductId));
   await mapForm.locator('[name="equivalent_confirmed"]').check();
   await mapForm.getByRole("button", { name: "Simpan hubungan produk" }).click();
-  await expect(page).toHaveURL(`${baseUrl}/admin?tab=suppliers`);
-  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
-  await expect(
-    page.getByRole("button", { name: "Simpan pilihan supplier" })
-  ).toBeVisible();
-  const priceForm = page.locator('form[action$="/supplier-pricing"]');
+  await expect(page).toHaveURL(
+    `${baseUrl}${invoiceFixtures.supplierProductPath}?section=supplier`
+  );
+  await page.locator("#workspace-trigger-price").click();
+  const priceForm = page.locator('[data-workspace-form="policy"]');
   await priceForm.locator('[name="buffer_idr"]').fill("500");
-  await priceForm
-    .getByRole("button", { name: "Simpan pengaturan harga" })
-    .click();
-  await expect(page).toHaveURL(`${baseUrl}/admin?tab=suppliers`);
-  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/supplier-pricing") &&
+        response.ok()
+    ),
+    priceForm
+      .getByRole("button", { name: "Simpan kebijakan harga", exact: true })
+      .click(),
+  ]);
+  await page.reload();
+  await page.locator("#workspace-trigger-price").click();
   await expect(priceForm.locator('[name="buffer_idr"]')).toHaveValue("500");
   const saved = JSON.parse(
     runArtisan([
@@ -4927,57 +4933,9 @@ test("keeps tabs, cards, and the stock modal usable at Telegram mini app width",
     "Browser QA Product Family"
   );
 
-  const productActions = productCard.locator("[data-product-actions]").first();
-  const primaryAction = productActions
-    .locator("[data-product-primary-action]")
-    .first();
-  const secondaryActions = productActions
-    .locator("[data-product-secondary-actions]")
-    .first();
-  const moreTrigger = productActions
-    .locator("[data-product-more-trigger]")
-    .first();
-  const morePanel = productActions.locator("[data-product-more-panel]").first();
-
-  await expect(
-    primaryAction.getByRole("button", { name: "Stok", exact: true })
-  ).toBeVisible();
-  await expect(
-    secondaryActions.getByRole("button", { name: "Ubah", exact: true })
-  ).toBeVisible();
-  await expect(
-    secondaryActions.getByRole("button", { name: "Kelola", exact: true })
-  ).toBeVisible();
-  await expect(
-    productActions.getByRole("button", { name: "Bagikan", exact: true })
-  ).toBeHidden();
-  await expect(
-    productActions.getByRole("button", { name: /Pause|Aktifkan/ })
-  ).toBeHidden();
-  await expect(
-    productActions.getByRole("button", { name: "Arsipkan", exact: true })
-  ).toBeHidden();
-  await expect(moreTrigger).toHaveAttribute("aria-expanded", "false");
-
-  await expectBefore(primaryAction, secondaryActions);
-  await expectBefore(secondaryActions, moreTrigger);
-  await expectStrictTouchTargetsAtLeast44px(productActions);
-
-  await moreTrigger.click();
-  await expect(moreTrigger).toHaveAttribute("aria-expanded", "true");
-  await expect(morePanel).toBeVisible();
-  await expect(
-    morePanel.getByRole("button", { name: "Bagikan", exact: true })
-  ).toBeVisible();
-  await expect(
-    morePanel.getByRole("button", { name: /Pause|Aktifkan/ })
-  ).toBeVisible();
-  await expect(
-    morePanel.getByRole("button", { name: "Arsipkan", exact: true })
-  ).toBeVisible();
-  await expectStrictTouchTargetsAtLeast44px(productActions);
-
-  await productCard.getByRole("button", { name: "Kelola" }).click();
+  await productCard
+    .getByRole("button", { name: "Kelola akun", exact: true })
+    .click();
 
   const manageModal = page.getByRole("dialog", { name: "Kelola Stok" });
   await expect(manageModal).toBeVisible();
@@ -5552,7 +5510,50 @@ async function expectClickedDashboardControlsToWork(page, navigationName) {
   await expect(productModal.locator("#product-name")).toBeVisible();
 }
 
-test("saves product name and icon edits from the admin modal", async ({
+test("supplier picker stays centered inside desktop and mobile viewports", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
+  await page.locator("#workspace-trigger-supplier").click();
+  const dialog = page.getByRole("dialog", {
+    name: "Tambah sumber supplier",
+    exact: true,
+  });
+  for (const viewport of [
+    { width: 1568, height: 768 },
+    { width: 390, height: 844 },
+    { width: 320, height: 568 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page
+      .getByRole("button", { name: "Tambah sumber supplier", exact: true })
+      .click();
+    await expect(dialog).toBeVisible();
+    await expect(
+      page.getByText("Memuat katalog supplier…", { exact: true })
+    ).toBeHidden();
+    const box = await dialog.boundingBox();
+    expect(
+      Math.abs(box.x + box.width / 2 - viewport.width / 2)
+    ).toBeLessThanOrEqual(2);
+    expect(
+      Math.abs(box.y + box.height / 2 - viewport.height / 2)
+    ).toBeLessThanOrEqual(2);
+    expect(box.x).toBeGreaterThanOrEqual(15);
+    expect(box.y).toBeGreaterThanOrEqual(15);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width - 15);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 15);
+    await expectNoDocumentOverflow(page);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(
+      page.getByRole("button", { name: "Tambah sumber supplier", exact: true })
+    ).toBeFocused();
+  }
+});
+
+test("workspace saves product detail and appearance independently without losing drafts", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -5563,205 +5564,139 @@ test("saves product name and icon edits from the admin modal", async ({
     "Browser QA Produk A",
     "Browser QA Product Family"
   );
-  await productCard.getByRole("button", { name: "Ubah", exact: true }).click();
-
-  const productModal = page.getByRole("dialog", { name: "Edit produk" });
-  const form = productModal.locator("form");
-  await expect(productModal).toBeVisible();
-  await expect(form).toHaveAttribute("action", /\/admin\/products\/\d+$/);
-  await expect(form.locator('input[name="_method"]')).toHaveValue("PATCH");
-
-  await productModal
-    .locator("#product-name")
-    .fill("Browser QA Produk A Edited");
-  await productModal.locator("#product-icon").fill("🛠️");
-
+  await productCard.getByRole("link", { name: /Kelola produk/ }).click();
+  await page.locator("#workspace-trigger-detail").click();
+  const detail = page.locator('[data-workspace-form="detail"]');
+  await detail.locator('[name="name"]').fill("Browser QA Produk A Edited");
+  await page.locator("#workspace-trigger-appearance").click();
+  const appearance = page.locator('[data-workspace-form="appearance"]');
+  await appearance.locator('[name="icon"]').fill("🛠️");
   await Promise.all([
-    page.waitForURL(`${baseUrl}/admin?tab=produk`),
-    productModal.getByRole("button", { name: /Simpan/i }).click(),
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().match(/\/admin\/products\/\d+$/) &&
+        response.ok()
+    ),
+    appearance
+      .getByRole("button", { name: "Simpan gambar & tampilan", exact: true })
+      .click(),
   ]);
-
-  await expect(
-    page.getByText("Produk Browser QA Produk A Edited berhasil diperbarui.")
-  ).toBeVisible();
-  await getAdminProductCard(
-    page,
-    "Browser QA Produk A Edited",
-    "Browser QA Product Family"
+  await page.locator("#workspace-trigger-detail").click();
+  await expect(detail.locator('[name="name"]')).toHaveValue(
+    "Browser QA Produk A Edited"
   );
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().match(/\/admin\/products\/\d+$/) &&
+        response.ok()
+    ),
+    detail.getByRole("button", { name: "Simpan detail", exact: true }).click(),
+  ]);
+  await page.reload();
+  await page.locator("#workspace-trigger-detail").click();
+  await expect(detail.locator('[name="name"]')).toHaveValue(
+    "Browser QA Produk A Edited"
+  );
+  await page.locator("#workspace-trigger-appearance").click();
+  await expect(appearance.locator('[name="icon"]')).toHaveValue("🛠️");
 });
 
-test("manages quantity price tiers from the product modal at narrow mobile width", async ({
+test("workspace quantity tiers remain bounded and persist at narrow mobile width", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 900 });
   await login(page);
-  await page.goto(`${baseUrl}/admin?tab=produk`, {
-    waitUntil: "domcontentloaded",
-  });
-
-  const productCard = await getAdminProductCard(
-    page,
-    "Browser QA Produk A",
-    "Browser QA Product Family"
-  );
-  await productCard.getByRole("button", { name: "Ubah", exact: true }).click();
-
-  const dialog = page.getByRole("dialog", { name: "Edit produk" });
-  const addTierButton = dialog.getByRole("button", {
-    name: "+ Tambah tingkat harga",
-  });
-  await expect(dialog).toBeVisible();
-  await expect(addTierButton).toBeVisible();
-  await expectElementWithinViewport(page, dialog);
-
-  await addTierButton.focus();
-  await page.keyboard.press("Enter");
-  await dialog.locator("#product-quantity-tier-0-minimum").fill("2");
-  await dialog.locator("#product-quantity-tier-0-idr").fill("40000");
-  await dialog.locator("#product-quantity-tier-0-usdt").fill("1.8");
-
-  for (const [index, minimum, idr, usdt] of [
-    [1, "5", "35000", "1.6"],
-    [2, "8", "30000", "1.4"],
-    [3, "10", "25000", "1.2"],
-    [4, "12", "20000", "1.0"],
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
+  await page.locator("#workspace-trigger-price").click();
+  const form = page.locator('[data-workspace-form="price"]');
+  const add = form.getByRole("button", { name: /Tambah tingkat/ });
+  const tiers = form.locator(".workspace-tier");
+  while (await tiers.count())
+    await tiers.first().getByRole("button", { name: /Hapus/ }).click();
+  for (const [minimum, idr, usdt] of [
+    ["2", "40000", "1.8"],
+    ["5", "35000", "1.6"],
+    ["8", "30000", "1.4"],
+    ["10", "25000", "1.2"],
+    ["12", "20000", "1.0"],
   ]) {
-    await addTierButton.click();
-    await dialog
-      .locator(`#product-quantity-tier-${index}-minimum`)
-      .fill(minimum);
-    await dialog.locator(`#product-quantity-tier-${index}-idr`).fill(idr);
-    await dialog.locator(`#product-quantity-tier-${index}-usdt`).fill(usdt);
+    await add.click();
+    const inputs = tiers.last().locator("input");
+    await inputs.nth(0).fill(minimum);
+    await inputs.nth(1).fill(idr);
+    await inputs.nth(2).fill(usdt);
   }
-  await expect(addTierButton).toBeDisabled();
-  await dialog.getByRole("button", { name: "Hapus tingkat harga #2" }).click();
-  await expect(dialog.locator("[data-tier-row]")).toHaveCount(4);
-  while (await dialog.locator("[data-tier-row]").count()) {
-    await dialog
-      .locator("[data-tier-row]")
-      .first()
-      .getByRole("button", { name: /Hapus tingkat harga/ })
-      .click();
-  }
-  await expect(dialog.locator("[data-tier-row]")).toHaveCount(0);
-  await expect(
-    dialog.getByText("Tidak ada tingkat harga. Harga dasar tetap digunakan.")
-  ).toBeVisible();
-
-  await addTierButton.click();
-  await dialog.locator("#product-quantity-tier-0-minimum").fill("2");
-  await dialog.locator("#product-quantity-tier-0-idr").fill("40000");
-  await dialog.locator("#product-quantity-tier-0-usdt").fill("1.8");
-
+  await expect(add).toBeDisabled();
+  await tiers.nth(1).getByRole("button", { name: /Hapus/ }).click();
+  await expect(tiers).toHaveCount(4);
+  while (await tiers.count())
+    await tiers.first().getByRole("button", { name: /Hapus/ }).click();
+  await add.click();
+  await tiers.first().locator("input").nth(0).fill("2");
+  await tiers.first().locator("input").nth(1).fill("40000");
+  await tiers.first().locator("input").nth(2).fill("1.8");
   await Promise.all([
-    page.waitForURL(/\/admin\?tab=produk/),
-    dialog.getByRole("button", { name: /Simpan/i }).click(),
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().match(/\/admin\/products\/\d+$/) &&
+        response.ok()
+    ),
+    form
+      .getByRole("button", {
+        name: "Simpan harga dasar & tingkat",
+        exact: true,
+      })
+      .click(),
   ]);
-  await expect(
-    page.getByText(
-      /Produk Browser QA Produk A(?: Edited)? berhasil diperbarui\./
-    )
-  ).toBeVisible();
-
-  const updatedCard = await getAdminProductCard(
-    page,
-    "Browser QA Produk A",
-    "Browser QA Product Family"
-  );
-  await updatedCard.getByRole("button", { name: "Ubah", exact: true }).click();
-  const reopenedDialog = page.getByRole("dialog", { name: "Edit produk" });
-  await expect(
-    reopenedDialog.locator("#product-quantity-tier-0-minimum")
-  ).toHaveValue("2");
-  await expect(
-    reopenedDialog.locator("#product-quantity-tier-0-idr")
-  ).toHaveValue("40000");
-  await expect(
-    reopenedDialog.locator("#product-quantity-tier-0-usdt")
-  ).toHaveValue("1.8");
-  await expectElementWithinViewport(page, reopenedDialog);
+  await page.reload();
+  await page.locator("#workspace-trigger-price").click();
+  await expect(tiers).toHaveCount(1);
+  await expect(tiers.first().locator("input").nth(0)).toHaveValue("2");
+  await expect(tiers.first().locator("input").nth(1)).toHaveValue("40000");
+  await expect(tiers.first().locator("input").nth(2)).toHaveValue("1.8");
   await expectNoDocumentOverflow(page);
 });
 
-test("saves locale copy variants from the product modal language tabs", async ({
+test("workspace preserves independent locale descriptions and warranty policies", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await login(page);
-  await page.goto(`${baseUrl}/admin?tab=produk`);
-
-  const productCard = await getAdminProductCard(
-    page,
-    "Browser QA Produk A",
-    "Browser QA Product Family"
-  );
-  await productCard.getByRole("button", { name: "Ubah", exact: true }).click();
-
-  const dialog = page.getByRole("dialog", { name: "Edit produk" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.locator("#product-description-id-panel")).toBeVisible();
-  await expect(dialog.locator("#product-description-en-panel")).toBeHidden();
-
-  await dialog
-    .getByRole("tab", { name: "English", exact: true })
-    .first()
-    .click();
-  await expect(dialog.locator("#product-description-id-panel")).toBeHidden();
-  await expect(dialog.locator("#product-description-en-panel")).toBeVisible();
-  await expect(
-    dialog.locator("#product-warranty-policy-en-panel")
-  ).toBeVisible();
-  await dialog
-    .locator("#product-description-en")
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
+  await page.locator("#workspace-trigger-detail").click();
+  const form = page.locator('[data-workspace-form="detail"]');
+  await form.getByRole("tab", { name: "English", exact: true }).click();
+  await form
+    .locator('[name="description_en"]')
     .fill("Browser QA English details.");
-  await dialog
-    .locator("#product-warranty-policy-en")
+  await form
+    .locator('[name="warranty_policy_en"]')
     .fill("Browser QA English refund policy.");
-
   await Promise.all([
-    page.waitForURL(`${baseUrl}/admin?tab=produk`),
-    dialog.getByRole("button", { name: /Simpan/i }).click(),
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().match(/\/admin\/products\/\d+$/) &&
+        response.ok()
+    ),
+    form.getByRole("button", { name: "Simpan detail", exact: true }).click(),
   ]);
-  await expect(
-    page.getByText(
-      /Produk Browser QA Produk A(?: Edited)? berhasil diperbarui\./
-    )
-  ).toBeVisible();
-
-  const reopenedCard = await getAdminProductCard(
-    page,
-    "Browser QA Produk A",
-    "Browser QA Product Family"
-  );
-  await reopenedCard.getByRole("button", { name: "Ubah", exact: true }).click();
-
-  const reopenedDialog = page.getByRole("dialog", { name: "Edit produk" });
-  await reopenedDialog
-    .getByRole("tab", { name: "English", exact: true })
-    .first()
-    .click();
-  await expect(reopenedDialog.locator("#product-description-en")).toHaveValue(
+  await page.reload();
+  await page.locator("#workspace-trigger-detail").click();
+  await form.getByRole("tab", { name: "English", exact: true }).click();
+  await expect(form.locator('[name="description_en"]')).toHaveValue(
     "Browser QA English details."
   );
-  await expect(
-    reopenedDialog.locator("#product-warranty-policy-en")
-  ).toHaveValue("Browser QA English refund policy.");
-
-  await reopenedDialog
-    .getByRole("tab", { name: "Bahasa Melayu", exact: true })
-    .first()
-    .click();
-  await expect(reopenedDialog.locator("#product-description-ms")).toHaveValue(
-    ""
+  await expect(form.locator('[name="warranty_policy_en"]')).toHaveValue(
+    "Browser QA English refund policy."
   );
-  await expect(
-    reopenedDialog.locator("#product-warranty-policy-ms")
-  ).toHaveValue("");
-  await expect(
-    reopenedDialog.locator("#product-description-ms-panel")
-  ).toBeVisible();
-  await expectElementWithinViewport(page, reopenedDialog);
+  await form.getByRole("tab", { name: "Bahasa Melayu", exact: true }).click();
+  await expect(form.locator('[name="description_ms"]')).toHaveValue("");
+  await expect(form.locator('[name="warranty_policy_ms"]')).toHaveValue("");
   await expectNoDocumentOverflow(page);
 });
 
@@ -5812,7 +5747,7 @@ test("bulk stock deletion keeps mobile modal open and refreshes remaining accoun
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
   const card = await getAdminProductCard(page, "Bulk Stock QA");
-  await card.getByRole("button", { name: "Kelola", exact: true }).click();
+  await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
   const modal = page.getByRole("dialog", { name: "Kelola Stok" });
   const selection = modal.getByRole("checkbox", { name: /Pilih akun stok/ });
   await expect(selection).toHaveCount(25);
@@ -7834,7 +7769,7 @@ $unknownEffect = \App\Models\TelegramOutboundEffect::factory()->create([
 
 echo json_encode([
     'supplierCatalogPath' => route('admin.suppliers.catalog', $supplier, false),
-    'supplierProductPath' => route('admin.products.suppliers', $productA, false),
+    'supplierProductPath' => route('admin.products.workspace', $productA, false),
     'supplierCatalogItemId' => $catalogItem->id,
     'supplierProductId' => $productA->id,
     'unknownEffectPath' => route('admin.telegram-outbound-effects.show', $unknownEffect, false),

@@ -20,48 +20,6 @@ use Tests\Support\NonTransactionalDatabaseTestCase as TestCase;
 #[Group('postgres-release')]
 final class SupplierPricingClarityTest extends TestCase
 {
-    public function test_product_supplier_page_explains_ordered_eligible_automatic_price_and_sku_simulation(): void
-    {
-        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-        $product = Product::factory()->create();
-        $this->policy($product, 'fixed');
-        $this->source($product, 'Primary SKU', 1000000, 10);
-        $this->source($product, 'Backup SKU', 500000, 20);
-
-        $this->get(route('admin.products.suppliers', $product))->assertOk()
-            ->assertSee('Harga otomatis tersimpan dihitung dari supplier aktif dan layak pertama menurut urutan (Urutan 1 diprioritaskan). Jika Urutan 1 tidak memenuhi syarat basis harga, source berikutnya yang memenuhi syarat digunakan.')
-            ->assertSee('Bukan memilih harga termurah, dan kelayakan basis harga bukan jaminan stok atau saldo cukup saat checkout.')
-            ->assertSee('Hitung simulasi berdasarkan SKU')
-            ->assertSee('SKU yang dipilih hanya untuk simulasi; tidak memilih source harga tersimpan dan tidak menyimpan kebijakan atau harga jual.')
-            ->assertSeeInOrder(['Urutan 1', 'Urutan 2'])
-            ->assertDontSee('Harga otomatis tidak aktif pada mode manual.');
-    }
-
-    public function test_manual_mode_does_not_imply_automatic_pricing_is_active(): void
-    {
-        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-        $product = Product::factory()->create(['price_amount' => 45000]);
-        $this->policy($product, 'manual');
-        $this->source($product, 'Mapped SKU', 1000000, 10);
-
-        $this->get(route('admin.products.suppliers', $product))->assertOk()
-            ->assertSee('Harga otomatis tidak aktif pada mode manual. Harga jual tersimpan mengikuti harga yang kamu isi di halaman Produk.')
-            ->assertSee('Jika mode otomatis disimpan')
-            ->assertSee('Hitung simulasi berdasarkan SKU');
-    }
-
-    public function test_product_without_sources_explains_no_automatic_price_basis_and_has_no_sku_preview(): void
-    {
-        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
-        $product = Product::factory()->create(['price_amount' => 45000]);
-        $this->policy($product, 'fixed');
-
-        $this->get(route('admin.products.suppliers', $product))->assertOk()
-            ->assertSee('Belum ada mapping supplier; belum ada source untuk menghitung harga otomatis atau simulasi SKU.')
-            ->assertDontSee('Hitung simulasi berdasarkan SKU');
-        $this->assertSame(45000, $product->fresh()->price_amount);
-    }
-
     #[DataProvider('savedModesAndPreviewFormats')]
     public function test_backup_sku_preview_never_changes_saved_price_policy_or_source_selection(string $savedMode, bool $json): void
     {
@@ -99,13 +57,11 @@ final class SupplierPricingClarityTest extends TestCase
                 ->assertOk()->assertExactJson(['cost_idr' => 8000, 'retail_idr' => 12000]);
         } else {
             $this->post(route('admin.products.supplier-pricing.preview', $product), $input)->assertOk()
-                ->assertViewIs('admin.suppliers.product')
-                ->assertViewHas('previewItem', fn (SupplierCatalogItem $item): bool => $item->id === $backup->supplier_catalog_item_id)
-                ->assertViewHas('policy', fn (SupplierPricePolicy $draft): bool => $draft->mode === 'hybrid' && $draft->buffer_idr === 250 && ! $draft->exists)
-                ->assertSee('Hasil simulasi harga untuk 1 produk')
-                ->assertSee('Rp8.000')->assertSee('Rp12.000')
-                ->assertSee('Simulasi SKU terpilih tidak mengubah urutan supplier atau source basis harga otomatis tersimpan.')
-                ->assertSee('Belum membeli produk atau menyimpan perubahan.');
+                ->assertViewHas('workspace', fn (array $workspace): bool => $workspace['price_preview'] === ['cost_idr' => 8000, 'retail_idr' => 12000]
+                    && $workspace['preview_catalog_item_id'] === $backup->supplier_catalog_item_id
+                    && $workspace['policy']['mode'] === 'hybrid'
+                    && $workspace['policy']['buffer_idr'] === 250
+                );
         }
 
         $this->assertSame($savedPrice, $product->fresh()->price_amount);

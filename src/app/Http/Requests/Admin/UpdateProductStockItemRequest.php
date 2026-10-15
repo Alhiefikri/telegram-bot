@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Enums\CredentialFormat;
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -10,6 +11,7 @@ use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 class UpdateProductStockItemRequest extends FormRequest
 {
@@ -32,16 +34,21 @@ class UpdateProductStockItemRequest extends FormRequest
     }
 
     /**
-     * @return array<string, list<string>>
+     * @return array<string, list<mixed>>
      */
     public function rules(): array
     {
+        $stockItem = $this->route('stockItem');
+        $format = $stockItem instanceof ProductStockItem ? $stockItem->safeCredentialFormat() : null;
+        $legacyRequired = $format === CredentialFormat::Legacy ? 'required' : 'nullable';
+        $structuredRequired = $format === CredentialFormat::StructuredAccount ? 'required' : 'nullable';
+
         return [
-            'credential_format' => ['required', 'string', 'in:legacy,structured_account'],
-            'secret' => ['required_if:credential_format,legacy', 'nullable', 'string', 'max:5000'],
-            'email' => ['required_if:credential_format,structured_account', 'nullable', 'string', 'max:254'],
-            'password' => ['required_if:credential_format,structured_account', 'nullable', 'string', 'max:1024'],
-            'access_method' => ['required_if:credential_format,structured_account', 'nullable', 'string', 'in:none,otp_mail_link,auth_token'],
+            'credential_format' => ['required', 'string', Rule::in($format === null ? [] : [$format->value])],
+            'secret' => [$legacyRequired, 'string', 'max:5000'],
+            'email' => [$structuredRequired, 'string', 'max:254'],
+            'password' => [$structuredRequired, 'string', 'max:1024'],
+            'access_method' => [$structuredRequired, 'string', 'in:none,otp_mail_link,auth_token'],
             'access_value' => ['nullable', 'string', 'max:3500'],
             'tutorial_override' => ['nullable', 'string'],
         ];
@@ -53,13 +60,14 @@ class UpdateProductStockItemRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'credential_format.in' => 'Format stok tidak cocok dengan editor akun.',
             'secret.required' => 'Isi akun stok tidak boleh kosong.',
             'secret.max' => 'Isi akun stok maksimal 5000 karakter.',
-            'email.required_if' => 'Email wajib diisi.',
+            'email.required' => 'Email wajib diisi.',
             'email.max' => 'Email maksimal 254 karakter.',
-            'password.required_if' => 'Password wajib diisi.',
+            'password.required' => 'Password wajib diisi.',
             'password.max' => 'Password maksimal 1024 karakter.',
-            'access_method.required_if' => 'Metode akses wajib dipilih.',
+            'access_method.required' => 'Metode akses wajib dipilih.',
             'access_value.max' => 'Nilai metode akses terlalu panjang.',
         ];
     }

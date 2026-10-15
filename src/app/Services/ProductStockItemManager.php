@@ -31,6 +31,12 @@ class ProductStockItemManager
 
     public function updateAvailableSecret(Product $product, ProductStockItem $stockItem, string $secret, User $user, ?string $ip = null): ProductStockItem
     {
+        if (trim($secret) === '') {
+            throw ValidationException::withMessages([
+                'secret' => 'Isi akun stok tidak boleh kosong.',
+            ]);
+        }
+
         return DB::transaction(function () use ($product, $stockItem, $secret, $user, $ip): ProductStockItem {
             /** @var Product $lockedProduct */
             $lockedProduct = Product::query()
@@ -46,6 +52,12 @@ class ProductStockItemManager
                 ->whereNull('retired_at')
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            if ($lockedItem->safeCredentialFormat() !== CredentialFormat::Legacy) {
+                throw ValidationException::withMessages([
+                    'credential_format' => 'Format stok tidak cocok dengan editor akun.',
+                ]);
+            }
 
             $lockedItem->forceFill(['secret' => $secret])->save();
 

@@ -27,7 +27,7 @@
         </dl>
         @if($item->requires_input)<x-admin-dashboard.notice tone="warning">Input/aktivasi manual: tidak bisa diaktifkan untuk pengiriman instan.</x-admin-dashboard.notice>@endif
         @if($item->description)<x-admin-dashboard.card as="details" padding="none" shadow="none"><summary class="min-h-11 cursor-pointer px-3 py-2 text-sm font-medium text-admin-ink">Deskripsi supplier privat</summary><p class="mx-3 mb-3 whitespace-pre-wrap break-words rounded-lg border border-admin-line bg-admin-surface-muted p-3 text-sm leading-6 text-admin-muted">{{ $item->description }}</p></x-admin-dashboard.card>@endif
-        <div><h3 class="text-xs font-medium text-admin-muted">Produk toko terhubung</h3><div class="mt-3 flex flex-wrap gap-2">@forelse($item->sources as $source)<x-admin-dashboard.button :href="route('admin.products.suppliers', $source->product_id)" variant="neutral" size="sm">#{{ $source->product_id }} {{ $source->product?->name ?? 'Produk dihapus' }} <span aria-hidden="true">→</span></x-admin-dashboard.button>@empty<p class="text-sm text-admin-muted">Belum dipetakan ke produk toko.</p>@endforelse</div></div>
+        <div><h3 class="text-xs font-medium text-admin-muted">Produk toko terhubung</h3><div class="mt-3 flex flex-wrap gap-2">@forelse($item->sources as $source)<x-admin-dashboard.button :href="route('admin.products.workspace', ['product' => $source->product_id, 'section' => 'supplier'])" variant="neutral" size="sm">#{{ $source->product_id }} {{ $source->product?->name ?? 'Produk dihapus' }}</x-admin-dashboard.button>@empty<p class="text-sm text-admin-muted">Belum dipetakan ke produk toko.</p>@endforelse</div></div>
     </div>
     <div class="grid gap-3 border-t border-admin-line p-5">
         <details>

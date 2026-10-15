@@ -26,7 +26,6 @@ use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class AdminDashboardStockFlowsTest extends TestCase
@@ -337,7 +336,7 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame($first->id, $state['manageStockEditingItemId']);
     }
 
-    public function test_produk_tab_renders_compact_product_cards_actions_and_stock_modal(): void
+    public function test_product_listing_does_not_embed_available_or_allocated_credentials(): void
     {
         $this->actingAs(User::factory()->create([
             'role' => UserRole::Owner,
@@ -361,41 +360,8 @@ class AdminDashboardStockFlowsTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertSee('Produk Saya')
-            ->assertSee('Netflix 1 Bulan')
-            ->assertSee('Akun Premium')
-            ->assertSeeInOrder(['Stok', '9'])
-            ->assertSeeInOrder(['Tersedia', '7'])
-            ->assertSeeInOrder(['Dipesan', '2'])
-            ->assertSee('IDR 45.000')
-            ->assertSee('Aktif')
-            ->assertSeeInOrder(['Stok', 'Ubah', 'Kelola', 'Aksi lainnya'])
-            ->assertSee('data-product-actions', false)
-            ->assertSee('data-product-primary-action', false)
-            ->assertSee('data-product-secondary-actions', false)
-            ->assertSee('data-product-more-trigger', false)
-            ->assertSee('data-product-more-panel', false)
-            ->assertSee('aria-expanded="false"', false)
-            ->assertSee('aria-controls="product-more-actions-'.$product->id.'"', false)
-            ->assertSeeInOrder(['Bagikan', 'Pause', 'Arsipkan'])
-            ->assertSee('Tambah kategori')
-            ->assertSee('Kelola stok')
-            ->assertSee('Tidak ada batas total karakter pada Input Cepat.')
             ->assertDontSee('available@example.test|pass')
-            ->assertDontSee('claimed@example.test|pass')
-            ->assertSee('stockItemsUrl', false)
-            ->assertSee('stock-items', false)
-            ->assertDontSee('product-action-btn', false)
-            ->assertDontSee('@js(', false)
-            ->assertDontSee('fi-form', false)
-            ->assertDontSee('fi-modal', false);
-
-        $productCardHtml = Str::before(
-            Str::after($response->getContent(), 'id="product-'.$product->id.'"'),
-            '</article>'
-        );
-
-        $this->assertStringNotContainsString('🗑️ Hapus', $productCardHtml);
+            ->assertDontSee('claimed@example.test|pass');
     }
 
     public function test_manage_stock_data_orders_mixed_rows_by_status_group_with_paid_history_last(): void

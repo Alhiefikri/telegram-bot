@@ -10,6 +10,10 @@
                         description="Input Cepat tetap untuk stok legacy. Input Akun membuat satu akun = satu stok."
                         size="2xl"
                     >
+                        @if ($workspaceStockMode ?? false)
+                            <p x-show="workspaceStockMessage" x-text="workspaceStockMessage" role="alert" class="workspace-validation"></p>
+                            <ul x-show="manageStockErrorMessages().length" class="workspace-field-error" role="alert"><template x-for="(message, index) in manageStockErrorMessages()" :key="index"><li x-text="message"></li></template></ul>
+                        @endif
                         @if ($structuredStockInputEnabled)
                         <div class="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2" role="tablist" aria-label="Mode input stok">
                             <button
@@ -348,6 +352,9 @@
                         description="Ready dikelompokkan paling atas, paid, retired, dan repair bersifat read-only."
                         size="2xl"
                     >
+                        @if ($workspaceStockMode ?? false)
+                            <p x-show="workspaceStockMessage" x-text="workspaceStockMessage" role="status" class="workspace-validation"></p>
+                        @endif
                         <div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-admin-ink">
                             <span class="max-w-[15rem] truncate font-medium" x-text="manageStockProductName">Produk</span>
                             <span class="text-admin-muted" x-text="`${manageStockSummary.available} tersedia · ${manageStockSummary.reserved} dipesan · ${manageStockSummary.paid} paid`">0 tersedia · 0 dipesan · 0 paid</span>

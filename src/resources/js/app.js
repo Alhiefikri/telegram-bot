@@ -4,10 +4,14 @@ import initTheme from "./theme";
 import supplierConnectionForm from "./supplier-connection-form";
 import dashboardNavigation from "./admin-dashboard/navigation";
 import modalFocus from "./admin-dashboard/modal-focus";
+import productWorkspace, { workspaceStock } from "./product-workspace.js";
+import "../css/product-workspace.css";
 
 window.Alpine = Alpine;
 initTheme();
 Alpine.data("adminDashboard", adminDashboard);
+Alpine.data("productWorkspace", productWorkspace);
+Alpine.data("workspaceStock", workspaceStock);
 Alpine.data("dashboardNavigation", () => ({
   ...modalFocus,
   ...dashboardNavigation(),

@@ -64,52 +64,18 @@
                             </p>
 
 
-                            <section class="mt-3 rounded-lg border border-admin-line bg-admin-surface-muted p-3" aria-label="Grouping Product">
-                                <div class="flex items-center justify-between gap-2">
-                                    <p class="text-xs font-medium text-admin-muted">Grouping katalog</p>
-                                    @if ($product['family_name'])
-                                        <span class="truncate text-xs font-medium text-admin-accent-strong">{{ $product['family_name'] }}</span>
-                                    @endif
-                                </div>
-                                @if ($canManageProducts)
-                                    <form method="POST" action="{{ $product['family_membership']['update_url'] }}" class="mt-2 space-y-2">
-                                        @csrf
-                                        @method('PATCH')
-                                        <label class="sr-only" for="product-family-select-{{ $product['id'] }}">Product Family</label>
-                                        <x-admin-dashboard.select id="product-family-select-{{ $product['id'] }}" name="product_family_id">
-                                            <option value="">Tanpa family</option>
-                                            @foreach ($familyOptions as $familyOption)
-                                                <option value="{{ $familyOption['id'] }}" @selected((int) ($product['family_id'] ?? 0) === (int) $familyOption['id'])>{{ $familyOption['name'] }}</option>
-                                            @endforeach
-                                        </x-admin-dashboard.select>
-                                        <div class="grid grid-cols-2 gap-2">
-                                            <label class="sr-only" for="product-family-order-{{ $product['id'] }}">Urutan option</label>
-                                            <x-admin-dashboard.input id="product-family-order-{{ $product['id'] }}" type="number" name="family_sort_order" min="0" max="999999" step="1" value="{{ $product['family_sort_order'] }}" placeholder="Urutan" />
-                                            <label class="sr-only" for="product-family-label-{{ $product['id'] }}">Label option</label>
-                                            <x-admin-dashboard.input id="product-family-label-{{ $product['id'] }}" type="text" name="family_option_label" maxlength="160" value="{{ $product['family_option_label'] }}" placeholder="Label option (opsional)" />
-                                        </div>
-                                        <x-admin-dashboard.button type="submit" variant="secondary" size="sm" class="w-full">Simpan grouping</x-admin-dashboard.button>
-                                    </form>
-                                    @if (($dashboardState['familyMembershipProductId'] ?? null) == $product['id'] && ! empty($dashboardState['familyMembershipErrors']))
-                                        <x-admin-dashboard.field-error class="mt-2">{{ collect($dashboardState['familyMembershipErrors'])->flatten()->first() }}</x-admin-dashboard.field-error>
-                                    @endif
-                                @else
-                                    <p class="mt-1 text-xs text-admin-muted">{{ $product['family_name'] ?: 'Belum memiliki Product Family.' }}</p>
-                                @endif
-                            </section>
+                            <p class="mt-3 text-xs text-admin-muted">Family: {{ $product['family_name'] ?: 'Tanpa family' }}</p>
                             @if ($canManageProducts)
-                            {{-- Action buttons: in-page only --}}
                             <div class="mt-4 space-y-2" data-product-actions>
                                 <div class="flex" data-product-primary-action>
                                     <x-admin-dashboard.button
-                                        type="button"
+                                        :href="route('admin.products.workspace', $product['id'])"
                                         variant="primary"
                                         size="sm"
                                         class="w-full"
-                                        aria-label="Stok"
-                                        x-on:click="openStockModal(stockPayload)"
+                                        :aria-label="'Kelola produk '.$product['name']"
                                     >
-                                        Stok
+                                        Kelola produk
                                     </x-admin-dashboard.button>
                                 </div>
 
@@ -119,20 +85,20 @@
                                         variant="neutral"
                                         size="sm"
                                         class="w-full"
-                                        aria-label="Ubah"
-                                        x-on:click="openProductEditModal(editPayload)"
+                                        aria-label="Tambah stok"
+                                        x-on:click="openStockModal(stockPayload)"
                                     >
-                                        Ubah
+                                        Tambah stok
                                     </x-admin-dashboard.button>
                                     <x-admin-dashboard.button
                                         type="button"
                                         variant="neutral"
                                         size="sm"
                                         class="w-full"
-                                        aria-label="Kelola"
+                                        aria-label="Kelola akun"
                                         x-on:click="openManageStockModal(editPayload)"
                                     >
-                                        Kelola
+                                        Kelola akun
                                     </x-admin-dashboard.button>
                                 </div>
 

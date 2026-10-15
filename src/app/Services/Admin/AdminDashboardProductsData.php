@@ -336,7 +336,7 @@ final class AdminDashboardProductsData
     }
 
     /** @param Collection<int, int> $productIds */
-    private function stockItemSummaries(Collection $productIds): Collection
+    public function stockItemSummaries(Collection $productIds): Collection
     {
         if ($productIds->isEmpty()) {
             return collect();
@@ -351,6 +351,7 @@ final class AdminDashboardProductsData
             ->selectRaw('sum(case when product_stock_items.supplier_purchase_id is null and product_stock_items.order_item_id is null and product_stock_items.retired_at is null then 1 else 0 end) as available')
             ->selectRaw('sum(case when orders.order_status = ? and orders.payment_status <> ? and not exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as reserved', [OrderStatus::PendingPayment->value, PaymentStatus::Paid->value, PaymentStatus::Paid->value])
             ->selectRaw('sum(case when orders.payment_status = ? or exists (select 1 from payments where payments.order_id = orders.id and payments.status = ?) then 1 else 0 end) as paid', [PaymentStatus::Paid->value, PaymentStatus::Paid->value])
+            ->selectRaw('sum(case when product_stock_items.retired_at is not null then 1 else 0 end) as retired')
             ->groupBy('product_stock_items.product_id')
             ->get()
             ->keyBy('product_id');

@@ -394,7 +394,7 @@ final class SupplierAdminTest extends TestCase
         $this->assertSame(45000, $product->refresh()->price_amount);
     }
 
-    public function test_supplier_ranking_is_shown_and_move_buttons_reorder_sources(): void
+    public function test_move_reorders_sources_and_rejects_stale_versions(): void
     {
         $this->owner();
         $primary = $this->supplier(['name' => 'Supplier Utama']);
@@ -405,13 +405,10 @@ final class SupplierAdminTest extends TestCase
         $first = $this->source($product, $primaryItem, ['priority' => 10, 'is_active' => true]);
         $second = $this->source($product, $backupItem, ['priority' => 20, 'is_active' => true]);
 
-        $this->get(route('admin.products.suppliers', $product))->assertOk()
-            ->assertSee('Urutan 1 · utama')->assertSee('Urutan 2 · cadangan');
-
         $this->post(route('admin.suppliers.move', $backupItem), [
             'product_id' => $product->id, 'direction' => 'up',
             'supplier_version' => (int) $backup->refresh()->version, 'version' => (int) $second->refresh()->version,
-        ])->assertRedirect(route('admin.products.suppliers', $product));
+        ])->assertRedirect(route('admin.products.workspace', ['product' => $product, 'section' => 'supplier']));
 
         $this->assertSame(10, $second->refresh()->priority);
         $this->assertSame(20, $first->refresh()->priority);
@@ -431,25 +428,6 @@ final class SupplierAdminTest extends TestCase
         $this->assertSame(10, $second->refresh()->priority);
         $this->assertSame(20, $first->refresh()->priority);
         $this->assertSame(1, AuditLog::query()->where('action', 'supplier.source_moved')->count());
-    }
-
-    public function test_source_cards_show_each_supplier_cost_and_missing_price_notice(): void
-    {
-        $this->owner();
-        $supplier = $this->supplier(['exchange_rate_idr' => 18000]);
-        $item = $this->item($supplier, ['unit_price_micros' => 590000]);
-        $product = Product::factory()->create();
-        $this->source($product, $item, ['priority' => 10, 'is_active' => true]);
-
-        $this->get(route('admin.products.suppliers', $product))->assertOk()
-            ->assertSee('Harga beli/unit')
-            ->assertSee('Rp10.620')
-            ->assertSee('0.59 USD');
-
-        $unpriced = $this->item($supplier, ['external_id' => 'private-sku-2', 'unit_price_micros' => null]);
-        $this->source($product, $unpriced, ['priority' => 20]);
-        $this->get(route('admin.products.suppliers', $product))->assertOk()
-            ->assertSee('Belum ada harga — sinkronkan katalog supplier.');
     }
 
     public function test_private_preview_is_integer_and_manual_policy_preserves_retail(): void
@@ -476,15 +454,13 @@ final class SupplierAdminTest extends TestCase
 
         $this->post(route('admin.products.supplier-pricing.preview', $product), $this->pricingInput(['mode' => 'manual', 'minimum_profit_idr' => 3000, 'buffer_idr' => 250, 'catalog_item_id' => $item->id]))
             ->assertOk()
-            ->assertViewIs('admin.suppliers.product')
-            ->assertSee('Harga beli dari supplier')
-            ->assertSee('Rp20.000')
-            ->assertSee('Rp45.000')
-            ->assertSee('Rp24.750')
-            ->assertSee('Belum membeli produk atau menyimpan perubahan.')
             ->assertDontSee(self::KEY)
-            ->assertViewHas('policy', fn (SupplierPricePolicy $policy): bool => $policy->mode === 'manual' && $policy->minimum_profit_idr === 3000 && $policy->buffer_idr === 250)
-            ->assertViewHas('previewItem', fn (SupplierCatalogItem $selected): bool => $selected->id === $item->id);
+            ->assertViewHas('workspace', fn (array $workspace): bool => $workspace['price_preview'] === ['cost_idr' => 20000, 'retail_idr' => 45000]
+                && $workspace['policy']['mode'] === 'manual'
+                && $workspace['policy']['minimum_profit_idr'] === 3000
+                && $workspace['policy']['buffer_idr'] === 250
+                && $workspace['preview_catalog_item_id'] === $item->id
+            );
 
         $this->assertSame(45000, $product->fresh()->price_amount);
         $this->assertSame(0, SupplierPricePolicy::query()->count());
@@ -567,7 +543,7 @@ final class SupplierAdminTest extends TestCase
         $tierBefore = $tier->fresh()->getAttributes();
 
         $this->delete(route('admin.suppliers.detach', $item), $this->detachInput($product, $target, $supplier))
-            ->assertRedirect(route('admin.products.suppliers', $product));
+            ->assertRedirect(route('admin.products.workspace', ['product' => $product, 'section' => 'supplier']));
 
         $this->assertModelMissing($target);
         $this->assertSame([10, 2], [$first->fresh()->priority, $first->fresh()->version]);

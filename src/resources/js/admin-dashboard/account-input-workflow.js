@@ -378,7 +378,7 @@ export default function accountInputWorkflow({
           return false;
         }
 
-        if (!response.ok) {
+        if (!response.ok || response.redirected) {
           this.accountInputErrors = body.errors ?? {};
           this.accountInputMessage =
             body.message ?? "Review Input Akun tidak dapat dilakukan.";
@@ -483,7 +483,7 @@ export default function accountInputWorkflow({
           return;
         }
 
-        if (!response.ok) {
+        if (!response.ok || response.redirected) {
           this.accountInputErrors = body.errors ?? {};
           this.accountInputMessage =
             body.message ?? "Input Akun tidak dapat disimpan.";
@@ -498,9 +498,13 @@ export default function accountInputWorkflow({
         this.accountInputSubmitting = false;
         this.accountInputMessage = `Stok bertambah ${count} akun.`;
         this.closeStockModal(true);
-        globalThis.window.location.assign(
-          body.redirect_url ?? this.stockReturnUrl
-        );
+        if (typeof this.onStockSaved === "function") {
+          await this.onStockSaved(body);
+        } else {
+          globalThis.window.location.assign(
+            body.redirect_url ?? this.stockReturnUrl
+          );
+        }
       } catch {
         if (submittedRevision !== this.accountInputDraftRevision) {
           return;

@@ -126,7 +126,7 @@
                                                                 @endforeach
                                                             </x-admin-dashboard.select>
                                                             <p class="mt-1 text-xs leading-5 text-admin-muted" x-show="productModalMode === 'create'">Family hanya mengatur grouping tampilan; harga dan stok tetap milik produk ini. Kategori harus sama dengan family yang dipilih.</p>
-                                                            <p class="mt-1 text-xs leading-5 text-admin-muted" x-cloak x-show="productModalMode === 'edit'">Grouping produk yang sudah ada diubah dari tombol Simpan grouping pada kartu produk.</p>
+                                                            <p class="mt-1 text-xs leading-5 text-admin-muted" x-cloak x-show="productModalMode === 'edit'">Grouping produk diatur di Kelola produk, bagian Detail produk.</p>
                                                             @error('product_family_id', 'productCreate')
                                                                 <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
                                                             @enderror

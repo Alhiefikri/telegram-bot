@@ -11,19 +11,16 @@ use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
-use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Services\Admin\AdminProductWorkspaceData;
 use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\Admin\SupplierOperationConfirmation;
 use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierManager;
-use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
-use App\Services\Suppliers\SupplierPricing;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -66,14 +63,20 @@ final class AdminSupplierController extends Controller
 
     public function import(SupplierAdminRequest $request, SupplierCatalogItem $catalogItem, ProductSupplierManager $manager)
     {
-        return $this->mutate(function () use ($request, $catalogItem, $manager): void {
-            $manager->import($catalogItem, $request->validated(), $request->attributes->get('adminUser'), $request->ip());
-        }, 'Draft produk tersedia. Edit di tab Produk sebelum dipublikasikan.');
+        try {
+            $product = $manager->import($catalogItem, $request->validated(), $request->attributes->get('adminUser'), $request->ip());
+        } catch (ValidationException $exception) {
+            return response()->json(['message' => 'Katalog berubah. Muat ulang sebelum mengimpor.', 'errors' => $exception->errors()], 409);
+        }
+
+        return $this->saved('Draft produk tersedia. Lengkapi detail sebelum dipublikasikan.', $product, 'detail');
     }
 
     public function map(SupplierAdminRequest $request, SupplierCatalogItem $catalogItem, ProductSupplierManager $manager)
     {
-        return $this->mutate(fn () => $manager->map(Product::query()->findOrFail($request->integer('product_id')), $catalogItem, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Pemetaan supplier disimpan.');
+        $product = Product::query()->findOrFail($request->integer('product_id'));
+
+        return $this->mutate(fn () => $manager->map($product, $catalogItem, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Pemetaan supplier disimpan.', $product);
     }
 
     public function move(SupplierAdminRequest $request, SupplierCatalogItem $catalogItem, ProductSupplierManager $manager)
@@ -82,10 +85,14 @@ final class AdminSupplierController extends Controller
         try {
             $manager->move($product, $catalogItem, $request->validated(), $request->attributes->get('adminUser'), $request->ip());
         } catch (ValidationException $exception) {
-            return redirect()->route('admin.products.suppliers', $product->id)->withErrors($exception->errors())->with('status', 'Urutan tidak berubah. Muat ulang halaman lalu coba lagi.');
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Urutan berubah. Muat ulang lalu coba lagi.', 'errors' => $exception->errors()], 409);
+            }
+
+            return redirect()->route('admin.products.workspace', ['product' => $product, 'section' => 'supplier'])->withErrors($exception->errors())->with('status', 'Urutan tidak berubah. Muat ulang halaman lalu coba lagi.');
         }
 
-        return redirect()->route('admin.products.suppliers', $product->id)->with('status', 'Urutan supplier diperbarui.');
+        return $this->saved('Urutan supplier diperbarui.', $product);
     }
 
     public function detach(SupplierAdminRequest $request, SupplierCatalogItem $catalogItem, ProductSupplierManager $manager)
@@ -103,24 +110,15 @@ final class AdminSupplierController extends Controller
             return response()->json(['message' => $exception->getMessage()], 409);
         }
 
-        return redirect()->route('admin.products.suppliers', $product)->with('status', 'Mapping supplier dilepas. Stok lokal, harga, dan riwayat tetap tersimpan.');
-    }
-
-    public function product(Request $request, Product $product, SupplierPricing $pricing)
-    {
-        $this->authorizeManager($request);
-        $sources = ProductSupplierSource::query()->where('product_id', $product->id)->with('catalogItem.supplier')->orderBy('priority')->orderBy('id')->get();
-        $policy = SupplierPricePolicy::query()->where('product_id', $product->id)->first();
-
-        return view('admin.suppliers.product', ['product' => $product, 'sources' => $sources, 'policy' => $policy, 'sourceCosts' => $this->sourceCosts($sources, $pricing)]);
+        return $this->saved('Mapping supplier dilepas. Stok lokal, harga, dan riwayat tetap tersimpan.', $product);
     }
 
     public function price(SupplierAdminRequest $request, Product $product, ProductSupplierManager $manager)
     {
-        return $this->mutate(fn () => $manager->price($product, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Kebijakan harga supplier disimpan.');
+        return $this->mutate(fn () => $manager->price($product, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Kebijakan harga supplier disimpan.', $product, 'price');
     }
 
-    public function preview(SupplierAdminRequest $request, Product $product, ProductSupplierManager $manager, SupplierPricing $pricing)
+    public function preview(SupplierAdminRequest $request, Product $product, ProductSupplierManager $manager)
     {
         $item = SupplierCatalogItem::query()->findOrFail($request->integer('catalog_item_id'));
         abort_unless(ProductSupplierSource::query()->where('product_id', $product->id)->where('supplier_catalog_item_id', $item->id)->exists(), 422);
@@ -131,18 +129,13 @@ final class AdminSupplierController extends Controller
             return response()->json($pricePreview);
         }
 
-        $sources = ProductSupplierSource::query()->where('product_id', $product->id)->with('catalogItem.supplier')->orderBy('priority')->orderBy('id')->get();
-        $policy = new SupplierPricePolicy;
-        $policy->forceFill($input);
+        $workspace = app(AdminProductWorkspaceData::class)->for($product, includeOptions: true);
+        $workspace['policy'] = array_intersect_key($input, array_flip(['version', 'mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'buffer_idr', 'rounding_idr']));
+        $workspace['price_preview'] = $pricePreview;
+        $workspace['preview_catalog_item_id'] = $item->id;
+        $workspace['initial_section'] = 'price';
 
-        return view('admin.suppliers.product', [
-            'product' => $product,
-            'sources' => $sources,
-            'policy' => $policy,
-            'pricePreview' => $pricePreview,
-            'previewItem' => $item,
-            'sourceCosts' => $this->sourceCosts($sources, $pricing),
-        ]);
+        return view('admin.products.workspace', compact('workspace'));
     }
 
     public function purchases(Request $request)
@@ -218,29 +211,7 @@ final class AdminSupplierController extends Controller
         abort_unless($request->attributes->get('adminUser')?->role?->canManageStoreOperations() === true, 403);
     }
 
-    /** Private read-only unit cost per mapped source; display only, never a purchase authorization. */
-    private function sourceCosts(Collection $sources, SupplierPricing $pricing): array
-    {
-        $costs = [];
-        foreach ($sources as $source) {
-            $item = $source->catalogItem;
-            $supplier = $item?->supplier;
-            $micros = $item === null ? null : $pricing->costMicros($item, 1);
-            try {
-                $idr = $micros === null || $supplier === null ? null : SupplierMoney::costIdr($micros, (int) $supplier->exchange_rate_idr);
-            } catch (InvalidArgumentException) {
-                $idr = null;
-            }
-            $costs[$source->id] = [
-                'unit' => $micros === null ? null : rtrim(rtrim(SupplierMoney::decimal($micros), '0'), '.'),
-                'idr' => $idr,
-            ];
-        }
-
-        return $costs;
-    }
-
-    private function mutate(callable $mutation, string $message)
+    private function mutate(callable $mutation, string $message, ?Product $product = null, string $section = 'supplier')
     {
         try {
             $mutation();
@@ -250,17 +221,16 @@ final class AdminSupplierController extends Controller
             return response()->json(['message' => $conflict ? 'Konfigurasi berubah atau komitmen supplier masih aktif. Muat ulang.' : 'Pemetaan atau kebijakan tidak valid.', 'errors' => $exception->errors()], $conflict ? 409 : 422);
         }
 
-        return $this->saved($message);
+        return $this->saved($message, $product, $section);
     }
 
-    private function saved(string $message)
+    private function saved(string $message, ?Product $product = null, string $section = 'supplier')
     {
+        $url = $product === null ? route('admin.dashboard', ['tab' => 'suppliers']) : route('admin.products.workspace', ['product' => $product, 'section' => $section]);
         if (request()->expectsJson()) {
-            request()->session()->flash('status', $message);
-
-            return response()->json(['message' => $message, 'redirect_url' => route('admin.dashboard', ['tab' => 'suppliers'])]);
+            return response()->json(['message' => $message, 'redirect_url' => $url] + ($product === null ? [] : ['workspace' => app(AdminProductWorkspaceData::class)->for($product)]))->header('Cache-Control', 'no-store, private');
         }
 
-        return redirect()->route('admin.dashboard', ['tab' => 'suppliers'])->with('status', $message);
+        return redirect()->to($url)->with('status', $message);
     }
 }

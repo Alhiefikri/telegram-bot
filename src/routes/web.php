@@ -37,6 +37,7 @@ use App\Http\Controllers\Admin\AdminProductStockItemsController;
 use App\Http\Controllers\Admin\AdminProductStockItemUpdateController;
 use App\Http\Controllers\Admin\AdminProductUpdateController;
 use App\Http\Controllers\Admin\AdminProductVisibilityController;
+use App\Http\Controllers\Admin\AdminProductWorkspaceController;
 use App\Http\Controllers\Admin\AdminSalesProofRetryController;
 use App\Http\Controllers\Admin\AdminStoreBalanceFundingPolicyController;
 use App\Http\Controllers\Admin\AdminStoreBalanceTopUpCompensationController;
@@ -275,7 +276,8 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::get('monitor/purchases', [AdminSupplierController::class, 'purchases'])->name('purchases');
                 Route::post('fulfillments/{fulfillment}/operate', [AdminSupplierController::class, 'operate'])->middleware('throttle:10,1')->name('operate');
             });
-            Route::get('products/{product}/suppliers', [AdminSupplierController::class, 'product'])->name('products.suppliers');
+            Route::get('products/{product}/workspace', AdminProductWorkspaceController::class)->name('products.workspace');
+            Route::get('products/{product}/workspace/catalog', [AdminProductWorkspaceController::class, 'catalog'])->name('products.workspace.catalog');
             Route::post('products/{product}/supplier-pricing', [AdminSupplierController::class, 'price'])->name('products.supplier-pricing');
             Route::post('products/{product}/supplier-pricing/preview', [AdminSupplierController::class, 'preview'])->name('products.supplier-pricing.preview');
             Route::post('categories', AdminCategoryCreateController::class)->name('categories.store');
