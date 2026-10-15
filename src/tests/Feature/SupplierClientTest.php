@@ -93,7 +93,7 @@ class SupplierClientTest extends TestCase
     public static function providers(): array
     {
         // Provider-specific contracts are covered by their dedicated suites.
-        return array_map(static fn ($provider) => [$provider->value], array_filter(SupplierProvider::cases(), fn ($provider) => ! in_array($provider, [SupplierProvider::BuyMail, SupplierProvider::Canboso], true)));
+        return array_map(static fn ($provider) => [$provider->value], array_filter(SupplierProvider::cases(), fn ($provider) => ! in_array($provider, [SupplierProvider::BuyMail, SupplierProvider::Canboso, SupplierProvider::Nastele], true)));
     }
 
     #[DataProvider('providers')]

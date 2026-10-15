@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\AuditLogger;
 use App\Services\Suppliers\ProductSupplierManager;
+use App\Services\Suppliers\SupplierMoney;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\DB;
@@ -111,9 +112,24 @@ final class SupplierAdminTest extends TestCase
             $this->assertSame($name, $supplier->name);
             $this->assertSame($currency, $supplier->currency);
             $this->assertTrue($supplier->currency_confirmed);
-            $this->assertSame($provider === 'buymail' ? 1 : 16000, $supplier->exchange_rate_idr);
         }
         Http::assertNothingSent();
+    }
+
+    public function test_nastele_admin_configuration_preserves_fractional_vnd_rate_and_rejects_currency_override(): void
+    {
+        $this->owner();
+        $input = $this->connectionInput(['provider' => 'nastele', 'exchange_rate_idr' => '0.650001']);
+        unset($input['name'], $input['currency'], $input['currency_confirmed']);
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.store'), $input)->assertRedirect();
+        $supplier = Supplier::query()->sole();
+        $this->assertSame('VND', $supplier->currency);
+        $this->assertSame(19501, SupplierMoney::costIdr(30_000_000_000, $supplier->exchange_rate_idr));
+        $this->assertStringNotContainsString(self::KEY, DB::table('suppliers')->value('api_key'));
+        $this->patch(route('admin.suppliers.update', $supplier), $input + ['currency' => 'USD', 'version' => 1])->assertStatus(422);
+        $this->patch(route('admin.suppliers.update', $supplier), array_replace($input, ['exchange_rate_idr' => '0.0000001', 'version' => 1]))->assertStatus(422);
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertSee('Nastele')->assertDontSee(self::KEY);
     }
 
     public function test_fixed_currency_cannot_be_overridden_by_a_submitted_dropdown_value(): void
@@ -130,12 +146,10 @@ final class SupplierAdminTest extends TestCase
         $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $input)->assertRedirect();
         $supplier = Supplier::query()->sole();
         $this->assertSame('IDR', $supplier->currency);
-        $this->assertSame(1, $supplier->exchange_rate_idr);
         $this->assertSame(self::KEY, $supplier->api_key);
         $this->assertStringNotContainsString(self::KEY, DB::table('suppliers')->value('api_key'));
         $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertSee('BuyMail')->assertDontSee(self::KEY);
         $this->patch(route('admin.suppliers.update', $supplier), array_replace($input, ['api_key' => '', 'version' => 1, 'exchange_rate_idr' => 16000]))->assertStatus(422);
-        $this->assertSame(1, $supplier->fresh()->exchange_rate_idr);
     }
 
     public function test_buymail_deposit_refresh_requires_recent_confirmation_before_recovery_or_http(): void

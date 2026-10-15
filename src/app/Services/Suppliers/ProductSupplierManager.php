@@ -219,7 +219,7 @@ final class ProductSupplierManager
                         continue;
                     }
                     try {
-                        $base = $this->pricing->retailPrice($policy, SupplierMoney::costIdr($micros, (int) $supplier->exchange_rate_idr));
+                        $base = $this->pricing->retailPrice($policy, SupplierMoney::costIdr($micros, $supplier->exchange_rate_idr));
                         app(ProductQuantityPricing::class)->validateSchedule($base, $locked->usdt_price_amount, $locked->quantityPriceTiers->map(fn ($tier) => ['minimum_quantity' => $tier->minimum_quantity, 'price_amount' => $tier->price_amount, 'usdt_price_amount' => $tier->usdt_price_amount])->all());
                     } catch (\InvalidArgumentException) {
                         throw ValidationException::withMessages(['mode' => 'Harga retail baru harus mempertahankan tier kuantitas yang valid.']);
@@ -251,7 +251,7 @@ final class ProductSupplierManager
             return ['cost_idr' => null, 'retail_idr' => null, 'profit_idr' => null];
         }
         $supplier = Supplier::query()->findOrFail($item->supplier_id);
-        $cost = SupplierMoney::costIdr($micros, (int) $supplier->exchange_rate_idr);
+        $cost = SupplierMoney::costIdr($micros, $supplier->exchange_rate_idr);
         $policy = new SupplierPricePolicy;
         $policy->forceFill($input);
 

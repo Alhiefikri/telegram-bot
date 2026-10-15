@@ -2,6 +2,9 @@
 
 namespace App\Services\Suppliers;
 
+use Brick\Math\BigDecimal;
+use Brick\Math\Exception\MathException;
+use Brick\Math\RoundingMode;
 use InvalidArgumentException;
 
 final class SupplierMoney
@@ -68,8 +71,33 @@ final class SupplierMoney
         return $left * $right;
     }
 
-    public static function costIdr(int $micros, int $rate): int
+    public static function costIdr(int $micros, int|string $rate): int
     {
+        if (is_string($rate)) {
+            if (! preg_match('/\A(0|[1-9][0-9]*)(?:\.([0-9]{1,6}))?\z/D', $rate)) {
+                throw new InvalidArgumentException('Invalid supplier conversion.');
+            }
+            if (isset($rate[32]) || $rate === '0' || preg_match('/\A0\.0+\z/D', $rate)) {
+                throw new InvalidArgumentException('Invalid supplier conversion.');
+            }
+            if (str_contains($rate, '.') && trim(explode('.', $rate, 2)[1], '0') !== '') {
+                if ($micros < 0) {
+                    throw new InvalidArgumentException('Invalid supplier conversion.');
+                }
+                try {
+                    return BigDecimal::of($micros)->multipliedBy($rate)
+                        ->dividedBy(self::SCALE, 0, RoundingMode::Ceiling)->toInt();
+                } catch (MathException $exception) {
+                    throw new InvalidArgumentException('Supplier conversion overflow.', previous: $exception);
+                }
+            }
+            $wholeRate = explode('.', $rate, 2)[0];
+            if (strlen($wholeRate) > strlen((string) PHP_INT_MAX)
+                || (strlen($wholeRate) === strlen((string) PHP_INT_MAX) && strcmp($wholeRate, (string) PHP_INT_MAX) > 0)) {
+                throw new InvalidArgumentException('Supplier conversion overflow.');
+            }
+            $rate = (int) $wholeRate;
+        }
         if ($micros < 0 || $rate <= 0) {
             throw new InvalidArgumentException('Invalid supplier conversion.');
         }

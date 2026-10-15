@@ -40,10 +40,13 @@ final class SupplierClient
         }
         $provider = $this->ready($supplier);
         $deadline = hrtime(true) + 40_000_000_000;
-        $account = $this->read($supplier, in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::Canboso], true) ? '/balance' : '/me', $deadline);
+        $account = $this->read($supplier, in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::Canboso, SupplierProvider::Nastele], true) ? '/balance' : '/me', $deadline);
         $catalog = $this->read($supplier, '/products', $deadline);
         if ($provider === SupplierProvider::Canboso) {
             return $this->canbosoSnapshot($supplier, $account, $catalog);
+        }
+        if ($provider === SupplierProvider::Nastele) {
+            return $this->nasteleSnapshot($supplier, $account, $catalog);
         }
         $this->currency($supplier, $account);
         $this->currency($supplier, $catalog);
@@ -125,9 +128,13 @@ final class SupplierClient
             if ($provider === SupplierProvider::ToolOrax && ! ctype_digit($id)) {
                 throw new SupplierUnavailable('unsupported_product');
             }
+            if ($provider === SupplierProvider::Nastele) {
+                $this->integer(ctype_digit($id) && strlen($id) <= 10 ? (int) $id : null, 1, 2_147_483_647);
+            }
             $body = match ($provider) {
                 SupplierProvider::ProdSeller => ['productId' => $id, 'quantity' => $quantity],
                 SupplierProvider::ToolOrax => ['product_id' => (int) $id, 'quantity' => $quantity],
+                SupplierProvider::Nastele => ['productId' => (int) $id, 'qty' => $quantity],
                 SupplierProvider::Canboso => ['key' => $supplier->api_key, 'product_id' => $id, 'quantity' => $quantity],
                 default => ['service_id' => $id, 'quantity' => $quantity],
             };
@@ -144,7 +151,7 @@ final class SupplierClient
                 $body['external_order_id'] = $reference;
             }
             $path = match ($provider) {
-                SupplierProvider::ProdSeller, SupplierProvider::ToolOrax => '/orders',
+                SupplierProvider::ProdSeller, SupplierProvider::ToolOrax, SupplierProvider::Nastele => '/orders',
                 SupplierProvider::Canboso => '/purchase',
                 default => '/order',
             };
@@ -177,6 +184,9 @@ final class SupplierClient
         try {
             if ($provider === SupplierProvider::Canboso) {
                 return $this->canbosoResult($supplier, $this->payload($response, $supplier->api_key), $quantity, $id);
+            }
+            if ($provider === SupplierProvider::Nastele) {
+                return $this->nasteleResult($this->payload($response, $supplier->api_key), $quantity, null);
             }
             $result = $this->result($supplier, $this->payload($response, $supplier->api_key), $quantity, null, $id, $reference);
         } catch (SupplierUnavailable) {
@@ -232,10 +242,13 @@ final class SupplierClient
             return new SupplierOrderResult('ambiguous', $orderId, errorCode: 'delivery_unavailable', identityTrusted: true);
         }
         $path = match ($provider) {
-            SupplierProvider::ProdSeller, SupplierProvider::ToolOrax => '/orders/',
+            SupplierProvider::ProdSeller, SupplierProvider::ToolOrax, SupplierProvider::Nastele => '/orders/',
             default => '/order/',
         };
         $payload = $this->read($supplier, $path.rawurlencode($orderId), allowInactive: true);
+        if ($provider === SupplierProvider::Nastele) {
+            return $this->nasteleResult($payload, null, $orderId);
+        }
 
         return $this->result($supplier, $payload, null, $orderId, $productId, $reference);
     }
@@ -406,7 +419,7 @@ final class SupplierClient
         if (! $allowInactive && ! $supplier->is_active) {
             throw new SupplierUnavailable('inactive');
         }
-        if (! in_array($supplier->currency, ['USD', 'USDT'], true)
+        if (! in_array($supplier->currency, ['USD', 'USDT', 'VND'], true)
             || ($provider->requiresCurrencyConfirmation() && ! $supplier->currency_confirmed)
             || (! $provider->requiresCurrencyConfirmation() && $supplier->currency !== $provider->defaultCurrency())) {
             throw new SupplierUnavailable('currency_mismatch');
@@ -512,7 +525,7 @@ final class SupplierClient
             $this->observeRateLimit($provider, $response);
         } catch (SupplierUnavailable $exception) {
             // A cache failure after dispatch is not evidence of no purchase.
-            if ($provider === SupplierProvider::Canboso && $method === 'POST') {
+            if (in_array($provider, [SupplierProvider::Canboso, SupplierProvider::Nastele], true) && $method === 'POST') {
                 throw new SupplierUnavailable('transport');
             }
             throw $exception;
@@ -593,6 +606,7 @@ final class SupplierClient
             // ShopBot publishes no rate-limit contract; stay deliberately small.
             SupplierProvider::ToolOrax => [30, 60, 20],
             SupplierProvider::Canboso => [30, 60, 20],
+            SupplierProvider::Nastele => [60, 60, 45],
         };
         // A shared provider bucket is deliberately conservative: all configured
         // accounts on this application may share the same outbound IP.
@@ -659,6 +673,114 @@ final class SupplierClient
         $inspect($payload);
 
         return $payload;
+    }
+
+    private function nasteleSnapshot(Supplier $supplier, array $account, array $catalog): SupplierCatalogSnapshot
+    {
+        if (($account['success'] ?? null) !== true || ($catalog['success'] ?? null) !== true
+            || ! is_array($account['data'] ?? null) || ($account['data']['currency'] ?? null) !== 'VND') {
+            throw new SupplierUnavailable('currency_mismatch');
+        }
+        $rows = $catalog['data'] ?? null;
+        if (! is_array($rows) || ! array_is_list($rows) || count($rows) > self::MAX_PRODUCTS) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $products = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $id = (string) $this->integer($row['id'] ?? null, 1, 2_147_483_647);
+            if (isset($seen[$id])) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $seen[$id] = true;
+            $this->currency($supplier, $row);
+            $tiers = $row['wholesale_tiers'] ?? [];
+            if (! is_array($tiers) || ! array_is_list($tiers) || count($tiers) > 100) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $normalized = [];
+            foreach ($tiers as $tier) {
+                if (! is_array($tier)) {
+                    throw new SupplierUnavailable('invalid_payload');
+                }
+                $normalized[] = [
+                    'min' => $this->integer($tier['minQuantity'] ?? null, 1, self::MAX_QUANTITY),
+                    'unit_price_micros' => $this->money($tier['unitPrice'] ?? null),
+                ];
+            }
+            usort($normalized, static fn ($a, $b) => $a['min'] <=> $b['min']);
+            foreach ($normalized as $index => &$tier) {
+                $next = $normalized[$index + 1]['min'] ?? null;
+                if ($next !== null && $next <= $tier['min']) {
+                    throw new SupplierUnavailable('invalid_payload');
+                }
+                $tier['max'] = $next === null ? null : $next - 1;
+            }
+            unset($tier);
+            $product = $this->product(SupplierProvider::Nastele, $row, $id);
+            $products[] = new SupplierProductData(
+                $id, $product->name, $product->description, $product->unitPriceMicros,
+                $product->stock, $product->orderable, $product->requiresInput, $normalized,
+            );
+        }
+
+        return new SupplierCatalogSnapshot($this->money($account['data']['balance'] ?? null, roundUp: false), 'VND', $products);
+    }
+
+    private function nasteleResult(array $payload, ?int $expectedQuantity, ?string $expectedOrderId): SupplierOrderResult
+    {
+        $row = $payload['data'] ?? null;
+        if (($payload['success'] ?? null) !== true || ! is_array($row)) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $id = (string) $this->integer($row['orderId'] ?? null, 1, PHP_INT_MAX);
+        if ($expectedOrderId !== null && $id !== $expectedOrderId) {
+            return new SupplierOrderResult('ambiguous', errorCode: 'payload_mismatch');
+        }
+        try {
+            if (isset($row['currency']) && $row['currency'] !== 'VND') {
+                throw new SupplierUnavailable('currency_mismatch');
+            }
+            $items = $row['items'] ?? null;
+            if (! is_array($items) || ! array_is_list($items) || count($items) !== 1 || ! is_array($items[0])) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $item = $items[0];
+            $quantity = $this->integer($item['quantity'] ?? null, 1, self::MAX_QUANTITY);
+            $cost = $this->money($row['totalAmount'] ?? null);
+            $unit = $this->money($item['unitPrice'] ?? null);
+            if (($expectedQuantity !== null && $quantity !== $expectedQuantity)
+                || SupplierMoney::checkedMultiply($unit, $quantity) !== $cost) {
+                throw new SupplierUnavailable('payload_mismatch');
+            }
+            $accounts = $item['accounts'] ?? [];
+            if (! is_array($accounts) || ! array_is_list($accounts) || count($accounts) > $quantity) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            foreach ($accounts as $account) {
+                $this->text($account, 16_000);
+            }
+            $status = $row['status'] ?? null;
+            // Only the documented successful create omits status; GET must say completed.
+            $completed = $status === 'completed' || ($expectedOrderId === null && $status === null);
+            if (! $completed) {
+                return new SupplierOrderResult('ambiguous', $id, deliveries: $accounts, errorCode: 'invalid_order_status', identityTrusted: true);
+            }
+            $complete = count($accounts) === $quantity
+                && count(array_unique($accounts, SORT_STRING)) === $quantity;
+
+            return new SupplierOrderResult(
+                $complete ? 'delivered' : 'ambiguous', $id, $quantity, $cost, $accounts,
+                $complete ? null : 'incomplete_delivery', identityTrusted: true, deliveryTrusted: $complete,
+            );
+        } catch (SupplierUnavailable $exception) {
+            return new SupplierOrderResult('ambiguous', $id, errorCode: $exception->errorCode, identityTrusted: true);
+        } catch (\InvalidArgumentException) {
+            return new SupplierOrderResult('ambiguous', $id, errorCode: 'invalid_payload', identityTrusted: true);
+        }
     }
 
     private function canbosoSnapshot(Supplier $supplier, array $account, array $catalog): SupplierCatalogSnapshot
@@ -910,6 +1032,24 @@ final class SupplierClient
 
     private function noPurchase(SupplierProvider $provider, Response $response): bool
     {
+        if ($provider === SupplierProvider::Nastele) {
+            if (in_array($response->status(), [401, 402, 403, 404, 422, 429], true)) {
+                return true;
+            }
+            if ($response->status() !== 409) {
+                return false;
+            }
+            try {
+                $payload = $this->payload($response);
+            } catch (SupplierUnavailable) {
+                return false;
+            }
+
+            return ($payload['success'] ?? null) === false
+                && in_array($payload['message'] ?? $payload['error'] ?? null, [
+                    'Insufficient stock', 'Insufficient flash sale quantity', 'Product price changed',
+                ], true);
+        }
         if ($provider === SupplierProvider::Canboso) {
             return in_array($response->status(), [400, 401, 404, 429], true);
         }

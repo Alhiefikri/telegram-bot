@@ -50,9 +50,9 @@ final class SupplierAdminRequest extends FormRequest
                 'provider' => ['required', Rule::enum(SupplierProvider::class)],
                 'api_key' => [$action === 'store' ? 'required' : 'nullable', 'string', 'max:2048', 'not_regex:/[\x00-\x20\x7F]/'],
                 'webhook_secret' => ['nullable', 'string', 'max:256', 'regex:/\Awhsec_[A-Za-z0-9_-]{8,240}\z/D'],
-                'currency' => ['required', Rule::in(['USD', 'USDT', 'IDR'])],
+                'currency' => ['required', Rule::in(['USD', 'USDT', 'IDR', 'VND'])],
                 'currency_confirmed' => ['required', 'boolean'],
-                'exchange_rate_idr' => ['required', 'integer', 'min:1', 'max:1000000'],
+                'exchange_rate_idr' => ['required', 'numeric', 'regex:/\A(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?\z/D', 'min:0.000001', 'max:1000000'],
                 'is_active' => ['required', 'boolean'],
                 'low_balance_threshold_micros' => ['required', 'integer', 'min:0', 'max:1000000000000'],
                 'version' => [$action === 'store' ? 'nullable' : 'required', 'integer', 'min:0'],
@@ -119,7 +119,7 @@ final class SupplierAdminRequest extends FormRequest
             if ($selected !== null && ! $selected->requiresCurrencyConfirmation() && $this->input('currency') !== $selected->defaultCurrency()) {
                 $validator->errors()->add('currency', 'Mata uang harus sesuai provider.');
             }
-            if ($this->input('provider') === 'buymail' && ($this->input('currency') !== 'IDR' || (int) $this->input('exchange_rate_idr') !== 1)) {
+            if ($this->input('provider') === 'buymail' && ($this->input('currency') !== 'IDR' || ! preg_match('/\A1(?:\.0{1,6})?\z/D', (string) $this->input('exchange_rate_idr')))) {
                 $validator->errors()->add('currency', 'BuyMail menggunakan IDR dengan kurs 1.');
             }
             if (in_array($this->input('provider'), ['arrs', 'warzone'], true) && ! $this->boolean('currency_confirmed')) {

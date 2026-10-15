@@ -6,7 +6,7 @@
     <h2 id="supplier-catalog-title" class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">{{ $supplier['name'] }}</h2>
     <dl class="mt-3 grid gap-3 sm:grid-cols-3">
         <div><dt class="text-xs font-medium text-admin-muted">Provider</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">{{ \App\Enums\SupplierProvider::from($supplier['provider'])->label() }}</dd></div>
-        <div><dt class="text-xs font-medium text-admin-muted">Konversi biaya</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">Rp{{ number_format($supplier['exchange_rate_idr'], 0, ',', '.') }} / {{ $supplier['currency'] }}</dd></div>
+        <div><dt class="text-xs font-medium text-admin-muted">Konversi biaya</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">Rp{{ rtrim(rtrim(number_format((float) $supplier['exchange_rate_idr'], 6, ',', '.'), '0'), ',') }} / {{ $supplier['currency'] }}</dd></div>
         <div><dt class="text-xs font-medium text-admin-muted">Katalog supplier</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">{{ $items->total() }} produk · Versi {{ $supplier['version'] }}</dd></div>
     </dl>
     <p class="mt-3 text-sm leading-6 text-admin-muted">Deskripsi supplier hanya referensi privat, tidak pernah dipublikasikan otomatis. Impor sebagai draft produk toko atau hubungkan ke produk yang sudah ada.</p>

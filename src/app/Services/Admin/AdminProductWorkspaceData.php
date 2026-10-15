@@ -132,7 +132,7 @@ final class AdminProductWorkspaceData
     {
         $micros = $this->pricing->costMicros($item, 1);
         try {
-            $idr = $micros === null ? null : SupplierMoney::costIdr($micros, (int) $item->supplier->exchange_rate_idr);
+            $idr = $micros === null ? null : SupplierMoney::costIdr($micros, $item->supplier->exchange_rate_idr);
         } catch (InvalidArgumentException) {
             $idr = null;
         }

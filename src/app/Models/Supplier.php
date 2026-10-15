@@ -19,7 +19,7 @@ class Supplier extends Model
             'account_metadata' => 'array',
             'purchase_paused_until' => 'immutable_datetime',
             'currency_confirmed' => 'boolean',
-            'exchange_rate_idr' => 'integer',
+            'exchange_rate_idr' => 'decimal:6',
             'balance_micros' => 'integer',
             'reserved_balance_micros' => 'integer',
             'is_active' => 'boolean',

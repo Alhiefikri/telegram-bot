@@ -32,9 +32,11 @@ use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Suppliers\SupplierMoney;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -495,6 +497,49 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame(0, $order->orderItems->sole()->stockItems()->count());
         $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
         Http::assertSentCount(2);
+    }
+
+    public function test_nastele_ambiguous_purchase_keeps_holds_and_exact_get_recovers_once_at_fractional_rate(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $product->update(['price_amount' => 50000]);
+        $supplier->forceFill(['provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.650001', 'balance_micros' => 300_000_000_000])->save();
+        $sku->update(['external_id' => '43', 'currency' => 'VND', 'unit_price_micros' => 30_000_000_000]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(fn () => Http::response(['success' => false], 500));
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $service->process($f->id);
+        $service->recover();
+        Http::assertSentCount(1);
+        $this->assertSame('ambiguous', SupplierPurchase::sole()->state);
+        $this->assertSame(30_000_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, ProductStockItem::whereNotNull('supplier_purchase_id')->count());
+        Http::swap(new Factory);
+        Http::fake(function ($request) {
+            $this->assertSame('GET', $request->method());
+
+            return Http::response(['success' => true, 'data' => [
+                'orderId' => 2244, 'status' => 'completed', 'totalAmount' => 30000,
+                'items' => [['quantity' => 1, 'unitPrice' => 30000, 'accounts' => ['synthetic-nastele|password']]],
+            ]]);
+        });
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $service->recoverOrder($f->id, '2244', $owner);
+        $service->process($f->id);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(270_000_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, ProductStockItem::whereNotNull('supplier_purchase_id')->count());
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(19501, SupplierMoney::costIdr(
+            SupplierPurchase::sole()->actual_cost_micros, SupplierPurchase::sole()->exchange_rate_idr,
+        ));
+        Http::assertSentCount(1);
     }
 
     protected function fixture(int $local = 0, int $quantity = 1, string $provider = 'prodseller'): array

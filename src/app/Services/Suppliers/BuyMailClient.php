@@ -286,7 +286,7 @@ final class BuyMailClient
         if (DB::transactionLevel() !== 0) {
             throw new SupplierUnavailable('financial_lock');
         }
-        if ($supplier->provider !== 'buymail' || $supplier->currency !== 'IDR' || $supplier->exchange_rate_idr !== 1) {
+        if ($supplier->provider !== 'buymail' || $supplier->currency !== 'IDR' || $supplier->exchange_rate_idr !== '1.000000') {
             throw new SupplierUnavailable('currency_mismatch');
         }
         try {

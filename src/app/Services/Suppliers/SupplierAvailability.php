@@ -137,7 +137,7 @@ final class SupplierAvailability
                 $policy = $product->supplierPricePolicy;
                 $minimumRetail = (int) $policy->minimum_profit_idr;
                 $maximumCost = $this->pricing->maximumCostIdr($policy, $quote->effectiveIdrUnitAmount, 1);
-                $costIdr = SupplierMoney::costIdr($oneUnitCost, (int) $supplier->exchange_rate_idr);
+                $costIdr = SupplierMoney::costIdr($oneUnitCost, $supplier->exchange_rate_idr);
                 if ($quote->effectiveIdrUnitAmount < $minimumRetail || $costIdr > $maximumCost) {
                     $reasons[] = 'Harga retail atau profit guard tidak menutup biaya supplier dan profit minimum.';
 

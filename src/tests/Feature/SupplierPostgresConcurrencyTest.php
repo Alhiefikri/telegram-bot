@@ -30,6 +30,7 @@ use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\Factory;
@@ -76,6 +77,63 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
         $this->assertSame(0, $product->fresh()->stock);
+    }
+
+    #[Group('postgres-release')]
+    public function test_nastele_workers_dispatch_one_non_idempotent_purchase_with_fractional_cost(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $product->update(['price_amount' => 50000]);
+        $supplier->forceFill(['provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.650001', 'balance_micros' => 300_000_000_000])->save();
+        $sku->update(['external_id' => '43', 'currency' => 'VND', 'unit_price_micros' => 30_000_000_000]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $id = SupplierFulfillment::where('order_id', $order->id)->sole()->id;
+        $process = function () use ($id): array {
+            Http::fake(function () {
+                usleep(150000);
+
+                return Http::response(['success' => true, 'data' => [
+                    'orderId' => 2244, 'totalAmount' => 30000,
+                    'items' => [['quantity' => 1, 'unitPrice' => 30000, 'accounts' => ['synthetic-race|password']]],
+                ]], 201);
+            });
+            app(SupplierFulfillmentService::class)->process($id);
+
+            return ['posts' => Http::recorded(fn ($request) => $request->method() === 'POST')->count()];
+        };
+        $results = $this->race([$process, $process, $process]);
+        $this->assertSame(1, array_sum(array_column($results, 'posts')));
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(1, ProductStockItem::whereNotNull('supplier_purchase_id')->count());
+        $this->assertSame(270_000_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(19501, SupplierMoney::costIdr(
+            SupplierPurchase::sole()->actual_cost_micros, SupplierPurchase::sole()->exchange_rate_idr,
+        ));
+    }
+
+    #[Group('postgres-release')]
+    public function test_nastele_competing_checkouts_cannot_overreserve_one_vnd_wallet_unit(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $product->update(['price_amount' => 50000]);
+        $supplier->forceFill(['provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.650001', 'balance_micros' => 30_000_000_000])->save();
+        $sku->update(['external_id' => '43', 'currency' => 'VND', 'unit_price_micros' => 30_000_000_000]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $second = $this->cart($product->id, 790002);
+        $results = $this->race([
+            fn () => $this->checkoutOutcome($cart->id),
+            fn () => $this->checkoutOutcome($second->id),
+        ]);
+        $outcomes = array_column($results, 'outcome');
+        sort($outcomes);
+        $this->assertSame(['reserved', 'unavailable'], $outcomes);
+        $this->assertSame(30_000_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(1, Order::count());
     }
 
     #[Group('postgres-release')]

@@ -15,7 +15,7 @@ Daftar Produk menyediakan pencarian nama produk, pilihan, dan family lintas hala
 Form Detail produk tidak lagi menampilkan Spesifikasi tambahan & dukungan (jenis produk, durasi akses, region, jenis akun, batas perangkat, yang termasuk, batasan penggunaan, estimasi pemenuhan, dan kebijakan dukungan). Penyimpanan detail tidak mengirim ulang field tersebut; nilai lama tetap tersimpan, tanpa penghapusan data atau perubahan tampilan Web Storefront yang memakai metadata lama.
 
 1. Open **Admin → Supplier Reseller** and fill the connection form. Clicking **Buat/Simpan supplier** opens an inline password dialog if recent confirmation is missing; successful confirmation resumes saving automatically. Incorrect passwords or cancelling retain the API key and other inputs in the current browser form. No secret is flashed to server session or persisted to browser storage. Operational recovery still requires recent confirmation.
-2. Add a connection: supported provider, API key, whole-IDR conversion rate, active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; BuyMail uses IDR with rate 1. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
+2. Add a connection: supported provider, API key, IDR conversion rate (up to six decimal places), active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; BuyMail uses IDR with rate 1; Nastele uses VND. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
 4. For ARRS/Warzone, confirm the actual account currency with the supplier. Also obtain authoritative currency evidence for the actual NyStore/ToolOraX accounts before activation or spend. Dollar-like presentation and USDT funding are not wallet-currency evidence. A mismatch must block activation and receive contract review, not a forced dropdown/ENV override.
 5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
@@ -26,6 +26,66 @@ Form Detail produk tidak lagi menampilkan Spesifikasi tambahan & dukungan (jenis
 10. Top up the external supplier account through that supplier's own supported payment flow. This application does not create a supplier funding transaction. Sync after funding to update availability.
 
 An account supports multiple SKUs with one credential. Adding another SKU from an implemented provider is an Admin operation, not a code change. A new provider contract or an unsupported fulfillment/input type still needs implementation and qualification.
+
+### Nastele
+
+Select **Nastele** in the existing Supplier Reseller connection form and enter a
+replacement API key, actual IDR funding cost for **one VND**, and a low-balance
+threshold in micro-VND (`1 VND = 1000000` micros). The rate may be below Rp1.
+The application does not fetch an FX rate or infer one from the supplier name.
+Migration `2026_10_15_000001_add_nastele_supplier_support` widens connection and
+purchase-snapshot rates to exact six-place decimals. Final IDR cost rounds up;
+existing integer-rate snapshots retain their economic value. Rollback refuses
+VND connections or fractional history rather than truncating financial evidence.
+
+The [Partner API contract](https://nastele.online/api/partner/docs) uses a fixed
+HTTPS origin and `X-API-Key` header. Sync reads `GET /balance` and
+`GET /products` only, at most 500 products, without per-product detail reads.
+`wholesale_tiers` are normalized into disjoint quantity ranges. Shared limits
+allow 60 requests/minute, at most 45 reads, retaining purchase headroom.
+Redirects are disabled; payload size, numeric amounts and credential echoes
+remain guarded by the shared transport. Keys and delivery evidence remain
+encrypted/private under the existing supplier owners.
+
+Purchases use `POST /orders {productId, qty}`. **No documented server-side
+idempotency exists:** no speculative idempotency header, blind POST replay or
+fallback after an unknown result. Existing durable dispatch claims fence worker
+races. Ambiguous purchases retain wallet/SKU holds. Recovery uses an exact
+verified `GET /orders/{orderId}`; paginated history is not automatic identity or
+no-debit evidence. The provider omits SKU ID from delivered-order items, so
+recovery relies on the trusted POST identity or the operator's verified exact
+order ID, not matching product names.
+
+Fulfillment requires one item, matching quantity, exact `unitPrice × quantity =
+totalAmount`, and a complete distinct account list. A successful create may
+omit status as documented; GET must explicitly say `completed`. Incomplete,
+duplicate, mismatched or unknown-status delivery remains in review with its
+known order ID. No supplier warranty/deposit API is documented or enabled.
+
+Read-only qualification on 15 October 2026 confirmed live VND balance **0**,
+11 catalog products and a paginated order-history response with the supplied
+temporary key. The actual PHP adapter read balance/catalog and one existing exact
+order successfully, validating its quantity, cost and one delivery without
+printing credentials. No purchase or deposit POST was sent; newly funded
+debit/delivery is not live-qualified. Enter a new key through Admin after revoking
+the temporary key. No credential from the chat is committed or seeded.
+
+Standalone synthetic runtime smoke completed sync → checkout → verified manual
+payment → supplier worker → worker replay with one purchase POST, one allocated
+Order-owned credential, `300000 → 270000 VND`, zero remaining wallet hold and
+`19501 IDR` cost at the synthetic `0.650001 IDR/VND` rate. Unmapped catalog sync
+used 17 SQL queries for both one and 100 products, with two HTTP reads per sync.
+The disposable Admin browser saved and reloaded that exact fractional rate,
+showed `Rp0,650001 / VND`, kept the saved key field empty, and had no horizontal
+overflow at 390 px in light/dark checks. PostgreSQL race cases live beside the
+existing supplier release group; run the commands below with
+`--filter=SupplierPostgresConcurrencyTest` to include the Nastele races.
+
+Final local checks: 364 non-race supplier/BuyMail/pricing tests passed with 2449
+assertions; all 13 `SupplierPostgresConcurrencyTest` scenarios passed with 185
+assertions on disposable PostgreSQL 16, including the two Nastele races. These
+are local results, not a production deployment, CI run, or exactly-once guarantee
+from Nastele's server.
 
 ### Canboso
 

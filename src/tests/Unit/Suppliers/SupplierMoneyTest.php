@@ -60,6 +60,17 @@ class SupplierMoneyTest extends TestCase
         $this->assertSame(PHP_INT_MAX - intdiv(PHP_INT_MAX, 1_000_000), SupplierMoney::costIdr(999_999, PHP_INT_MAX));
     }
 
+    public function test_fractional_exchange_rate_rounds_once_without_losing_sub_rupiah_costs(): void
+    {
+        $this->assertSame(19500, SupplierMoney::costIdr(30_000_000_000, '0.650000'));
+        $this->assertSame(19501, SupplierMoney::costIdr(30_000_000_000, '0.650001'));
+        $this->assertSame(1, SupplierMoney::costIdr(1, '0.000001'));
+        $this->assertSame(0, SupplierMoney::costIdr(0, '0.650001'));
+        $this->assertSame(79_840, SupplierMoney::costIdr(4_990_000, '16000.000000'));
+        $this->expectException(InvalidArgumentException::class);
+        SupplierMoney::costIdr(PHP_INT_MAX, '1000000.000001');
+    }
+
     #[DataProvider('overflowOperations')]
     public function test_checked_arithmetic_does_not_wrap(string $operation, int $left, int $right): void
     {

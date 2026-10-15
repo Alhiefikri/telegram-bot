@@ -29,7 +29,7 @@ class SupplierPurchase extends Model
 
     protected function casts(): array
     {
-        return ['supplier_fulfillment_id' => 'integer', 'supplier_id' => 'integer', 'supplier_catalog_item_id' => 'integer', 'quantity' => 'integer', 'observed_quantity' => 'integer', 'expected_cost_micros' => 'integer', 'actual_cost_micros' => 'integer', 'exchange_rate_idr' => 'integer', 'replay_count' => 'integer', 'lease_expires_at' => 'immutable_datetime', 'dispatched_at' => 'immutable_datetime', 'next_attempt_at' => 'immutable_datetime', 'delivery_payload' => 'encrypted:array', 'trusted_delivery_payload' => 'encrypted:array', 'account_units' => 'encrypted:array', 'committed_at' => 'immutable_datetime'];
+        return ['supplier_fulfillment_id' => 'integer', 'supplier_id' => 'integer', 'supplier_catalog_item_id' => 'integer', 'quantity' => 'integer', 'observed_quantity' => 'integer', 'expected_cost_micros' => 'integer', 'actual_cost_micros' => 'integer', 'exchange_rate_idr' => 'decimal:6', 'replay_count' => 'integer', 'lease_expires_at' => 'immutable_datetime', 'dispatched_at' => 'immutable_datetime', 'next_attempt_at' => 'immutable_datetime', 'delivery_payload' => 'encrypted:array', 'trusted_delivery_payload' => 'encrypted:array', 'account_units' => 'encrypted:array', 'committed_at' => 'immutable_datetime'];
     }
 
     public function fulfillment(): BelongsTo

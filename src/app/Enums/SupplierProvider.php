@@ -13,6 +13,7 @@ enum SupplierProvider: string
     case ToolOrax = 'toolorax';
     case BuyMail = 'buymail';
     case Canboso = 'canboso';
+    case Nastele = 'nastele';
 
     public function baseUrl(): string
     {
@@ -26,6 +27,7 @@ enum SupplierProvider: string
             self::ToolOrax => 'https://shopbot.00969600.xyz/shop-api/v1',
             self::BuyMail => 'https://buymail.simuru-store.com/api/reseller',
             self::Canboso => 'https://canboso.com/api/v2/telegram-buyer',
+            self::Nastele => 'https://nastele.online/api/partner',
         };
     }
 
@@ -41,6 +43,7 @@ enum SupplierProvider: string
             self::ToolOrax => 'ToolOraX (ShopBot)',
             self::BuyMail => 'BuyMail',
             self::Canboso => 'Canboso',
+            self::Nastele => 'Nastele',
         };
     }
 
@@ -54,6 +57,7 @@ enum SupplierProvider: string
         return match ($this) {
             self::ProdSeller => 'USDT',
             self::BuyMail => 'IDR',
+            self::Nastele => 'VND',
             default => 'USD',
         };
     }
