@@ -400,6 +400,16 @@ dan preservasi episode legacy saat migration).
 
 The application buys external units only after authoritative customer payment. It saves dispatch intent before HTTP, sends outside database locks, then persists evidence before customer delivery. A timeout is not proof of rejection.
 
+Customer API Orders use these same durable obligations. After a lost response, clients
+recover their own API-origin Order through `GET /api/v1/orders/{id}` and
+`GET /api/v1/orders/{id}/delivery`; current same-account keys can read Orders accepted
+under an older key. These reads never wake a worker, buy again or resend Telegram.
+`paid` with processing/review and zero released units is a valid result, including mixed
+local/supplier Orders. Committed BuyMail partial units retain their existing release
+exception; retired warranty/refund units stay unavailable. Use the existing recovery
+command/worker below, not another API purchase, for lost Redis work. See
+[API order schemas and worker-loss proof](customer-api-orders.md#owned-history-status-and-delivery-s07).
+
 ### Supervised purchase transport and crash evidence (#571)
 
 `suppliers:recover` only dispatches `ProcessSupplierFulfillment` to connection

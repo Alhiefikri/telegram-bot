@@ -300,6 +300,18 @@ transaction locks the Customer shared and calls `CustomerApiPrincipal::revalidat
 before any write. Contract, error table, lock order and evidence: [Customer API orders](../customer-api-orders.md);
 decision: [ADR-0025](../adr/0025-api-order-idempotency-claims.md).
 
+Customer API order recovery (#624) uses `CustomerApiOrderReadController` and
+`CustomerApiOrders` for Customer + immutable API-origin history/status/results, independent
+of the creating key version. Ascending UUID keysets are bounded to 100 summaries;
+`CredentialDeliveryEligibility::rejectionReasons()` batches the shared paid/lifecycle,
+supplier partial-release and late-review gate without credential hydration. Delivery
+holds the owned Order shared, loads only bounded non-retired allocated units after that
+gate, and reuses `CredentialDeliveryPresentation`; GET never purchases, reallocates,
+debits, refunds or resends. `suppliers:recover` and the existing `suppliers` worker recover
+the committed obligation after volatile Redis loss; unknown dispatched purchases retain
+review/holds. Schemas, partial/refund semantics, query plans and disposable worker-loss
+HTTP evidence: [Customer API orders](../customer-api-orders.md#owned-history-status-and-delivery-s07).
+
 
 ### Product dan stock
 

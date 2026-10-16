@@ -34,6 +34,7 @@
             <file>tests/Feature/CustomerUsdtBalancePostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtBalanceCheckoutPostgresConcurrencyTest.php</file>
             <file>tests/Feature/CustomerApiOrderPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/CustomerApiOrderReadTest.php</file>
             <file>tests/Feature/UsdtReceiverOwnershipPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtReconciliationPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtReorgIncidentPostgresConcurrencyTest.php</file>

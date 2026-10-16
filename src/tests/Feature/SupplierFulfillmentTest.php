@@ -30,6 +30,7 @@ use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\CustomerApi\CustomerApiCredentials;
 use App\Services\CustomerApi\CustomerApiOrderCheckout;
 use App\Services\CustomerApi\CustomerApiOrderRequest;
+use App\Services\CustomerApi\CustomerApiOrders;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceLedger;
@@ -59,14 +60,15 @@ class SupplierFulfillmentTest extends TestCase
 
     public function test_api_replay_and_lost_queue_recovery_preserve_an_unknown_supplier_purchase(): void
     {
-        [$product, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone');
+        [$product, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone', local: 1, quantity: 2);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'local-owned-account']);
         $customer = $cart->customer;
-        app(StoreBalanceLedger::class)->creditTopUp($customer, 10_000, 'api-supplier-funding', 'api-supplier-funding');
+        app(StoreBalanceLedger::class)->creditTopUp($customer, 15_000, 'api-supplier-funding', 'api-supplier-funding');
         $credentials = app(CustomerApiCredentials::class);
         $principal = $credentials->authenticate('Bearer '.$credentials->generate($customer)->takeSecret());
         $http = Request::create('/api/v1/orders', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
-            'product_id' => (string) $product->id, 'quantity' => 1,
-            'preference' => 'idr_only', 'expected_totals' => ['IDR' => '5000'],
+            'product_id' => (string) $product->id, 'quantity' => 2,
+            'preference' => 'idr_only', 'expected_totals' => ['IDR' => '10000'],
         ], JSON_THROW_ON_ERROR));
         $http->headers->set('Idempotency-Key', 'api-supplier-unknown');
         $request = CustomerApiOrderRequest::fromRequest($http);
@@ -76,6 +78,11 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame('pending', $fulfillment->state);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
         Http::assertNothingSent();
+        $reads = app(CustomerApiOrders::class);
+        $pending = $reads->detail($principal, $order->id)['data'];
+        $this->assertSame(1, $pending['fulfillment']['allocated_units']);
+        $this->assertSame(0, $pending['fulfillment']['released_units']);
+        $this->assertSame([], $reads->delivery($principal, $order->id)['data']['units']);
 
         // Drop all wakeups, then rediscover the committed obligation.
         Queue::fake();
@@ -103,7 +110,9 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame('ambiguous', SupplierPurchase::sole()->state);
         $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(1, $sku->fresh()->reserved_quantity);
-        $this->assertSame(0, ProductStockItem::count());
+        $this->assertSame(1, ProductStockItem::count());
+        $this->assertSame('review', $reads->detail($principal, $order->id)['data']['fulfillment']['state']);
+        $this->assertSame([], $reads->delivery($principal, $order->id)['data']['units']);
         try {
             app(OrderLifecycle::class)->applyPaymentRefunded($order->payments()->sole());
             $this->fail('Unknown supplier purchase permitted a refund.');
@@ -111,6 +120,14 @@ class SupplierFulfillmentTest extends TestCase
             $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
             $this->assertSame(5000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
         }
+        $service->provideManualCredentials($fulfillment->id, ['operator-replacement-account']);
+        $delivery = $reads->delivery($principal, $order->id)['data'];
+        $this->assertSame('ready', $delivery['state']);
+        $this->assertSame(['local-owned-account', 'operator-replacement-account'], array_column($delivery['units'], 'text'));
+        $this->assertSame($delivery, $reads->delivery($principal, $order->id)['data']);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(5000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        Http::assertSentCount(1);
     }
 
     public function test_supplier_completion_without_materialized_receipt_is_recovered_without_reallocating(): void

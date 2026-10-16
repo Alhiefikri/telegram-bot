@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\BuyMailWebhookController;
 use App\Http\Controllers\CustomerApiOrderController;
+use App\Http\Controllers\CustomerApiOrderReadController;
 use App\Http\Controllers\CustomerApiReadController;
 use App\Http\Controllers\KlikQrisProductionWebhookController;
 use App\Http\Controllers\KlikQrisSandboxWebhookController;
@@ -23,4 +24,7 @@ Route::prefix('v1')->name('customer-api.')->group(function (): void {
     Route::get('/products', [CustomerApiReadController::class, 'products'])->name('products');
     Route::get('/products/{id}', [CustomerApiReadController::class, 'product'])->name('product');
     Route::post('/orders', [CustomerApiOrderController::class, 'store'])->name('orders.store');
+    Route::get('/orders', [CustomerApiOrderReadController::class, 'index'])->name('orders.index');
+    Route::get('/orders/{id}', [CustomerApiOrderReadController::class, 'show'])->name('orders.show');
+    Route::get('/orders/{id}/delivery', [CustomerApiOrderReadController::class, 'delivery'])->name('orders.delivery');
 });

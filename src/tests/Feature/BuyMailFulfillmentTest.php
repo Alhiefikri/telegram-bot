@@ -25,6 +25,10 @@ use App\Models\User;
 use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Credentials\CredentialDeliveryPresentation;
+use App\Services\CustomerApi\CustomerApiCredentials;
+use App\Services\CustomerApi\CustomerApiOrderCheckout;
+use App\Services\CustomerApi\CustomerApiOrderRequest;
+use App\Services\CustomerApi\CustomerApiOrders;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceLedger;
@@ -32,14 +36,18 @@ use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Warranty\MissingFulfillmentRefundService;
+use App\Services\Warranty\RefundProof;
+use App\Services\Warranty\WarrantyClaimService;
 use App\Services\Warranty\WarrantySettlementService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Request;
 use Illuminate\Queue\Connectors\DatabaseConnector;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\NonTransactionalDatabaseTestCase;
@@ -108,7 +116,7 @@ final class BuyMailFulfillmentTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }
 
-    private function fixture(int $quantity): array
+    private function fixture(int $quantity, bool $api = false): array
     {
         $supplier = Supplier::forceCreate(['name' => 'Private Gmail source', 'provider' => 'buymail', 'api_key' => 'synthetic-test-key', 'currency' => 'IDR', 'currency_confirmed' => true, 'exchange_rate_idr' => 1, 'is_active' => true]);
         Http::fake(fn () => Http::response([
@@ -125,7 +133,19 @@ final class BuyMailFulfillmentTest extends NonTransactionalDatabaseTestCase
         $customer = Customer::factory()->create(['telegram_id' => 790001]);
         $cart = Cart::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addHour()]);
         CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => $quantity]);
-        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        if ($api) {
+            app(StoreBalanceLedger::class)->creditTopUp($customer, 24000, 'api-buymail-funding', 'api-buymail-funding');
+            $keys = app(CustomerApiCredentials::class);
+            $principal = $keys->authenticate('Bearer '.$keys->generate($customer)->takeSecret());
+            $request = Request::create('/api/v1/orders', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+                'product_id' => (string) $product->id, 'quantity' => $quantity, 'preference' => 'idr_only',
+                'expected_totals' => ['IDR' => (string) ($quantity * 8000)],
+            ], JSON_THROW_ON_ERROR));
+            $request->headers->set('Idempotency-Key', 'api-buymail');
+            $order = app(CustomerApiOrderCheckout::class)->place($principal, CustomerApiOrderRequest::fromRequest($request))->order;
+        } else {
+            $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        }
         Http::swap(new Factory);
         Http::preventStrayRequests();
 
@@ -164,6 +184,58 @@ final class BuyMailFulfillmentTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(85_600_000_000, $supplier->fresh()->balance_micros);
         $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(3, ProductStockItem::count());
+    }
+
+    public function test_api_partial_recovery_missing_refund_and_warranty_retirement_preserve_unit_identity(): void
+    {
+        Storage::fake('local');
+        [, $order] = $this->fixture(3, api: true);
+        $customer = $order->customer;
+        $keys = app(CustomerApiCredentials::class);
+        $nonce = $keys->prepareRotation($customer, 10);
+        $principal = $keys->authenticate('Bearer '.$keys->rotate($customer, 10, $nonce)->takeSecret());
+        $reads = app(CustomerApiOrders::class);
+        $this->assertSame('processing', $reads->detail($principal, $order->id)['data']['fulfillment']['state']);
+        $this->assertSame([], $reads->delivery($principal, $order->id)['data']['units']);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $posts = 0;
+        Http::fake(function ($request) use (&$posts) {
+            $posts++;
+
+            return $posts === 1 ? Http::response($this->delivery($request['reference'], 3, 2), 201)
+                : Http::response(['error' => ['code' => 'out_of_stock']], 409);
+        });
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $partial = $reads->delivery($principal, $order->id)['data'];
+        $this->assertSame('partial', $partial['state']);
+        $this->assertSame(2, $partial['progress']['released_units']);
+        $this->assertSame($partial, $reads->delivery($principal, $order->id)['data']);
+        Http::assertSentCount(1);
+        $service->process($f->id);
+        $this->assertSame('review', $reads->detail($principal, $order->id)['data']['fulfillment']['state']);
+        $this->assertSame($partial['units'], $reads->delivery($principal, $order->id)['data']['units']);
+        app(MissingFulfillmentRefundService::class)->request($customer, $order->orderItems()->sole()->id);
+        $summary = $reads->detail($principal, $order->id)['data'];
+        $this->assertSame(['state' => 'partial', 'currency' => 'IDR', 'confirmed_amount' => '8000', 'pending_amount' => '0'], $summary['refund']);
+        $this->assertSame($partial['units'], $reads->delivery($principal, $order->id)['data']['units']);
+        $unit = SupplierAccountUnit::where('order_id', $order->id)->orderBy('unit_number')->firstOrFail();
+        $proof = RefundProof::fromBytes(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAC0lEQVQImWNgQAYAAA4AAbGa6gYAAAAASUVORK5CYII='));
+        $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $proof, 'Wrong password');
+        Http::swap(new Factory);
+        Http::fake(fn () => Http::response(['account' => [
+            'id' => $unit->external_id, 'order_id' => $unit->purchase->supplier_order_id,
+            'status' => 'refunded', 'price' => 4800, 'refund_deadline' => now()->addHours(2)->utc()->toIso8601String(),
+            'refund' => ['status' => 'approved'],
+        ]]));
+        app(WarrantyClaimService::class)->process($claim->id);
+        app(WarrantySettlementService::class)->choose($customer, $claim->public_id, 'refund');
+        $remaining = $reads->delivery($principal, $order->id)['data']['units'];
+        $this->assertSame([$partial['units'][1]], $remaining);
+        $this->assertNotNull($unit->stockItem->fresh()->retired_at);
+        $this->assertSame('16000', $reads->detail($principal, $order->id)['data']['refund']['confirmed_amount']);
+        $this->assertSame(16000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(1, StoreBalanceEntry::where('kind', 'purchase_debit')->count());
     }
 
     public function test_balance_sync_during_a_purchase_cannot_apply_the_same_supplier_debit_twice(): void

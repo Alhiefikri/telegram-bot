@@ -1,7 +1,8 @@
-# Customer API Orders (S06, #623)
+# Customer API Orders (S06 #623, S07 #624)
 
 Contract: [#617 sections 4.2, 5, 5.1, 6, 7 and 10](https://github.com/Alhiefikri/telegram-bot/issues/617),
-implemented by [#623](https://github.com/Alhiefikri/telegram-bot/issues/623). Authentication,
+implemented by [#623](https://github.com/Alhiefikri/telegram-bot/issues/623) and
+[#624](https://github.com/Alhiefikri/telegram-bot/issues/624). Authentication,
 shared admission, rate-limit headers and revocation follow
 [Customer API key operations](customer-api-key-operations.md). Quote semantics follow
 [Customer API reads](customer-api-reads.md). The idempotency design is
@@ -179,6 +180,143 @@ creating a Cart or touching a wallet. An expired lease cannot be stolen during f
 commit, and a suspended worker whose token was replaced returns 409 `in_progress`
 without purchasing. Acceptance cannot silently succeed for a stale token.
 
+## Owned history, status and delivery (S07)
+
+All reads authenticate the current key on every HTTP request and scope by its Customer
+and immutable `orders.api_order_claim_id IS NOT NULL`, never by the credential that
+created the Order. Rotation preserves access to earlier API Orders. A revoked key gets
+401. A foreign, nonexistent, malformed or retail Order ID gets the same 404
+`not_found` / `Resource not found.` envelope. Browser sessions and Recovery Keys grant
+no API authority. All responses, including errors, use `Cache-Control: no-store, private`,
+`Referrer-Policy: no-referrer` and `X-Request-ID`.
+
+| GET route | Query / response |
+| --- | --- |
+| `/api/v1/orders` | `limit` (default 20, 1–100), optional `cursor` and `status`; `data: OrderSummary[]` plus `pagination: {next_cursor: string|null, has_more: boolean}` |
+| `/api/v1/orders/{id}` | No query fields; `data: OrderSummary` |
+| `/api/v1/orders/{id}/delivery` | No query fields; `data: DeliveryResult`; also consumes the shared 10/minute Customer delivery budget |
+
+Unknown query fields, arrays, invalid filters and nonempty GET bodies are 422
+`invalid_input`. `status` filters the canonical **Order** status, not payment or delivery:
+`draft`, `pending_payment`, `processing`, `completed`, `cancelled`, `expired`.
+IDs/cursors are opaque UUID strings. Omit `cursor` for the first page, then pass
+`pagination.next_cursor` unchanged with the same filters. History traverses ascending
+Order ID with no OFFSET or total count. Concurrent new Orders may appear later and status
+changes can change filter membership; pagination is not a frozen snapshot.
+
+### OrderSummary schema
+
+| Field | Type / meaning |
+| --- | --- |
+| `id`, `invoice_number`, `origin` | String identity/reference; origin is `api` |
+| `status`, `payment_status` | Separate canonical Order/Payment states; `paid` is not proof of delivery |
+| `currency`, `amount` | Original selected public currency (`IDR`/`USD`) and exact decimal-string Payment amount; null amount only when no Payment exists |
+| `quantity` | Ordered integer units |
+| `items` | Array of `{product_id: string, name: string, quantity: integer}` snapshots |
+| `fulfillment.state` | `not_ready`, `processing`, `review`, `partial`, `complete`, `refunded` |
+| `fulfillment.ordered_units` | Total purchased quantity |
+| `fulfillment.allocated_units` | Durable stock-row allocation count, including retired/replaced historical rows; not a release entitlement |
+| `fulfillment.released_units` | Current non-retired units authorized by `CredentialDeliveryEligibility`; zero if the lifecycle blocks release |
+| `fulfillment.processing`, `fulfillment.review_required` | Independent booleans from durable fulfillment/open manual-review state |
+| `delivery` | `{available: boolean, state: not_ready|partial|ready}`; availability means lifecycle-authorized rows exist, not that ciphertext has been decoded by this read |
+| `refund` | `{state: none|pending|partial|refunded, currency: IDR|USD, confirmed_amount: string|null, pending_amount: string}` |
+| `created_at` | ISO 8601 timestamp with timezone |
+
+`review` takes precedence over partial progress; counts and delivery availability remain
+separate so an authorized BuyMail partial result can coexist with manual review.
+`complete` means all ordered units are currently releasable, not simply that payment or
+Order processing finished. A missing-unit refund can settle the Order while delivery
+remains `partial`. A full refund reports the original Payment amount as confirmed,
+including earlier partial credits exactly once; otherwise confirmed/pending sums come
+from registered original-currency `OrderRefund` entitlements. Warranty refunds/replacements
+retain the existing unit retirement rules.
+
+History/status use explicit allowlists and batched Payment/item/fulfillment/review/refund
+metadata. They neither select nor decrypt credential columns, call a provider, poll
+upstream, enqueue fulfillment nor read a stock pool. The partial index
+`orders_api_customer_cursor (customer_id, id) WHERE api_order_claim_id IS NOT NULL`
+supports owned keyset traversal without indexing retail history into that access path.
+
+### DeliveryResult schema and release rules
+
+Success, including pending/review, is HTTP 200:
+
+```json
+{
+  "data": {
+    "id": "01a14505-c0a1-7005-aeb6-dbf062934315",
+    "state": "not_ready",
+    "progress": {
+      "state": "review",
+      "ordered_units": 2,
+      "allocated_units": 1,
+      "released_units": 0,
+      "processing": true,
+      "review_required": true
+    },
+    "units": [],
+    "usage_guides": []
+  }
+}
+```
+
+This is a disposable fixture response. `state` is `not_ready`, `partial` or `ready`;
+`progress` has the same schema as `OrderSummary.fulfillment`. A client waits or contacts
+support on review; it must not create a new purchase to recover an existing result.
+
+Each released `units[]` object has exactly:
+
+| Field | Type / meaning |
+| --- | --- |
+| `id`, `product_id` | Opaque string allocated-unit and Product identities; stable on repeat reads |
+| `number` | Logical account number from the shared delivery presentation |
+| `format` | `legacy` or `structured_account` |
+| `text` | Canonical formatted credential text, including supported legacy MFA fields |
+| `email`, `password` | Nullable strings from the shared legacy/structured presentation |
+| `access_method`, `access_value` | Nullable structured access enum/value (`none`, `otp_mail_link`, `auth_token`); alternatives are not combined |
+| `reader_mail_link` | Nullable supported mailbox-reader link |
+| `tutorial` | Nullable item override or snapshotted/default delivery instruction |
+
+`usage_guides` is an array of `{title: string, url: string}` from the canonical
+`ProductUsageGuide`. The API does not fetch these URLs. No provider identity, provider
+account ID, raw supplier evidence, recovery secret, acquisition cost or pool metadata
+appears in any response.
+
+Delivery holds the owned Order shared while deciding entitlement and projecting existing
+units. Canonical refund, warranty and fulfillment writers take that Order exclusively;
+the read never takes a wallet lock or reverses the writer lock order. It first checks
+paid-at/Payment/Order/lifecycle and late-payment review, including the existing committed
+BuyMail partial-release exception. Only then does it load at most 101 non-retired
+allocated rows (100 is the valid maximum) and the supported credential fields through
+`CredentialDeliveryPresentation`. Mixed local/non-partial supplier processing releases
+nothing until the canonical gate permits it. Retired units never load/decrypt for this
+endpoint. Invalid allocation bounds, malformed ciphertext or a JSON result over 1 MiB
+fail closed with safe 503 `temporarily_unavailable`, without returning a partial payload.
+
+GET never buys, allocates, debits, refunds, resends or creates a new fulfillment attempt.
+Repeated reads return the same unit identities and values until an authorized existing
+warranty/refund operation retires or replaces a unit. This is recovery of the same result,
+not exactly-once Telegram transport.
+
+### Durable recovery
+
+No API-specific fulfillment queue/state machine is added. Economic checkout already
+commits `SupplierFulfillment` and local allocation atomically. Redis only carries wakeups.
+After worker/Redis loss, use the existing bounded recovery and worker:
+
+```sh
+php artisan suppliers:recover --limit=25
+php artisan queue:work supplier --queue=suppliers --stop-when-empty --tries=1 --timeout=120
+```
+
+The scheduler runs supplier recovery every minute. A pending accepted API Order can
+progress without a new HTTP purchase. Known supplier identities recover through existing
+reads; an expired dispatched non-idempotent purchase without a known outcome remains
+`ambiguous`/manual review with holds retained, no new acquisition and no automatic refund.
+`telegram:recover-outbound` remains the owner of lost receipt/outbound handoffs; GET is
+not a resend path. Existing qualification/activation gates remain unchanged.
+
+
 ## Verification
 
 Local verification on 2026-10-16 used host PHP 8.5.9, application image PHP 8.4.26,
@@ -296,7 +434,100 @@ not owned by this continuation.
   client instead of bypassing shared admission.
 - One Product and quantity 1–100 are supported. Canonical automatic checkout currently
   has no buyer-input fields; catalog `input_requirements` remains empty.
-- Own-order history/status/delivery belongs to #624, notifications to #625, public
-  documentation publication to #626 and Store Bot management to #627.
+- Own-order history/status/delivery is implemented in S07 above. Notifications remain
+  #625, public documentation publication #626 and Store Bot management #627.
 - Existing custody, funding, provider, pause and restore qualification gates remain
   fail-closed. This work does not authorize financial production exposure.
+
+## S07 verification (2026-10-16)
+
+The local PostgreSQL regression batch ran `CustomerApiOrderReadTest`,
+`SupplierFulfillmentTest`, `BuyMailFulfillmentTest`,
+`CredentialDeliveryPresentationTest` and `UsdtOrderRefundPostgresConcurrencyTest`:
+55 tests, 863 assertions passed. The initial SQLite batch of the first four files passed
+49 tests, 799 assertions. The API tests exercise canonical checkout and current rotated-key
+ownership; supplier/warranty fixtures cover blocked mixed local results, ambiguous purchase
+holds, manual replacement, authorized partial BuyMail units, missing-unit refunds and
+per-account warranty retirement. Invalid ciphertext is tolerated by metadata history but
+delivery fails closed. These are fixture provider contracts, not live supplier qualification.
+
+After the final code/formatting changes, the focused PostgreSQL rerun passed 14 tests,
+410 assertions: all order-read cases (including the 1 MiB response bound), mixed unknown
+supplier recovery, BuyMail partial/warranty retirement and the six existing original-currency
+refund concurrency cases. Pint completed on the changed PHP files; LSP diagnostics for
+the new controller/service reported no issues.
+The final SQLite compatibility batch passed 125 tests, 1,552 assertions across
+`CustomerApiOrderReadTest`, `CustomerApiOrderTest`, `CredentialDeliveryPresentationTest`,
+`OrderCredentialMailTest`, `WarrantyClaimTest`, `SupplierFulfillmentTest` and
+`BuyMailFulfillmentTest`.
+
+### Disposable HTTP and worker-loss recovery
+
+Runtime: application image PHP 8.4.26, PostgreSQL 16, isolated Redis 7, HTTP bound only
+to `127.0.0.1:18624`. It used the real v1 routes, authentication, shared Redis admission,
+canonical checkout, durable supplier recovery command and actual queue worker.
+The dataset contained 103 accepted API Orders for one funded Customer and 2,001
+retail Orders across two Customers. All inventory/credentials/funding were synthetic;
+Telegram and live supplier traffic were disabled.
+
+Observed sequence:
+
+1. HTTP POST accepted local, supplier-only and mixed local/supplier Orders with 201/paid.
+   Initial delivery GET returned 200/ready for local unit `101`, 200/not-ready with
+   zero allocated units for the supplier-only Order, and 200/not-ready with one
+   allocated but **zero released** units for the mixed Order.
+2. `FLUSHALL` on only the disposable Redis deleted queue wakeups. Actual
+   `suppliers:recover --limit=25` reported two due records. Actual
+   `queue:work supplier --queue=suppliers --stop-when-empty --tries=1 --timeout=120`
+   completed the first obligation, allocating supplier unit `103`.
+3. The fixture supplier transport killed the second real worker with SIGKILL after its
+   dispatch intent was durable and before a result was returned (worker exit 137).
+   Only that killed dispatch's lease/deadline was advanced to expiry for the drill.
+   A second recovery reported one due record; the restarted worker completed recovery
+   into `review` / `ambiguous`, with the original supplier hold retained.
+4. HTTP delivery recovered the completed supplier unit `103`. The unknown mixed Order
+   stayed `processing`/`paid`, with one allocated unit, zero released units,
+   review required and no refund. Fixture transport logged exactly two calls total,
+   both outside DB transactions; recovery/result/history reads made no new acquisition.
+5. Account key rotation and HTTP-process restart preserved the exact same local/supplier
+   unit IDs and delivery values. The revoked key returned 401. Foreign, nonexistent,
+   retail and malformed IDs all returned indistinguishable 404 codes/messages with
+   matching response/error request IDs. Private success/error responses used
+   `Cache-Control: no-store, private`.
+
+Direct DB snapshots around repeated GETs, key rotation and restart were equal:
+103 accepted API Orders, 103 Payments, 103 IDR purchase debits, zero refund credits,
+103 allocated rows and IDR balance `480000`. Supplier holds were `0` for the completed
+purchase and `1000000` micro-units for the unknown purchase. No API-specific handoff
+repair or replacement recovery engine was needed.
+
+### HTTP query-growth evidence
+
+Ten serial actual HTTP requests per page size, with request-local SQL/memory instrumentation
+in the disposable router (not application code):
+
+| Summary rows | SQL statements | Statements involving relationship metadata | p50 ms | p95 ms | Peak PHP MiB |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 11 | 9 | 102.84 | 805.22 | 12 |
+| 20 | 11 | 9 | 117.68 | 124.70 | 4 |
+| 100 | 11 | 9 | 169.39 | 197.78 | 4 |
+
+The one-row sample includes cold PHP startup. p95 is nearest-rank over ten observations.
+Peak in-flight requests was one; these are boundedness diagnostics, not throughput or
+production capacity evidence. Credential text was absent from every history response;
+upstream fixture calls stayed at two throughout the reads.
+
+`EXPLAIN (ANALYZE, BUFFERS)` after `ANALYZE orders` used
+`orders_api_customer_cursor` for the one-row shape (two rows fetched, five shared buffer
+hits, 0.183 ms execution). On this small correlated fixture, PostgreSQL chose the existing
+nonnull claim index for 20/100, filtering 103 API rows and sorting with 27/38 KiB
+(nine buffer hits, 0.159/0.185 ms execution); it did not scan retail history.
+`pg_stat_database.deadlocks` was zero. Lock-wait duration was not sampled by this serial
+HTTP probe; PostgreSQL refund concurrency coverage is separate from this measurement.
+
+The worker crash and upstream results used deterministic local transport fixtures, not
+network/provider qualification. Existing financial exposure gates remain fail-closed.
+No CI/CD inspection, production access, activation, deployment, commit or push was performed.
+The disposable HTTP/Redis containers, both smoke/regression databases and temporary
+router/worker/fixture instrumentation were removed. The pre-existing PostgreSQL container
+was left running.

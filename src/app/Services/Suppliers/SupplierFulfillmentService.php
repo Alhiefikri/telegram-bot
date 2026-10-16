@@ -100,7 +100,16 @@ final class SupplierFulfillmentService
 
     public function hasPending(Order $order): bool
     {
-        return SupplierFulfillment::query()->where('order_id', $order->id)->where('state', '!=', 'delivered')->exists();
+        return $this->pendingOrderIds([$order->id]) !== [];
+    }
+
+    /** @param list<string> $orderIds
+     * @return list<string>
+     */
+    public function pendingOrderIds(array $orderIds): array
+    {
+        return SupplierFulfillment::query()->whereIn('order_id', $orderIds)->where('state', '!=', 'delivered')
+            ->distinct()->pluck('order_id')->all();
     }
 
     public function hasExternalHandoff(Order $order): bool

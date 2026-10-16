@@ -4,12 +4,14 @@ namespace App\Services\Credentials;
 
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\ProductStockItem;
 use App\Models\SupplierPurchase;
 use App\Services\OrderLifecycleProjection;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Decides whether a Customer may receive an Order's paid credentials without
@@ -22,41 +24,50 @@ final class CredentialDeliveryEligibility
         ?Customer $customer = null,
         ?Payment $payment = null,
     ): ?string {
-        if ($customer !== null
-            && (string) $customer->getKey() !== (string) $order->customer_id) {
-            return 'order_unavailable';
+        return $this->rejectionReasons(new Collection([$order]), $customer, $payment === null ? [] : [$order->id => $payment])[$order->id];
+    }
+
+    /**
+     * Batch the same entitlement decision without selecting credential fields.
+     *
+     * @param  Collection<int, Order>  $orders
+     * @param  array<string, Payment>  $payments
+     * @return array<string, ?string>
+     */
+    public function rejectionReasons(Collection $orders, ?Customer $customer = null, array $payments = []): array
+    {
+        if ($orders->isEmpty()) {
+            return [];
+        }
+        $orders->loadMissing('payments');
+        $ids = $orders->modelKeys();
+        $pending = collect(app(SupplierFulfillmentService::class)->pendingOrderIds($ids))->flip();
+        $partial = SupplierPurchase::query()
+            ->whereHas('fulfillment', fn ($q) => $q->whereIn('order_id', $ids))
+            ->whereHas('supplier', fn ($q) => $q->where('provider', 'buymail'))
+            ->whereNotNull('committed_at')->where('observed_quantity', '>', 0)->whereColumn('observed_quantity', '<', 'supplier_purchases.quantity')
+            ->join('supplier_fulfillments', 'supplier_fulfillments.id', '=', 'supplier_purchases.supplier_fulfillment_id')
+            ->pluck('supplier_fulfillments.order_id')->flip();
+        $review = ManualFulfillmentReview::query()->whereIn('order_id', $ids)->openLatePayment()->pluck('order_id')->flip();
+
+        $reasons = [];
+        foreach ($orders as $order) {
+            $payment = $payments[$order->id] ?? $this->latestPayment($order);
+            $reasons[$order->id] = match (true) {
+                $customer !== null && (string) $customer->id !== (string) $order->customer_id => 'order_unavailable',
+                $payment === null,
+                (string) $payment->order_id !== (string) $order->id,
+                $payment->status !== PaymentStatus::Paid,
+                $payment->paid_at === null => 'payment_not_confirmed',
+                $order->payment_status !== PaymentStatus::Paid => 'payment_not_paid',
+                $pending->has($order->id) && ! $partial->has($order->id) => 'fulfillment_processing',
+                $review->has($order->id) => 'late_payment_review',
+                ! OrderLifecycleProjection::from($order, $payment)->isPaid => 'lifecycle_ineligible',
+                default => null,
+            };
         }
 
-        $order->loadMissing('payments');
-        $payment ??= $this->latestPayment($order);
-
-        if ($payment === null
-            || (string) $payment->order_id !== (string) $order->getKey()
-            || $payment->status !== PaymentStatus::Paid
-            || $payment->paid_at === null) {
-            return 'payment_not_confirmed';
-        }
-
-        if ($order->payment_status !== PaymentStatus::Paid) {
-            return 'payment_not_paid';
-        }
-
-        if (app(SupplierFulfillmentService::class)->hasPending($order)
-            && ! SupplierPurchase::query()->whereHas('fulfillment', fn ($q) => $q->where('order_id', $order->id))
-                ->whereHas('supplier', fn ($q) => $q->where('provider', 'buymail'))
-                ->whereNotNull('committed_at')->where('observed_quantity', '>', 0)->whereColumn('observed_quantity', '<', 'quantity')->exists()) {
-            return 'fulfillment_processing';
-        }
-
-        if ($order->hasOpenLatePaymentReview()) {
-            return 'late_payment_review';
-        }
-
-        if (! OrderLifecycleProjection::from($order, $payment)->isPaid) {
-            return 'lifecycle_ineligible';
-        }
-
-        return null;
+        return $reasons;
     }
 
     public function allows(
