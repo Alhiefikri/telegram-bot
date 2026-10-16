@@ -60,7 +60,7 @@ final class ExternalMoneyReceiptClaimTest extends TestCase
 
         $record = ExternalMoneyReceipt::query()->sole();
         $this->assertNotNull($record->claimed_at);
-        $this->assertSame(ExternalMoneyReceipt::query()->sole()->id, ExternalMoneyReceiptAlias::query()->sole()->external_money_receipt_id);
+        $this->assertSame($record->id, ExternalMoneyReceiptAlias::query()->where('alias_key', $alias->identity->canonicalKey())->sole()->external_money_receipt_id);
     }
 
     public function test_replaying_the_same_receipt_returns_replayed_without_a_second_effect(): void
@@ -72,7 +72,6 @@ final class ExternalMoneyReceiptClaimTest extends TestCase
         $this->assertSame(ExternalMoneyReceiptClaimOutcome::Replayed, $this->claims()->claim($receipt));
 
         $this->assertDatabaseCount('external_money_receipts', 1);
-        $this->assertDatabaseCount('external_money_receipt_aliases', 1);
         $this->assertDatabaseCount('external_money_receipt_parent_claims', 1);
     }
 
@@ -119,9 +118,8 @@ final class ExternalMoneyReceiptClaimTest extends TestCase
         $this->assertSame(ExternalMoneyReceiptClaimOutcome::Conflict, $this->claims()->claim($second));
 
         $this->assertDatabaseCount('external_money_receipts', 1);
-        $this->assertDatabaseCount('external_money_receipt_aliases', 1);
         $this->assertDatabaseMissing('external_money_receipts', ['canonical_key' => $second->canonicalKey()]);
-        $this->assertSame(ExternalMoneyReceipt::query()->sole()->id, ExternalMoneyReceiptAlias::query()->sole()->external_money_receipt_id);
+        $this->assertSame(ExternalMoneyReceipt::query()->sole()->id, ExternalMoneyReceiptAlias::query()->where('alias_key', $alias->identity->canonicalKey())->sole()->external_money_receipt_id);
     }
 
     public function test_a_caller_transaction_survives_a_conflicting_claim_and_commits_its_own_work(): void
@@ -220,8 +218,8 @@ final class ExternalMoneyReceiptClaimTest extends TestCase
         $this->assertImmutable(fn () => ExternalMoneyReceipt::query()->sole()->forceFill(['amount_units' => '1'])->save());
         $this->assertImmutable(fn () => ExternalMoneyReceipt::query()->sole()->forceFill(['target_id' => 'order-2'])->save());
         $this->assertImmutable(fn () => ExternalMoneyReceipt::query()->sole()->delete());
-        $this->assertImmutable(fn () => ExternalMoneyReceiptAlias::query()->sole()->forceFill(['alias_type' => 'other'])->save());
-        $this->assertImmutable(fn () => ExternalMoneyReceiptAlias::query()->sole()->delete());
+        $this->assertImmutable(fn () => ExternalMoneyReceiptAlias::query()->where('alias_key', $alias->identity->canonicalKey())->sole()->forceFill(['alias_type' => 'other'])->save());
+        $this->assertImmutable(fn () => ExternalMoneyReceiptAlias::query()->where('alias_key', $alias->identity->canonicalKey())->sole()->delete());
         $this->assertImmutable(fn () => ExternalMoneyReceiptParentClaim::query()->sole()->forceFill(['target_id' => 'order-2'])->save());
         $this->assertImmutable(fn () => ExternalMoneyReceiptParentClaim::query()->sole()->delete());
     }
@@ -254,6 +252,25 @@ final class ExternalMoneyReceiptClaimTest extends TestCase
             'target_type' => 'order_payment',
             'target_id' => 'order-1',
         ]);
+    }
+
+    public function test_canonical_and_alias_identities_share_one_global_owner_in_both_directions(): void
+    {
+        $transaction = MoneyReceiptIdentity::binancePay('pay_id', '123456789', 'TXN-ALIAS');
+        $order = MoneyReceiptIdentity::binancePay('pay_id', '123456789', 'ORDER-ALIAS');
+        $first = new VerifiedMoneyReceipt($transaction, 'customer:1', 'USDT', '300000', 6,
+            MoneyReceiptTarget::customerUsdtTopUp('top-up-1'), [], [new MoneyReceiptAlias('binance_order_id', $order)]);
+        $this->assertSame(ExternalMoneyReceiptClaimOutcome::Claimed, $this->claims()->claim($first));
+        foreach ([[], [new MoneyReceiptAlias('binance_order_id', $transaction)]] as $aliases) {
+            $second = new VerifiedMoneyReceipt($order, 'customer:2', 'USDT', '300000', 6,
+                MoneyReceiptTarget::orderPayment('order-2'), [], $aliases);
+            $this->assertSame(ExternalMoneyReceiptClaimOutcome::Conflict, $this->claims()->claim($second));
+        }
+        $third = new VerifiedMoneyReceipt(MoneyReceiptIdentity::binancePay('pay_id', '123456789', 'OTHER-TXN'),
+            'customer:3', 'USDT', '300000', 6, MoneyReceiptTarget::customerUsdtTopUp('top-up-3'), [],
+            [new MoneyReceiptAlias('binance_order_id', $transaction)]);
+        $this->assertSame(ExternalMoneyReceiptClaimOutcome::Conflict, $this->claims()->claim($third));
+        $this->assertSame('top-up-1', ExternalMoneyReceipt::query()->sole()->target_id);
     }
 
     public function test_legacy_bsc_evidence_hashes_normalize_to_the_same_receipt_identity(): void

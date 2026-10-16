@@ -2,7 +2,9 @@
 
 namespace App\Services\UsdtTopUps;
 
+use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtTopUp;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -34,9 +36,13 @@ final class UsdtTopUpStatusReader
             return [];
         }
 
-        $resolutions = DB::table('customer_usdt_top_up_resolutions')
-            ->whereIn('top_up_id', $ids)
-            ->get(['top_up_id', 'kind', 'entry_id'])
+        $resolutions = DB::table('customer_usdt_top_up_resolutions as resolutions')
+            ->leftJoin('external_money_receipts as receipts', 'receipts.id', '=', 'resolutions.receipt_id')
+            ->whereIn('resolutions.top_up_id', $ids)
+            ->get([
+                'resolutions.top_up_id', 'resolutions.kind', 'resolutions.entry_id',
+                'receipts.amount_units', 'receipts.decimals',
+            ])
             ->keyBy(static fn (object $row): string => (string) $row->top_up_id);
         $preparation = DB::table('customer_usdt_top_up_work')
             ->whereIn('top_up_id', $ids)
@@ -45,38 +51,40 @@ final class UsdtTopUpStatusReader
             ->whereIn('top_up_id', $ids)
             ->pluck('state', 'top_up_id');
 
-        $settledEntryIds = $resolutions
-            ->filter(static fn (object $row): bool => (string) $row->kind === UsdtTopUpStatus::STATE_SETTLED && $row->entry_id !== null)
-            ->map(static fn (object $row): int => (int) $row->entry_id)
-            ->values()
-            ->all();
-        $existingEntryIds = $settledEntryIds === []
-            ? []
-            : DB::table('customer_usdt_balance_entries')->whereIn('id', $settledEntryIds)->pluck('id')
-                ->map(static fn ($id): int => (int) $id)->all();
+        $entryIds = $resolutions->pluck('entry_id')->filter()->values()->all();
+        $entries = $entryIds === [] ? new Collection : CustomerUsdtBalanceEntry::query()
+            ->join('customer_usdt_balance_accounts as accounts', 'accounts.id', '=', 'customer_usdt_balance_entries.customer_usdt_balance_account_id')
+            ->whereIn('customer_usdt_balance_entries.id', $entryIds)
+            ->get(['customer_usdt_balance_entries.*', 'accounts.customer_id as owner_customer_id'])
+            ->keyBy('id');
 
         $statuses = [];
         foreach ($targets as $target) {
             $id = (string) $target->id;
             $resolution = $resolutions->get($id);
+            $entry = $resolution === null ? null : $entries->get($resolution->entry_id);
+            if ($entry !== null && ((int) $entry->owner_customer_id !== (int) $target->customer_id
+                || $entry->source_type !== 'customer_usdt_top_up' || $entry->source_id !== $id
+                || $entry->kind->value !== 'funding_credit')) {
+                $entry = null;
+            }
             $statuses[$id] = UsdtTopUpStatus::for($target, $this->state(
                 resolution: $resolution,
-                existingEntryIds: $existingEntryIds,
+                hasEntry: $entry !== null,
                 preparation: $preparation[$id] ?? null,
                 settlement: $settlement[$id] ?? null,
                 target: $target,
-            ));
+            ), $entry, $entry !== null && $resolution->amount_units !== null && $resolution->decimals !== null
+                ? UsdtMicroAmount::fromRawTokenUnits((string) $resolution->amount_units, (int) $resolution->decimals)->units()
+                : null);
         }
 
         return $statuses;
     }
 
-    /**
-     * @param  list<int>  $existingEntryIds
-     */
     private function state(
         ?object $resolution,
-        array $existingEntryIds,
+        bool $hasEntry,
         ?string $preparation,
         ?string $settlement,
         CustomerUsdtTopUp $target,
@@ -86,7 +94,7 @@ final class UsdtTopUpStatusReader
             if ($kind === UsdtTopUpStatus::STATE_SETTLED) {
                 // A settled resolution without its ledger entry is never shown
                 // as a credited balance.
-                return $resolution->entry_id !== null && in_array((int) $resolution->entry_id, $existingEntryIds, true)
+                return $hasEntry
                     ? UsdtTopUpStatus::STATE_SETTLED
                     : UsdtTopUpStatus::STATE_REVIEW;
             }

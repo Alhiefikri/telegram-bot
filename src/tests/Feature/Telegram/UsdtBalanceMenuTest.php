@@ -11,7 +11,9 @@ use App\Models\ManualPaymentSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Models\User;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
+use App\Services\Telegram\TelegramMessageRouter;
 use App\Services\Telegram\TelegramUsdtActivityToken;
+use App\Services\Telegram\TelegramUsdtFundingSession;
 use App\Services\UsdtBalance\CustomerUsdtActivityCursor;
 use App\Services\UsdtBalance\CustomerUsdtActivityService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
@@ -20,6 +22,7 @@ use App\Services\UsdtBalance\VerifiedUsdtFunding;
 use App\Services\UsdtReceivers\UsdtDepositReceiverRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -38,6 +41,8 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
     protected BscUsdtRailRpcFixture $rpc;
 
     private int $updateId = 7000;
+
+    private bool $replaceNextEdit = false;
 
     protected function setUp(): void
     {
@@ -64,6 +69,121 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         );
     }
 
+    #[DataProvider('decimalAmounts')]
+    public function test_decimal_amount_survives_navigation_root_replacement(string $amount): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $this->tap('usd', 'balance:currency:usd', $root);
+        $this->replaceNextEdit = true;
+        $this->tap('rail', 'balance:usd:binance_pay', $root);
+        $this->assertNotSame($root->message_id, $root->fresh()->message_id);
+
+        $this->sendText($amount);
+        $intent = CustomerUsdtFundingIntent::query()->sole();
+        $this->assertSame(300_000, $intent->amount_micro);
+        $this->assertSame(300_000, $intent->payable_micro);
+        $this->assertSame('pending', $intent->state);
+        $this->assertSame(0, CustomerUsdtTopUp::query()->count());
+        $this->assertNoMoneyOrOutbound();
+    }
+
+    public static function decimalAmounts(): array
+    {
+        return [['0.3'], ['0,3']];
+    }
+
+    public function test_invalid_amounts_keep_prompt_usable_even_after_replacement(): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $this->tap('rail', 'balance:usd:binance_pay', $root);
+        $this->replaceNextEdit = true;
+        foreach (['0', '-0.3', '1e2', '1,2.3', '1.2,3', '1,000,000', '9223372036854.775808', '0.1234567'] as $invalid) {
+            $this->sendText($invalid);
+            $this->assertSame(0, CustomerUsdtFundingIntent::query()->count(), $invalid);
+            $this->assertSame(0, CustomerUsdtTopUp::query()->count(), $invalid);
+        }
+        $this->sendText('0,3');
+        $this->assertSame(300_000, CustomerUsdtFundingIntent::query()->sole()->amount_micro);
+        $this->assertNoMoneyOrOutbound();
+    }
+
+    public function test_lost_amount_cache_requires_explicit_restart_without_guessing_rail(): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $this->tap('rail', 'balance:usd:binance_pay', $root);
+        Cache::flush();
+        $this->sendText('0.3');
+        $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Pilih metode top-up USD'));
+        $root = $root->fresh();
+        $this->tap('restart', 'balance:usd:binance_pay', $root);
+        $this->sendText('0,3');
+        $this->assertSame(300_000, CustomerUsdtFundingIntent::query()->sole()->amount_micro);
+        $this->assertNoMoneyOrOutbound();
+    }
+
+    public function test_stale_amount_root_requires_restart_and_cannot_create_a_target(): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $this->tap('rail', 'balance:usd:binance_pay', $root);
+        $root->update(['message_id' => 999999]);
+        $this->sendText('0.3');
+        $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Pilih metode top-up USD'));
+        $this->assertNoMoneyOrOutbound();
+    }
+
+    #[DataProvider('amountNavigation')]
+    public function test_amount_prompt_cannot_survive_navigation_or_accept_foreign_private_input(string $action): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $this->tap('rail', 'balance:usd:binance_pay', $root);
+        app(TelegramMessageRouter::class)->route($this->customer, '554099', ['text' => '0.3']);
+        $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
+        if ($action === '/batal') {
+            $this->sendText($action);
+        } else {
+            $this->tap('leave-amount', $action, $root);
+        }
+        $this->sendText('0.3');
+        $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
+        $this->assertNoMoneyOrOutbound();
+    }
+
+    public static function amountNavigation(): array
+    {
+        return [['menu:home'], ['menu:back'], ['balance:currency:usd'], ['/batal']];
+    }
+
+    public function test_missing_binance_receiver_does_not_offer_transfer_or_amount_prompt(): void
+    {
+        $this->enableBinance();
+        config(['services.binance.pay_id' => '', 'services.binance.pay_uid' => '']);
+        $root = $this->startRoot();
+        $this->tap('rail', 'balance:usd:binance_pay', $root);
+        $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
+        $this->assertStringNotContainsString('Kirim nominal', $copy);
+        $this->assertStringNotContainsString('<code>', $copy);
+        $this->assertNull(app(TelegramUsdtFundingSession::class)->promptedAmount($this->customer));
+        $this->sendText('0.3');
+        $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
+        $this->assertNoMoneyOrOutbound();
+    }
+
+    private function enableBinance(): void
+    {
+        config(['services.binance.api_key' => 'test', 'services.binance.api_secret' => 'test',
+            'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '']);
+        ManualPaymentSetting::query()->update(['binance_pay_enabled' => true]);
+    }
+
     public function test_usd_binance_amount_and_order_id_flow_records_a_durable_lookup(): void
     {
         config(['services.binance.api_key' => 'test', 'services.binance.api_secret' => 'test',
@@ -73,6 +193,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->tap('currency', 'balance:add', $root);
         $this->tap('usd', 'balance:currency:usd', $root);
         $this->tap('binance', 'balance:usd:binance_pay', $root);
+        $this->assertStringContainsString('<code>12345678</code>', (string) ($this->lastCanonicalEdit(self::CHAT_ID)['caption'] ?? $this->lastCanonicalEdit(self::CHAT_ID)['text']));
         $this->sendText('1.5');
         $intent = CustomerUsdtFundingIntent::query()->sole();
         $this->assertSame('binance_pay', $intent->rail);
@@ -80,9 +201,15 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->tap('confirm-binance', 'usdt:confirm:'.$intent->nonce, $root);
         $target = CustomerUsdtTopUp::query()->sole();
         $this->assertSame('ready', DB::table('customer_usdt_top_up_work')->value('state'));
+        $this->tap('confirm-replay', 'usdt:confirm:'.$intent->nonce, $root->fresh());
+        $this->assertSame($target->id, CustomerUsdtTopUp::query()->sole()->id);
+        config(['services.binance.pay_id' => '87654321']);
         $this->sendText('445011487581044736');
         $this->assertSame($target->id, DB::table('customer_usdt_top_up_inbox')->value('top_up_id'));
         $this->assertSame('445011487581044736', DB::table('customer_usdt_top_up_inbox')->value('provider_reference'));
+        $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
+        $this->assertStringContainsString('12345678', $copy);
+        $this->assertStringNotContainsString('87654321', $copy);
         $this->assertEntriesUnchanged(0);
     }
 
@@ -635,7 +762,15 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
                 return Http::response(['ok' => true, 'result' => ['message_id' => $nextMessageId]]);
             },
-            'https://api.telegram.org/*' => Http::response(['ok' => true]),
+            'https://api.telegram.org/*' => function (Request $request) {
+                if ($this->replaceNextEdit && $this->isEditRequest($request)) {
+                    $this->replaceNextEdit = false;
+
+                    return Http::response(['ok' => false, 'error_code' => 400, 'description' => 'Bad Request: message to edit not found'], 400);
+                }
+
+                return Http::response(['ok' => true]);
+            },
         ]);
     }
 
@@ -669,7 +804,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
     private function editCopy(array $edit): string
     {
-        return (string) ($edit['caption'] ?? $edit['text'] ?? '');
+        return html_entity_decode(strip_tags((string) ($edit['caption'] ?? $edit['text'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
     }
 
     private function assertNoMoneyOrOutbound(): void

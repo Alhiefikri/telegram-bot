@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
 use App\Enums\UserRole;
@@ -226,6 +227,75 @@ class UsdtFundingIntentTest extends TestCase
         $this->assertSame(1_000_003, $opened->intent->payable_micro);
         $this->assertSame('unavailable', app(UsdtFundingIntentService::class)->open($this->customer, '951001', $this->root->id, 100, UsdtMicroAmount::fromUnits(PHP_INT_MAX))->outcome);
         $this->assertSame('invalid_amount', app(TelegramUsdtFundingActions::class)->preview('951001', '951001', 'private', 100, '0.0000001')->outcome);
+    }
+
+    public function test_binance_fee_is_zero_in_preview_target_and_reservation_without_changing_bsc_fee(): void
+    {
+        CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 250_000]);
+        config(['services.binance.api_key' => 'fixture-key', 'services.binance.api_secret' => 'fixture-secret',
+            'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '']);
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
+        $actions = app(TelegramUsdtFundingActions::class);
+        $opened = $actions->preview('951001', '951001', 'private', 100, '0.30', CustomerUsdtFundingRail::BinancePay);
+        $this->assertSame('opened', $opened->outcome);
+        $this->assertSame(300_000, $opened->intent->amount_micro);
+        $this->assertSame(0, $opened->intent->fee_micro);
+        $this->assertSame(300_000, $opened->intent->payable_micro);
+        $confirmed = $this->action($opened->intent->nonce);
+        $this->assertSame('confirmed', $confirmed->outcome);
+        $this->assertSame(0, $confirmed->topUp->fee_micro);
+        $this->assertSame(300_000, $confirmed->topUp->payable_micro);
+        $this->assertSame(0, (int) DB::table('customer_usdt_funding_reservations')->value('fee_micro'));
+        $this->assertSame(250_000, CustomerUsdtFundingPolicy::current()->applicationFeeMicro());
+
+        config(['services.binance.pay_id' => '87654321']);
+        CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 500_000, 'version' => 2]);
+        $replayed = $this->action($opened->intent->nonce);
+        $this->assertSame($confirmed->topUp->id, $replayed->topUp->id);
+        $this->assertSame('12345678', $replayed->topUp->payment_snapshot['receiver_pay_id']);
+        $this->assertSame(0, $replayed->topUp->fee_micro);
+        $this->assertSame(300_000, $replayed->topUp->payable_micro);
+        $this->assertNoMoneyOrOutbound();
+        Http::assertNothingSent();
+    }
+
+    public function test_unconfirmed_legacy_binance_fee_requires_a_fresh_zero_fee_preview(): void
+    {
+        CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 100_000]);
+        config(['services.binance.api_key' => 'fixture-key', 'services.binance.api_secret' => 'fixture-secret',
+            'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '']);
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
+        $original = $this->preview()->intent;
+        $this->action($original->nonce, 'cancel');
+        $legacy = $original->replicate();
+        $legacy->forceFill(['nonce' => str_repeat('e', 32), 'state' => 'pending', 'rail' => 'binance_pay', 'created_at' => now(),
+            'receiver_id' => null, 'payment_snapshot' => ['receiver_pay_id' => '12345678', 'receiver_uid' => null,
+                'payment_ttl_seconds' => 1200]])->save();
+
+        $this->assertSame('stale_terms', $this->action($legacy->nonce)->outcome);
+        $this->assertSame('superseded', $legacy->fresh()->state);
+        $this->assertSame(0, CustomerUsdtTopUp::query()->count());
+        $this->assertSame(0, DB::table('customer_usdt_funding_reservations')->count());
+        $fresh = app(TelegramUsdtFundingActions::class)->preview('951001', '951001', 'private', 100,
+            '0.30', CustomerUsdtFundingRail::BinancePay);
+        $this->assertSame(0, $fresh->intent->fee_micro);
+        $this->assertNoMoneyOrOutbound();
+    }
+
+    public function test_binance_zero_fee_does_not_inherit_bsc_fee_overflow_guard(): void
+    {
+        CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 1]);
+        config(['services.binance.api_key' => 'fixture-key', 'services.binance.api_secret' => 'fixture-secret',
+            'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '']);
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
+        $opened = app(UsdtFundingIntentService::class)->open($this->customer, '951001', $this->root->id, 100,
+            UsdtMicroAmount::fromUnits(PHP_INT_MAX), CustomerUsdtFundingRail::BinancePay);
+        $this->assertSame('opened', $opened->outcome);
+        $this->assertSame(PHP_INT_MAX, $opened->intent->payable_micro);
+        $this->assertSame(0, $opened->intent->fee_micro);
+        $this->assertSame('unavailable', app(UsdtFundingIntentService::class)->open($this->customer, '951001', $this->root->id, 100,
+            UsdtMicroAmount::fromUnits(PHP_INT_MAX), CustomerUsdtFundingRail::BscUsdt)->outcome);
+        $this->assertNoMoneyOrOutbound();
     }
 
     public function test_work_persistence_failure_rolls_back_confirmation_target_and_reservation(): void

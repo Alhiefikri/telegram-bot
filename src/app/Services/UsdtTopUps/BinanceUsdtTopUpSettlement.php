@@ -49,7 +49,6 @@ final class BinanceUsdtTopUpSettlement
             if ($target === null || $target->rail !== 'binance_pay') {
                 throw new AuthorizationException('Binance USDT funding target unavailable.');
             }
-            $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $topUpId)->lockForUpdate()->firstOrFail();
             if (DB::table('customer_usdt_top_up_inbox')->where('top_up_id', $topUpId)->where('provider_reference', $orderId)->exists()) {
                 return;
             }
@@ -59,10 +58,6 @@ final class BinanceUsdtTopUpSettlement
             DB::table('customer_usdt_top_up_inbox')->insert([
                 'top_up_id' => $topUpId, 'tx_hash' => null, 'provider_reference' => $orderId,
                 'state' => 'pending', 'attempts' => 0, 'next_check_at' => now(), 'created_at' => now(),
-            ]);
-            DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $topUpId)->update([
-                'version' => (int) $work->version + 1, 'lease_token' => null, 'lease_until' => null,
-                'next_check_at' => now(), 'updated_at' => now(),
             ]);
         }, 5);
     }

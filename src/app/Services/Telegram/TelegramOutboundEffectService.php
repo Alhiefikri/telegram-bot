@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
@@ -33,6 +34,7 @@ use App\Services\AuditLogger;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -602,12 +604,35 @@ class TelegramOutboundEffectService
         }
         $locale = $customer->locale ?? 'id';
         $translations = app(TelegramLocale::class);
+        $status = app(UsdtTopUpStatusReader::class)->for($target);
+        $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
+        $rail = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
+        $isBinance = ($rail !== '' ? $rail : (string) ($snapshot['rail'] ?? '')) === CustomerUsdtFundingRail::BinancePay->value;
         $message = implode("\n", [
             $translations->translateLocale($locale, 'balance.usdt.receipt.title'),
-            $translations->translateLocale($locale, 'balance.usdt.receipt.credit', [
-                'amount' => UsdtMicroAmount::fromUnits($entry->amount_micro)->decimal(),
+            $translations->translateLocale($locale, 'balance.usdt.receipt.submitted', [
+                'amount' => UsdtMicroAmount::formatUnits((int) $target->amount_micro),
             ]),
-            $translations->translateLocale($locale, 'balance.usdt.receipt.reference', ['reference' => $target->id]),
+            ...($status->receivedMicro !== null ? [
+                $translations->translateLocale($locale, 'balance.usdt.receipt.received', [
+                    'amount' => UsdtMicroAmount::formatUnits($status->receivedMicro),
+                ]),
+            ] : []),
+            $translations->translateLocale($locale, $isBinance ? 'balance.usdt.receipt.usd_credit' : 'balance.usdt.receipt.credit', [
+                'amount' => UsdtMicroAmount::formatUnits((int) $entry->amount_micro),
+            ]),
+            ...((int) $target->fee_micro > 0 ? [
+                $translations->translateLocale($locale, 'balance.usdt.status.fee', [
+                    'amount' => UsdtMicroAmount::formatUnits((int) $target->fee_micro),
+                ]),
+            ] : []),
+            $translations->translateLocale($locale, $isBinance ? 'balance.usdt.receipt.balance_before_usd' : 'balance.usdt.receipt.balance_before', [
+                'amount' => UsdtMicroAmount::formatUnits((int) $entry->balance_after_micro - (int) $entry->amount_micro),
+            ]),
+            $translations->translateLocale($locale, $isBinance ? 'balance.usdt.receipt.balance_after_usd' : 'balance.usdt.receipt.balance_after', [
+                'amount' => UsdtMicroAmount::formatUnits((int) $entry->balance_after_micro),
+            ]),
+            $translations->translateLocale($locale, 'balance.usdt.receipt.reference', ['reference' => $target->reference]),
             ...((int) $entry->amount_micro !== (int) $target->amount_micro ? [
                 $translations->translateLocale($locale, 'balance.usdt.receipt.revised', [
                     'original' => UsdtMicroAmount::fromUnits($target->amount_micro)->decimal(),

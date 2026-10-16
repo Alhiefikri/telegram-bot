@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CustomerUsdtFundingRail;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -55,6 +56,11 @@ class CustomerUsdtFundingPolicy extends Model
     public function applicationFeeMicro(): int
     {
         return (int) $this->application_fee_micro;
+    }
+
+    public function applicationFeeMicroForRail(CustomerUsdtFundingRail $rail): int
+    {
+        return $rail === CustomerUsdtFundingRail::BinancePay ? 0 : $this->applicationFeeMicro();
     }
 
     public function termsVersion(): int

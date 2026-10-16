@@ -5,6 +5,7 @@ namespace App\Services\Telegram\Callbacks;
 use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\StoreBalanceFundingIntentClaimOutcome;
 use App\Enums\TelegramNavigationRenderOutcome;
+use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
@@ -77,21 +78,29 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
     /** Consume a prompted exact USDT amount; invalid input keeps the prompt alive. */
     public function handleUsdtAmountInput(Customer $customer, string $chatId, string $text): bool
     {
-        $prompt = $this->usdtFundingSession->promptedAmount($customer);
-        if ($prompt === null || $prompt['chat_id'] !== $chatId) {
+        if ((string) $customer->telegram_id !== $chatId) {
             return false;
         }
+        $prompt = $this->usdtFundingSession->promptedAmount($customer);
         $root = $this->roots->currentForChat($customer, $chatId);
-        if ($root === null || (int) $root->id !== $prompt['root_id'] || (int) $root->message_id !== $prompt['message_id']) {
-            $this->usdtFundingSession->forget($customer);
+        if ($prompt === null) {
+            if ($root?->screen === TelegramNavigationScreen::UsdtFundingAmount) {
+                return $this->restartAmount($customer, $chatId);
+            }
 
             return false;
+        }
+        if ($prompt['chat_id'] !== $chatId) {
+            return false;
+        }
+        if ($root === null || (int) $root->id !== $prompt['root_id']
+            || (int) $root->message_id !== $prompt['message_id']
+            || $root->screen !== TelegramNavigationScreen::UsdtFundingAmount) {
+            return $this->restartAmount($customer, $chatId);
         }
         $rail = CustomerUsdtFundingRail::tryFrom($prompt['rail']);
         if ($rail === null) {
-            $this->usdtFundingSession->forget($customer);
-
-            return false;
+            return $this->restartAmount($customer, $chatId);
         }
 
         $result = $this->usdtFunding->preview(
@@ -99,26 +108,21 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             $chatId,
             'private',
             $prompt['message_id'],
-            trim($text),
+            preg_match('/\A[0-9]+,[0-9]{1,6}\z/D', trim($text)) === 1
+                ? str_replace(',', '.', trim($text))
+                : trim($text),
             $rail,
         );
         if ($result->outcome !== 'invalid_amount') {
             $this->usdtFundingSession->forget($customer);
         }
         if ($result->outcome === 'invalid_amount') {
-            $this->navigation->presentOnRoot(
-                $root,
-                $chatId,
-                $this->menu->usdAmountSurface($customer, $rail, 'balance.usd.amount.invalid'),
-            );
+            $this->presentAmount($customer, $chatId, $root, $rail, 'balance.usd.amount.invalid');
 
             return true;
         }
         if ($result->outcome === 'unauthorized' || $result->outcome === 'stale') {
-            $this->usdtFundingSession->forget($customer);
-            $this->navigation->presentOnRoot($root, $chatId, $this->menu->usdRailSurface($customer));
-
-            return true;
+            return $this->restartAmount($customer, $chatId);
         }
         if (in_array($result->outcome, ['opened', 'replayed'], true) && $result->intent !== null) {
             $this->navigation->presentOnRoot($root, $chatId, $this->usdtBalance->previewSurface($customer, $result->intent));
@@ -133,6 +137,34 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         );
 
         return true;
+    }
+
+    private function restartAmount(Customer $customer, string $chatId): bool
+    {
+        $this->usdtFundingSession->forget($customer);
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.usd.amount.restart'));
+        $this->navigation->presentOrEstablish($customer, $chatId, $this->menu->usdRailSurface($customer));
+
+        return true;
+    }
+
+    private function presentAmount(
+        Customer $customer,
+        string $chatId,
+        TelegramNavigationRoot $root,
+        CustomerUsdtFundingRail $rail,
+        ?string $noticeKey = null,
+    ): TelegramNavigationRenderOutcome {
+        $outcome = $this->navigation->presentOnRoot($root, $chatId, $this->menu->usdAmountSurface($customer, $rail, $noticeKey));
+        $this->usdtFundingSession->forget($customer);
+        if (in_array($outcome, [TelegramNavigationRenderOutcome::Applied, TelegramNavigationRenderOutcome::Unchanged, TelegramNavigationRenderOutcome::Replaced], true)) {
+            $rendered = $this->roots->currentForChat($customer, $chatId);
+            if ($rendered?->screen === TelegramNavigationScreen::UsdtFundingAmount) {
+                $this->usdtFundingSession->promptAmount($customer, $chatId, (int) $rendered->id, (int) $rendered->message_id, $rail->value);
+            }
+        }
+
+        return $outcome;
     }
 
     public function supports(TelegramCallbackContext $context): bool
@@ -271,18 +303,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             $rail = $context->data === 'balance:usd:binance_pay'
                 ? CustomerUsdtFundingRail::BinancePay
                 : CustomerUsdtFundingRail::BscUsdt;
-            $this->usdtFundingSession->promptAmount(
-                $context->customer,
-                $context->chatId,
-                (int) $root->id,
-                (int) $root->message_id,
-                $rail->value,
-            );
-            $outcome = $this->navigation->presentOnRoot(
-                $root,
-                $context->chatId,
-                $this->menu->usdAmountSurface($context->customer, $rail),
-            );
+            $outcome = $this->presentAmount($context->customer, $context->chatId, $root, $rail);
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
 
             return true;

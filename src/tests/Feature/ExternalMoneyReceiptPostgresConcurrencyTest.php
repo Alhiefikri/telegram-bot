@@ -101,11 +101,10 @@ final class ExternalMoneyReceiptPostgresConcurrencyTest extends TestCase
         sort($outcomes);
         $this->assertSame(['claimed', 'conflict'], $outcomes);
         $this->assertSame(1, ExternalMoneyReceipt::query()->count());
-        $this->assertSame(1, ExternalMoneyReceiptAlias::query()->count());
         $this->assertSame(1, ExternalMoneyReceiptParentClaim::query()->count());
         $this->assertSame(
             ExternalMoneyReceipt::query()->sole()->id,
-            ExternalMoneyReceiptAlias::query()->sole()->external_money_receipt_id,
+            ExternalMoneyReceiptAlias::query()->where('alias_key', $alias->identity->canonicalKey())->sole()->external_money_receipt_id,
         );
         // Both caller transactions committed their own work after the losing
         // claim recovered from the unique violation without an aborted
@@ -216,7 +215,7 @@ final class ExternalMoneyReceiptPostgresConcurrencyTest extends TestCase
         $storedReceipt = ExternalMoneyReceipt::query()->sole();
         $receiptAttributes = $storedReceipt->getAttributes();
         unset($receiptAttributes['id']);
-        $aliasAttributes = ExternalMoneyReceiptAlias::query()->sole()->getAttributes();
+        $aliasAttributes = ExternalMoneyReceiptAlias::query()->where('alias_type', 'custody_deposit')->sole()->getAttributes();
         unset($aliasAttributes['id']);
         $parentAttributes = ExternalMoneyReceiptParentClaim::query()->sole()->getAttributes();
         unset($parentAttributes['id']);

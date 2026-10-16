@@ -2,6 +2,7 @@
 
 namespace App\Services\UsdtTopUps;
 
+use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtTopUp;
 use Carbon\CarbonImmutable;
 
@@ -47,16 +48,23 @@ final class UsdtTopUpStatus
         public readonly ?string $tokenContract,
         public readonly CarbonImmutable $createdAt,
         public readonly CarbonImmutable $deadline,
+        public readonly ?int $receivedMicro,
+        public readonly ?int $balanceBeforeMicro,
+        public readonly ?int $balanceAfterMicro,
     ) {}
 
-    public static function for(CustomerUsdtTopUp $target, string $state): self
-    {
+    public static function for(
+        CustomerUsdtTopUp $target,
+        string $state,
+        ?CustomerUsdtBalanceEntry $entry = null,
+        ?int $receivedMicro = null,
+    ): self {
         $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
 
         return new self(
             state: $state,
             reference: (string) $target->reference,
-            creditMicro: (int) $target->amount_micro,
+            creditMicro: $entry === null ? (int) $target->amount_micro : (int) $entry->amount_micro,
             feeMicro: (int) $target->fee_micro,
             payableMicro: (int) $target->payable_micro,
             receiverAddress: isset($snapshot['receiver_address']) ? (string) $snapshot['receiver_address'] : null,
@@ -64,6 +72,9 @@ final class UsdtTopUpStatus
             tokenContract: isset($snapshot['token_contract']) ? (string) $snapshot['token_contract'] : null,
             createdAt: CarbonImmutable::instance($target->created_at),
             deadline: CarbonImmutable::instance($target->expires_at),
+            receivedMicro: $receivedMicro,
+            balanceBeforeMicro: $entry === null ? null : (int) $entry->balance_after_micro - (int) $entry->amount_micro,
+            balanceAfterMicro: $entry === null ? null : (int) $entry->balance_after_micro,
         );
     }
 

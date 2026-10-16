@@ -46,8 +46,9 @@ final class UsdtFundingIntentService
             }
 
             $settings = ManualPaymentSetting::query()->where('is_active', true)->lockForUpdate()->first();
+            $feeMicro = $policy->applicationFeeMicroForRail($rail);
             if ($settings === null || ($rail === CustomerUsdtFundingRail::BinancePay && ! $settings->binance_pay_enabled)
-                || $policy->applicationFeeMicro() > PHP_INT_MAX - $amount->units()) {
+                || $feeMicro > PHP_INT_MAX - $amount->units()) {
                 return new UsdtFundingIntentResult('unavailable');
             }
 
@@ -87,8 +88,8 @@ final class UsdtFundingIntentService
                 'customer_id' => (int) $customer->id, 'telegram_navigation_root_id' => $rootId,
                 'chat_id' => $chatId, 'canonical_message_id' => $messageId,
                 'currency' => 'USDT', 'rail' => $rail->value,
-                'amount_micro' => $amount->units(), 'fee_micro' => $policy->applicationFeeMicro(),
-                'payable_micro' => $amount->units() + $policy->applicationFeeMicro(),
+                'amount_micro' => $amount->units(), 'fee_micro' => $feeMicro,
+                'payable_micro' => $amount->units() + $feeMicro,
                 'policy_version' => $policy->policyVersion(), 'terms_version' => $policy->termsVersion(),
                 'receiver_id' => $receiverId, 'payment_snapshot' => $terms,
             ];
@@ -147,6 +148,11 @@ final class UsdtFundingIntentService
                 $this->transition($intent, 'cancelled');
 
                 return new UsdtFundingIntentResult('cancelled', $intent);
+            }
+            if ($rail === CustomerUsdtFundingRail::BinancePay && (int) $intent->fee_micro !== 0) {
+                $this->transition($intent, 'superseded');
+
+                return new UsdtFundingIntentResult('stale_terms', $intent);
             }
             if ($policy === null || $policy->policyVersion() !== $intent->policy_version || $policy->termsVersion() !== $intent->terms_version) {
                 $this->transition($intent, 'superseded');

@@ -2,26 +2,42 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CustomerUsdtFundingRail;
+use App\Enums\PaymentStatus;
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
 use App\Enums\UserRole;
 use App\Exceptions\CustomerUsdtFundingReservationConflict;
+use App\Models\Cart;
+use App\Models\CartItem;
 use App\Models\Customer;
+use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\CustomerUsdtTopUp;
 use App\Models\ManualPaymentSetting;
+use App\Models\Payment;
+use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\TelegramNavigationRoot;
 use App\Models\User;
+use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramUsdtFundingActions;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\UsdtReceiptReconciliation;
+use App\Services\UsdtBalance\VerifiedUsdtFunding;
 use App\Services\UsdtFunding\CustomerUsdtFundingRelease;
 use App\Services\UsdtFunding\CustomerUsdtFundingReservationService;
 use App\Services\UsdtReceivers\UsdtDepositReceiverRegistry;
+use App\Services\UsdtTopUps\BinanceUsdtTopUpSettlement;
 use App\Services\UsdtTopUps\UsdtTopUpPreparation;
 use App\Services\UsdtTopUps\UsdtTopUpSettlement;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Concerns\RunsPostgresWorkers;
@@ -206,6 +222,140 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
         $this->assertWorkersSucceeded($results);
         $this->assertSingleSettlement();
         $this->assertNull(DB::table('customer_usdt_top_up_settlement_work')->value('lease_token'));
+    }
+
+    public function test_binance_transaction_and_order_aliases_race_across_customers_and_checkout_once(): void
+    {
+        $this->configureBinance();
+        $targets = [$this->binanceTarget(951101), $this->binanceTarget(951102)];
+        $checkoutCustomer = Customer::factory()->create(['telegram_id' => 951103, 'locale' => 'en']);
+        $cart = $this->fundingRaceCart($checkoutCustomer, 300_000);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::binancePay(), 'binance-receipt-alias-race');
+        $payment = $order->payments()->sole();
+        $payment->update(['binance_order_id' => '445011487581044736', 'binance_order_id_submission_version' => 1,
+            'binance_order_id_attempts' => 1, 'binance_verification_status' => 'checking']);
+        foreach ($targets as $index => $target) {
+            app(BinanceUsdtTopUpSettlement::class)->submit(Customer::findOrFail($target->customer_id), $target->id,
+                $index === 0 ? '445011487581044736' : '445011487581044737');
+        }
+        $transaction = $this->binanceTransaction();
+        $results = $this->runConcurrentWorkers(3, function (int $index) use ($targets, $payment, $transaction): string {
+            $payload = $index === 1
+                ? array_replace($transaction, ['transactionId' => $transaction['orderId'], 'orderId' => $transaction['transactionId']])
+                : $transaction;
+            $this->fakeBinanceHistory($payload);
+            if ($index === 2) {
+                return app(BinancePaymentVerification::class)->verify(Payment::findOrFail($payment->id))->outcome->value;
+            }
+            app(BinanceUsdtTopUpSettlement::class)->check($targets[$index]->id);
+
+            return 'checked';
+        }, 'binance-alias-settlement-race');
+        $this->assertWorkersSucceeded($results);
+        $credits = DB::table('customer_usdt_balance_entries')->whereIn('source_id', array_map(fn ($target) => $target->id, $targets))->count();
+        $paidCheckout = $payment->fresh()->status === PaymentStatus::Paid ? 1 : 0;
+        $this->assertSame(1, $credits + $paidCheckout);
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $this->assertSame($credits, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame($credits * 300_000, (int) DB::table('customer_usdt_balance_entries')->sum('amount_micro'));
+        foreach ($targets as $target) {
+            $settled = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->exists();
+            $this->assertSame($settled ? 'settled' : 'manual_review',
+                DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->value('state'));
+        }
+    }
+
+    public function test_binance_credit_racing_checkout_keeps_transaction_time_receipt_balances(): void
+    {
+        $this->configureBinance();
+        CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 100_000]);
+        $target = $this->binanceTarget(951104);
+        $customer = Customer::findOrFail($target->customer_id);
+        $ledger = app(CustomerUsdtBalanceLedger::class);
+        $ledger->creditVerifiedTopUp($customer, new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits(500_000),
+            'binance-race-opening-funds', 'binance-race-opening-receipt', 'v1'), 'binance-race-opening-funds');
+        $cart = $this->fundingRaceCart($customer, 200_000);
+        app(BinanceUsdtTopUpSettlement::class)->submit($customer, $target->id, '445011487581044736');
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($target, $cart): string {
+            $this->fakeBinanceHistory($this->binanceTransaction());
+            if ($index === 0) {
+                app(BinanceUsdtTopUpSettlement::class)->check($target->id);
+
+                return 'checked';
+            }
+            $order = app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id),
+                CheckoutPaymentIntents::usdtBalance(), 'binance-credit-spend-race');
+            Http::assertNothingSent();
+
+            return (string) $order->id;
+        }, 'binance-credit-spend-race');
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(600_000, $ledger->snapshot($customer)->balanceMicro());
+        $resolution = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->sole();
+        $entry = CustomerUsdtBalanceEntry::findOrFail($resolution->entry_id);
+        $this->assertSame(300_000, $entry->amount_micro);
+        $this->assertContains((int) $entry->balance_after_micro, [600_000, 800_000]);
+        $effect = DB::table('telegram_outbound_effects')->where('source_id', $target->id)->sole();
+        $metadata = json_decode($effect->outcome_metadata, true, flags: JSON_THROW_ON_ERROR);
+        $before = (int) $entry->balance_after_micro - (int) $entry->amount_micro;
+        $this->assertStringContainsString('Balance before credit: '.UsdtMicroAmount::formatUnits($before).' USD', $metadata['message']);
+        $this->assertStringContainsString('Balance after credit: '.UsdtMicroAmount::formatUnits((int) $entry->balance_after_micro).' USD', $metadata['message']);
+
+        $laterCart = $this->fundingRaceCart($customer, 100_000);
+        app(OrderCheckoutService::class)->checkout($laterCart, CheckoutPaymentIntents::usdtBalance(), 'binance-after-credit-spend');
+        $this->assertSame(500_000, $ledger->snapshot($customer)->balanceMicro());
+        $this->assertNotSame($ledger->snapshot($customer)->balanceMicro(), (int) $entry->balance_after_micro);
+        app(BinanceUsdtTopUpSettlement::class)->submit($customer, $target->id, '445011487581044736');
+        $this->assertFalse(app(BinanceUsdtTopUpSettlement::class)->check($target->id));
+        $this->assertSame($effect->outcome_metadata, DB::table('telegram_outbound_effects')->where('id', $effect->id)->value('outcome_metadata'));
+        $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_fee_events')->count());
+    }
+
+    private function configureBinance(): void
+    {
+        Http::preventStrayRequests();
+        config(['services.binance.api_key' => 'fixture-key', 'services.binance.api_secret' => 'fixture-secret',
+            'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '', 'services.binance.history_cache_seconds' => 0]);
+        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true, 'binance_verification_mode' => 'order_id']);
+    }
+
+    private function binanceTarget(int $telegramId): CustomerUsdtTopUp
+    {
+        $customer = Customer::factory()->create(['telegram_id' => $telegramId, 'locale' => 'en']);
+        TelegramNavigationRoot::create(['customer_id' => $customer->id, 'chat_id' => (string) $telegramId,
+            'message_id' => 100, 'media_kind' => 'text', 'screen' => 'home', 'locale' => 'en', 'generation' => 1]);
+        $actions = app(TelegramUsdtFundingActions::class);
+        $preview = $actions->preview((string) $telegramId, (string) $telegramId, 'private', 100, '0.30', CustomerUsdtFundingRail::BinancePay);
+        $this->assertSame('opened', $preview->outcome);
+
+        return $actions->callback((string) $telegramId, (string) $telegramId, 'private', 100, 'usdt:confirm:'.$preview->intent->nonce)->topUp;
+    }
+
+    private function fundingRaceCart(Customer $customer, int $priceMicro): Cart
+    {
+        $product = Product::factory()->create(['price_amount' => 10_000, 'usdt_price_amount' => $priceMicro, 'stock' => 1, 'reserved_stock' => 0]);
+        ProductStockItem::create(['product_id' => $product->id, 'secret' => 'binance-race-fixture-secret']);
+        $cart = Cart::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addHour()]);
+        CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1]);
+
+        return $cart;
+    }
+
+    private function binanceTransaction(): array
+    {
+        return ['orderId' => '445011487581044736', 'transactionId' => '445011487581044737',
+            'amount' => '0.30', 'currency' => 'USDT', 'transactionTime' => now()->getTimestampMs(),
+            'status' => 'SUCCESS', 'receiverInfo' => ['accountId' => '12345678']];
+    }
+
+    private function fakeBinanceHistory(array $transaction): void
+    {
+        Http::fake(['*sapi/v1/pay/transactions*' => function () use ($transaction) {
+            $this->assertSame(0, DB::transactionLevel());
+
+            return Http::response(['code' => '000000', 'success' => true, 'data' => [$transaction]]);
+        }]);
     }
 
     private function assertSingleSettlement(): void

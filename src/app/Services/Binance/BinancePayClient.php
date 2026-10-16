@@ -130,6 +130,8 @@ class BinancePayClient
                 'orderType' => $payload['orderType'] ?? null,
                 'amount' => $payload['amount'] ?? null,
                 'currency' => $payload['currency'] ?? null,
+                'status' => $payload['status'] ?? null,
+                'transactionStatus' => $payload['transactionStatus'] ?? null,
                 'transactionTime' => $payload['transactionTime'] ?? null,
                 'receiverInfo' => [
                     'accountId' => $receiver['accountId'] ?? null,

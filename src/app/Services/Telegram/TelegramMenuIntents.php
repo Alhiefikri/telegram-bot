@@ -487,18 +487,37 @@ class TelegramMenuIntents
             $this->locale->translate($customer, 'balance.usd.amount.rail', [
                 'rail' => $this->locale->translate($customer, $railKey),
             ]),
-            $this->locale->translate($customer, 'balance.usd.amount.prompt'),
-            $this->locale->translate($customer, 'balance.usd.amount.precision'),
         ];
+        $copyable = [];
+        $available = $this->usdtFundingGate->availability($rail)->available;
+        if ($available) {
+            if ($rail === CustomerUsdtFundingRail::BinancePay) {
+                $payId = trim((string) config('services.binance.pay_id'));
+                $receiver = $payId !== '' ? $payId : trim((string) config('services.binance.pay_uid'));
+                $marker = "\x1Fbinance-receiver\x1F";
+                $copyable[$marker] = '<code>'.htmlspecialchars($receiver, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8').'</code>';
+                $lines[] = $this->locale->translate($customer, $payId !== ''
+                    ? 'balance.usdt.status.pay_id'
+                    : 'balance.usd.amount.uid', [
+                        'pay_id' => $marker,
+                        'uid' => $marker,
+                    ]);
+                $lines[] = $this->locale->translate($customer, 'balance.usd.amount.parity');
+            }
+            $lines[] = $this->locale->translate($customer, 'balance.usd.amount.prompt');
+            $lines[] = $this->locale->translate($customer, 'balance.usd.amount.precision');
+        } else {
+            $lines[] = $this->locale->translate($customer, 'balance.usd.amount.unavailable');
+        }
         if ($noticeKey !== null) {
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, $noticeKey);
         }
 
         return new TelegramNavigationSurface(
-            TelegramNavigationScreen::AddBalance,
+            $available ? TelegramNavigationScreen::UsdtFundingAmount : TelegramNavigationScreen::AddBalance,
             $this->locale->code($customer),
-            $this->captions->html(implode("\n", $lines)),
+            strtr($this->captions->html(implode("\n", $lines)), $copyable),
             ['inline_keyboard' => [
                 [[
                     'text' => $this->locale->translate($customer, 'balance.confirmation.cancel'),

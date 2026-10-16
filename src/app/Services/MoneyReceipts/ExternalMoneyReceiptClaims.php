@@ -89,7 +89,11 @@ final class ExternalMoneyReceiptClaims
             return ExternalMoneyReceiptClaimOutcome::Review;
         }
 
-        foreach ($receipt->aliases as $alias) {
+        // Canonical and alternate identities share the same unique claim index.
+        // Sorted acquisition also prevents reversed identity sets from deadlocking.
+        $identities = [new MoneyReceiptAlias('canonical', $receipt->identity), ...$receipt->aliases];
+        usort($identities, static fn (MoneyReceiptAlias $left, MoneyReceiptAlias $right): int => strcmp($left->identity->canonicalKey(), $right->identity->canonicalKey()));
+        foreach ($identities as $alias) {
             $this->claimAlias($alias, $record);
         }
 
@@ -129,9 +133,14 @@ final class ExternalMoneyReceiptClaims
 
     private function aliasesAreCompatible(VerifiedMoneyReceipt $receipt, ?ExternalMoneyReceipt $record): bool
     {
-        foreach ($receipt->aliases as $alias) {
+        foreach ([$receipt->identity, ...array_map(static fn (MoneyReceiptAlias $alias): MoneyReceiptIdentity => $alias->identity, $receipt->aliases)] as $identity) {
+            $key = $identity->canonicalKey();
+            $canonical = ExternalMoneyReceipt::query()->where('canonical_key', $key)->first();
+            if ($canonical !== null && ($record === null || (int) $canonical->id !== (int) $record->id)) {
+                return false;
+            }
             $attached = ExternalMoneyReceiptAlias::query()
-                ->where('alias_key', $alias->identity->canonicalKey())
+                ->where('alias_key', $key)
                 ->first();
 
             if ($attached !== null && ($record === null || ! $this->aliasBelongsTo($attached, $record))) {
