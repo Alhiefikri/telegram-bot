@@ -19,9 +19,9 @@ final class UsdtBalanceSnapshot
      * The projection cannot be trusted against its immutable cursor, so
      * callers must show a recovery state instead of an amount.
      */
-    public static function unavailable(): self
+    public static function unavailable(?string $frozenReason = null): self
     {
-        return new self(false, 0, null);
+        return new self(false, 0, $frozenReason);
     }
 
     public function isAvailable(): bool

@@ -30,6 +30,8 @@ The future S08 first-display adapter must send the consumed full key once throug
 
 All responses use no-store/private, no-referrer and an application-generated `X-Request-ID`. Errors have `error.code`, `error.message`, `error.request_id`. Missing/invalid/revoked keys return 401; browser use returns 403; oversized bodies return 413; exhausted admission returns 429; unavailable shared admission returns 503 before authenticated work. The API exception renderer suppresses SQL/provider/debug details even with debug enabled. Future endpoint DTOs still own allowlisted success/error payloads and must not serialize credential-bearing models.
 
+The implemented S05 balance/catalog endpoints and their allowlisted schemas are documented in [Customer API reads](customer-api-reads.md). They inherit this boundary without a separate authentication, limiter or financial cache.
+
 ### Financial revalidation and lock order
 
 Admission is not financial authorization. S06 must call `CustomerApiPrincipal::revalidateForMutation()` **inside its owning transaction, after acquiring every canonical financial/resource lock and before any financial write**. It refuses calls outside a transaction. It acquires a shared credential-row lock scoped to both admitted credential and Customer. Acquire no new unrelated resource locks after this terminal authentication fence, do no network work, and retain the shared lock through commit.

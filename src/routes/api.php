@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\BuyMailWebhookController;
+use App\Http\Controllers\CustomerApiReadController;
 use App\Http\Controllers\KlikQrisProductionWebhookController;
 use App\Http\Controllers\KlikQrisSandboxWebhookController;
 use App\Http\Controllers\PakasirWebhookController;
@@ -15,3 +16,9 @@ Route::post('/webhook/klikqris', KlikQrisProductionWebhookController::class)->mi
 Route::post('/webhook/sakurupiah', SakurupiahWebhookController::class)->middleware('throttle:sakurupiah-webhook')->name('sakurupiah.webhook');
 Route::post('/webhook/pakasir', PakasirWebhookController::class)->middleware('throttle:pakasir-webhook');
 Route::post('/webhook/telegram', TelegramWebhookController::class)->middleware('throttle:telegram');
+
+Route::prefix('v1')->name('customer-api.')->group(function (): void {
+    Route::get('/balance', [CustomerApiReadController::class, 'balance'])->name('balance');
+    Route::get('/products', [CustomerApiReadController::class, 'products'])->name('products');
+    Route::get('/products/{id}', [CustomerApiReadController::class, 'product'])->name('product');
+});

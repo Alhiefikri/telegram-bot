@@ -62,13 +62,13 @@ final class CustomerUsdtBalanceLedger
 
         if ($account->latest_balance_after === null) {
             return (int) $account->version === 0 && (int) $account->balance_micro === 0
-                ? UsdtBalanceSnapshot::available(0)
-                : UsdtBalanceSnapshot::unavailable();
+                ? UsdtBalanceSnapshot::available(0, $account->frozen_reason)
+                : UsdtBalanceSnapshot::unavailable($account->frozen_reason);
         }
 
         if ((int) $account->latest_balance_after !== (int) $account->balance_micro
             || (int) $account->latest_account_sequence !== (int) $account->version) {
-            return UsdtBalanceSnapshot::unavailable();
+            return UsdtBalanceSnapshot::unavailable($account->frozen_reason);
         }
 
         return UsdtBalanceSnapshot::available((int) $account->balance_micro, $account->frozen_reason);
