@@ -283,6 +283,27 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         $this->assertSame(self::EMOJI_ID, $button['icon_custom_emoji_id'] ?? null);
     }
 
+    public function test_api_menu_slot_uses_existing_admin_capture_and_clear_paths(): void
+    {
+        $this->verifiedEmojiFakes();
+        $customer = $this->adminCustomer(999);
+        $this->captureEmoji($customer, 'menu.api');
+        $this->postTelegramWebhook($this->messageUpdate(50212, '/start', ['id' => 999], 999))->assertOk();
+        $button = $this->keyboardButton('api:menu');
+        $this->assertSame(self::EMOJI_ID, $button['icon_custom_emoji_id'] ?? null);
+        $this->assertSame('primary', $button['style']);
+        $icon = $this->menuIcon('menu.api');
+        $this->postTelegramWebhook($this->callbackUpdate(50213, 'clear-api', 'menuicon:clear:'.$icon->id, ['id' => 999], 999, 'private', 777))->assertOk();
+        $this->assertNull($icon->fresh()->custom_emoji_id);
+        $this->postTelegramWebhook($this->messageUpdate(50214, '/start', ['id' => 999], 999))->assertOk();
+        $request = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
+        $markup = $this->telegramRequestField($request, 'reply_markup');
+        $markup = is_string($markup) ? json_decode($markup, true, flags: JSON_THROW_ON_ERROR) : $markup;
+        $fallback = collect(array_merge(...$markup['inline_keyboard']))->firstWhere('callback_data', 'api:menu');
+        $this->assertSame($button['callback_data'], $fallback['callback_data']);
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $fallback);
+    }
+
     public function test_captured_menu_emoji_replaces_the_glyph_on_navigation_rows(): void
     {
         $this->verifiedEmojiFakes();

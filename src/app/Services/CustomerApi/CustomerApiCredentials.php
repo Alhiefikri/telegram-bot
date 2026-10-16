@@ -66,6 +66,35 @@ final class CustomerApiCredentials
         }, 3);
     }
 
+    public function prepareDisable(Customer $customer, int $messageId): string
+    {
+        return DB::transaction(function () use ($customer, $messageId): string {
+            $this->lockCustomer($customer);
+            $credential = $this->active($customer);
+            if ($credential === null) {
+                throw new CustomerApiFailure(409, 'stale_key_action', 'The API key changed.');
+            }
+            $nonce = bin2hex(random_bytes(16));
+            $credential->forceFill(['rotation_digest' => hash('sha256', 'disable:'.$nonce), 'rotation_message_id' => $messageId, 'rotation_expires_at' => now()->addMinutes(5)])->save();
+
+            return $nonce;
+        }, 3);
+    }
+
+    public function disableConfirmed(Customer $customer, int $messageId, #[\SensitiveParameter] string $confirmation): void
+    {
+        DB::transaction(function () use ($customer, $messageId, $confirmation): void {
+            $this->lockCustomer($customer);
+            $credential = $this->active($customer);
+            if ($credential === null || $credential->rotation_expires_at === null || $credential->rotation_expires_at->isPast()
+                || (int) $credential->rotation_message_id !== $messageId || strlen($confirmation) !== 32
+                || ! hash_equals((string) $credential->rotation_digest, hash('sha256', 'disable:'.$confirmation))) {
+                throw new CustomerApiFailure(409, 'stale_key_action', 'Disable confirmation expired or the API key changed.');
+            }
+            $credential->forceFill(['revoked_at' => now(), 'rotation_digest' => null, 'rotation_expires_at' => null, 'rotation_message_id' => null])->save();
+        }, 3);
+    }
+
     public function disable(Customer $customer): void
     {
         DB::transaction(function () use ($customer): void {
@@ -84,7 +113,7 @@ final class CustomerApiCredentials
             'active' => $credential !== null,
             'masked_identifier' => $credential?->maskedIdentifier(),
             'created_at' => $credential?->created_at?->toIso8601String(),
-            'last_used_at' => $usage?->last_used_at === null ? null : CarbonImmutable::parse($usage->last_used_at)->toIso8601String(),
+            'last_used_at' => $usage?->last_used_at === null ? null : CarbonImmutable::parse($usage->last_used_at, 'UTC')->toIso8601String(),
             'account_request_count' => (string) ($usage?->request_count ?? 0),
             'usage_consistency' => 'eventual_lower_bound',
         ];

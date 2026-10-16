@@ -1,6 +1,6 @@
 # Customer API credentials and admission (S04, #621)
 
-This implements the credential/admission foundation from [#617](https://github.com/Alhiefikri/telegram-bot/issues/617), not the later catalog, checkout, delivery, documentation website or Store Bot menu tickets. No production exposure, CI, deployment or financial activation is authorized.
+This implements the credential/admission foundation from [#617](https://github.com/Alhiefikri/telegram-bot/issues/617) and its private Store Bot management adapter (#627). Catalog, checkout, delivery and public documentation retain their own owners. No production exposure, CI, deployment or financial activation is authorized.
 
 ## Credential ownership
 
@@ -16,13 +16,24 @@ This implements the credential/admission foundation from [#617](https://github.c
 
 - `generate(...)` creates only when no key is active; concurrent double taps do not rotate an existing key.
 - `prepareRotation(...)` returns a five-minute, 128-bit confirmation nonce bound to the current key/message. Persist only its digest. The 32-character nonce fits a Telegram callback with an action prefix; it is not an API key.
-- The future S08 adapter must render an explicit destructive confirmation before passing that nonce to `rotate(...)`. Consumption and old-key revocation/new-key creation commit together. Stale, wrong-message, expired and replayed confirmations cannot replace the new key.
-- `disable(...)` revokes the current credential, including an undisplayed one. It has a separate anti-flood budget, so exhausted generation quota does not prevent emergency disable.
+- `TelegramCustomerApiCallbackHandler` renders an explicit destructive confirmation before passing that nonce to `rotate(...)`. Consumption and old-key revocation/new-key creation commit together. Stale, wrong-message, expired and replayed confirmations cannot replace the new key.
+- `prepareDisable(...)` and `disable(..., confirmation)` use a separate anti-flood budget, so exhausted generation quota does not prevent emergency disable. The credential owner provides `disableConfirmed(...)`; its five-minute nonce is bound to the active key and canonical message. It shares the existing confirmation slot with rotation but hashes a `disable:` purpose prefix. Preparing either operation invalidates the previous confirmation, and a disable nonce cannot authorize rotation or revoke a replacement key. Trusted non-Telegram lifecycle callers retain `CustomerApiCredentials::disable(Customer)`.
 - `summary(...)` returns the mask, timestamps and eventual account request count; it never returns a public selector suitable for reconstructing the token or a full key.
 
 ### Narrow exception to ADR-0007
 
-The future S08 first-display adapter must send the consumed full key once through the existing Telegram client, outside every DB/retried transaction. This is a deliberately non-durable private secret display, not an Outbound Effect. Do not put it in an effect row, queue, navigation state, callback, URL, response replay cache, trace or error report. Do not retry definite or ambiguous sends; instruct the Customer to regenerate. The original message can remain in Telegram history; this does not promise deletion or screenshot protection. This foundation does not add a Telegram send path.
+The S08 adapter sends the consumed full key once through the existing Telegram client, outside every DB/retried transaction. This is a deliberately non-durable private secret display, not an Outbound Effect. Do not put it in an effect row, queue, navigation state, callback, URL, response replay cache, trace or error report. The send has no custom emoji or keyboard and uses no automatic HTTP retries. Exceptions are caught without forwarding secret-bearing objects to logs or error reporting. Missing positive message-ID proof, definite rejection and ambiguous timeout all leave the key active and offer regeneration/disable on the canonical root, never recovery or resend. The original message can remain in Telegram history; this does not promise deletion or screenshot protection.
+
+### Store Bot screens (#627)
+
+Private `/start` exposes `api:menu` through the editable `menu.api` DB icon slot (Unicode fallback `🔌`) and primary/blue buttons. The migration adds only the slot; existing Admin Dashboard icon editing and Store Bot `menuicon` capture/clear paths own edits. No ENV or callback changes are needed for icon updates. Groups do not expose the entry.
+
+`TelegramCustomerApiIntents` renders the no-key screen, masked active-key screen, confirmation and four payment-preference choices in Indonesian, English and Malay. `TelegramCustomerApiCallbackHandler` matches the originating canonical root and exact private actor/chat before calling `TelegramCustomerApiActions`; the action boundary rechecks Customer identity and the root under locks. Back/Home reuse normal navigation. Secret display is a separate message and never becomes the root.
+
+Preference writes update the existing `Customer.balance_payment_preference` enum under Customer/current-root authority. Per-order API overrides and explicit Bot payment-rail selection remain unchanged. No wallet, Order or idempotency owner is called by this adapter. Documentation uses `url('/api-docs/')` on the existing application origin and resolves to the public S10 route.
+
+Metadata comes from the bounded S04 summary, with ISO timestamps and real account admission count across rotations. The screen explicitly labels the count as account-scoped, eventually consistent and potentially incomplete; last admission is minute-rounded, not fulfillment. Usage buckets persist UTC minute timestamps, so the raw account timestamp is parsed explicitly as UTC rather than accidentally shifted by the application timezone.
+
 
 ## HTTP integration and revocation
 
@@ -126,3 +137,51 @@ Application HTTP accepted an exact 32 KiB body and rejected 32 KiB + 1 byte. Ngi
 The final encoded-path HTTP walkthrough admitted ten canonical delivery reads, then returned 429 with limit 10 for canonical, `%64elivery` and encoded-slash paths. This uses the actual middleware and route decoder, not a source-text assertion.
 
 Usage drained one new aggregate and zero on replay; the maintenance command also ran successfully. Full-bucket behavior preserves existing fields while dropping new identities. Redis restart discarded volatile counters as documented without changing committed fixture work. Temporary handlers and containers were removed. No production TLS/CDN/APM transport, real Telegram send, financial purchase fulfillment, CI or deployment was exercised or authorized.
+
+## Disposable verification recorded for S08 (#627)
+
+Final local verification used host PHP 8.5.9 for SQLite and the existing application image's PHP 8.4.26 for PostgreSQL 16.15/Redis 7. All database/cache state and Telegram credentials were disposable. The host has neither phpredis nor Predis; its initial shared-admission attempt failed closed with 503. The same lane passed using the Redis-capable application image. A PostgreSQL startup connection failure preceded its ready state and did not indicate an application defect.
+
+```sh
+php vendor/bin/phpunit \
+  tests/Feature/Telegram/TelegramCustomerApiManagementTest.php \
+  tests/Feature/CustomerApiCredentialsTest.php \
+  tests/Feature/CustomerApiLoggingTest.php \
+  tests/Feature/Telegram/TelegramRoutineNavigationTest.php \
+  tests/Feature/Telegram/MenuIconCaptureTest.php \
+  tests/Feature/Telegram/TelegramCustomerLocaleTest.php \
+  tests/Feature/Telegram/TelegramTranslationAuditTest.php \
+  tests/Feature/CustomerApiOrderTest.php \
+  tests/Feature/UsdtBalanceCheckoutTest.php \
+  tests/Feature/StorefrontApiDocsTest.php
+
+# Disposable PostgreSQL/Redis with both opt-in flags:
+php vendor/bin/phpunit --do-not-cache-result --no-configuration \
+  --bootstrap vendor/autoload.php \
+  tests/Feature/CustomerApiCredentialsPostgresTest.php \
+  tests/Feature/CustomerApiAdmissionPostgresTest.php
+```
+
+| Final lane | Result |
+| --- | --- |
+| SQLite adapter, localization, icons, logging, API Orders, explicit balance checkout and public docs | 153 tests, 3573 assertions passed |
+| PostgreSQL credential races and shared Redis admission | 12 tests, 261 assertions passed |
+
+The adapter suite exercises real webhook/processor/callback/client navigation with disposable transport responses. It checks double Generate, masked reopening, rotation replay, purpose/key/message/expiry-bound disable, replaced roots, foreign actors, groups, all four preferences, fail-closed admission and no secret in credential/navigation/update/outbound/job rows. Secret-display timeout, definite HTTP rejection and missing message-ID proof each produce one attempt, leave the key active and expose regeneration rather than secret recovery. Admin capture/clear edits the actual `menu.api` slot; fallback retains the callback and primary styling. The obsolete locale test's hard-coded home-row ordering assertion was removed rather than repinned.
+
+The lifecycle regression seeds an existing Order, an accepted account idempotency claim, Rp 25,000 through the IDR ledger and 2 USDT through the typed USDT funding owner. Complete Order, both wallet projection/entry and accepted claim snapshots remain identical after adapter rotation and disable.
+
+The PostgreSQL lane runs independent three-process Generate, Rotate and confirmed Disable races. Each produces one winner. Reusing a consumed disable confirmation after generating a replacement leaves that replacement authenticated. Existing shared mutation fencing, DB uniqueness/immutability, cross-worker quotas, generation cooldown versus emergency disable and Redis outage checks also pass.
+
+A separate throwaway CLI walkthrough bootstrapped the real application, explicitly bound `TelegramBotClient` (not the testing fake client), then sent `/start` and callback update envelopes through the HTTP kernel, ingress, sync processor and actual navigation/client stack. Only the remote Telegram HTTP transport was substituted. The walkthrough inspected rendered no-key, masked, confirmation, timeout and all three localized screens. It exercised all four preferences, Back/Home, rapid Generate, Rotate, stale Disable, group/foreign/stale-message denial, custom icon and unsupported-custom-emoji fallback. `/api-docs` returned 200 at the same local application origin. Real Bearer HTTP-kernel requests to `/api/v1/products` returned 200 before rotation, 401 for the rotated old key, 200 for the replacement and 401 after Disable.
+
+Two admitted requests were drained through `CustomerApiUsage::flush(500)` and appeared as account count `2` with a minute-rounded admission instant. This exposed and fixed UTC timestamp interpretation: the original raw usage minute was shifted by the app timezone; the final summary returned the correct `+00:00` instant, checked against the current minute. Existing Order and IDR ledger credit counts remained one each across rotation/disable in the walkthrough. The primary account ended with zero active keys; a second account's timed-out display left its one key active with no retry. Three total secret-send attempts were observed (Generate, Rotate, timeout), and full-secret/raw-secret-component scans found no secret in durable rows or the walkthrough log.
+
+UI delivery gate, scoped to the new Telegram surface:
+
+- Hard gate PASS: real adapter navigation and all new controls exercised; no dead recovery control, invented usage, secret replay or fabricated claims. Telegram owns native layout, theme, contrast, focus and keyboard rendering; these were not independently qualified on a live client.
+- Purpose gate PASS: primary blue follows the existing navigation convention; the plug identifies API integration, wallet identifies preference, link identifies documentation, and Back/Home reuse their existing icon slots. No new visual assets, framework or presentation ENV.
+- Liveliness PASS: ENERGY 1 / RHYTHM 1 / MOTION 1; state-first text, separated metadata and one action per row follow the existing compact Store Bot identity. No animation or decorative dashboard.
+- Craftsmanship PASS: no-key, active-key, destructive confirmation, limiter error and ambiguous-display recovery paths work; ID/EN/MS catalogs pass the translation audit. The first-secret warning states backend-only storage, save-now and Telegram-history persistence without promising deletion.
+
+Limitations: in-process HTTP-kernel requests and deterministic Telegram transport fixtures are not live network/Telegram-client proof. No production origin, deployment, CI, throughput benchmark, TLS/CDN/APM inspection or custody/provider qualification was performed. Existing fail-closed admission and financial release gates remain in force. Disposable containers and the throwaway walkthrough were removed after verification.

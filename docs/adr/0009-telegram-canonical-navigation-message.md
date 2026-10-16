@@ -15,7 +15,7 @@ sending a new bot reply:
 
 - Browse Products from inline controls (catalog list, category picker, category
   list, family options, product detail, search results);
-- My Balance, Orders, Support, and the Language picker;
+- My Balance, Orders, Support, API management/payment preferences, and the Language picker;
 - Back and Home, which always return to the current home projection.
 
 `TelegramNavigationPresenter` is the presentation seam. A callback may only
@@ -73,6 +73,11 @@ Durable transactional artifacts — QRIS instructions, receipts, delivered
 credentials, checkout instruction effects, and business notifications — are
 never tracked as the root and are never overwritten by navigation. The receipt
 "main menu" action opens the canonical home instead of editing the receipt.
+
+API key creation/rotation sends its first secret separately through the narrow
+non-durable [ADR-0007 exception](0007-telegram-outbound-effects.md#customer-api-first-secret-display-exception).
+Only masked metadata and opaque destructive confirmations enter the canonical
+API screen; the secret message never becomes a navigation root.
 
 Group chats never own a private root and receive a public-safe surface only:
 the group home exposes Browse Products, group catalog navigation edits the

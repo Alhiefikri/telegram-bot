@@ -12,7 +12,7 @@ Telegram does not document an outbound idempotency key for `sendMessage` or `sen
 
 ### Customer API first-secret display exception
 
-Customer API key creation/rotation (#621, canonical #617 section 4.1) returns a memory-only, one-use secret result. The future Store Bot management adapter sends that value once in the authenticated private conversation through the existing client, outside DB transactions. It must never create a durable effect, queue/cache/navigation payload or recovery/re-display path for this secret. Definite or ambiguous display failure leaves the key active and requires explicit regeneration, not automatic retry. Telegram history may retain the original message. See [Customer API key operations](../customer-api-key-operations.md).
+Customer API key creation/rotation (#621, canonical #617 section 4.1) returns a memory-only, one-use secret result. `TelegramCustomerApiCallbackHandler` (#627) consumes it for one authenticated private `TelegramBotClient::sendMessage` call outside DB transactions. The plain secret message carries no custom emoji or keyboard, so custom-emoji fallback cannot resend it. It never creates a durable effect, queue/cache/navigation payload or recovery/re-display path. Definite or ambiguous display failure leaves the key active and renders a regeneration/disable path on the masked canonical root; no automatic retry occurs. Telegram history may retain the original message. See [Customer API key operations](../customer-api-key-operations.md).
 
 
 ### Final protocol boundary

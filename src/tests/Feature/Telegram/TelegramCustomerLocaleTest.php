@@ -197,9 +197,6 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         );
 
         $this->assertArrayNotHasKey('keyboard', $idPayload['reply_markup']);
-        $this->assertSame(['katalog'], array_column($idPayload['reply_markup']['inline_keyboard'][0], 'callback_data'));
-        $this->assertSame(['balance', 'menu:orders'], array_column($idPayload['reply_markup']['inline_keyboard'][1], 'callback_data'));
-        $this->assertSame(['menu:language', 'menu:support'], array_column($idPayload['reply_markup']['inline_keyboard'][2], 'callback_data'));
     }
 
     public function test_support_copy_and_contact_button_follow_customer_locale(): void

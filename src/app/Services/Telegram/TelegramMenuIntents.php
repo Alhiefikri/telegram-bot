@@ -823,6 +823,9 @@ class TelegramMenuIntents
                 $this->navButton($customer, 'menu.orders', 'menu:orders'),
             ],
             [
+                $this->navButton($customer, 'menu.api', 'api:menu'),
+            ],
+            [
                 $this->navButton($customer, 'menu.language', 'menu:language'),
                 $this->navButton($customer, 'menu.support', 'menu:support'),
             ],

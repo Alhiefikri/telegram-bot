@@ -12,6 +12,7 @@ enum TelegramNavigationScreen: string
     case UsdtBalance = 'usdt_balance';
     case Orders = 'orders';
     case Support = 'support';
+    case Api = 'api';
     case Catalog = 'catalog';
     case Product = 'product';
 }

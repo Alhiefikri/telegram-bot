@@ -97,6 +97,34 @@ class CustomerApiCredentialsPostgresTest extends TestCase
         DB::transaction(fn () => $principal->revalidateForMutation());
     }
 
+    public function test_three_process_disable_confirmation_has_one_winner_and_cannot_disable_replacement(): void
+    {
+        $customer = Customer::factory()->create();
+        $service = app(CustomerApiCredentials::class);
+        $service->generate($customer);
+        $confirmation = $service->prepareDisable($customer, 100);
+        $results = $this->race(array_fill(0, 3, function () use ($customer, $confirmation): string {
+            try {
+                app(CustomerApiCredentials::class)->disableConfirmed($customer, 100, $confirmation);
+
+                return 'disabled';
+            } catch (CustomerApiFailure $failure) {
+                return $failure->machineCode;
+            }
+        }));
+        sort($results);
+        $this->assertSame(['disabled', 'stale_key_action', 'stale_key_action'], $results);
+        $replacement = $service->generate($customer)->takeSecret();
+        try {
+            $service->disableConfirmed($customer, 100, $confirmation);
+            $this->fail('Old disable confirmation revoked a replacement.');
+        } catch (CustomerApiFailure $failure) {
+            $this->assertSame('stale_key_action', $failure->machineCode);
+        }
+        $this->assertNotNull($service->authenticate('Bearer '.$replacement));
+        $this->assertSame(1, CustomerApiCredential::query()->where('customer_id', $customer->id)->whereNull('revoked_at')->count());
+    }
+
     public function test_database_independently_rejects_second_active_key_reactivation_and_identity_rebinding(): void
     {
         $customer = Customer::factory()->create();

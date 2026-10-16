@@ -11,6 +11,7 @@ use App\Services\CustomerApi\CustomerApiCredentials;
 use App\Services\CustomerApi\CustomerApiFailure;
 use App\Services\CustomerApi\CustomerApiUsage;
 use App\Services\Telegram\TelegramCustomerApiActions;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -153,6 +154,7 @@ class CustomerApiAdmissionPostgresTest extends TestCase
 
     public function test_limiter_outage_stops_http_before_work_and_telemetry_is_coalesced_account_scoped_and_not_replayed(): void
     {
+        $this->freezeTime();
         $customer = Customer::factory()->create();
         $credentials = app(CustomerApiCredentials::class);
         $token = $credentials->generate($customer)->takeSecret();
@@ -175,6 +177,8 @@ class CustomerApiAdmissionPostgresTest extends TestCase
             'cache.limiter' => 's04-unavailable']);
         $this->getJson('/api/v1/probe', ['Authorization' => 'Bearer '.$new])->assertStatus(503)->assertJsonPath('error.code', 'temporarily_unavailable');
         $this->assertSame('5', $credentials->summary($customer)['account_request_count']);
+        $lastUsed = CarbonImmutable::parse($credentials->summary($customer)['last_used_at']);
+        $this->assertEquals(now()->startOfMinute()->timestamp, $lastUsed->timestamp);
     }
 
     public function test_private_key_operations_share_create_cooldown_but_disable_remains_available(): void
@@ -197,7 +201,8 @@ class CustomerApiAdmissionPostgresTest extends TestCase
             $this->assertSame(429, $failure->status);
         }
         $this->assertNotNull(app(CustomerApiCredentials::class)->authenticate('Bearer '.$token));
-        $actions->disable($actor, $actor, 'private', 100);
+        $disable = $actions->prepareDisable($actor, $actor, 'private', 100);
+        $actions->disable($actor, $actor, 'private', 100, $disable);
         $this->assertNull(app(CustomerApiCredentials::class)->authenticate('Bearer '.$token));
     }
 

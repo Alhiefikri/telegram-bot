@@ -112,7 +112,7 @@ class CustomerApiCredentialsTest extends TestCase
         foreach ([[(string) $customer->telegram_id, (string) $customer->telegram_id, 'group', 100], ['999', (string) $customer->telegram_id, 'private', 100], ['999', '999', 'private', 100], [(string) $customer->telegram_id, (string) $customer->telegram_id, 'private', 99]] as $facts) {
             foreach (['generate', 'disable'] as $operation) {
                 try {
-                    $actions->$operation(...$facts);
+                    $actions->$operation(...($operation === 'disable' ? [...$facts, str_repeat('0', 32)] : $facts));
                     $this->fail('Untrusted private actor facts were admitted.');
                 } catch (CustomerApiFailure $failure) {
                     $this->assertSame(403, $failure->status);
@@ -121,6 +121,37 @@ class CustomerApiCredentialsTest extends TestCase
         }
         $this->assertNotNull($service->authenticate('Bearer '.$original));
         $this->assertSame(1, CustomerApiCredential::query()->count());
+    }
+
+    public function test_disable_confirmation_is_key_message_purpose_and_expiry_bound(): void
+    {
+        $customer = Customer::factory()->create();
+        $service = app(CustomerApiCredentials::class);
+        $token = $service->generate($customer)->takeSecret();
+        $rotation = $service->prepareRotation($customer, 100);
+        try {
+            $service->disableConfirmed($customer, 100, $rotation);
+            $this->fail('Rotation confirmation authorized disable.');
+        } catch (CustomerApiFailure $failure) {
+            $this->assertSame('stale_key_action', $failure->machineCode);
+        }
+        $disable = $service->prepareDisable($customer, 100);
+        foreach ([[101, $disable], [100, str_repeat('0', 32)]] as [$message, $nonce]) {
+            try {
+                $service->disableConfirmed($customer, $message, $nonce);
+                $this->fail('Unbound disable confirmation was accepted.');
+            } catch (CustomerApiFailure $failure) {
+                $this->assertSame('stale_key_action', $failure->machineCode);
+            }
+        }
+        $this->travel(6)->minutes();
+        try {
+            $service->disableConfirmed($customer, 100, $disable);
+            $this->fail('Expired disable confirmation was accepted.');
+        } catch (CustomerApiFailure $failure) {
+            $this->assertSame('stale_key_action', $failure->machineCode);
+        }
+        $this->assertNotNull($service->authenticate('Bearer '.$token));
     }
 
     public function test_unshared_admission_store_is_unavailable_instead_of_failing_open(): void

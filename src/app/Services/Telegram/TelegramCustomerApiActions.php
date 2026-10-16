@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\BalancePaymentPreference;
 use App\Models\Customer;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CustomerApi\CustomerApiAdmission;
@@ -39,11 +40,25 @@ final class TelegramCustomerApiActions
         return $this->withCurrentRoot($customer, $chatId, $messageId, fn () => $this->credentials->rotate($customer, $messageId, $confirmation));
     }
 
-    public function disable(string $actorId, string $chatId, string $chatType, int $messageId): void
+    public function disable(string $actorId, string $chatId, string $chatType, int $messageId, #[\SensitiveParameter] string $confirmation): void
     {
         $customer = $this->customer($actorId, $chatId, $chatType, $messageId);
         $this->admission->keyOperation($customer->id, disable: true);
-        $this->withCurrentRoot($customer, $chatId, $messageId, fn () => $this->credentials->disable($customer));
+        $this->withCurrentRoot($customer, $chatId, $messageId, fn () => $this->credentials->disableConfirmed($customer, $messageId, $confirmation));
+    }
+
+    public function prepareDisable(string $actorId, string $chatId, string $chatType, int $messageId): string
+    {
+        $customer = $this->customer($actorId, $chatId, $chatType, $messageId);
+        $this->admission->keyOperation($customer->id, disable: true);
+
+        return $this->withCurrentRoot($customer, $chatId, $messageId, fn () => $this->credentials->prepareDisable($customer, $messageId));
+    }
+
+    public function preference(string $actorId, string $chatId, string $chatType, int $messageId, BalancePaymentPreference $preference): void
+    {
+        $customer = $this->customer($actorId, $chatId, $chatType, $messageId);
+        $this->withCurrentRoot($customer, $chatId, $messageId, fn () => $customer->forceFill(['balance_payment_preference' => $preference])->save());
     }
 
     public function summary(string $actorId, string $chatId, string $chatType, int $messageId): array
