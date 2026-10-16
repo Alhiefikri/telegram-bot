@@ -2,6 +2,8 @@
 
 namespace App\Services\Telegram;
 
+use App\Logging\RedactCustomerApiSecrets;
+
 final class TelegramBotApiRedactor
 {
     private const REDACTED_BOT_API_PATH = '[redacted-telegram-bot-api-path]';
@@ -19,7 +21,7 @@ final class TelegramBotApiRedactor
             return $text;
         }
 
-        $redacted = self::redactBotApiUrls($text);
+        $redacted = self::redactBotApiUrls(RedactCustomerApiSecrets::text($text));
         $redacted = self::redactBotApiPaths($redacted);
         $redacted = preg_replace(
             '~(?<![A-Za-z0-9_-])(?:wa_confirm(?::|%3A)|wa_)[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])~i',

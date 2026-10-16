@@ -10,6 +10,11 @@ Durable business deliveries to Telegram use one transactional Outbound Effect Le
 
 Telegram does not document an outbound idempotency key for `sendMessage` or `sendPhoto`, so a timeout, connection failure, or worker crash after the send may have an ambiguous outcome. Ambiguous effects are never blindly retried. They remain auditable for operator verification or an explicit new resend effect. Existing `orders.checkout_key` remains responsible for checkout mutation idempotency, while queue uniqueness and `afterCommit()` remain supporting optimisations rather than delivery guarantees.
 
+### Customer API first-secret display exception
+
+Customer API key creation/rotation (#621, canonical #617 section 4.1) returns a memory-only, one-use secret result. The future Store Bot management adapter sends that value once in the authenticated private conversation through the existing client, outside DB transactions. It must never create a durable effect, queue/cache/navigation payload or recovery/re-display path for this secret. Definite or ambiguous display failure leaves the key active and requires explicit regeneration, not automatic retry. Telegram history may retain the original message. See [Customer API key operations](../customer-api-key-operations.md).
+
+
 ### Final protocol boundary
 
 `TelegramOutboundEffectLedgerProtocol` is the sole durable delivery-state

@@ -95,5 +95,6 @@ Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->w
 Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
 Schedule::command('customer-auth:cleanup --limit=500')->hourly()->withoutOverlapping(10);
 Schedule::command('customer-auth:recover-mail --limit=100')->everyMinute()->withoutOverlapping(2);
+Schedule::command('customer-api:flush-usage --limit=500')->everyMinute()->withoutOverlapping(2);
 Schedule::command('ops:cleanup-retained-data --chunk=500')->daily()->withoutOverlapping();
 Schedule::job(new SendDailyAdminStatsNotification, 'notifications')->dailyAt('00:00')->withoutOverlapping()->onOneServer();

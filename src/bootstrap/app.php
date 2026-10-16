@@ -3,12 +3,23 @@
 use App\Http\Middleware\AuthorizeAdminAccess;
 use App\Http\Middleware\AuthorizeBscReceiverMutation;
 use App\Http\Middleware\AuthorizeStoreBalanceCompensation;
+use App\Http\Middleware\CustomerApiBoundary;
 use App\Http\Middleware\PreventAdminMiniAppCache;
 use App\Http\Middleware\RedirectToCanonicalHost;
 use App\Http\Middleware\ValidateStorefrontSignedInvoice;
+use App\Services\CustomerApi\CustomerApiFailure;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
+use Illuminate\Foundation\Http\Middleware\InvokeDeferredCallbacks;
+use Illuminate\Foundation\Http\Middleware\PreventRequestsDuringMaintenance;
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
+use Illuminate\Http\Middleware\HandleCors;
+use Illuminate\Http\Middleware\TrustHosts;
+use Illuminate\Http\Middleware\TrustProxies;
+use Illuminate\Http\Middleware\ValidatePathEncoding;
+use Illuminate\Http\Middleware\ValidatePostSize;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
@@ -56,9 +67,32 @@ return Application::configure(basePath: dirname(__DIR__))
                 (string) config('app.url'),
             ));
         }
+        $middleware->use(array_values(array_filter([
+            ValidatePathEncoding::class,
+            InvokeDeferredCallbacks::class,
+            $trustedHosts !== [] ? TrustHosts::class : null,
+            TrustProxies::class,
+            CustomerApiBoundary::class,
+            HandleCors::class,
+            PreventRequestsDuringMaintenance::class,
+            ValidatePostSize::class,
+            TrimStrings::class,
+            ConvertEmptyStringsToNull::class,
+        ])));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->dontFlash(['api_key', 'credentials', 'token', 'code', 'challenge', 'state', 'access_key']);
+        $exceptions->dontReportWhen(fn (Throwable $error) => request()->is('api/v1', 'api/v1/*'));
+        $exceptions->render(function (Throwable $error, Request $request) {
+            if (! $request->is('api/v1', 'api/v1/*')) {
+                return null;
+            }
+            $failure = CustomerApiFailure::fromException($error);
+
+            return response()->json(['error' => ['code' => $failure->machineCode, 'message' => $failure->getMessage(),
+                'request_id' => $request->attributes->get('customer_api_request_id')]], $failure->status, $failure->headers)
+                ->header('Cache-Control', 'no-store, private');
+        });
         $exceptions->render(function (HttpExceptionInterface $exception, Request $request) {
             if ($exception->getStatusCode() !== 429 || ! $request->is('akun', 'akun/*') || $request->expectsJson()) {
                 return null;
