@@ -10,11 +10,16 @@ use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 final class CustomerApiFailure extends RuntimeException
 {
+    /**
+     * @param  array<string, string>  $headers
+     * @param  array<string, mixed>  $details  Extra allowlisted machine-readable error members.
+     */
     public function __construct(
         public readonly int $status,
         public readonly string $machineCode,
         string $message,
         public readonly array $headers = [],
+        public readonly array $details = [],
     ) {
         parent::__construct($message);
     }

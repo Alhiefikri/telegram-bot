@@ -18,3 +18,4 @@ The Telegram callback router also acquires a short cache lock for the checkout i
 - A new checkout prompt still creates a fresh intent, so users can order again after a previous transaction.
 - Old buttons from a previous prompt no longer create a new order after the user has moved on, which is deliberate.
 - The Web Storefront flow is unchanged.
+- The Customer API cannot use a Telegram prompt identity, so `POST /api/v1/orders` derives its namespaced `orders.checkout_key` from a durable claim instead; see [ADR-0025](0025-api-order-idempotency-claims.md). Both channels share the same canonical `OrderCheckoutService` and compete safely for money and stock, but their keys never collide (the bot key is a 64-character HMAC hex, the API key starts with `api-`).

@@ -30,7 +30,7 @@ return new class extends Migration
         if (DB::getDriverName() === 'pgsql') {
             DB::statement("ALTER TABLE customer_api_credentials ADD CONSTRAINT customer_api_digest_shape CHECK (selector ~ '^[0-9a-f]{32}$' AND secret_digest ~ '^[0-9a-f]{64}$')");
             DB::unprepared(<<<'SQL'
-CREATE FUNCTION guard_customer_api_credential() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION guard_customer_api_credential() RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'Customer API credential history is immutable';

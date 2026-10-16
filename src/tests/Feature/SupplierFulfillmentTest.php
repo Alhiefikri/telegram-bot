@@ -9,6 +9,7 @@ use App\Enums\StoreBalanceEntryKind;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\ProcessSupplierFulfillment;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
@@ -26,6 +27,9 @@ use App\Models\SupplierPurchase;
 use App\Models\User;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Credentials\CredentialDeliveryEligibility;
+use App\Services\CustomerApi\CustomerApiCredentials;
+use App\Services\CustomerApi\CustomerApiOrderCheckout;
+use App\Services\CustomerApi\CustomerApiOrderRequest;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceLedger;
@@ -37,6 +41,7 @@ use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -50,6 +55,62 @@ class SupplierFulfillmentTest extends TestCase
         parent::setUp();
         Queue::fake();
         Http::preventStrayRequests();
+    }
+
+    public function test_api_replay_and_lost_queue_recovery_preserve_an_unknown_supplier_purchase(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone');
+        $customer = $cart->customer;
+        app(StoreBalanceLedger::class)->creditTopUp($customer, 10_000, 'api-supplier-funding', 'api-supplier-funding');
+        $credentials = app(CustomerApiCredentials::class);
+        $principal = $credentials->authenticate('Bearer '.$credentials->generate($customer)->takeSecret());
+        $http = Request::create('/api/v1/orders', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'product_id' => (string) $product->id, 'quantity' => 1,
+            'preference' => 'idr_only', 'expected_totals' => ['IDR' => '5000'],
+        ], JSON_THROW_ON_ERROR));
+        $http->headers->set('Idempotency-Key', 'api-supplier-unknown');
+        $request = CustomerApiOrderRequest::fromRequest($http);
+        $checkout = app(CustomerApiOrderCheckout::class);
+        $order = $checkout->place($principal, $request)->order;
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $this->assertSame('pending', $fulfillment->state);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        Http::assertNothingSent();
+
+        // Drop all wakeups, then rediscover the committed obligation.
+        Queue::fake();
+        $service = app(SupplierFulfillmentService::class);
+        $service->recover();
+        Queue::assertPushed(ProcessSupplierFulfillment::class);
+        Http::fake(function () {
+            $this->assertSame(0, DB::transactionLevel(), 'Supplier IO must be outside financial locks.');
+
+            return Http::response(['message' => 'unknown purchase outcome'], 500);
+        });
+        $service->process($fulfillment->id);
+        $service->recover();
+        $service->process($fulfillment->id);
+        $replay = $checkout->place($principal, $request);
+
+        $this->assertTrue($replay->replayed);
+        $this->assertSame($order->id, $replay->order->id);
+        Http::assertSentCount(1);
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, DB::table('payments')->count());
+        $this->assertSame(1, DB::table('store_balance_entries')->where('kind', 'purchase_debit')->count());
+        $this->assertSame(5000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertSame('ambiguous', SupplierPurchase::sole()->state);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, ProductStockItem::count());
+        try {
+            app(OrderLifecycle::class)->applyPaymentRefunded($order->payments()->sole());
+            $this->fail('Unknown supplier purchase permitted a refund.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+            $this->assertSame(5000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        }
     }
 
     public function test_supplier_completion_without_materialized_receipt_is_recovered_without_reallocating(): void

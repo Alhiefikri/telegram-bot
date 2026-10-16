@@ -24,6 +24,9 @@ class Order extends Model
             if ($order->isDirty('balance_checkout_snapshot')) {
                 throw new \LogicException('Balance checkout snapshots are immutable.');
             }
+            if ($order->getRawOriginal('api_order_claim_id') !== null && $order->isDirty('api_order_claim_id')) {
+                throw new \LogicException('Order API origin is immutable.');
+            }
         });
     }
 

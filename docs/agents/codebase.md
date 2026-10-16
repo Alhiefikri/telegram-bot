@@ -286,6 +286,20 @@ Customer API credentials/admission (#621) use `CustomerApiCredentials`, `Telegra
 
 Customer API reads (#622) use `CustomerApiReadController` for bounded input and own-wallet mapping, and `CustomerApiCatalog` for ascending-ID keyset Product pages with explicit response allowlists. Visibility/availability use canonical Product scopes, family icons use `CatalogFamilyIconResolver`, and batched quotes use `ProductQuantityPricing::quoteMany()` with the admitted Customer's reseller context. IDR/USDT ledger snapshots remain the money owners; public USD is exact boundary mapping, and frozen/drifted wallets expose null amounts rather than fake zeros. No stock credential model, provider HTTP, supplier economic relation, financial cache or new index is introduced. Schemas, errors, examples and disposable PostgreSQL/Redis HTTP evidence: [Customer API reads](../customer-api-reads.md).
 
+Customer API orders (#623) add `POST /api/v1/orders` through `CustomerApiOrderController`,
+`CustomerApiOrderCheckout` and the durable claim owner `CustomerApiOrderClaims`. A claim is
+uniquely guarded by Customer + `create_order` + `Idempotency-Key`, carries the canonical
+payload fingerprint, the resolved preference snapshot, the admitted credential id, a fenced
+lease and (once accepted) exactly one Order. The namespaced `api-` checkout key is derived
+only from the durable claim, so the shared `OrderCheckoutService` still owns pricing, stock,
+credential allocation, the single currency debit and the paid lifecycle, and a committed
+Order is replayable without current stock or price. The API Cart and item are created inside
+the checkout transaction with `carts.origin = api`, which is immutable and filtered by every
+customer-facing cart read and write; a rolled-back request leaves zero cart rows. The API
+transaction locks the Customer shared and calls `CustomerApiPrincipal::revalidateForMutation()`
+before any write. Contract, error table, lock order and evidence: [Customer API orders](../customer-api-orders.md);
+decision: [ADR-0025](../adr/0025-api-order-idempotency-claims.md).
+
 
 ### Product dan stock
 

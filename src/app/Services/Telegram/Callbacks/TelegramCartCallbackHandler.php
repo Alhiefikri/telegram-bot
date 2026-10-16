@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Enums\CartOrigin;
 use App\Enums\CartStatus;
 use App\Models\Customer;
 use App\Models\Product;
@@ -48,7 +49,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
         if ($context->data === 'batal') {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
             $this->session->forgetWithLock($context->customer);
-            $context->customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
+            $context->customer->carts()->where('origin', CartOrigin::Customer)->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'cart.cancelled'));
 
             return true;

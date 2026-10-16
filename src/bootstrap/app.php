@@ -90,7 +90,7 @@ return Application::configure(basePath: dirname(__DIR__))
             $failure = CustomerApiFailure::fromException($error);
 
             return response()->json(['error' => ['code' => $failure->machineCode, 'message' => $failure->getMessage(),
-                'request_id' => $request->attributes->get('customer_api_request_id')]], $failure->status, $failure->headers)
+                'request_id' => $request->attributes->get('customer_api_request_id')] + $failure->details], $failure->status, $failure->headers)
                 ->header('Cache-Control', 'no-store, private');
         });
         $exceptions->render(function (HttpExceptionInterface $exception, Request $request) {

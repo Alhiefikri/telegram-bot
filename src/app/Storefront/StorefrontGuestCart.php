@@ -2,6 +2,7 @@
 
 namespace App\Storefront;
 
+use App\Enums\CartOrigin;
 use App\Enums\CartStatus;
 use App\Exceptions\InvalidCartState;
 use App\Models\Cart;
@@ -76,6 +77,7 @@ final class StorefrontGuestCart
 
         $cart = Cart::query()
             ->where('customer_id', $customer->id)
+            ->where('origin', CartOrigin::Customer)
             ->where('status', CartStatus::CheckedOut)
             ->latest('id')
             ->first();

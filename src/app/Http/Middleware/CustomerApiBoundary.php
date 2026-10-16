@@ -59,7 +59,7 @@ final class CustomerApiBoundary
         } catch (Throwable $error) {
             $failure = CustomerApiFailure::fromException($error);
             $headers = $failure->headers;
-            $response = $this->error($failure->status, $failure->machineCode, $failure->getMessage(), $requestId);
+            $response = $this->error($failure->status, $failure->machineCode, $failure->getMessage(), $requestId, $failure->details);
         } finally {
             $request->headers->remove('Authorization');
             $request->server->remove('HTTP_AUTHORIZATION');
@@ -72,8 +72,8 @@ final class CustomerApiBoundary
         return $response;
     }
 
-    private function error(int $status, string $code, string $message, string $requestId): Response
+    private function error(int $status, string $code, string $message, string $requestId, array $details = []): Response
     {
-        return response()->json(['error' => ['code' => $code, 'message' => $message, 'request_id' => $requestId]], $status);
+        return response()->json(['error' => ['code' => $code, 'message' => $message, 'request_id' => $requestId] + $details], $status);
     }
 }

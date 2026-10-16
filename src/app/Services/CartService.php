@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\CartOrigin;
 use App\Enums\CartStatus;
 use App\Exceptions\InvalidCartState;
 use App\Models\Cart;
@@ -27,7 +28,7 @@ class CartService
                 $cart = null;
             }
 
-            return $cart ?: Cart::create(['customer_id' => $customer->id, 'status' => CartStatus::Active, 'expires_at' => $expiresAt ?: now()->addHours(24)]);
+            return $cart ?: Cart::create(['customer_id' => $customer->id, 'origin' => CartOrigin::Customer, 'status' => CartStatus::Active, 'expires_at' => $expiresAt ?: now()->addHours(24)]);
         }, 5);
     }
 
@@ -83,7 +84,10 @@ class CartService
 
     private function activeCartQuery(Customer $customer)
     {
-        return Cart::where('customer_id', $customer->id)->where('status', CartStatus::Active);
+        // API checkout inputs are isolated: a Customer's bot/Web "current cart"
+        // can never be an API cart, including the checked_out flip back to
+        // active when its Order is cancelled.
+        return Cart::where('customer_id', $customer->id)->where('origin', CartOrigin::Customer)->where('status', CartStatus::Active);
     }
 
     private function mutateItem(Cart $cart, Product $product, callable $quantityResolver): CartItem
@@ -104,8 +108,10 @@ class CartService
     {
         $lockedCart = Cart::whereKey($cart->id)->lockForUpdate()->firstOrFail();
 
-        if ($lockedCart->status !== CartStatus::Active || ($lockedCart->expires_at && $lockedCart->expires_at->isPast())) {
-            if ($lockedCart->status === CartStatus::Active) {
+        if ($lockedCart->origin !== CartOrigin::Customer
+            || $lockedCart->status !== CartStatus::Active
+            || ($lockedCart->expires_at && $lockedCart->expires_at->isPast())) {
+            if ($lockedCart->origin === CartOrigin::Customer && $lockedCart->status === CartStatus::Active) {
                 $lockedCart->update(['status' => CartStatus::Expired]);
             }
             throw new InvalidCartState('Cart is not active.');

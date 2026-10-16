@@ -283,7 +283,7 @@ class OrderCheckoutService
         if ($resolvedPreference !== null) {
             $order->forceFill(['balance_checkout_snapshot' => [
                 'preference' => $resolvedPreference->value,
-                'source' => $balanceRequest === null ? 'explicit_rail' : ($balanceRequest->preference === null ? 'account' : 'override'),
+                'source' => $balanceRequest === null ? 'explicit_rail' : ($balanceRequest->preferenceSource ?? ($balanceRequest->preference === null ? 'account' : 'override')),
                 'currency' => $paymentPlan->paymentCurrency(),
                 'amount' => $paymentPlan->amount(),
                 'expected_idr_total' => $balanceRequest?->expectedIdrTotal,

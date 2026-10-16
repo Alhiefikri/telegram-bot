@@ -6,16 +6,29 @@ use App\Enums\BalancePaymentPreference;
 use App\Exceptions\CheckoutPriceChanged;
 use App\Exceptions\InsufficientCheckoutBalance;
 use App\Exceptions\InvalidCheckout;
+use App\Exceptions\MissingCheckoutPriceConsent;
 use InvalidArgumentException;
 
 /** Trusted checkout consent; amounts are whole IDR and micro-USDT, never floats. */
 final readonly class BalanceCheckoutRequest
 {
+    /**
+     * @param  ?string  $preferenceSource  Audit label for an already-resolved preference
+     *                                     (`account` or `override`); null keeps the
+     *                                     derived label of the canonical caller.
+     */
     public function __construct(
         public ?BalancePaymentPreference $preference = null,
         public ?int $expectedIdrTotal = null,
         public ?int $expectedUsdTotalMicro = null,
+        public ?string $preferenceSource = null,
     ) {
+        if ($preferenceSource !== null && ! in_array($preferenceSource, ['account', 'override'], true)) {
+            throw new InvalidArgumentException('A preference source must be the account preference or an explicit override.');
+        }
+        if ($preferenceSource !== null && $preference === null) {
+            throw new InvalidArgumentException('A preference source requires a resolved preference.');
+        }
         foreach ([$expectedIdrTotal, $expectedUsdTotalMicro] as $amount) {
             if ($amount !== null && $amount <= 0) {
                 throw new InvalidArgumentException('Expected balance totals must be positive integers.');
@@ -40,7 +53,7 @@ final readonly class BalanceCheckoutRequest
                 throw new CheckoutPriceChanged($pricing->idrTotal(), $pricing->usdtTotal());
             }
             if ($index === 0 && $totals[$currency] !== null && $expected[$currency] === null) {
-                throw new InvalidCheckout('The primary currency requires an expected total.');
+                throw new MissingCheckoutPriceConsent('The primary currency requires an expected total.');
             }
         }
 

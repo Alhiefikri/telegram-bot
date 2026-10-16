@@ -306,3 +306,59 @@ commit or push occurred.
 
 After verification, the standalone smoke/profile scripts, temporary formatter
 configuration, disposable PostgreSQL container and its volume were removed.
+
+## S06 API order path (#623)
+
+Implementation update, 2026-10-16. [#623](https://github.com/Alhiefikri/telegram-bot/issues/623)
+implements [#617 sections 4.2, 5, 5.1 and 6](https://github.com/Alhiefikri/telegram-bot/issues/617)
+on top of the S03 checkout, S04 admission/revalidation and S05 reads. It activates
+no funding, custody, provider or production deployment. Design:
+[ADR-0025](adr/0025-api-order-idempotency-claims.md); contract:
+[Customer API orders](customer-api-orders.md).
+
+### Added lock edges
+
+`App\Services\CustomerApi\CustomerApiOrderCheckout::place` composes one deterministic
+prefix in front of the unchanged S03 chain:
+
+| Flow | Acquisition order and ownership |
+| --- | --- |
+| API order (`POST /api/v1/orders`) | Initial unique claim insertion commits separately. Financial transaction: Customer shared → shared credential row (`CustomerApiPrincipal::revalidateForMutation`) → claim row FOR UPDATE plus token check → newly inserted isolated API Cart + item → S03 chain (IDR before USDT, funding policy shared, restore shared, maintenance, CartItems by Product, Products by ID, Suppliers by ID, SKUs by ID, payment setting) → Order/Payment/items → paid lifecycle, debit and allocation. Claim lock remains held through commit. |
+| API replay / lost response | claim read only, then the canonical accepted Order; no money, Cart, Product or credential lock is acquired, and current stock and price are never consulted. |
+| API claim takeover | one atomic conditional `UPDATE` on an expired lease of the claim row; the loser answers 409 `in_progress` without acquiring financial locks. |
+
+A worker that lost its claim token cannot enter checkout. A live financial transaction
+holds the claim row, so expiry alone cannot authorize a competing commit; takeover
+serializes against that transaction. Acceptance rejects a stale token rather than
+silently leaving an unaccepted paid Order.
+
+`CustomerApiCredentials::rotate/disable` still take Customer exclusive then the credential
+row, and `CartService` still takes Customer before Cart, so no path acquires Customer (or
+the credential row) after the shared checkout prefix, and the credential shared row is
+retained through commit. The API Cart is inserted inside the checkout transaction with
+`carts.origin = api`; `CartService`, the Telegram cancel writes and the storefront cart
+sources all filter `origin = customer`, so an API cart can never be the Customer's
+Telegram/Web Cart, including when `checkoutOnce` flips a `checked_out` cart back to
+`active` for a cancelled Order. Money and stock remain exclusively owned by
+`OrderCheckoutService`, `StoreBalanceLedger`, `CustomerUsdtBalanceLedger`,
+`EloquentInventoryLedger` and `ProductCredentialAllocator`; the claim layer writes no
+money and adds no second checkout.
+
+### Superseded note
+
+The historical "Cart → IDR account" and "Existing Cart → maintenance" prefixes above still
+describe the Telegram/Web rails. The API rail owns its own isolated cart and never reaches a
+customer cart.
+
+### Verification evidence (#623)
+
+See [Customer API orders](customer-api-orders.md) for the recorded SQLite, PostgreSQL and
+disposable HTTP results. `migrate:fresh` drops tables but not the PL/pgSQL guard functions a
+migration installs, and the shipped S04 credential migration created its
+`guard_customer_api_credential()` function with a bare `CREATE FUNCTION`, so a second fresh
+migration on a reused PostgreSQL database failed with `SQLSTATE[42723] Duplicate function`
+(observed on `main`: 16/16 errors in `UsdtBalanceCheckoutPostgresConcurrencyTest`). Both that
+migration and this ticket's `2026_10_16_130000_create_customer_api_order_claims.php` now use
+`CREATE OR REPLACE FUNCTION`, matching the S03 convention; the shared test helper was left
+unchanged.
+

@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\CartOrigin;
 use App\Enums\CartStatus;
 use App\Models\Customer;
 use App\Services\Telegram\Callbacks\TelegramBalanceFundingCallbackHandler;
@@ -281,7 +282,7 @@ class TelegramMessageRouter
             $this->session->forgetWithLock($customer);
             $this->binanceVerify->cancelPrompt($customer);
             $this->bscVerify->cancelPrompt($customer);
-            $customer->carts()->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
+            $customer->carts()->where('origin', CartOrigin::Customer)->where('status', CartStatus::Active)->update(['status' => CartStatus::Abandoned]);
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'cart.cancelled'));
 
             return;
