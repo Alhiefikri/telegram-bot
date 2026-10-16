@@ -18,11 +18,21 @@ class Order extends Model
 
     protected $hidden = ['notification_email'];
 
+    protected static function booted(): void
+    {
+        static::updating(function (self $order): void {
+            if ($order->isDirty('balance_checkout_snapshot')) {
+                throw new \LogicException('Balance checkout snapshots are immutable.');
+            }
+        });
+    }
+
     protected function casts(): array
     {
         return [
             'order_status' => OrderStatus::class,
             'payment_status' => PaymentStatus::class,
+            'balance_checkout_snapshot' => 'array',
             'support_contact_value' => 'encrypted',
             'total_amount' => 'integer',
             'expires_at' => 'datetime',

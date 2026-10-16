@@ -68,6 +68,26 @@ final class UsdtBalanceCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
     }
 
+    public function test_explicit_idr_callback_cannot_bypass_the_shared_spending_pause(): void
+    {
+        $this->fakeTelegramHttp();
+        Queue::fake([SendTelegramReceipt::class]);
+        $customer = $this->fixture();
+        $ledger = app(\App\Services\StoreBalance\StoreBalanceLedger::class);
+        $ledger->creditTopUp($customer, 30_000, 'telegram-idr-fixture', 'telegram-idr-fixture');
+        $this->postTelegramWebhook($this->callbackUpdate(55508, 'choose-idr', 'checkout', [], 555001, 'private', 55501))->assertOk();
+        app(CustomerUsdtFundingPolicyManager::class)->pause(CustomerUsdtFundingPauseScope::Spending, 'Incident', User::factory()->create(), null);
+        $this->postTelegramWebhook($this->callbackUpdate(55509, 'paused-idr', 'checkout:store_balance', [], 555001, 'private', 55501))->assertOk();
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertDatabaseCount('payments', 0);
+        $this->assertSame(30_000, $ledger->snapshot($customer)->balance());
+        $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(0, \App\Models\StoreBalanceEntry::where('kind', 'purchase_debit')->count());
+        $this->assertSame(1, Product::sole()->stock);
+        $this->assertSame(0, Product::sole()->reserved_stock);
+        $this->assertNull(ProductStockItem::sole()->order_item_id);
+    }
+
     private function fixture(): Customer
     {
         $customer = Customer::factory()->create(['telegram_id' => 555001, 'locale' => 'en']);

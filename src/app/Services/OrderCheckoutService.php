@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\BalancePaymentPreference;
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
+use App\Models\BalanceRestoreGate;
 use App\Models\Cart;
 use App\Models\Customer;
 use App\Models\CustomerUsdtFundingPolicy;
@@ -13,6 +15,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Services\Catalog\CatalogFamilyIconResolver;
+use App\Services\Checkout\BalanceCheckoutRequest;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPaymentPlanWriter;
@@ -68,8 +71,14 @@ class OrderCheckoutService
         ?string $termsVersion = null,
         ?DateTimeInterface $termsAcceptedAt = null,
         ?ResellerPricingContext $resellerContext = null,
+        ?BalanceCheckoutRequest $balanceRequest = null,
     ): Order {
-        $paymentIntent ??= $this->providerResolver->resolve()->paymentIntent;
+        if ($balanceRequest !== null && $paymentIntent !== null) {
+            throw new InvalidCheckout('A preference request cannot override an explicit payment rail.');
+        }
+        $paymentIntent ??= $balanceRequest !== null
+            ? CheckoutPaymentIntents::storeBalance()
+            : $this->providerResolver->resolve()->paymentIntent;
         $this->assertStoreBalanceEligibility($cart, $paymentIntent);
         if (($termsVersion === null) !== ($termsAcceptedAt === null)) {
             throw new InvalidCheckout('Checkout terms snapshot is incomplete.');
@@ -88,7 +97,7 @@ class OrderCheckoutService
         for ($i = 0; $i < 5; $i++) {
             try {
                 $order = DB::transaction(
-                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext),
+                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext, $balanceRequest),
                     5,
                 );
 
@@ -111,12 +120,21 @@ class OrderCheckoutService
         ?string $termsVersion,
         ?DateTimeInterface $termsAcceptedAt,
         ?ResellerPricingContext $resellerContext = null,
+        ?BalanceCheckoutRequest $balanceRequest = null,
     ): Order {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->assertCheckoutCustomer($existing, $cart);
             $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
 
             return $existing;
+        }
+
+        $balanceCustomer = null;
+        if (in_array(strtolower(trim($paymentIntent->provider())), [PaymentProvider::STORE_BALANCE, PaymentProvider::USDT_BALANCE], true)) {
+            // CartService takes Customer before Cart. This shared prefix also
+            // fences preference edits and first-account FK creation vs top-ups.
+            $customerId = Cart::query()->whereKey($cart->id)->value('customer_id');
+            $balanceCustomer = Customer::query()->whereKey($customerId)->sharedLock()->firstOrFail();
         }
 
         $lockedCart = Cart::whereKey($cart->id)->lockForUpdate()->firstOrFail();
@@ -138,30 +156,40 @@ class OrderCheckoutService
         }
         $storeBalanceCustomer = null;
         $usdtBalanceCustomer = null;
-        if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::USDT_BALANCE) {
-            $usdtBalanceCustomer = Customer::query()->findOrFail($lockedCart->customer_id);
-            if ($usdtBalanceCustomer->telegram_id === null) {
-                throw new InvalidCheckout('USDT Balance checkout is available only for Telegram customers.');
+        $idrAccount = null;
+        $usdtAccount = null;
+        $resolvedPreference = null;
+        $provider = strtolower(trim($paymentIntent->provider()));
+        if ($balanceRequest !== null || in_array($provider, [PaymentProvider::STORE_BALANCE, PaymentProvider::USDT_BALANCE], true)) {
+            $customer = $balanceCustomer;
+            if ($customer === null || (int) $customer->id !== (int) $lockedCart->customer_id) {
+                throw new InvalidCheckout('Checkout Customer changed.');
             }
+            if ($customer->telegram_id === null) {
+                throw new InvalidCheckout('Balance checkout is available only for Telegram customers.');
+            }
+            $resolvedPreference = $balanceRequest === null
+                ? ($provider === PaymentProvider::STORE_BALANCE ? BalancePaymentPreference::IdrOnly : BalancePaymentPreference::UsdOnly)
+                : ($balanceRequest->preference ?? $customer->balance_payment_preference);
+            $currencies = $resolvedPreference->currencies();
 
-            // Cart → selected account → policy read barrier → maintenance →
-            // stock/supplier resources. Shared readers do not serialize all
-            // Customers; Owner pause writers take the exclusive policy lock.
-            $this->usdtBalance->lockForTransaction($usdtBalanceCustomer);
+            // Always IDR → USDT, regardless of preference. Both automatic
+            // candidates must be healthy before any inventory/supplier locks.
+            if (in_array('IDR', $currencies, true)) {
+                $storeBalanceCustomer = $customer;
+                $idrAccount = $this->storeBalance->lockForPurchase($customer);
+            }
+            if (in_array('USDT', $currencies, true)) {
+                $usdtBalanceCustomer = $customer;
+                $usdtAccount = $this->usdtBalance->lockForTransaction($customer);
+            }
             CustomerUsdtFundingPolicy::query()
                 ->where('singleton_key', CustomerUsdtFundingPolicy::SINGLETON_KEY)
                 ->sharedLock()->first();
-            $this->usdtFundingGate->assertSpendingAvailable();
-        }
-        if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::STORE_BALANCE) {
-            $storeBalanceCustomer = Customer::query()->findOrFail($lockedCart->customer_id);
-            if ($storeBalanceCustomer->telegram_id === null) {
-                throw new InvalidCheckout('Store Balance checkout is available only for Telegram customers.');
+            if (BalanceRestoreGate::query()->whereKey(BalanceRestoreGate::SINGLETON_ID)->sharedLock()->first() === null) {
+                throw new InvalidCheckout('Balance restore state is unavailable.');
             }
-
-            // Store Balance checkout and refund paths both acquire the account
-            // before any Product locks.
-            $this->storeBalance->lockForTransaction($storeBalanceCustomer);
+            $this->usdtFundingGate->assertSpendingAvailable();
         }
 
         // Every checkout rail acquires the maintenance singleton before any
@@ -198,8 +226,18 @@ class OrderCheckoutService
             $paymentIntent = $this->providerResolver->resolve(setting: $activeSetting)->paymentIntent;
         }
 
+        try {
+            $pricing = CheckoutPricingSnapshot::fromCartItems($items, $products, $this->pricing, $resellerContext);
+        } catch (InvalidArgumentException $exception) {
+            throw new InvalidCheckout(
+                'Checkout pricing is not available. Please try again later or contact support.',
+                previous: $exception,
+            );
+        }
+        if ($balanceRequest !== null) {
+            $paymentIntent = $balanceRequest->select($resolvedPreference, $pricing, $idrAccount?->balance, $usdtAccount?->balance_micro);
+        }
         $paymentPreparation = $this->paymentPreparations->for($paymentIntent);
-
         $preflightContext = new CheckoutPaymentPreflightContext(
             currentSetting: $activeSetting,
             requestedProvider: $paymentIntent->provider(),
@@ -211,14 +249,6 @@ class OrderCheckoutService
             }
 
             $preflight = CheckoutPaymentPreflight::none($preflightContext);
-        }
-        try {
-            $pricing = CheckoutPricingSnapshot::fromCartItems($items, $products, $this->pricing, $resellerContext);
-        } catch (InvalidArgumentException $exception) {
-            throw new InvalidCheckout(
-                'Checkout pricing is not available. Please try again later or contact support.',
-                previous: $exception,
-            );
         }
         $paymentPlan = $paymentPreparation->prepare(new CheckoutPaymentPreparationContext(
             cart: $lockedCart,
@@ -249,7 +279,18 @@ class OrderCheckoutService
             }
         }
 
-        $order = Order::create(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'terms_version' => $termsVersion, 'terms_accepted_at' => $termsAcceptedAt, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $pricing->idrTotal(), 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
+        $order = new Order(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'terms_version' => $termsVersion, 'terms_accepted_at' => $termsAcceptedAt, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $pricing->idrTotal(), 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
+        if ($resolvedPreference !== null) {
+            $order->forceFill(['balance_checkout_snapshot' => [
+                'preference' => $resolvedPreference->value,
+                'source' => $balanceRequest === null ? 'explicit_rail' : ($balanceRequest->preference === null ? 'account' : 'override'),
+                'currency' => $paymentPlan->paymentCurrency(),
+                'amount' => $paymentPlan->amount(),
+                'expected_idr_total' => $balanceRequest?->expectedIdrTotal,
+                'expected_usd_total_micro' => $balanceRequest?->expectedUsdTotalMicro,
+            ]]);
+        }
+        $order->save();
 
         $payment = $this->paymentPlanWriter->persist($order, $paymentPlan);
 

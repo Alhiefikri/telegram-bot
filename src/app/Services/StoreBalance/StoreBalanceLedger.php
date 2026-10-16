@@ -69,6 +69,15 @@ final class StoreBalanceLedger
         return $this->lockAccount($customer);
     }
 
+    /** Selection must prove health even when this wallet is not debited. */
+    public function lockForPurchase(Customer $customer): CustomerBalanceAccount
+    {
+        $account = $this->lockAccount($customer);
+        $this->assertProjectionIsConsistent($account, $customer);
+
+        return $account;
+    }
+
     public function credit(
         Customer $customer,
         int $amount,

@@ -125,3 +125,184 @@ State examples and typed source, receipt, accounting and outbox schemas/contract
 The source matrix and appendix cover ledger, checkout/payment preparation, historical external payment writers, top-up/manual/late/compensation, full/partial/external/remainder refund, supplier wallet/commitment/sync/deposit and warranty replacement. I1–I12 each have actual caller evidence, a gap classification and downstream owner. Relative links and appendix source lines are checked against the worktree; lock orders above were followed through nested calls. This proves the baseline documentation, not PostgreSQL runtime safety of future features.
 
 Reviewable PR description: “Document issue #537's actual economic writers and lock graph, with Proposed ADR-0019 for typed sources, separate USDT ledger, global receipt aliases/parent claims, accounting and durable work. Add glossary/map pointers and record open policy/custody/provider gates. Validation: source/lock/link audit; no runtime changes or production mutation. Event-first and historical Supplier late-lock remediation is specified for downstream implementation; no production or PostgreSQL race qualification claimed.”
+
+## S03 atomic dual-balance checkout (#620)
+
+Implementation update, 2026-10-16. [#620](https://github.com/Alhiefikri/telegram-bot/issues/620)
+implements [#617 sections 4.2 and 6](https://github.com/Alhiefikri/telegram-bot/issues/617)
+after #619's completed shared pricing cutover. This section supersedes the
+checkout prefix in the historical A0/U10 graph above. It does not activate an
+API, funding, custody or production deployment.
+
+### Current lock edges
+
+`OrderCheckoutService::checkoutOnce` resolves an existing checkout before new
+money locks. For a new internal balance purchase it acquires Customer shared
+before Cart, matching `CartService::activeCartFor`/`currentActiveCartFor`'s Customer-first
+ordering. The shared Customer row fences preference updates and avoids a late
+Customer FK lock while creating a missing second account. It also serializes
+against Customer-first top-up/adjustment writers without introducing an
+account-to-Customer edge.
+
+| Flow | Acquisition order and ownership |
+| --- | --- |
+| Explicit balance checkout | Customer shared → Cart → named account → funding policy shared → restore singleton shared → maintenance → CartItems by Product → Products by ID → Suppliers by ID → SKUs by ID → payment setting → newly inserted Order/Payment/items → paid lifecycle and inventory. |
+| Automatic preference checkout | Same chain, with **IDR account before USDT account**, even for `usd_first`; both are validated before Product locks. IDR uses `StoreBalanceLedger::lockForPurchase`, USDT uses `CustomerUsdtBalanceLedger::lockForTransaction`. Preference controls selection, never lock order. |
+| External checkout | Existing Cart → maintenance → CartItems/Products → Suppliers/SKUs → setting → rail-specific local preparation. No balance preference or new wallet locks. |
+| IDR top-up/compensation/adjustment | Existing Customer exclusive → IDR account → target/request/resolution/receipt resources → ledger. No later Cart, USDT account or Product lock. |
+| USDT top-up settlement | Existing Customer exclusive → USDT account → target/evidence/resolution/receipt resources → typed funding entry/accounting/outbound. Provider evidence is prepared before this chain. It never acquires IDR afterward. |
+| Whole refund / Admin refund review | Original selected account → Order → Payments by ID → supplier/inventory resource union → registered entitlement/remainder → original-currency ledger credit and durable effects. No Customer lock, other wallet, preference or spending barrier. |
+| Warranty / missing-unit refund | Original selected account → Order/Payments → Product/Supplier/SKU union, including historical unit/replacement resources → fulfillment/purchase/unit/claim → OrderRefund → capped ledger credit. Full-refund re-entry reuses the same account. Ambiguous supplier outcomes remain held/reviewed. |
+| Pause/policy writer | `CustomerUsdtFundingPolicyManager` takes policy exclusive before changing pauses. No account/Cart/Product acquisition afterward. Checkout's shared barrier fences both automatic selection and explicit IDR/USDT debit through commit. |
+| Restore open/close/replay-finalize | `BalanceRestoreGateService` takes restore singleton exclusive. New balance checkout holds its shared row through commit; a missing singleton fails closed. Replay/provider work precedes the short finalize transaction. |
+
+Re-locking an already held selected account inside the ledger/lifecycle is not a
+reverse edge. Refund/top-up writers never acquire the other wallet after their
+selected wallet. New automatic checkout therefore adds IDR → USDT, not USDT →
+IDR. Customer locks precede Cart/account locks; preference changes use ordinary
+Customer updates. A new adapter must not enter checkout while retaining
+Order/Payment, supplier, policy-exclusive or restore-exclusive locks.
+
+### Selection and authority
+
+`BalanceCheckoutRequest` carries a nullable trusted override and exact expected
+totals (whole IDR and micro-USDT). Null override reads the persisted Customer
+enum, default `idr_first`. A priced primary requires an expected total; a
+secondary without consent cannot be spent. All supplied candidates must still
+match the locked pricing snapshot before any selection. Stale secondary
+consent rejects even when primary funds suffice. Missing USD pricing can fall
+back to an authorized IDR quote; no conversion or split occurs.
+
+Both automatic wallets must be healthy, even when one lacks a price. Freeze,
+projection drift, missing trusted control state, spending/restore pause, stock
+failure and uncertain supplier fulfillment are never fallback signals. A failed
+checkout rolls back its Order/Payment, debit, allocations, reservations and
+transaction-created accounts. All new balance checkout rails now observe the
+same spending/restore barriers, extending the prior USDT-only spending scope;
+funding/rail pauses remain scope-specific and refunds stay available.
+
+`balance_checkout_snapshot` freezes resolved preference/source, currency,
+amount and expected totals on Order insertion. PostgreSQL and model guards
+reject later snapshot changes. Existing Orders retain null snapshots. The
+Payment and original debit still authorize full/warranty remainder refunds;
+public USD serializers must map existing internal USDT at the boundary, not
+rewrite money history. API durable request fingerprints/admission (#621/#623)
+and private preference controls (#627) remain their own tickets.
+
+### Disposable runtime evidence
+
+Standalone PHP bootstrapped the actual Laravel checkout/lifecycle against
+PostgreSQL 16 in `issue620_smoke_test`, separate from the race database. Initial
+typed disposable credits were IDR 20,000 and USDT 5,000,000 micro, with four
+local credential units. Queue dispatch was faked and HTTP was denied: this
+proves local transactions and durable obligations, not live provider funding,
+Telegram delivery or custody qualification.
+
+| Observed step | IDR balance | USDT micro balance | Available stock | Allocated units | Retired units |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Saved `usd_first`, paid 2,000,000 micro-USDT | 20,000 | 3,000,000 | 3 | 1 | 0 |
+| Same-key replay after preference and both prices changed | 20,000 | 3,000,000 | 3 | 1 | 0 |
+| USD quote 4,000,000 micro insufficient, authorized IDR 10,000 fallback | 10,000 | 3,000,000 | 2 | 2 | 0 |
+| IDR-only override rejected during spending pause | 10,000 | 3,000,000 | 2 | 2 | 0 |
+| Both original-currency refunds, each replayed | 20,000 | 5,000,000 | 2 | 2 | 2 |
+
+Every observed `reserved_stock` was zero after the operation. Final state was
+two Orders, two Payments, one purchase debit and one refund credit per currency.
+Refunds retired exposed credentials instead of returning them to stock.
+Preference/price changes did not change the accepted USDT 2,000,000 Payment or
+its selection snapshot. Zero HTTP requests occurred.
+
+Measured SQL/elapsed times in that cold, sequential fixture: saved-preference
+checkout 75 statements / 378.63 ms; replay 9 / 32.84 ms; fallback 75 / 152.66 ms;
+two refunds plus their replays 245 / 506.97 ms. These are local fixture
+observations, not throughput or production latency guarantees.
+
+A separate 20-purchase sequential run alternated `idr_first`/`usd_first` through
+actual checkout, starting with IDR 100,000, USDT 20,000,000 micro and 20 units.
+It ended with both balances zero, all 20 units allocated, stock and reservations
+zero, and no HTTP requests. Measured p50/p95 were 223.21/327.36 ms wall time and
+124.84/173.97 ms SQL time. SQL statement frequencies were 72 (10 purchases),
+74 (9) and 94 (1 cold path); these measurements include existing paid lifecycle
+and durable effects, not only candidate selection. Peak in-flight work was one,
+so this is not load/capacity evidence. `pg_stat_database.deadlocks` was zero in
+both disposable databases at the observed snapshot; one `pg_stat_activity`
+snapshot found no Lock wait. That point sample does not measure cumulative lock
+wait duration or prove contention-free operation.
+
+### PostgreSQL process results
+
+PostgreSQL **16.15**, isolated `issue620_test`, `RUN_CONCURRENCY_TESTS=1`:
+the existing checkout/refund/settlement lanes passed **26 tests / 312 assertions**.
+Two added three-process uncommitted pause/restore barrier cases then passed
+**2 tests / 30 assertions**. Each barrier writer retained its actual control
+row lock until `pg_blocking_pids` showed both opposite-preference checkout
+processes waiting; after commit both rejected, with IDR 15,000, USDT 2,000,000
+micro, zero Orders/Payments/allocations and both stock units unchanged.
+
+The other process cases assert:
+
+| Contention | Exact committed money and units enforced by the tests |
+| --- | --- |
+| Opposite automatic modes plus explicit bot IDR, last IDR funds | One IDR 15,000 debit; balances IDR 0 / USDT 1 micro; one allocated unit, two available, no reservations; two losing Carts remain active. |
+| Opposite automatic modes, one purchase in each currency | One IDR 15,000 debit and one USDT 2,000,000 micro debit; balances 0 / 0; two allocated units, stock/reservations 0. |
+| First creation of empty secondary account | One IDR purchase; both balances 0; one allocated and one available unit, no reservations. |
+| Last stock across Customers | One allocated unit and one paid Order; loser retains IDR 30,000 and USDT 5,000,000 micro. Winner retains IDR 15,000 / USDT 5,000,000 if IDR selected, or IDR 30,000 / USDT 3,000,000 if USDT selected. |
+| Automatic spend vs duplicate original refund and IDR/USDT top-ups (five processes) | Exactly one original USDT 2,000,000 refund. If new purchase is IDR: balances IDR 15,000 / USDT 4,000,000 micro; if USDT: IDR 30,000 / USDT 2,000,000 micro. Two allocated units, one retired, stock/reservations 0. |
+| Three matching automatic checkouts, then preference/price edit and replay | One USDT 2,000,000 debit/Payment, original `idr_first` account resolution retained; balances IDR 1 / USDT 0; one allocated unit. |
+| Warranty partial/full refund vs automatic checkout | Original refund sum exactly USDT 2,000,001 micro, capped to its debit; new automatic Order spends USDT 2,000,000. Final USDT balance 3,000,000 micro, no IDR entries; one new allocated unit. |
+| Actual Binance settlement vs automatic checkout | Verified fixture credit USDT 300,000 micro plus spend 200,000, ending at 600,000 micro; IDR 0; one allocated unit. Immutable receipt balance-after is exactly 600,000 or 800,000 according to credit/spend ordering. Provider HTTP asserts transaction depth 0; checkout asserts no HTTP. |
+
+The PostgreSQL guards also rejected an invalid preference and attempted Order
+snapshot relabeling. Existing accounting/receipt failure injection still rolled
+back money and inventory. Existing supplier-capacity and ambiguous-refund
+protections passed in the same lanes.
+
+Final database counters were **2 detected deadlocks in the race database and
+0 in the smoke database**, not the zero seen in the earlier point sample.
+Server logs locate both in the existing three-way **external Binance
+transaction/Order-ID alias** test: receipt/alias inserts contended with external
+checkout's `stock_notification_recipients` insert while top-up settlement held
+Customer rows. They recovered through existing transaction retries; that test
+still produced exactly one economic result. That external-rail scenario does
+not use `BalanceCheckoutRequest` or the new dual-wallet lock prefix. No detected
+deadlock in these logs involved the new dual-wallet or pause/restore cases.
+This result is not a claim that the repository's entire external notification/
+receipt graph is deadlock-free; that external edge remains a production
+qualification concern.
+
+Commands ran locally, not in CI:
+
+```sh
+php vendor/bin/phpunit tests/Feature/UsdtBalanceCheckoutTest.php \
+  tests/Feature/OrderCartDomainTest.php tests/Feature/UsdtOrderRefundTest.php \
+  tests/Feature/ProductResellerPricingTest.php
+
+# Disposable PostgreSQL connection variables selected issue620_test on port 15620.
+RUN_CONCURRENCY_TESTS=1 php vendor/bin/phpunit -c phpunit.postgres.xml \
+  tests/Feature/UsdtBalanceCheckoutPostgresConcurrencyTest.php \
+  tests/Feature/UsdtOrderRefundPostgresConcurrencyTest.php \
+  tests/Feature/UsdtTopUpSettlementPostgresConcurrencyTest.php
+
+RUN_CONCURRENCY_TESTS=1 php vendor/bin/phpunit -c phpunit.postgres.xml \
+  tests/Feature/UsdtBalanceCheckoutPostgresConcurrencyTest.php \
+  --filter test_control_writer_fences_both_preferences_before_any_debit
+
+php vendor/bin/phpunit tests/Feature/UsdtBalanceCheckoutTest.php \
+  tests/Feature/OrderCartDomainTest.php tests/Feature/UsdtOrderRefundTest.php \
+  tests/Feature/ProductResellerPricingTest.php \
+  tests/Feature/Telegram/UsdtBalanceCheckoutTest.php \
+  tests/Feature/Telegram/CartCheckoutTest.php \
+  tests/Feature/CheckoutMaintenanceTest.php tests/Feature/BuyMailFulfillmentTest.php
+```
+
+The first focused SQLite run passed 103 tests / 1,224 assertions; the final
+expanded checkout/Telegram/maintenance/supplier batch passed **158 tests /
+1,702 assertions**. New value/schema files passed Pint; touched existing import
+lists passed scoped formatting without restyling unrelated code. Standalone
+runtime scripts used the actual service/lifecycle rather than PHPUnit test
+methods; their opening credits and transport/queue restrictions were disposable
+fixtures. No live money, provider, Telegram, CI/CD, production access, activation,
+commit or push occurred.
+
+After verification, the standalone smoke/profile scripts, temporary formatter
+configuration, disposable PostgreSQL container and its volume were removed.

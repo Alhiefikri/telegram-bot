@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\BalancePaymentPreference;
 use Database\Factories\CustomerFactory;
 use Illuminate\Auth\Authenticatable as AuthenticatableTrait;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -20,7 +21,7 @@ class Customer extends Model implements Authenticatable
 
     protected function casts(): array
     {
-        return ['telegram_id' => 'integer', 'email_verified_at' => 'datetime', 'password' => 'hashed', 'auth_version' => 'integer', 'enrollment_version' => 'integer'];
+        return ['telegram_id' => 'integer', 'email_verified_at' => 'datetime', 'password' => 'hashed', 'auth_version' => 'integer', 'enrollment_version' => 'integer', 'balance_payment_preference' => BalancePaymentPreference::class];
     }
 
     public function routeNotificationForMail(): ?string

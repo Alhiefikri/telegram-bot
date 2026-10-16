@@ -2,11 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Enums\BalancePaymentPreference;
 use App\Enums\CartStatus;
+use App\Enums\CustomerUsdtFundingPauseScope;
 use App\Enums\InventoryMovementType;
 use App\Enums\PaymentStatus;
 use App\Enums\UsdtBalanceEntryKind;
+use App\Exceptions\CustomerUsdtFundingUnavailable;
+use App\Exceptions\InsufficientCheckoutBalance;
 use App\Exceptions\InsufficientStock;
+use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\InsufficientUsdtBalance;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -22,16 +27,23 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Models\User;
+use App\Services\Checkout\BalanceCheckoutRequest;
 use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\Operations\BalanceRestoreGateService;
 use App\Services\OrderCheckoutService;
+use App\Services\OrderLifecycle;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
+use App\Services\UsdtFunding\CustomerUsdtFundingPolicyManager;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Concerns\RunsPostgresWorkers;
 use Tests\Support\PostgresTestDatabase;
@@ -144,6 +156,239 @@ final class UsdtBalanceCheckoutPostgresConcurrencyTest extends TestCase
         $this->assertSame(0, $product->fresh()->reserved_stock);
         $this->assertNull($product->stockItems()->sole()->order_item_id);
         $this->assertSame(CartStatus::Active, $cart->fresh()->status);
+    }
+
+    public static function spendingControls(): array
+    {
+        return [['pause', 'spending_paused'], ['restore', 'restore_gate_open']];
+    }
+
+    #[DataProvider('spendingControls')]
+    public function test_control_writer_fences_both_preferences_before_any_debit(string $control, string $reason): void
+    {
+        $customer = $this->customer(2_000_000);
+        $this->fundIdr($customer, 15_000);
+        $product = $this->product(2);
+        $carts = [$this->cart($customer, $product), $this->cart($customer, $product)];
+        $owner = User::factory()->create();
+        $directory = $this->createWorkspace('dual-balance-control');
+        try {
+            $results = $this->runConcurrentWorkers(3, function (int $index) use ($control, $carts, $owner, $directory): string {
+                if ($index === 0) {
+                    DB::transaction(function () use ($control, $owner, $directory): void {
+                        if ($control === 'pause') {
+                            app(CustomerUsdtFundingPolicyManager::class)->pause(CustomerUsdtFundingPauseScope::Spending, 'Race incident', $owner, null);
+                        } else {
+                            app(BalanceRestoreGateService::class)->open(now()->subHour(), now(), 'Race restore', 'fixture-owner');
+                        }
+                        touch($directory.'/writer-holds-control');
+                        $deadline = microtime(true) + 10;
+                        do {
+                            DB::select('SELECT pg_stat_clear_snapshot()');
+                            $blocked = DB::selectOne("SELECT count(*) AS total FROM pg_stat_activity WHERE datname = current_database() AND application_name IN ('issue620-reader-1','issue620-reader-2') AND cardinality(pg_blocking_pids(pid)) > 0");
+                            if ((int) $blocked->total === 2) {
+                                return;
+                            }
+                            usleep(10_000);
+                        } while (microtime(true) < $deadline);
+                        throw new \RuntimeException('Both checkouts must wait behind uncommitted control state.');
+                    });
+
+                    return 'control_committed';
+                }
+                DB::statement("SET application_name = 'issue620-reader-{$index}'");
+                $this->waitForMarker($directory.'/writer-holds-control');
+                try {
+                    $this->preferenceCheckout($carts[$index - 1]->id, $index === 1 ? BalancePaymentPreference::IdrFirst : BalancePaymentPreference::UsdFirst);
+                } catch (CustomerUsdtFundingUnavailable $exception) {
+                    return $exception->reason->value;
+                }
+
+                throw new \RuntimeException('Checkout bypassed the financial control.');
+            });
+        } finally {
+            $this->cleanupWorkspace($directory);
+        }
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(['control_committed', $reason, $reason], array_column($results, 'value'));
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, DB::table('payments')->count());
+        $this->assertSame(15_000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(2_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(0, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+    }
+
+    public function test_opposite_preferences_create_empty_secondary_account_without_lock_inversion(): void
+    {
+        $customer = Customer::factory()->create();
+        $this->fundIdr($customer, 15_000);
+        $product = $this->product(2);
+        $carts = [$this->cart($customer, $product), $this->cart($customer, $product)];
+        $results = $this->runConcurrentWorkers(2, fn (int $index): string => $this->preferenceCheckout($carts[$index]->id, $index === 0 ? BalancePaymentPreference::IdrFirst : BalancePaymentPreference::UsdFirst));
+        $this->assertOneWinner($results, InsufficientCheckoutBalance::class);
+        $this->assertSame(1, Order::count());
+        $this->assertSame('IDR', Order::sole()->currency);
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+    }
+
+    public function test_opposite_automatic_preferences_and_explicit_bot_compete_for_one_purchase(): void
+    {
+        $customer = $this->customer(1);
+        $this->fundIdr($customer, 15_000);
+        $product = $this->product(3);
+        $carts = array_map(fn (): Cart => $this->cart($customer, $product), range(1, 3));
+        $results = $this->runConcurrentWorkers(3, function (int $index) use ($carts): string {
+            if ($index === 2) {
+                return (string) app(OrderCheckoutService::class)->checkout(Cart::findOrFail($carts[$index]->id), CheckoutPaymentIntents::storeBalance(), 'explicit-bot')->id;
+            }
+
+            return $this->preferenceCheckout($carts[$index]->id, $index === 0 ? BalancePaymentPreference::IdrFirst : BalancePaymentPreference::UsdFirst);
+        });
+        $this->assertCount(1, array_filter($results, fn (array $row): bool => $row['ok']), json_encode($results));
+        foreach (array_filter($results, fn (array $row): bool => ! $row['ok']) as $row) {
+            $this->assertContains($row['class'], [InsufficientCheckoutBalance::class, InsufficientStoreBalance::class]);
+        }
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(1, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, DB::table('store_balance_entries')->where('kind', 'purchase_debit')->count());
+        $this->assertSame(0, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(2, Cart::where('status', CartStatus::Active)->count());
+    }
+
+    public function test_opposite_preferences_spend_two_wallets_without_split_or_deadlock(): void
+    {
+        $customer = $this->customer(2_000_000);
+        $this->fundIdr($customer, 15_000);
+        $product = $this->product(2);
+        $carts = [$this->cart($customer, $product), $this->cart($customer, $product)];
+        $results = $this->runConcurrentWorkers(2, fn (int $index): string => $this->preferenceCheckout($carts[$index]->id, $index === 0 ? BalancePaymentPreference::IdrFirst : BalancePaymentPreference::UsdFirst));
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(['IDR', 'USDT'], Order::orderBy('currency')->pluck('currency')->all());
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, DB::table('store_balance_entries')->where('kind', 'purchase_debit')->count());
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(2, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+    }
+
+    public function test_automatic_requests_compete_for_last_stock_and_do_not_charge_loser(): void
+    {
+        $customers = [$this->customer(), $this->customer()];
+        foreach ($customers as $customer) {
+            $this->fundIdr($customer, 30_000);
+        }
+        $product = $this->product(1);
+        $carts = array_map(fn (Customer $customer): Cart => $this->cart($customer, $product), $customers);
+        $results = $this->runConcurrentWorkers(2, fn (int $index): string => $this->preferenceCheckout($carts[$index]->id, $index === 0 ? BalancePaymentPreference::IdrFirst : BalancePaymentPreference::UsdFirst));
+        $this->assertOneWinner($results, InsufficientStock::class);
+        $order = Order::with('payments')->sole();
+        foreach ($customers as $customer) {
+            $won = (int) $order->customer_id === (int) $customer->id;
+            $this->assertSame(30_000 - ($won && $order->currency === 'IDR' ? 15_000 : 0), app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+            $this->assertSame(5_000_000 - ($won && $order->currency === 'USDT' ? 2_000_000 : 0), app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        }
+        $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+    }
+
+    public function test_automatic_spend_contends_with_original_refund_and_both_currency_topups(): void
+    {
+        $customer = $this->customer(2_000_000);
+        $this->fundIdr($customer, 15_000);
+        $product = $this->product(2);
+        $old = app(OrderCheckoutService::class)->checkout($this->cart($customer, $product), CheckoutPaymentIntents::usdtBalance());
+        $cart = $this->cart($customer, $product);
+        $paymentId = $old->payments->sole()->id;
+        $results = $this->runConcurrentWorkers(5, function (int $index) use ($customer, $cart, $paymentId): string {
+            if ($index === 0) {
+                return $this->preferenceCheckout($cart->id, BalancePaymentPreference::UsdFirst);
+            }
+            if ($index === 1 || $index === 4) {
+                app(OrderLifecycle::class)->applyPaymentRefunded(\App\Models\Payment::findOrFail($paymentId));
+            } elseif ($index === 2) {
+                app(CustomerUsdtBalanceLedger::class)->creditVerifiedTopUp($customer,
+                    new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits(2_000_000), 'contended-usd', 'receipt-contended', 'v1'), 'contended-usd');
+            } else {
+                app(StoreBalanceLedger::class)->creditTopUp($customer, 15_000, 'contended-idr', 'contended-idr');
+            }
+            Http::assertNothingSent();
+
+            return 'posted';
+        });
+        $this->assertWorkersSucceeded($results);
+        $purchase = Order::findOrFail($results[0]['value']);
+        $this->assertSame(30_000 - ($purchase->currency === 'IDR' ? 15_000 : 0), app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(4_000_000 - ($purchase->currency === 'USDT' ? 2_000_000 : 0), app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(2, Order::count());
+        $this->assertSame(PaymentStatus::Paid, $purchase->payment_status);
+        $this->assertSame(PaymentStatus::Refunded, $old->fresh()->payment_status);
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::RefundCredit)->count());
+        $this->assertSame(2_000_000, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::RefundCredit)->sole()->amount_micro);
+        $this->assertSame(2, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(1, ProductStockItem::whereNotNull('retired_at')->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+    }
+
+    public function test_three_automatic_replays_preserve_account_resolution_after_preference_edit(): void
+    {
+        $customer = $this->customer(2_000_000);
+        $this->fundIdr($customer, 1);
+        $product = $this->product(1);
+        $cart = $this->cart($customer, $product);
+        $work = fn (): string => $this->preferenceCheckout($cart->id, null);
+        $results = $this->runConcurrentWorkers(3, $work);
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame([$results[0]['value'], $results[0]['value'], $results[0]['value']], array_column($results, 'value'));
+        $customer->forceFill(['balance_payment_preference' => BalancePaymentPreference::IdrOnly])->save();
+        $product->update(['usdt_price_amount' => null, 'price_amount' => 99_000]);
+        $this->assertSame($results[0]['value'], $work());
+        $order = Order::sole();
+        $this->assertSame('idr_first', $order->balance_checkout_snapshot['preference']);
+        $this->assertSame('account', $order->balance_checkout_snapshot['source']);
+        $this->assertSame('USDT', $order->currency);
+        $this->assertSame(2_000_000, $order->payments()->sole()->amount);
+        $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
+    }
+
+    public function test_database_rejects_invalid_preference_and_snapshot_relabeling(): void
+    {
+        $customer = $this->customer();
+        $product = $this->product(1);
+        $order = Order::findOrFail($this->preferenceCheckout($this->cart($customer, $product)->id, BalancePaymentPreference::UsdOnly));
+        $this->assertDatabaseConstraintRejects(fn () => DB::table('customers')->where('id', $customer->id)->update(['balance_payment_preference' => 'mixed']), 'customers_balance_payment_preference_check');
+        $this->assertDatabaseConstraintRejects(fn () => DB::table('orders')->where('id', $order->id)->update(['balance_checkout_snapshot' => json_encode(['currency' => 'USD'])]), 'balance_checkout_snapshot is immutable');
+        $this->assertSame('USDT', $order->fresh()->balance_checkout_snapshot['currency']);
+        $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+    }
+
+    private function preferenceCheckout(string $cartId, ?BalancePaymentPreference $preference): string
+    {
+        $order = app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cartId), checkoutKey: 'preference-'.$cartId,
+            balanceRequest: new BalanceCheckoutRequest($preference, 15_000, 2_000_000));
+        Http::assertNothingSent();
+
+        return (string) $order->id;
+    }
+
+    private function fundIdr(Customer $customer, int $amount): void
+    {
+        app(StoreBalanceLedger::class)->creditTopUp($customer, $amount, 'fixture-idr-'.$customer->id, 'fixture-idr-'.$customer->id);
     }
 
     private function customer(int $funds = 5_000_000): Customer

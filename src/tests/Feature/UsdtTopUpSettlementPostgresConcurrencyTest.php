@@ -284,13 +284,19 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
                 return 'checked';
             }
             $order = app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id),
-                CheckoutPaymentIntents::usdtBalance(), 'binance-credit-spend-race');
+                checkoutKey: 'binance-credit-spend-race',
+                balanceRequest: new \App\Services\Checkout\BalanceCheckoutRequest(\App\Enums\BalancePaymentPreference::UsdFirst, 10_000, 200_000));
             Http::assertNothingSent();
 
             return (string) $order->id;
         }, 'binance-credit-spend-race');
         $this->assertWorkersSucceeded($results);
         $this->assertSame(600_000, $ledger->snapshot($customer)->balanceMicro());
+        $accepted = \App\Models\Order::findOrFail($results[1]['value']);
+        $this->assertSame('USDT', $accepted->currency);
+        $this->assertSame('usd_first', $accepted->balance_checkout_snapshot['preference']);
+        $this->assertSame(1, ProductStockItem::where('order_item_id', $accepted->orderItems()->sole()->id)->count());
+        $this->assertSame(0, app(\App\Services\StoreBalance\StoreBalanceLedger::class)->snapshot($customer)->balance());
         $resolution = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->sole();
         $entry = CustomerUsdtBalanceEntry::findOrFail($resolution->entry_id);
         $this->assertSame(300_000, $entry->amount_micro);

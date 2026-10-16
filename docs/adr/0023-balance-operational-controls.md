@@ -29,3 +29,12 @@ Rejected: a single global "stop everything" switch (it would stall reconciliatio
 ## Limits
 
 The gate covers Customer USDT funding and spending; IDR Store Balance operations are paused through the existing Store Balance controls. The fixture custody adapter used by the disposable drill is test evidence, never a qualification: H1 custody, provider permission, legal review and production activation remain open. SQLite tests do not prove PostgreSQL locking or restore behavior; the disposable PostgreSQL lane does.
+
+Implementation extension (#620, canonical [#617 section 4.2](https://github.com/Alhiefikri/telegram-bot/issues/617)):
+all new internal balance checkouts now share the spending-policy and restore
+barriers, including explicit IDR and automatic fallback to IDR. This supersedes
+the USDT-only new-checkout scope above; it does not widen funding/rail pauses or
+block settlement/refund/reversal. Checkout holds policy and restore shared row
+locks through commit against their exclusive writers. Missing restore state
+fails closed for checkout. Original-currency refunds retain their existing
+account-first graph and never consult current preference.

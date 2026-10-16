@@ -59,9 +59,11 @@ preset list never creates a balance entry or changes any Customer projection.
   writing the projection.
 - Store Balance checkout is an internal full-payment rail. The canonical
   `OrderCheckoutService` transaction follows the common checkout lock order:
-  Cart, the Customer account for Store Balance, the Checkout Maintenance
-  singleton, CartItem/Product, then `ManualPaymentSetting`. Non-Store Balance
-  rails omit the account step. The transaction then debits the exact IDR
+  Customer (shared for balance rails), Cart, IDR account, USDT account when
+  automatic selection needs it, shared spending-policy/restore barriers,
+  Checkout Maintenance singleton, CartItem/Product, Supplier/SKU resources,
+  then `ManualPaymentSetting`. Explicit rails omit the other wallet; external
+  rails omit the Customer/wallet/barrier prefix. The transaction then debits the exact IDR
   Order total through this ledger and delegates paid state and fulfillment to
   `OrderLifecycle`.
 - Store Balance refunds are owned by `OrderLifecycle` and use the common
@@ -78,3 +80,22 @@ preset list never creates a balance entry or changes any Customer projection.
   than a numeric balance.
 - The check command is advisory evidence; a mismatch fails the command and
   requires operator action. Money is never silently repaired.
+
+## Dual-balance extension (#620)
+
+The [#617 currency contract](https://github.com/Alhiefikri/telegram-bot/issues/617)
+extends selection, not this ledger's financial authority. Customer preference
+and a trusted per-order override choose one fully affordable authorized currency
+inside canonical checkout. Both automatic wallets must be healthy, with IDR
+locked before USDT regardless of preferred currency. Expected totals authorize
+candidate prices; stale totals, drift, freeze, spending/restore pause and stock
+failure never cause fallback. Existing explicit IDR buttons remain IDR-only.
+
+New explicit and automatic IDR checkout also observes the existing spending and
+restore barriers. This deliberately extends ADR-0023's earlier USDT-only
+spending scope to prevent another-wallet bypass under #617. It does not pause
+funding settlement, refund, reconciliation or reversal. The immutable Order
+selection snapshot is descriptive; the actual Payment and original debit still
+authorize refunds. Historical financial currency is never relabeled.
+
+See [the current cross-flow lock graph and runtime evidence](../balance-a0-baseline.md#s03-atomic-dual-balance-checkout-620).

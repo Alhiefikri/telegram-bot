@@ -796,7 +796,14 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.usdt_balance.insufficient'));
 
             return;
-        } catch (UsdtBalanceFrozenException|UsdtBalanceProjectionMismatchException|CustomerUsdtFundingUnavailable) {
+        } catch (CustomerUsdtFundingUnavailable) {
+            $key = $paymentIntent->provider() === PaymentProvider::STORE_BALANCE
+                ? 'checkout.balance.recovery'
+                : 'checkout.usdt_balance.unavailable';
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, $key));
+
+            return;
+        } catch (UsdtBalanceFrozenException|UsdtBalanceProjectionMismatchException) {
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.usdt_balance.unavailable'));
 
             return;

@@ -16,7 +16,6 @@ use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\SupplierAccountUnit;
 use App\Models\TelegramOutboundEffect;
-use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
@@ -85,7 +84,8 @@ final class UsdtOrderRefundPostgresConcurrencyTest extends TestCase
 
                 return 'full';
             }
-            $order = app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), CheckoutPaymentIntents::usdtBalance(), 'refund-race-checkout');
+            $order = app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), checkoutKey: 'refund-race-checkout',
+                balanceRequest: new \App\Services\Checkout\BalanceCheckoutRequest(\App\Enums\BalancePaymentPreference::UsdFirst, 15_000, 2_000_000));
             Http::assertNothingSent();
 
             return (string) $order->id;
@@ -94,6 +94,13 @@ final class UsdtOrderRefundPostgresConcurrencyTest extends TestCase
         $this->assertSame(3_000_000, $this->balance($customer));
         $this->assertSame(2_000_001, (int) $this->refundEntries()->where('original_entry_id', $debit->entryId)->sum('amount_micro'));
         $this->assertSame(2, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::PurchaseDebit)->count());
+        $accepted = \App\Models\Order::findOrFail($results[2]['value']);
+        $this->assertSame('USDT', $accepted->currency);
+        $this->assertSame(2_000_000, $accepted->payments()->sole()->amount);
+        $this->assertSame('usd_first', $accepted->balance_checkout_snapshot['preference']);
+        $this->assertSame(1, ProductStockItem::where('order_item_id', $accepted->orderItems()->sole()->id)->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
         $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
         $this->assertSame(0, DB::table('store_balance_entries')->count());
         app(OrderLifecycle::class)->applyPaymentRefunded($payment);

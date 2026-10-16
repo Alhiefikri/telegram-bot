@@ -23,8 +23,8 @@ final class CustomerUsdtFundingUnavailable extends RuntimeException
             CustomerUsdtFundingAvailabilityReason::RailNotRegistered => 'Rail top-up USDT belum tersedia.',
             CustomerUsdtFundingAvailabilityReason::RailNotReady => 'Rail top-up USDT belum siap menerima dana.',
             CustomerUsdtFundingAvailabilityReason::RailPaused => 'Rail top-up USDT sedang dijeda Owner.',
-            CustomerUsdtFundingAvailabilityReason::SpendingPaused => 'Belanja USDT sedang dijeda Owner.',
-            CustomerUsdtFundingAvailabilityReason::RestoreGateOpen => 'Pemulihan basis data saldo belum diverifikasi; top-up dan belanja USDT ditahan.',
+            CustomerUsdtFundingAvailabilityReason::SpendingPaused => 'Belanja saldo sedang dijeda Owner.',
+            CustomerUsdtFundingAvailabilityReason::RestoreGateOpen => 'Pemulihan basis data saldo belum diverifikasi; top-up dan belanja saldo ditahan.',
             CustomerUsdtFundingAvailabilityReason::Available => 'Top-up USDT tersedia.',
         };
 
