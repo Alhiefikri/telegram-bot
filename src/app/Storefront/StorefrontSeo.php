@@ -155,6 +155,17 @@ final class StorefrontSeo
         );
     }
 
+    public function apiDocs(string $canonicalUrl): StorefrontPageMetadata
+    {
+        $brand = $this->brand();
+
+        return $this->publicPage(
+            title: 'Dokumentasi API Supplier | '.$brand,
+            description: 'Dokumentasi API supplier '.$brand.': endpoint saldo, katalog, dan pesanan dengan kutipan harga, idempotensi, contoh cURL, Python, JavaScript, dan PHP, serta berkas OpenAPI dan Markdown untuk mesin.',
+            canonicalUrl: $canonicalUrl,
+        );
+    }
+
     /**
      * @param  array<string, mixed>  $policy
      */

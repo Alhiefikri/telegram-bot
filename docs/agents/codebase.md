@@ -323,6 +323,20 @@ Bounded `telegram:recover-outbound` source discovery recovers missing API
 proof/review handoffs; the shared protocol retains sent/unknown semantics.
 Contract and evidence: [API notifications](../customer-api-orders.md#public-proof-and-private-owner-notifications-s09).
 
+Customer API public documentation (#626) is published from one canonical description in
+`App\ApiDocs\DocumentationSet`: `CustomerApiDocumentation` owns the operations, schemas,
+enums, bounds, budgets and machine error codes, `CustomerApiGuide` the bilingual
+explanations, `CustomerApiExamples` the runnable cURL/Python/JavaScript/PHP examples and
+`CustomerApiSamples` the JSON examples, while `DocumentationTables`, `OpenApiDocument`,
+`ReferenceMarkdown` and `LlmsIndex` render them. `StorefrontApiDocsController` serves
+`/api-docs`, `/api-docs/openapi.json` and `/api-docs/reference.md`; `StorefrontLlmsController`
+serves the root `/llms.txt`; `StorefrontSeo::apiDocs()` supplies metadata and the sitemap
+lists the page. The page is a standalone storefront document whose explanations, tables and
+code samples are readable without JavaScript; `storefront/api-docs.js` only reveals the
+optional language, sample, filter and copy controls. All artifacts render from the same
+classes, so a contract change lands in one place. Contract, accessibility decisions and
+evidence: [Customer API public documentation](../customer-api-public-docs.md).
+
 
 ### Product dan stock
 

@@ -12,6 +12,24 @@ final class StorefrontSitemap
     public const MAX_URLS = 1_000;
 
     /**
+     * Public canonical pages that always lead the sitemap, in order. Adding a
+     * public page extends this list instead of duplicating route names.
+     *
+     * @var list<string>
+     */
+    public const PUBLIC_ROUTES = [
+        'storefront.home',
+        'storefront.shop.index',
+        'storefront.guides.index',
+        'storefront.login-guide',
+        'storefront.api-docs.index',
+        'storefront.policies.privacy',
+        'storefront.policies.terms',
+        'storefront.policies.refund',
+        'storefront.policies.recovery',
+    ];
+
+    /**
      * @return list<array{loc:string,lastmod:?string}>
      */
     public function entries(): array
@@ -21,16 +39,7 @@ final class StorefrontSitemap
                 'loc' => route($routeName),
                 'lastmod' => null,
             ],
-            [
-                'storefront.home',
-                'storefront.shop.index',
-                'storefront.guides.index',
-                'storefront.login-guide',
-                'storefront.policies.privacy',
-                'storefront.policies.terms',
-                'storefront.policies.refund',
-                'storefront.policies.recovery',
-            ],
+            self::PUBLIC_ROUTES,
         );
         $familyLimit = max(0, $this->maxUrls(count($entries)) - count($entries));
         foreach (ProductFamily::query()

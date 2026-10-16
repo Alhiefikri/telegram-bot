@@ -536,8 +536,10 @@ not owned by this continuation.
   client instead of bypassing shared admission.
 - One Product and quantity 1–100 are supported. Canonical automatic checkout currently
   has no buyer-input fields; catalog `input_requirements` remains empty.
-- Own-order history/status/delivery is implemented in S07 above. Notifications remain
-  #625, public documentation publication #626 and Store Bot management #627.
+- Own-order history/status/delivery is implemented in S07 above. Notifications are
+  implemented by S09 #625, public documentation publication by S10 #626
+  ([Customer API public documentation](customer-api-public-docs.md)) and Store Bot
+  management remains #627.
 - Existing custody, funding, provider, pause and restore qualification gates remain
   fail-closed. This work does not authorize financial production exposure.
 

@@ -7,6 +7,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Storefront\StorefrontSitemap;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
@@ -121,7 +122,8 @@ class StorefrontSeoTest extends TestCase
 
     public function test_sitemap_contains_only_bounded_public_canonical_urls(): void
     {
-        config()->set('storefront.sitemap.max_urls', 10);
+        $publicRoutes = count(StorefrontSitemap::PUBLIC_ROUTES);
+        config()->set('storefront.sitemap.max_urls', $publicRoutes + 2);
         $first = Product::factory()->create(['name' => 'Sitemap Public One']);
         $second = Product::factory()->create(['name' => 'Sitemap Public Two']);
         $inactive = Product::factory()->create(['name' => 'Sitemap Inactive', 'is_active' => false]);
@@ -142,7 +144,8 @@ class StorefrontSeoTest extends TestCase
             $matches[1] ?? [],
         );
 
-        $this->assertCount(10, $locations);
+        $this->assertCount($publicRoutes + 2, $locations);
+        $this->assertContains(route('storefront.api-docs.index'), $locations);
         $this->assertContains(route('storefront.products.show', $first), $locations);
         $this->assertContains(route('storefront.products.show', $second), $locations);
         $this->assertNotContains(route('storefront.products.show', $inactive), $locations);

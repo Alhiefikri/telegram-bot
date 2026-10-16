@@ -387,4 +387,191 @@
       align-items: start;
     }
   }
+
+  /*
+   * Public API documentation (/api-docs/). Reasons, one line each:
+   * - the section list is sticky because the page is long and readers navigate by
+   *   endpoint or topic; below `lg` it becomes a native disclosure instead.
+   * - language and sample focusing only hides a block after JavaScript publishes a
+   *   choice on `[data-api-docs]`, so the initial HTML keeps every language and
+   *   every sample readable, and no control is ever present-but-dead.
+   * - code samples keep one fixed dark console surface in both themes because code
+   *   is data, and it must hold one predictable contrast on light paper and in dark.
+   */
+  .api-docs-toc {
+    position: sticky;
+    top: 6.5rem;
+    max-height: calc(100vh - 9rem);
+    overflow-y: auto;
+  }
+
+  .api-docs-toc a {
+    display: block;
+    min-height: 2.75rem;
+    padding: 0.375rem 0.625rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--sf-ink);
+    text-decoration: none;
+  }
+
+  .api-docs-toc a:hover {
+    background: var(--sf-surface-warm);
+    color: var(--sf-ink);
+  }
+
+  [data-api-docs][data-api-docs-lang="id"] [data-api-docs-block="en"],
+  [data-api-docs][data-api-docs-lang="en"] [data-api-docs-block="id"] {
+    display: none;
+  }
+
+  [data-api-docs][data-api-docs-example="curl"]
+    [data-api-docs-example-block]:not([data-api-docs-example-block="curl"]),
+  [data-api-docs][data-api-docs-example="python"]
+    [data-api-docs-example-block]:not([data-api-docs-example-block="python"]),
+  [data-api-docs][data-api-docs-example="javascript"]
+    [data-api-docs-example-block]:not(
+      [data-api-docs-example-block="javascript"]
+    ),
+  [data-api-docs][data-api-docs-example="php"]
+    [data-api-docs-example-block]:not([data-api-docs-example-block="php"]) {
+    display: none;
+  }
+
+  /*
+   * Documentation sections and endpoint articles are grid items; without this
+   * they inherit an `auto` minimum width from their widest table, which widened
+   * (and then clipped) the whole page instead of letting the table scroll inside
+   * its own container.
+   */
+  [data-api-docs] :where(section, article, details) {
+    min-width: 0;
+  }
+
+  .api-docs-prose {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.75;
+    color: var(--sf-muted);
+  }
+
+  .api-docs-prose > * + * {
+    margin-top: 0.85rem;
+  }
+
+  .api-docs-prose h3 {
+    font-family: "Space Grotesk", "Plus Jakarta Sans", sans-serif;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--sf-ink);
+  }
+
+  .api-docs-prose ul,
+  .api-docs-prose ol {
+    padding-left: 1.25rem;
+  }
+
+  .api-docs-prose ul {
+    list-style: disc;
+  }
+
+  .api-docs-prose ol {
+    list-style: decimal;
+  }
+
+  .api-docs-prose li + li {
+    margin-top: 0.4rem;
+  }
+
+  .api-docs-prose li::marker {
+    color: var(--sf-accent);
+    font-weight: 800;
+  }
+
+  .api-docs-prose strong {
+    font-weight: 800;
+    color: var(--sf-ink);
+  }
+
+  .api-docs-prose a {
+    color: var(--sf-accent);
+    font-weight: 800;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .api-docs-prose code,
+  .api-docs-table code {
+    padding: 0.05rem 0.3rem;
+    border: 1px solid var(--sf-border);
+    border-radius: 0.375rem;
+    background: var(--sf-surface-warm);
+    font-family:
+      ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    color: var(--sf-ink);
+  }
+
+  .api-docs-prose table,
+  .api-docs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+  }
+
+  /* Rendered Markdown tables have no scroll wrapper of their own, so they become
+     their own scroll container on narrow screens. */
+  .api-docs-prose table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .api-docs-prose th,
+  .api-docs-prose td,
+  .api-docs-table th,
+  .api-docs-table td {
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid var(--sf-border);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .api-docs-prose th,
+  .api-docs-table th {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--sf-muted);
+  }
+
+  .api-docs-code {
+    border: 1px solid var(--sf-trend-border);
+    border-radius: 0.75rem;
+    background: var(--sf-trend-panel);
+    box-shadow: 4px 4px 0 var(--sf-shadow);
+    color: var(--sf-trend-text);
+  }
+
+  .api-docs-code pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.8125rem;
+    line-height: 1.65;
+    tab-size: 4;
+  }
+
+  .api-docs-code code {
+    font-family:
+      ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--sf-trend-text);
+    white-space: pre;
+  }
+
+  .api-docs-code pre:focus-visible {
+    outline: 3px solid var(--sf-trend-accent);
+    outline-offset: 2px;
+  }
 }

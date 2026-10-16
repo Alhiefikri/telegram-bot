@@ -57,9 +57,11 @@ use App\Http\Controllers\CustomerEmailOtpController;
 use App\Http\Controllers\CustomerGoogleAuthenticationController;
 use App\Http\Controllers\CustomerIdentityController;
 use App\Http\Controllers\CustomerPasswordAuthenticationController;
+use App\Http\Controllers\StorefrontApiDocsController;
 use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontFunnelEventController;
 use App\Http\Controllers\StorefrontLegacyProductFamilyRedirectController;
+use App\Http\Controllers\StorefrontLlmsController;
 use App\Http\Controllers\StorefrontLoginGuideController;
 use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontPolicyController;
@@ -90,6 +92,10 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 Route::get('/robots.txt', StorefrontRobotsController::class)->name('storefront.robots');
 Route::get('/sitemap.xml', StorefrontSitemapController::class)->name('storefront.sitemap');
+Route::get('/llms.txt', StorefrontLlmsController::class)->name('storefront.llms');
+Route::get('/api-docs', [StorefrontApiDocsController::class, 'index'])->name('storefront.api-docs.index');
+Route::get('/api-docs/openapi.json', [StorefrontApiDocsController::class, 'openapi'])->name('storefront.api-docs.openapi');
+Route::get('/api-docs/reference.md', [StorefrontApiDocsController::class, 'reference'])->name('storefront.api-docs.reference');
 Route::get('/', StorefrontController::class)
     ->withoutMiddleware([
         StartSession::class,

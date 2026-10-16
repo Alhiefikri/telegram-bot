@@ -231,4 +231,6 @@ scripts were removed after verification.
 No production/TLS, real supplier request, live wallet funding, checkout,
 concurrent-money qualification, CI/CD, deployment, commit or push forms part of
 this evidence. Existing financial exposure gates remain unchanged. Public
-website/OpenAPI publishing belongs to S10; this is its implemented read contract.
+website/OpenAPI publishing is implemented by S10 #626 and documented in
+[Customer API public documentation](customer-api-public-docs.md); this file remains
+the implemented read contract.
