@@ -208,6 +208,93 @@ final class AdminProductWorkspaceTest extends TestCase
         $this->assertSame(85000, $product->quantityPriceTiers()->sole()->price_amount);
     }
 
+    public function test_price_section_saves_and_clears_independent_reseller_overrides_with_audit(): void
+    {
+        $this->manager();
+        $product = $this->tieredProduct();
+
+        $this->saveSection($product, 'price', ['reseller_price_amount' => 70000, 'reseller_usdt_price_amount' => '7.5'])
+            ->assertOk()
+            ->assertJsonPath('workspace.product.reseller_price_amount', 70000)
+            ->assertJsonPath('workspace.product.reseller_usdt_price_amount', '7.5');
+
+        $saved = $product->fresh();
+        $this->assertSame(70000, $saved->reseller_price_amount);
+        $this->assertSame(7_500_000, $saved->reseller_usdt_price_amount);
+        $this->assertSame(100000, $saved->price_amount);
+        $this->assertSame(10_000_000, $saved->usdt_price_amount);
+        $this->assertSame(90000, $saved->quantityPriceTiers()->sole()->price_amount);
+
+        $created = AuditLog::query()->where('action', 'product.updated')->latest('id')->firstOrFail();
+        $this->assertNull($created->old_values['reseller_price_amount']);
+        $this->assertSame(70000, $created->new_values['reseller_price_amount']);
+        $this->assertNull($created->old_values['reseller_usdt_price_amount']);
+        $this->assertSame(7_500_000, $created->new_values['reseller_usdt_price_amount']);
+
+        $this->saveSection($product->refresh(), 'price', ['reseller_price_amount' => null, 'reseller_usdt_price_amount' => null])
+            ->assertOk()
+            ->assertJsonPath('workspace.product.reseller_price_amount', null)
+            ->assertJsonPath('workspace.product.reseller_usdt_price_amount', null);
+
+        $this->assertNull($product->fresh()->reseller_price_amount);
+        $this->assertNull($product->fresh()->reseller_usdt_price_amount);
+        $this->assertSame(100000, $product->fresh()->price_amount);
+        $this->assertSame(1, $product->quantityPriceTiers()->count());
+    }
+
+    public function test_reseller_override_validation_rejects_unbacked_and_malformed_values_without_mutating(): void
+    {
+        $this->manager();
+        $product = $this->tieredProduct();
+        $auditCount = AuditLog::query()->count();
+
+        $this->saveSection($product, 'price', ['usdt_price_amount' => null, 'reseller_usdt_price_amount' => '7.5'])
+            ->assertUnprocessable()->assertJsonValidationErrors('reseller_usdt_price_amount');
+
+        $product->forceFill(['reseller_usdt_price_amount' => 7_500_000])->save();
+        $this->saveSection($product->refresh(), 'price', ['usdt_price_amount' => null])
+            ->assertUnprocessable()->assertJsonValidationErrors('reseller_usdt_price_amount');
+
+        $this->saveSection($product->refresh(), 'price', ['reseller_price_amount' => 0, 'reseller_usdt_price_amount' => 'abc'])
+            ->assertUnprocessable()->assertJsonValidationErrors(['reseller_price_amount', 'reseller_usdt_price_amount']);
+
+        $this->assertSame($auditCount, AuditLog::query()->count());
+        $this->assertSame(100000, $product->fresh()->price_amount);
+        $this->assertSame(10_000_000, $product->fresh()->usdt_price_amount);
+        $this->assertSame(7_500_000, $product->fresh()->reseller_usdt_price_amount);
+        $this->assertNull($product->fresh()->reseller_price_amount);
+    }
+
+    public function test_stale_reseller_price_save_conflicts_without_mutating_or_auditing(): void
+    {
+        $this->manager();
+        $product = $this->tieredProduct();
+        $token = $this->version($product, 'price');
+        $this->saveSection($product, 'price', ['reseller_price_amount' => 70000], $token)->assertOk();
+        $auditCount = AuditLog::query()->count();
+
+        $this->saveSection($product->refresh(), 'price', ['reseller_price_amount' => 60000], $token)->assertConflict();
+
+        $this->assertSame(70000, $product->fresh()->reseller_price_amount);
+        $this->assertSame($auditCount, AuditLog::query()->count());
+    }
+
+    public function test_support_and_finance_cannot_write_reseller_prices(): void
+    {
+        Queue::fake();
+        $product = $this->tieredProduct();
+
+        foreach ([UserRole::Support, UserRole::Finance] as $role) {
+            $this->actingAs(User::factory()->create(['role' => $role]));
+            $this->saveSection($product->refresh(), 'price', ['reseller_price_amount' => 1, 'reseller_usdt_price_amount' => '0.5'])
+                ->assertForbidden();
+        }
+
+        $this->assertNull($product->fresh()->reseller_price_amount);
+        $this->assertNull($product->fresh()->reseller_usdt_price_amount);
+        $this->assertSame(0, AuditLog::query()->count());
+    }
+
     public function test_missing_version_unknown_section_and_unsafe_guide_are_rejected_as_json(): void
     {
         $this->manager();

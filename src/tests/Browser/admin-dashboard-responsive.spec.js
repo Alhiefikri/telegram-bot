@@ -5663,6 +5663,65 @@ test("workspace quantity tiers remain bounded and persist at narrow mobile width
   await expectNoDocumentOverflow(page);
 });
 
+test("workspace creates edits and clears reseller prices without touching retail prices", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await login(page);
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
+  await page.locator("#workspace-trigger-price").click();
+  const form = page.locator('[data-workspace-form="price"]');
+  const retailIdr = form.locator('input[name="price_amount"]');
+  const retailUsdt = form.locator('input[name="usdt_price_amount"]');
+  const resellerIdr = form.locator('input[name="reseller_price_amount"]');
+  const resellerUsdt = form.locator('input[name="reseller_usdt_price_amount"]');
+  const save = form.getByRole("button", {
+    name: "Simpan harga dasar & tingkat",
+    exact: true,
+  });
+  const savePriceSection = () =>
+    Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          /\/admin\/products\/\d+$/.test(response.url()) &&
+          response.ok()
+      ),
+      save.click(),
+    ]);
+
+  await expect(retailIdr).toHaveValue("45000");
+  await expect(retailUsdt).toHaveValue("2");
+  await resellerIdr.fill("40000");
+  await resellerUsdt.fill("1.5");
+  await savePriceSection();
+  await page.reload();
+  await page.locator("#workspace-trigger-price").click();
+  await expect(resellerIdr).toHaveValue("40000");
+  await expect(resellerUsdt).toHaveValue("1.5");
+  await expect(retailIdr).toHaveValue("45000");
+  await expect(retailUsdt).toHaveValue("2");
+
+  await resellerIdr.fill("41000");
+  await resellerUsdt.fill("1.6");
+  await savePriceSection();
+  await page.reload();
+  await page.locator("#workspace-trigger-price").click();
+  await expect(resellerIdr).toHaveValue("41000");
+  await expect(resellerUsdt).toHaveValue("1.6");
+
+  await resellerIdr.fill("");
+  await resellerUsdt.fill("");
+  await savePriceSection();
+  await page.reload();
+  await page.locator("#workspace-trigger-price").click();
+  await expect(resellerIdr).toHaveValue("");
+  await expect(resellerUsdt).toHaveValue("");
+  await expect(retailIdr).toHaveValue("45000");
+  await expect(retailUsdt).toHaveValue("2");
+  await expectNoDocumentOverflow(page);
+});
+
 test("workspace preserves independent locale descriptions and warranty policies", async ({
   page,
 }) => {

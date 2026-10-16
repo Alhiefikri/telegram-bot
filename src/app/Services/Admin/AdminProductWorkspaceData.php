@@ -19,7 +19,7 @@ final class AdminProductWorkspaceData
 {
     public const SECTIONS = [
         'detail' => ['category_id', 'name', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url'],
-        'price' => ['price_amount', 'usdt_price_amount'],
+        'price' => ['price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount'],
         'appearance' => ['icon', 'is_active', 'featured_rank', 'image_path', 'telegram_image_path', 'telegram_channel_image_path'],
     ];
 
@@ -50,6 +50,7 @@ final class AdminProductWorkspaceData
         $fields = array_values(array_unique(array_merge(...array_values(self::SECTIONS))));
         $data = $product->only(['id', ...$fields]);
         $data['usdt_price_amount'] = $this->usdt($product->usdt_price_amount);
+        $data['reseller_usdt_price_amount'] = $this->usdt($product->reseller_usdt_price_amount);
         $priceTiers = $this->tiers->snapshot($product);
         $data['quantity_price_tiers'] = $priceTiers;
         foreach ($data['quantity_price_tiers'] as &$tier) {

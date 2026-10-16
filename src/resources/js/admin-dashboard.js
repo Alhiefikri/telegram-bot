@@ -38,6 +38,8 @@ const emptyProductForm = () => ({
   productIcon: "",
   productPrice: "",
   productUsdtPrice: "",
+  productResellerPrice: "",
+  productResellerUsdtPrice: "",
   productCategoryId: "",
   productFamilyId: "",
   productDescription: "",
@@ -975,6 +977,8 @@ export default function adminDashboard(initialState = {}) {
         productIcon: product.icon ?? "",
         productPrice: product.priceAmount,
         productUsdtPrice: product.usdtPriceAmount ?? "",
+        productResellerPrice: product.resellerPriceAmount ?? "",
+        productResellerUsdtPrice: product.resellerUsdtPriceAmount ?? "",
         productQuantityPriceTiers: normalizeProductQuantityPriceTiers(
           product.quantityPriceTiers ?? []
         ),

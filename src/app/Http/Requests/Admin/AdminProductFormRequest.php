@@ -3,7 +3,9 @@
 namespace App\Http\Requests\Admin;
 
 use App\Catalog\LocalizedProductCopy;
+use App\Models\Product;
 use App\Services\Admin\AdminProductQuantityPricing;
+use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\Telegram\TelegramProductContent;
 use Closure;
 use Illuminate\Contracts\Validation\Validator as ValidatorContract;
@@ -57,28 +59,32 @@ abstract class AdminProductFormRequest extends FormRequest
 
         $this->merge($normalized);
 
-        $value = trim((string) $this->input('usdt_price_amount', ''));
-        if ($value === '') {
-            return;
-        }
-
-        if (str_contains($value, '.')) {
-            [$whole, $fraction] = explode('.', $value, 2);
-
-            if ($fraction !== '') {
-                $fraction = rtrim($fraction, '0');
-                $value = $fraction === '' ? $whole : $whole.'.'.$fraction;
+        foreach (['usdt_price_amount', 'reseller_usdt_price_amount'] as $field) {
+            $value = trim((string) $this->input($field, ''));
+            if ($value === '') {
+                continue;
             }
-        }
 
-        if (preg_match('/^(\d+)(?:\.(\d{1,3}))?$/', $value, $m)) {
-            $this->merge(['usdt_price_amount' => ((int) $m[1] * 1_000_000) + (int) str_pad($m[2] ?? '', 6, '0')]);
+            if (str_contains($value, '.')) {
+                [$whole, $fraction] = explode('.', $value, 2);
+
+                if ($fraction !== '') {
+                    $fraction = rtrim($fraction, '0');
+                    $value = $fraction === '' ? $whole : $whole.'.'.$fraction;
+                }
+            }
+
+            if (preg_match('/^(\d+)(?:\.(\d{1,3}))?$/', $value, $m)) {
+                $this->merge([$field => ((int) $m[1] * 1_000_000) + (int) str_pad($m[2] ?? '', 6, '0')]);
+            }
         }
     }
 
     public function withValidator(ValidatorContract $validator): void
     {
         $validator->after(function (ValidatorContract $validator): void {
+            $this->validateResellerPriceInput($validator);
+
             if (! $this->hasQuantityPriceTiersInput() || $this->hasTierFieldErrors($validator)) {
                 $this->validateProductDetailBudget($validator);
 
@@ -156,6 +162,77 @@ abstract class AdminProductFormRequest extends FormRequest
         return false;
     }
 
+    /**
+     * A reseller dollar override is only valid while the Product keeps a base
+     * dollar price. The check uses the effective post-write values so a partial
+     * price save cannot leave an override without an eligible dollar price.
+     */
+    private function validateResellerPriceInput(ValidatorContract $validator): void
+    {
+        if ($this->hasResellerFieldErrors($validator)) {
+            return;
+        }
+
+        try {
+            app(ProductQuantityPricing::class)->validateResellerOverrides(
+                $this->effectivePriceAmount('reseller_price_amount'),
+                $this->effectivePriceAmount('usdt_price_amount'),
+                $this->effectivePriceAmount('reseller_usdt_price_amount'),
+            );
+        } catch (InvalidArgumentException $exception) {
+            $attribute = str_contains($exception->getMessage(), 'reseller IDR price')
+                ? 'reseller_price_amount'
+                : 'reseller_usdt_price_amount';
+
+            $validator->errors()->add($attribute, $this->resellerValidationMessage($exception));
+        }
+    }
+
+    private function hasResellerFieldErrors(ValidatorContract $validator): bool
+    {
+        foreach (array_keys($validator->errors()->toArray()) as $attribute) {
+            if ($attribute === 'reseller_price_amount'
+                || $attribute === 'reseller_usdt_price_amount'
+                || $attribute === 'usdt_price_amount') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function resellerValidationMessage(InvalidArgumentException $exception): string
+    {
+        $message = $exception->getMessage();
+
+        return match (true) {
+            str_contains($message, 'reseller IDR price') => 'Harga reseller IDR harus lebih besar dari 0.',
+            str_contains($message, 'must be positive') => 'Harga reseller USDT harus lebih besar dari 0.',
+            default => 'Harga reseller USDT hanya berlaku jika produk memiliki harga USDT dasar. Isi Harga USDT atau kosongkan harga reseller USDT.',
+        };
+    }
+
+    /**
+     * Resolve a price field the way the write will: the submitted value, or the
+     * persisted one when a partial section save omits it.
+     */
+    private function effectivePriceAmount(string $field): ?int
+    {
+        if ($this->exists($field)) {
+            $value = $this->input($field);
+
+            return $value === null || $value === '' ? null : (int) $value;
+        }
+
+        $product = $this->route('product');
+
+        if (! $product instanceof Product || $product->getAttribute($field) === null) {
+            return null;
+        }
+
+        return (int) $product->getAttribute($field);
+    }
+
     private function tierValidationMessage(InvalidArgumentException $exception): string
     {
         $message = $exception->getMessage();
@@ -180,6 +257,8 @@ abstract class AdminProductFormRequest extends FormRequest
             'icon' => ['nullable', 'string', 'max:32'],
             'price_amount' => ['required', 'integer', 'min:0'],
             'usdt_price_amount' => ['nullable', 'integer', 'min:0'],
+            'reseller_price_amount' => ['nullable', 'integer', 'min:1'],
+            'reseller_usdt_price_amount' => ['nullable', 'integer', 'min:1'],
             'quantity_price_tiers_present' => ['sometimes', 'boolean'],
             'quantity_price_tiers' => ['sometimes', 'array', 'max:5'],
             'quantity_price_tiers.*' => ['array'],
@@ -264,6 +343,10 @@ abstract class AdminProductFormRequest extends FormRequest
             'price_amount.required' => 'Harga wajib diisi.',
             'price_amount.integer' => 'Harga harus berupa angka tanpa pemisah.',
             'usdt_price_amount.integer' => 'Harga USDT harus berupa angka dengan maksimal 3 desimal.',
+            'reseller_price_amount.integer' => 'Harga reseller IDR harus berupa angka bulat.',
+            'reseller_price_amount.min' => 'Harga reseller IDR harus lebih besar dari 0.',
+            'reseller_usdt_price_amount.integer' => 'Harga reseller USDT harus berupa angka dengan maksimal 3 desimal.',
+            'reseller_usdt_price_amount.min' => 'Harga reseller USDT harus lebih besar dari 0.',
             'quantity_price_tiers.array' => 'Jadwal harga bertingkat tidak valid.',
             'quantity_price_tiers.max' => 'Jadwal harga bertingkat maksimal berisi 5 tingkat.',
             'quantity_price_tiers.*.minimum_quantity.required' => 'Minimum quantity wajib diisi.',

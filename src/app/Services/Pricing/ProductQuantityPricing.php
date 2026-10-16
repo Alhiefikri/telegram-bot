@@ -3,6 +3,7 @@
 namespace App\Services\Pricing;
 
 use App\Models\Product;
+use Illuminate\Support\Collection;
 use InvalidArgumentException;
 
 final class ProductQuantityPricing
@@ -13,7 +14,15 @@ final class ProductQuantityPricing
 
     public const MAXIMUM_TIER_QUANTITY = 20;
 
-    public function quote(Product $product, int $quantity): ProductPriceQuote
+    /**
+     * Quote one Product for a quantity and channel.
+     *
+     * A trusted reseller context lets a Product-owned reseller override replace
+     * that currency's schedule: the override is the final per-unit amount, never
+     * stacked with a quantity tier, applies independently per currency, and a
+     * null override keeps the normal quantity quote.
+     */
+    public function quote(Product $product, int $quantity, ?ResellerPricingContext $context = null): ProductPriceQuote
     {
         if ($quantity < 1) {
             throw new InvalidArgumentException('Product quantity must be positive.');
@@ -61,10 +70,19 @@ final class ProductQuantityPricing
             $nextTier ??= $tier;
         }
 
-        $effectiveIdrUnitAmount = $appliedTier?->priceAmount ?? $baseIdrUnitAmount;
+        $resellerIdrUnitAmount = $this->resellerUnitAmount($product->reseller_price_amount ?? null, $context !== null, 'IDR');
+        $resellerUsdtUnitAmount = $baseUsdtUnitAmount === null
+            ? null
+            : $this->resellerUnitAmount($product->reseller_usdt_price_amount ?? null, $context !== null, 'USDT');
+
+        $effectiveIdrUnitAmount = $resellerIdrUnitAmount ?? $appliedTier?->priceAmount ?? $baseIdrUnitAmount;
         $effectiveUsdtUnitAmount = $baseUsdtUnitAmount === null
             ? null
-            : ($appliedTier?->usdtPriceAmount ?? $baseUsdtUnitAmount);
+            : ($resellerUsdtUnitAmount ?? $appliedTier?->usdtPriceAmount ?? $baseUsdtUnitAmount);
+        $appliedTierMinimum = $resellerIdrUnitAmount === null ? $appliedTier?->minimumQuantity : null;
+        $appliedUsdtTierMinimum = $baseUsdtUnitAmount === null || $resellerUsdtUnitAmount !== null
+            ? null
+            : $appliedTier?->minimumQuantity;
 
         $baseIdrSubtotal = $this->multiply($baseIdrUnitAmount, $quantity, 'IDR');
         $baseUsdtSubtotal = $baseUsdtUnitAmount === null
@@ -84,10 +102,44 @@ final class ProductQuantityPricing
             usdtSubtotal: $effectiveUsdtUnitAmount === null
                 ? null
                 : $this->multiply($effectiveUsdtUnitAmount, $quantity, 'USDT'),
-            appliedTierMinimum: $appliedTier?->minimumQuantity,
+            appliedTierMinimum: $appliedTierMinimum,
+            appliedUsdtTierMinimum: $appliedUsdtTierMinimum,
+            resellerIdrUnitAmount: $resellerIdrUnitAmount,
+            resellerUsdtUnitAmount: $resellerUsdtUnitAmount,
             nextTier: $nextTier,
             orderedTiers: $orderedTiers,
         );
+    }
+
+    /**
+     * Quote one bounded page of Products for the same quantity and channel.
+     *
+     * The page must be loaded with the `quantityPriceTiers` relation
+     * (`with('quantityPriceTiers')`): one bulk relation query for the whole page
+     * is the caller's responsibility, and an unprepared page is rejected instead
+     * of falling back to one tier query per Product.
+     *
+     * @param  Collection<int, Product>  $products
+     * @return array<int, ProductPriceQuote> keyed by Product ID
+     */
+    public function quoteMany(Collection $products, int $quantity, ?ResellerPricingContext $context = null): array
+    {
+        foreach ($products as $product) {
+            if (! $product instanceof Product) {
+                throw new InvalidArgumentException('A Product price quote page requires Product models.');
+            }
+
+            if (! $product->relationLoaded('quantityPriceTiers')) {
+                throw new InvalidArgumentException('A Product price quote page requires the quantityPriceTiers relation to be eager loaded.');
+            }
+        }
+
+        $quotes = [];
+        foreach ($products as $product) {
+            $quotes[(int) $product->getKey()] = $this->quote($product, $quantity, $context);
+        }
+
+        return $quotes;
     }
 
     /**
@@ -98,6 +150,33 @@ final class ProductQuantityPricing
     public function validateSchedule(int $baseIdrUnitAmount, ?int $baseUsdtUnitAmount, array $tiers): void
     {
         $this->validatedTierValues($baseIdrUnitAmount, $baseUsdtUnitAmount, $tiers);
+    }
+
+    /**
+     * Validate the optional Product-owned reseller overrides before persistence.
+     *
+     * Both currencies are independent and optional; a reseller USDT override is
+     * only valid while the Product keeps a base USDT price, so an override can
+     * never manufacture dollar eligibility. The reseller IDR override is
+     * normalized when the caller passes it.
+     */
+    public function validateResellerOverrides(?int $resellerIdrUnitAmount, ?int $baseUsdtUnitAmount, ?int $resellerUsdtUnitAmount): void
+    {
+        if ($resellerIdrUnitAmount !== null && $resellerIdrUnitAmount <= 0) {
+            throw $this->invalidResellerPrice('the reseller IDR price must be positive');
+        }
+
+        if ($resellerUsdtUnitAmount === null) {
+            return;
+        }
+
+        if ($resellerUsdtUnitAmount <= 0) {
+            throw $this->invalidResellerPrice('the reseller USDT price must be positive');
+        }
+
+        if ($baseUsdtUnitAmount === null) {
+            throw $this->invalidResellerPrice('the reseller USDT price requires a base USDT price');
+        }
     }
 
     /**
@@ -154,6 +233,26 @@ final class ProductQuantityPricing
         return $normalized;
     }
 
+    /**
+     * A reseller override only applies inside a trusted reseller context.
+     *
+     * Persisted overrides are positive by contract; a non-positive stored amount
+     * fails closed instead of silently becoming free or retail pricing.
+     */
+    private function resellerUnitAmount(mixed $override, bool $hasResellerContext, string $currency): ?int
+    {
+        if (! $hasResellerContext || $override === null) {
+            return null;
+        }
+
+        $amount = (int) $override;
+        if ($amount <= 0) {
+            throw $this->invalidResellerPrice("the reseller {$currency} price must be positive");
+        }
+
+        return $amount;
+    }
+
     private function multiply(int $unitAmount, int $quantity, string $currency): int
     {
         if ($unitAmount > 0 && $quantity > intdiv(PHP_INT_MAX, $unitAmount)) {
@@ -170,5 +269,10 @@ final class ProductQuantityPricing
     private function invalidSchedule(string $reason): InvalidArgumentException
     {
         return new InvalidArgumentException("Product quantity price schedule is invalid: {$reason}.");
+    }
+
+    private function invalidResellerPrice(string $reason): InvalidArgumentException
+    {
+        return new InvalidArgumentException("Product reseller price schedule is invalid: {$reason}.");
     }
 }

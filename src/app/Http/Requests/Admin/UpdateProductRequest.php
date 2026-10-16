@@ -61,7 +61,7 @@ class UpdateProductRequest extends AdminProductFormRequest
     {
         parent::prepareForValidation();
         if ($this->input('workspace_section') === 'price') {
-            foreach (['price_amount', 'usdt_price_amount'] as $field) {
+            foreach (['price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount'] as $field) {
                 if (! $this->exists($field)) {
                     $this->merge([$field => $this->product()->getAttribute($field)]);
                 }

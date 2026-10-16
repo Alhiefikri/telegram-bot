@@ -61,7 +61,12 @@ function formsFor(workspace) {
   return {
     detail,
     price: {
-      ...pick(workspace.product, ["price_amount", "usdt_price_amount"]),
+      ...pick(workspace.product, [
+        "price_amount",
+        "usdt_price_amount",
+        "reseller_price_amount",
+        "reseller_usdt_price_amount",
+      ]),
       quantity_price_tiers: clone(
         workspace.product?.quantity_price_tiers ?? []
       ),

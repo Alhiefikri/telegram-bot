@@ -74,6 +74,12 @@ class AdminProductDashboardState
             $productUsdtPrice = $this->formatUsdtPriceInput($productUsdtPrice);
         }
 
+        $productResellerPrice = old('reseller_price_amount', $editingProduct['reseller_price_amount'] ?? '');
+        $productResellerUsdtPrice = old('reseller_usdt_price_amount', $editingProduct['reseller_usdt_price_amount'] ?? '');
+        if (request()->session()->hasOldInput('reseller_usdt_price_amount')) {
+            $productResellerUsdtPrice = $this->formatUsdtPriceInput($productResellerUsdtPrice);
+        }
+
         $productTierRows = old('quantity_price_tiers', $editingProduct['quantity_price_tiers'] ?? []);
         $productTierRows = is_array($productTierRows) ? array_values($productTierRows) : [];
         // Reopen the language tab that owns the rejected copy.
@@ -139,6 +145,8 @@ class AdminProductDashboardState
                 'productIcon' => old('icon', $editingProduct['icon'] ?? ''),
                 'productPrice' => old('price_amount', $editingProduct['price_amount'] ?? ''),
                 'productUsdtPrice' => $productUsdtPrice,
+                'productResellerPrice' => $productResellerPrice,
+                'productResellerUsdtPrice' => $productResellerUsdtPrice,
                 'productCategoryId' => old('category_id', $editingProduct['category_id'] ?? ''),
                 'productFamilyId' => old('product_family_id', $editingProduct['family_id'] ?? ''),
                 'productDescription' => old('description', $editingProduct['description'] ?? ''),

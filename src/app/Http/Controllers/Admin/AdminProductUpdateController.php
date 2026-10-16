@@ -50,7 +50,7 @@ class AdminProductUpdateController extends Controller
                 if ($section !== null) {
                     abort_unless(hash_equals($workspace->version($locked, $section), $validated['workspace_version']), 409, 'Bagian ini telah berubah. Muat ulang sebelum menyimpan.');
                 }
-                $auditFields = ['category_id', 'name', 'icon', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock'];
+                $auditFields = ['category_id', 'name', 'icon', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock'];
                 $oldValues = $locked->only($auditFields);
                 $tierAudit = [
                     'before' => $tierPricing->snapshot($locked),
@@ -78,6 +78,8 @@ class AdminProductUpdateController extends Controller
                         'usage_guide_url' => $validated['usage_guide_url'] ?? null,
                         'price_amount' => (int) $validated['price_amount'],
                         'usdt_price_amount' => $validated['usdt_price_amount'] ?? null,
+                        'reseller_price_amount' => $request->exists('reseller_price_amount') ? ($validated['reseller_price_amount'] ?? null) : $locked->reseller_price_amount,
+                        'reseller_usdt_price_amount' => $request->exists('reseller_usdt_price_amount') ? ($validated['reseller_usdt_price_amount'] ?? null) : $locked->reseller_usdt_price_amount,
                         'currency' => 'IDR',
                         'is_active' => $request->boolean('is_active'),
                     ]);
@@ -99,6 +101,17 @@ class AdminProductUpdateController extends Controller
                     } catch (\InvalidArgumentException) {
                         throw ValidationException::withMessages(['quantity_price_tiers' => 'Harga dasar harus mempertahankan jadwal harga bertingkat yang valid.']);
                     }
+                }
+                try {
+                    app(ProductQuantityPricing::class)->validateResellerOverrides(
+                        $locked->reseller_price_amount === null ? null : (int) $locked->reseller_price_amount,
+                        $locked->usdt_price_amount === null ? null : (int) $locked->usdt_price_amount,
+                        $locked->reseller_usdt_price_amount === null ? null : (int) $locked->reseller_usdt_price_amount,
+                    );
+                } catch (\InvalidArgumentException $exception) {
+                    throw ValidationException::withMessages([
+                        str_contains($exception->getMessage(), 'reseller IDR price') ? 'reseller_price_amount' : 'reseller_usdt_price_amount' => 'Harga reseller USDT hanya berlaku jika produk memiliki harga USDT dasar. Isi Harga USDT atau kosongkan harga reseller USDT.',
+                    ]);
                 }
                 $locked->save();
                 if ($request->hasQuantityPriceTiersInput()) {

@@ -17,6 +17,8 @@ const fixture = () => ({
     delivery_note: "Catatan privat",
     price_amount: 15000,
     usdt_price_amount: "1.250",
+    reseller_price_amount: 13000,
+    reseller_usdt_price_amount: "1.1",
     quantity_price_tiers: [
       { minimum_quantity: 2, price_amount: 14000, usdt_price_amount: "1.100" },
     ],
@@ -238,12 +240,28 @@ test("manual price save retains USDT and tier schedule without posting supplier 
     body = JSON.parse(options.body);
     return response({ workspace: fixture() });
   });
+  assert.equal(state.draft.price.reseller_price_amount, 13000);
+  assert.equal(state.draft.price.reseller_usdt_price_amount, "1.1");
   await state.save("price");
   assert.equal(body.quantity_price_tiers_present, 1);
   assert.equal(body.usdt_price_amount, "1.250");
+  assert.equal(body.reseller_price_amount, 13000);
+  assert.equal(body.reseller_usdt_price_amount, "1.1");
   assert.equal(body.quantity_price_tiers[0].usdt_price_amount, "1.100");
   assert.equal("mode" in body, false);
   assert.equal("name" in body, false);
+});
+test("manual price save clears reseller overrides with empty values", async () => {
+  let body;
+  const state = create(async (_url, options) => {
+    body = JSON.parse(options.body);
+    return response({ workspace: fixture() });
+  });
+  state.draft.price.reseller_price_amount = "";
+  state.draft.price.reseller_usdt_price_amount = "";
+  await state.save("price");
+  assert.equal(body.reseller_price_amount, "");
+  assert.equal(body.reseller_usdt_price_amount, "");
 });
 test("policy uses policy version and exact basis points, never overwrites manual/tier fields", async () => {
   let body, url;

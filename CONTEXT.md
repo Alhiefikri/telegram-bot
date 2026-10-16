@@ -353,6 +353,10 @@ _Avoid_: Menu message, home message, reply keyboard menu, pinned message
 A Product-owned pricing rule that replaces the base per-unit catalog amount when one Cart Item reaches its minimum quantity; the applicable rule with the greatest reached minimum wins. It may define paired IDR and USDT amounts, applies only to that Product's quantity, and becomes immutable commercial history only through the Order Item snapshot created at checkout.
 _Avoid_: coupon, percentage discount, customer membership tier, Product variant, cart-wide bulk total
 
+**Reseller Price**:
+An optional Product-owned per-unit price for one currency that replaces that currency's normal quantity schedule for the Reseller (API) channel only. It is edited on the same Product as the retail price, applies independently per currency, never stacks with a Quantity Price Tier, and a null value keeps the normal quantity quote. It becomes immutable commercial history only through the Order Item snapshot created at checkout.
+_Avoid_: negotiated per-reseller rate, customer membership price, coupon, discount campaign, retail repricing
+
 **Supplier**:
 A private external shop connection from which the store acquires digital products for customer Orders. Its identity, credentials, prices and account balance are operator information, not customer catalog content.
 _Avoid_: Payment Provider, customer shop

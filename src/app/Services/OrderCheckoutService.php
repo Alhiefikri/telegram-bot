@@ -27,6 +27,7 @@ use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
 use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Pricing\ProductQuantityPricing;
+use App\Services\Pricing\ResellerPricingContext;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -66,6 +67,7 @@ class OrderCheckoutService
         ?string $checkoutKey = null,
         ?string $termsVersion = null,
         ?DateTimeInterface $termsAcceptedAt = null,
+        ?ResellerPricingContext $resellerContext = null,
     ): Order {
         $paymentIntent ??= $this->providerResolver->resolve()->paymentIntent;
         $this->assertStoreBalanceEligibility($cart, $paymentIntent);
@@ -86,7 +88,7 @@ class OrderCheckoutService
         for ($i = 0; $i < 5; $i++) {
             try {
                 $order = DB::transaction(
-                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt),
+                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext),
                     5,
                 );
 
@@ -108,6 +110,7 @@ class OrderCheckoutService
         CheckoutPaymentPreflight $preflight,
         ?string $termsVersion,
         ?DateTimeInterface $termsAcceptedAt,
+        ?ResellerPricingContext $resellerContext = null,
     ): Order {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->assertCheckoutCustomer($existing, $cart);
@@ -210,7 +213,7 @@ class OrderCheckoutService
             $preflight = CheckoutPaymentPreflight::none($preflightContext);
         }
         try {
-            $pricing = CheckoutPricingSnapshot::fromCartItems($items, $products, $this->pricing);
+            $pricing = CheckoutPricingSnapshot::fromCartItems($items, $products, $this->pricing, $resellerContext);
         } catch (InvalidArgumentException $exception) {
             throw new InvalidCheckout(
                 'Checkout pricing is not available. Please try again later or contact support.',

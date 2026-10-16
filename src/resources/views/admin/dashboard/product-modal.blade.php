@@ -96,6 +96,20 @@
                                                         </div>
 
                                                         <div>
+                                                            <x-admin-dashboard.field-label for="product-reseller-price">Harga Reseller IDR (opsional)</x-admin-dashboard.field-label>
+                                                            <x-admin-dashboard.input type="number" id="product-reseller-price" name="reseller_price_amount" min="1" step="1" inputmode="numeric" placeholder="20000" class="mt-1.5" x-model="productResellerPrice" />
+                                                            @error('reseller_price_amount', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                                                            @error('reseller_price_amount', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                                                        </div>
+
+                                                        <div>
+                                                            <x-admin-dashboard.field-label for="product-reseller-usdt-price">Harga Reseller USDT (opsional)</x-admin-dashboard.field-label>
+                                                            <x-admin-dashboard.input type="number" id="product-reseller-usdt-price" name="reseller_usdt_price_amount" min="0.001" step="0.001" inputmode="decimal" placeholder="0.4" class="mt-1.5" x-model="productResellerUsdtPrice" />
+                                                            @error('reseller_usdt_price_amount', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                                                            @error('reseller_usdt_price_amount', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                                                        </div>
+
+                                                        <div>
                                                             <x-admin-dashboard.field-label for="product-category">Kategori</x-admin-dashboard.field-label>
                                                             <x-admin-dashboard.select id="product-category" name="category_id" class="mt-1.5" x-model="productCategoryId">
                                                                 <option value="">— Pilih —</option>

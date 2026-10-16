@@ -244,6 +244,9 @@ Menyimpan katalog produk.
 | name | string | indexed | Nama produk. |
 | description | text | not null | Deskripsi produk. |
 | price_amount | bigint | not null | Harga dalam minor unit. |
+| usdt_price_amount | bigint | nullable | Harga USDT dalam micro-USDT (1 USDT = 1.000.000). |
+| reseller_price_amount | bigint | nullable | Harga reseller IDR per unit untuk channel API; `null` memakai harga retail. |
+| reseller_usdt_price_amount | bigint | nullable | Harga reseller USDT per unit dalam micro-USDT; butuh `usdt_price_amount` dan `null` memakai harga retail. |
 | currency | string(3) | default `IDR` | Mata uang. |
 | stock | integer | default 0 | Stok tersedia. |
 | reserved_stock | integer | default 0 | Stok yang sedang dikunci checkout. |

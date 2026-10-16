@@ -316,6 +316,115 @@ class AdminDashboardProductFormsTest extends TestCase
         $this->assertSame(0, ProductPriceChangeEvent::query()->count());
     }
 
+    public function test_admin_can_create_edit_and_clear_reseller_prices_from_the_product_modal(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+        $this->actingAs($admin)
+            ->from('/admin?tab=produk')
+            ->post(route('admin.products.store'), [
+                'name' => 'Reseller Priced Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'reseller_price_amount' => '45000',
+                'reseller_usdt_price_amount' => '1.75',
+                'description' => 'Produk dengan harga reseller.',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-1');
+
+        $product = Product::query()->where('name', 'Reseller Priced Product')->firstOrFail();
+        $this->assertSame(45000, $product->reseller_price_amount);
+        $this->assertSame(1_750_000, $product->reseller_usdt_price_amount);
+        $this->assertSame(50000, $product->price_amount);
+        $this->assertSame(2_000_000, $product->usdt_price_amount);
+
+        $created = AuditLog::query()->where('action', 'product.created')->latest('id')->firstOrFail();
+        $this->assertSame(45000, $created->new_values['reseller_price_amount']);
+        $this->assertSame(1_750_000, $created->new_values['reseller_usdt_price_amount']);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Reseller Priced Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'reseller_price_amount' => '40000',
+                'reseller_usdt_price_amount' => '1.5',
+                'description' => 'Produk dengan harga reseller.',
+                'is_active' => '1',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $updated = AuditLog::query()->where('action', 'product.updated')->latest('id')->firstOrFail();
+        $this->assertSame(45000, $updated->old_values['reseller_price_amount']);
+        $this->assertSame(40000, $updated->new_values['reseller_price_amount']);
+        $this->assertSame(1_750_000, $updated->old_values['reseller_usdt_price_amount']);
+        $this->assertSame(1_500_000, $updated->new_values['reseller_usdt_price_amount']);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'Reseller Priced Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'reseller_price_amount' => '',
+                'reseller_usdt_price_amount' => '',
+                'description' => 'Produk dengan harga reseller.',
+                'is_active' => '1',
+            ])
+            ->assertRedirect('/admin?tab=produk#product-'.$product->id);
+
+        $this->assertNull($product->fresh()->reseller_price_amount);
+        $this->assertNull($product->fresh()->reseller_usdt_price_amount);
+        $this->assertSame(50000, $product->fresh()->price_amount);
+        $this->assertSame(2_000_000, $product->fresh()->usdt_price_amount);
+    }
+
+    public function test_reseller_price_validation_rejects_unbacked_and_malformed_values_from_the_modal(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create([
+            'name' => 'No USDT Product',
+            'description' => 'Tanpa harga USDT.',
+            'price_amount' => 50000,
+            'usdt_price_amount' => null,
+        ]);
+        $auditCount = AuditLog::query()->count();
+
+        $this->actingAs($admin)
+            ->followingRedirects()
+            ->from('/admin?tab=produk')
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'No USDT Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '',
+                'reseller_price_amount' => '45000',
+                'reseller_usdt_price_amount' => '1.5',
+                'description' => 'Tanpa harga USDT.',
+                'is_active' => '1',
+            ])
+            ->assertOk()
+            ->assertSee('Periksa kembali field produk yang ditandai.')
+            ->assertSee('\u0022productResellerPrice\u0022:\u002245000', false)
+            ->assertSee('\u0022productResellerUsdtPrice\u0022:\u00221.5', false);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.products.update', $product), [
+                'name' => 'No USDT Product',
+                'price_amount' => '50000',
+                'usdt_price_amount' => '2',
+                'reseller_price_amount' => '0',
+                'reseller_usdt_price_amount' => 'abc',
+                'description' => 'Tanpa harga USDT.',
+                'is_active' => '1',
+            ])
+            ->assertSessionHasErrors(['reseller_price_amount', 'reseller_usdt_price_amount'], null, 'productUpdate');
+
+        $this->assertSame($auditCount, AuditLog::query()->count());
+        $this->assertNull($product->fresh()->reseller_price_amount);
+        $this->assertNull($product->fresh()->reseller_usdt_price_amount);
+        $this->assertNull($product->fresh()->usdt_price_amount);
+        $this->assertSame(50000, $product->fresh()->price_amount);
+    }
+
     public function test_admin_can_update_and_clear_optional_product_icon(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

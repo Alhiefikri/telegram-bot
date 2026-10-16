@@ -5,11 +5,17 @@ namespace App\Services\Checkout;
 use App\Models\Product;
 use App\Services\Pricing\ProductPriceQuote;
 use App\Services\Pricing\ProductQuantityPricing;
+use App\Services\Pricing\ResellerPricingContext;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
 
 /**
  * The single pricing snapshot shared by Order creation and payment assembly.
+ *
+ * The snapshot owns the priced channel: retail callers build it with no context
+ * and the reseller channel passes one trusted {@see ResellerPricingContext}, so
+ * a quote preview and the charged Order total observe the same products,
+ * currencies and per-unit precedence.
  *
  * Product and tier reads happen before construction. Checkout constructs this
  * value after acquiring Product locks; presentation previews may construct an
@@ -29,9 +35,14 @@ final readonly class CheckoutPricingSnapshot
     public ?int $usdtTotal;
 
     /**
+     * Trusted reseller context the quotes were built for, or null for retail.
+     */
+    public ?ResellerPricingContext $resellerContext;
+
+    /**
      * @param  array<int, ProductPriceQuote>  $quotes
      */
-    public function __construct(array $quotes)
+    public function __construct(array $quotes, ?ResellerPricingContext $resellerContext = null)
     {
         if ($quotes === []) {
             throw new InvalidArgumentException('A checkout pricing snapshot requires at least one quote.');
@@ -65,10 +76,14 @@ final readonly class CheckoutPricingSnapshot
         $this->quotes = $normalizedQuotes;
         $this->idrTotal = $idrTotal;
         $this->usdtTotal = $hasCompleteUsdtTotal ? $usdtTotal : null;
+        $this->resellerContext = $resellerContext;
     }
 
     /**
      * Quote every Cart Item once after the caller has acquired Product locks.
+     *
+     * The channel is decided here once: retail callers pass no context, and only
+     * a trusted authenticated boundary may supply a reseller context.
      *
      * @param  Collection<int, object>  $items
      * @param  Collection<int, Product>  $products
@@ -77,6 +92,7 @@ final readonly class CheckoutPricingSnapshot
         Collection $items,
         Collection $products,
         ProductQuantityPricing $pricing,
+        ?ResellerPricingContext $resellerContext = null,
     ): self {
         if ($items->isEmpty()) {
             throw new InvalidArgumentException('A checkout pricing snapshot requires at least one Cart Item.');
@@ -104,10 +120,10 @@ final readonly class CheckoutPricingSnapshot
                 throw new InvalidArgumentException('A checkout Cart cannot contain duplicate Product quotes.');
             }
 
-            $quotes[$productId] = $pricing->quote($product, (int) ($item->quantity ?? 0));
+            $quotes[$productId] = $pricing->quote($product, (int) ($item->quantity ?? 0), $resellerContext);
         }
 
-        return new self($quotes);
+        return new self($quotes, $resellerContext);
     }
 
     public function quoteForProduct(int $productId): ProductPriceQuote
@@ -140,6 +156,16 @@ final readonly class CheckoutPricingSnapshot
     public function usdtTotal(): ?int
     {
         return $this->usdtTotal;
+    }
+
+    public function isResellerChannel(): bool
+    {
+        return $this->resellerContext !== null;
+    }
+
+    public function resellerOrigin(): ?string
+    {
+        return $this->resellerContext?->origin;
     }
 
     private function add(int $total, int $amount, string $currency): int

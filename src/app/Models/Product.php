@@ -10,8 +10,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use InvalidArgumentException;
 
-#[Fillable(['category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'family_id', 'family_order', 'option_label', 'name', 'icon', 'custom_emoji_id', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank'])]
+#[Fillable(['category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'family_id', 'family_order', 'option_label', 'name', 'icon', 'custom_emoji_id', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank'])]
 class Product extends Model
 {
     /** @use HasFactory<ProductFactory> */
@@ -21,7 +22,28 @@ class Product extends Model
 
     protected function casts(): array
     {
-        return ['telegram_content' => 'array', 'category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'supplier_available_stock' => 'integer', 'supplier_available_until' => 'datetime', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
+        return ['telegram_content' => 'array', 'category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'reseller_price_amount' => 'integer', 'reseller_usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'supplier_available_stock' => 'integer', 'supplier_available_until' => 'datetime', 'is_active' => 'boolean', 'featured_rank' => 'integer'];
+    }
+
+    /**
+     * Mirror the PostgreSQL reseller-override CHECK constraints for the SQLite
+     * lane: an override must be positive, and a dollar override can never
+     * manufacture dollar eligibility without a base dollar price.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Product $product): void {
+            $resellerIdr = $product->reseller_price_amount === null ? null : (int) $product->reseller_price_amount;
+            $resellerUsdt = $product->reseller_usdt_price_amount === null ? null : (int) $product->reseller_usdt_price_amount;
+
+            if (($resellerIdr !== null && $resellerIdr <= 0) || ($resellerUsdt !== null && $resellerUsdt <= 0)) {
+                throw new InvalidArgumentException('A Product reseller price override must be positive.');
+            }
+
+            if ($resellerUsdt !== null && $product->usdt_price_amount === null) {
+                throw new InvalidArgumentException('A Product reseller USDT override requires a base USDT price.');
+            }
+        });
     }
 
     /**
