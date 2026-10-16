@@ -5,7 +5,7 @@ This context describes the store domain language used by the web storefront and 
 ## Language
 
 **Sales Proof Post**:
-A public Telegram channel post that announces a successfully paid customer order using masked customer information.
+A public Telegram channel post that announces a successfully paid customer order using masked customer information. API-origin Orders additionally require lifecycle-authorized fulfillment completion.
 _Avoid_: Testimonial, review
 
 **Store Bot**:
@@ -98,6 +98,7 @@ _Avoid_: Community, group, access gate
 **Paid Order Proof Event**:
 The moment a public sales proof may be created: after payment is confirmed paid and the inventory sale has been recorded.
 _Avoid_: Completed order event
+API-origin Orders narrow this event to authorized completion: all ordered units allocated and non-retired, no pending supplier fulfillment and no open Manual Fulfillment Review. This does not redefine historical or other-channel Paid Order Proof Events.
 
 **Available Product**:
 A product that can currently be bought because it has available stock.

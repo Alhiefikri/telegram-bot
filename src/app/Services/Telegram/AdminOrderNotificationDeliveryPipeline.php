@@ -6,13 +6,14 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
 use InvalidArgumentException;
 use Throwable;
 
 /**
- * Adapter for the three lifecycle notifications sent to the configured admin
+ * Adapter for Order lifecycle notifications sent to the configured admin
  * chat. Eligibility, rendering, cleanup, and the Order projection stay here;
  * the ledger protocol owns every durable delivery transition.
  */
@@ -23,6 +24,7 @@ final class AdminOrderNotificationDeliveryPipeline
         TelegramOutboundEffectType::AdminOrderPendingNotification->value,
         TelegramOutboundEffectType::AdminOrderPaidNotification->value,
         TelegramOutboundEffectType::AdminOrderExpiredNotification->value,
+        TelegramOutboundEffectType::AdminOrderReviewNotification->value,
     ];
 
     public function __construct(
@@ -44,9 +46,12 @@ final class AdminOrderNotificationDeliveryPipeline
         }
 
         try {
+            $sourceId = $claimed->effect_type === TelegramOutboundEffectType::AdminOrderReviewNotification->value
+                ? ManualFulfillmentReview::query()->whereKey($claimed->source_id)->value('order_id')
+                : $claimed->source_id;
             $order = Order::query()
                 ->with(['customer', 'orderItems', 'payments'])
-                ->findOrFail($claimed->source_id);
+                ->findOrFail($sourceId);
 
             if (blank(config('services.telegram.token'))
                 || preg_match('/^[1-9][0-9]*$/', trim((string) $claimed->telegram_chat_id)) !== 1) {
@@ -74,6 +79,11 @@ final class AdminOrderNotificationDeliveryPipeline
                 TelegramOutboundEffectType::AdminOrderPaidNotification->value => $this->adminPaidOrderNotifier->sendEffect(
                     $order,
                     (string) $claimed->telegram_chat_id,
+                ),
+                TelegramOutboundEffectType::AdminOrderReviewNotification->value => $this->adminPaidOrderNotifier->sendEffect(
+                    $order,
+                    (string) $claimed->telegram_chat_id,
+                    reviewNotice: true,
                 ),
                 TelegramOutboundEffectType::AdminOrderExpiredNotification->value => $this->adminOrderNotifier->sendExpiredEffect(
                     $order,
@@ -157,9 +167,36 @@ final class AdminOrderNotificationDeliveryPipeline
         return $repaired;
     }
 
+    public function recoverMissingApiReviews(int $chunk = 100): int
+    {
+        $reviews = app(TelegramOutboundRecoveryPage::class)->load(
+            'api_owner_review_handoffs',
+            ManualFulfillmentReview::query()
+                ->whereHas('order', fn ($q) => $q->whereNotNull('api_order_claim_id'))
+                ->whereNotExists(function ($effects): void {
+                    $effects->selectRaw('1')->from('telegram_outbound_effects')
+                        ->where('source_type', ManualFulfillmentReview::class)
+                        ->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)
+                        ->whereRaw('source_id = CAST(manual_fulfillment_reviews.id AS TEXT)');
+                }),
+            max(1, $chunk),
+        );
+        $dispatched = 0;
+        foreach ($reviews as $review) {
+            $effect = app(TelegramOutboundEffectService::class)->recordAdminOrderReviewNotification($review);
+            if ($effect !== null) {
+                app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
+                $dispatched++;
+            }
+        }
+
+        return $dispatched;
+    }
+
     private function eligible(Order $order, string $effectType): bool
     {
         return match ($effectType) {
+            TelegramOutboundEffectType::AdminOrderReviewNotification->value => $order->api_order_claim_id !== null,
             TelegramOutboundEffectType::AdminOrderPendingNotification->value => $order->order_status === OrderStatus::PendingPayment
                 && $order->payment_status === PaymentStatus::Pending,
             TelegramOutboundEffectType::AdminOrderPaidNotification->value => in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)

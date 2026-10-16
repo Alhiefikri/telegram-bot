@@ -30,6 +30,7 @@ final readonly class PaidInvoicePresentation
         public string $buyerName = 'Buyer',
         public ?string $itemCurrency = null,
         public ?int $paymentSubtotal = null,
+        public ?string $origin = null,
     ) {
         if ($this->invoiceId === '' || $this->buyerIdentifier === '' || $this->paymentMethod === '') {
             throw new \InvalidArgumentException('Paid invoice presentation identifiers and labels are required.');
@@ -107,6 +108,7 @@ final readonly class PaidInvoicePresentation
             'payment_method' => $this->paymentMethod,
             'status' => $this->status,
             'currency' => $this->currency,
+            'origin' => $this->origin,
             'item_currency' => $this->itemCurrency ?? $this->currency,
             'items' => $this->items,
             'display_items' => $this->displayItems(),

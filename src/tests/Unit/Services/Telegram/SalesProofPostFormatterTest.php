@@ -17,6 +17,26 @@ class SalesProofPostFormatterTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_api_proof_preserves_all_six_usdt_decimals_at_the_integer_boundary(): void
+    {
+        $presentation = new PaidInvoicePresentation(
+            invoiceId: 'INV-API-EXACT',
+            buyerIdentifier: '284*****24',
+            paidAt: CarbonImmutable::parse('2026-10-16T12:00:00Z'),
+            paymentMethod: 'USDT Balance · API',
+            currency: 'USDT',
+            items: [['product_name' => 'Plan', 'quantity' => 1, 'unit_price' => PHP_INT_MAX, 'subtotal' => PHP_INT_MAX]],
+            providerFee: 0,
+            totalPaid: PHP_INT_MAX,
+            origin: 'api',
+        );
+
+        $caption = app(SalesProofPostFormatter::class)->format($presentation, 1);
+
+        $this->assertStringContainsString('Subtotal: 9223372036854.775807 USDT', $caption);
+        $this->assertStringContainsString('Amount paid: 9223372036854.775807 USDT', $caption);
+    }
+
     public function test_photo_caption_is_bounded_and_uses_the_public_paid_order_shape(): void
     {
         $presentation = new PaidInvoicePresentation(

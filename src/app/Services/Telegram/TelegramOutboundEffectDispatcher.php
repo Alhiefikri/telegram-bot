@@ -63,6 +63,9 @@ final class TelegramOutboundEffectDispatcher
             TelegramOutboundEffectType::WarrantyDeadlineReminder->value => SendWarrantyDeadlineReminder::dispatch((string) $effect->id),
             TelegramOutboundEffectType::BalanceAdjustmentNotice->value => SendBalanceAdjustmentNotice::dispatch((string) $effect->id),
             TelegramOutboundEffectType::SupplierHealth->value => SendSupplierHealthNotification::dispatch((string) $effect->id),
+            TelegramOutboundEffectType::AdminOrderReviewNotification->value => SendAdminOrderPaidNotification::dispatch(
+                (string) $effect->source_id, $jobEnqueuedAt, (string) $effect->id,
+            ),
             TelegramOutboundEffectType::BalanceOperationsAlert->value => SendBalanceOperationsAlert::dispatch((string) $effect->id),
             TelegramOutboundEffectType::UsdtTopUpReceipt->value,
             TelegramOutboundEffectType::UsdtRefundReceipt->value => SendUsdtTopUpReceipt::dispatch((string) $effect->id),

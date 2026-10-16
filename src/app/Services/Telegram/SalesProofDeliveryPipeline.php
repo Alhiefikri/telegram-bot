@@ -2,21 +2,18 @@
 
 namespace App\Services\Telegram;
 
-use App\Enums\OrderStatus;
-use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
-use App\Services\InventoryLedger;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
-use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Storefront\StorefrontUrl;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Throwable;
@@ -34,7 +31,6 @@ final class SalesProofDeliveryPipeline
         private readonly SalesProofPostFormatter $formatter,
         private readonly SalesProofPostNumbering $numbering,
         private readonly SalesProofStockSignal $stockSignal,
-        private readonly InventoryLedger $inventory,
         private readonly StorefrontUrl $urls,
         private readonly PaidInvoiceRenderer $invoiceRenderer,
         private readonly PaidInvoiceOrderPresentationAdapter $invoicePresentation,
@@ -72,7 +68,7 @@ final class SalesProofDeliveryPipeline
                 return;
             }
 
-            $invariantFailure = $this->paidOrderProofInvariantFailure($order);
+            $invariantFailure = app(SalesProofEligibility::class)->rejectionReason($order);
             if ($invariantFailure !== null) {
                 $this->finalizeNotDeliverable($claimed, 'proof_not_eligible', $invariantFailure);
 
@@ -193,21 +189,33 @@ final class SalesProofDeliveryPipeline
         return $repaired;
     }
 
-    private function paidOrderProofInvariantFailure(Order $order): ?string
+    public function recoverMissingApiProofs(int $chunk = 100): int
     {
-        if (app(SupplierFulfillmentService::class)->hasPending($order)) {
-            return 'Order fulfillment is processing.';
-        }
-        $isPaid = $order->payment_status === PaymentStatus::Paid
-            && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Paid);
-        $isProcessable = in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true);
-        if (! $isPaid || ! $isProcessable) {
-            return 'Sales Proof Post requires a paid processable order.';
+        $orders = app(TelegramOutboundRecoveryPage::class)->load(
+            'api_sales_proof_handoffs',
+            Order::query()->whereNotNull('api_order_claim_id')->where('payment_status', 'paid')
+                ->whereIn('order_status', ['processing', 'completed'])->whereDoesntHave('salesProofPost'),
+            max(1, $chunk),
+        );
+        $dispatched = 0;
+        foreach ($orders as $order) {
+            $effect = DB::transaction(function () use ($order): ?TelegramOutboundEffect {
+                $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
+                if (! StoreChannelSetting::current()->sales_proof_enabled
+                    || app(SalesProofEligibility::class)->rejectionReason($locked) !== null) {
+                    return null;
+                }
+                $post = SalesProofPost::query()->firstOrCreate(['order_id' => $locked->id], ['status' => SalesProofPost::STATUS_PENDING]);
+
+                return app(TelegramOutboundEffectService::class)->recordSalesProofPost($locked, $post);
+            });
+            if ($effect !== null) {
+                app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
+                $dispatched++;
+            }
         }
 
-        return $this->inventory->hasSaleProofForOrder($order)
-            ? null
-            : 'Sales Proof Post requires matching inventory sale proof.';
+        return $dispatched;
     }
 
     private function salesProofShoppingButtonUrl(Order $order): string

@@ -41,7 +41,7 @@ final class PaidInvoiceOrderPresentationAdapter
             buyerIdentifier: $this->maskBuyerTelegramId($order->customer),
             buyerName: $this->buyerNameMasker->mask($order->customer),
             paidAt: $this->paidAt($payment),
-            paymentMethod: $this->paymentMethod($payment),
+            paymentMethod: $this->paymentMethod($payment).($order->api_order_claim_id !== null ? ' · API' : ''),
             currency: $currency,
             itemCurrency: $currency === 'USDT'
                 ? $currency
@@ -50,6 +50,7 @@ final class PaidInvoiceOrderPresentationAdapter
             providerFee: max(0, (int) ($payment->provider_fee ?? 0)),
             paymentSubtotal: $this->paymentSubtotal($payment, $currency),
             totalPaid: $this->totalPaid($payment, $order, $currency),
+            origin: $order->api_order_claim_id !== null ? 'api' : null,
         );
     }
 

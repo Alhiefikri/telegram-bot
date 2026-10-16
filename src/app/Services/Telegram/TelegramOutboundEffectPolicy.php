@@ -86,6 +86,7 @@ final class TelegramOutboundEffectPolicy
     /** @var array<string, int> */
     private const MAX_ATTEMPTS = [
         TelegramOutboundEffectType::WarrantyNotification->value => 3,
+        TelegramOutboundEffectType::AdminOrderReviewNotification->value => 3,
         TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 3,
         TelegramOutboundEffectType::BalanceAdjustmentNotice->value => 3,
         TelegramOutboundEffectType::SupplierHealth->value => 3,

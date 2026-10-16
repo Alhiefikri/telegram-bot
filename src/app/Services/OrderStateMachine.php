@@ -21,6 +21,7 @@ use App\Models\StoreChannelSetting;
 use App\Services\Bsc\BscConfirmationGrace;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Telegram\SalesProofEligibility;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
@@ -327,7 +328,9 @@ class OrderStateMachine implements OrderLifecycle
         }
         $this->dispatchAdminPendingNotificationDelete($order);
 
-        $salesProofEnabled = ! $this->supplierFulfillment()->hasPending($order) && (bool) StoreChannelSetting::current()->sales_proof_enabled;
+        $salesProofEnabled = ! $this->supplierFulfillment()->hasPending($order)
+            && ($order->api_order_claim_id === null || app(SalesProofEligibility::class)->rejectionReason($order) === null)
+            && (bool) StoreChannelSetting::current()->sales_proof_enabled;
 
         if ($salesProofEnabled) {
             $salesProofPost = SalesProofPost::query()->firstOrCreate(

@@ -14,6 +14,7 @@ use App\Models\BalanceOperationsAlertEpisode;
 use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtTopUp;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\ProductPriceChangeEvent;
@@ -910,6 +911,29 @@ class TelegramOutboundEffectService
         );
     }
 
+    public function recordAdminOrderReviewNotification(ManualFulfillmentReview $review): ?TelegramOutboundEffect
+    {
+        $chatId = $this->adminTargetChatId();
+        if ($chatId === null || blank(config('services.telegram.token'))
+            || $review->order?->api_order_claim_id === null) {
+            return null;
+        }
+        $key = 'order-review:'.$review->id.':owner:v1';
+
+        return TelegramOutboundEffect::query()->firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectType::AdminOrderReviewNotification->value,
+            'source_type' => ManualFulfillmentReview::class,
+            'source_id' => (string) $review->id,
+            'target_type' => 'admin', 'telegram_chat_id' => $chatId,
+            'queue' => 'notifications', 'telegram_method' => 'sendMessage',
+            'locale' => 'id', 'template_version' => 'admin-order-review-v1',
+            'state' => TelegramOutboundEffectState::Pending->value,
+            'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => ['delivery_context' => 'order_lifecycle'],
+        ]);
+    }
+
     public function recordAdminOrderExpiredNotification(Order $order, ?string $chatId = null): ?TelegramOutboundEffect
     {
         return $this->recordAdminOrderNotification(
@@ -1206,6 +1230,10 @@ class TelegramOutboundEffectService
      */
     public function recordSalesProofPost(Order $order, ?SalesProofPost $post = null): ?TelegramOutboundEffect
     {
+        if ($order->api_order_claim_id !== null && app(SalesProofEligibility::class)->rejectionReason($order) !== null) {
+            return null;
+        }
+
         $post ??= SalesProofPost::query()->where('order_id', $order->getKey())->first();
         if ($post === null) {
             return null;
@@ -3130,6 +3158,7 @@ class TelegramOutboundEffectService
             self::TYPE_ADMIN_PENDING => self::TEMPLATE_ADMIN_ORDER_PENDING,
             self::TYPE_ADMIN_PAID => self::TEMPLATE_ADMIN_ORDER_PAID,
             self::TYPE_ADMIN_EXPIRED => self::TEMPLATE_ADMIN_ORDER_EXPIRED,
+            TelegramOutboundEffectType::AdminOrderReviewNotification->value => 'admin-order-review-v1',
             self::TYPE_ADMIN_BROADCAST => self::TEMPLATE_ADMIN_BROADCAST,
             self::TYPE_MANUAL_PAYMENT_PROOF => self::TEMPLATE_MANUAL_PAYMENT_PROOF,
             self::TYPE_SALES_PROOF => self::TEMPLATE_SALES_PROOF,

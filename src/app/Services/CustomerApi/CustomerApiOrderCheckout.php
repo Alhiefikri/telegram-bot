@@ -112,6 +112,7 @@ final class CustomerApiOrderCheckout
                 $claim->expected_usd_total_micro,
                 $claim->preference_source,
             ),
+            apiOrderClaimId: (string) $claim->getKey(),
         );
 
         // A concurrent identical attempt won the unique checkout key: our cart

@@ -72,6 +72,7 @@ class OrderCheckoutService
         ?DateTimeInterface $termsAcceptedAt = null,
         ?ResellerPricingContext $resellerContext = null,
         ?BalanceCheckoutRequest $balanceRequest = null,
+        ?string $apiOrderClaimId = null,
     ): Order {
         if ($balanceRequest !== null && $paymentIntent !== null) {
             throw new InvalidCheckout('A preference request cannot override an explicit payment rail.');
@@ -97,7 +98,7 @@ class OrderCheckoutService
         for ($i = 0; $i < 5; $i++) {
             try {
                 $order = DB::transaction(
-                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext, $balanceRequest),
+                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext, $balanceRequest, $apiOrderClaimId),
                     5,
                 );
 
@@ -121,6 +122,7 @@ class OrderCheckoutService
         ?DateTimeInterface $termsAcceptedAt,
         ?ResellerPricingContext $resellerContext = null,
         ?BalanceCheckoutRequest $balanceRequest = null,
+        ?string $apiOrderClaimId = null,
     ): Order {
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->assertCheckoutCustomer($existing, $cart);
@@ -280,6 +282,9 @@ class OrderCheckoutService
         }
 
         $order = new Order(['customer_id' => $lockedCart->customer_id, 'cart_id' => $lockedCart->id, 'checkout_key' => $checkoutKey, 'terms_version' => $termsVersion, 'terms_accepted_at' => $termsAcceptedAt, 'invoice_number' => $this->numbers->invoiceNumber(), 'order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending, 'total_amount' => $pricing->idrTotal(), 'currency' => $paymentPlan->orderCurrency(), 'expires_at' => $paymentPlan->orderExpiresAt()]);
+        if ($apiOrderClaimId !== null) {
+            $order->forceFill(['api_order_claim_id' => $apiOrderClaimId]);
+        }
         if ($resolvedPreference !== null) {
             $order->forceFill(['balance_checkout_snapshot' => [
                 'preference' => $resolvedPreference->value,

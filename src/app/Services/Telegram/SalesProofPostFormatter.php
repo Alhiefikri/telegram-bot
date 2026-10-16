@@ -5,6 +5,7 @@ namespace App\Services\Telegram;
 use App\Models\Order;
 use App\Models\SalesProofPost;
 use App\Services\PaidInvoice\PaidInvoicePresentation;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 
 class SalesProofPostFormatter
 {
@@ -35,10 +36,11 @@ class SalesProofPostFormatter
             $items,
         ));
         $lines = [
-            $this->channelLegacyIcons('🎉 ORDER PAYMENT CONFIRMED'),
+            $this->channelLegacyIcons($presentation->origin === 'api' ? '🎉 API ORDER FULFILLED' : '🎉 ORDER PAYMENT CONFIRMED'),
             '',
             $this->channelTextIcon('message.users').' Buyer: '.$presentation->buyerName,
             $this->channelTextIcon('message.ticket').' Order ID: '.$presentation->invoiceId,
+            ...($presentation->origin === 'api' ? ['Origin: API'] : []),
             ...$this->itemSummaryLines($items),
             ...$this->lowStockLines($remainingStock),
             $this->channelLegacyIcons('💳 Paid via: ').$presentation->paymentMethod,
@@ -224,9 +226,7 @@ class SalesProofPostFormatter
     private function money(int $amount, string $currency): string
     {
         if ($currency === 'USDT') {
-            $value = rtrim(rtrim(number_format($amount / 1_000_000, 6, '.', ''), '0'), '.');
-
-            return ($value !== '' ? $value : '0').' USDT';
+            return UsdtMicroAmount::formatUnits($amount).' USDT';
         }
 
         $formatted = number_format($amount, 0, ',', '.');

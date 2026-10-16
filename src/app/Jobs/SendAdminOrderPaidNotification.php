@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\TelegramOutboundEffectType;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
@@ -59,7 +60,10 @@ class SendAdminOrderPaidNotification implements ShouldBeUnique, ShouldQueue
                 ? $outboundEffects->forOrder($this->orderId, TelegramOutboundEffectService::TYPE_ADMIN_PAID)
                 : TelegramOutboundEffect::query()
                     ->whereKey($this->effectId)
-                    ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PAID)
+                    ->whereIn('effect_type', [
+                        TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+                        TelegramOutboundEffectType::AdminOrderReviewNotification->value,
+                    ])
                     ->firstOrFail();
 
             if ($effect !== null) {

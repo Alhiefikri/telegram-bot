@@ -281,6 +281,40 @@ inventory adjustment; the fake-proof job and Stock Notification ledger use
 bounded retry behavior independently. A restock before the deferred job flushes
 the sold-out event as stale without sending an obsolete sold-out message.
 
+### Customer API public proof and Owner notices (#625)
+
+`orders.api_order_claim_id` is written at Order creation, before the paid
+lifecycle runs, and commits with claim acceptance and the purchase. Public
+API proof requires canonical paid credential-release authority, no pending
+supplier fulfillment or open Manual Fulfillment Review, and every ordered
+unit allocated and non-retired. The local balance lifecycle may still label
+the Order `processing` even when all local units are authorized; this is
+fulfillment completion, not proof of a successful HTTP response or Telegram
+receipt. Other-channel Paid Order Proof Events and historical effects keep
+their existing timing and identities.
+
+The existing Sales Proof Order key owns the one logical public post. Both
+materialization and delivery recheck API eligibility. Its public-safe invoice
+and caption carry API origin and the canonical Payment's actual IDR/USDT
+amounts; internal USDT is not relabelled or converted. Masking, item/icon
+snapshots and the existing invoice renderer remain authoritative.
+
+The ordinary paid Owner effect also reports API origin and current operational
+state, without depending on a Telegram buyer receipt. A supplier review
+commits `admin.order_review_notification` in the same ledger beside its
+`ManualFulfillmentReview`; `order-review:{review-id}:owner:v1` is the event
+identity. It uses the existing Admin notification pipeline/worker, renders
+current state and links to the Order dashboard. Repeated requests, reads,
+jobs and review rediscovery do not create another event or paid notice.
+
+If no Owner target is configured, the committed review is the deferred
+materialization handoff. `telegram:recover-outbound` discovers missing API
+review effects and eligible API Orders without a Sales Proof projection in
+bounded fairness pages. Existing projection/effect recovery handles the rest.
+Rendering and Telegram IO remain outside money locks; `unknown` remains
+auditable and is never automatically resent. Notification failure changes
+neither purchase authority nor balances, inventory, supplier holds or refunds.
+
 ## Consequences
 
 - A committed checkout or lifecycle transition cannot lose its durable Telegram effect merely because the process dies before queue dispatch.

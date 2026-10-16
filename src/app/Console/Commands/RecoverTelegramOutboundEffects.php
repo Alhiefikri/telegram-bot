@@ -13,7 +13,9 @@ use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
 use App\Services\Telegram\CheckoutInstructionDeliveryPipeline;
+use App\Services\Telegram\SalesProofDeliveryPipeline;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
@@ -106,6 +108,7 @@ class RecoverTelegramOutboundEffects extends Command
                 TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
                 TelegramOutboundEffectService::TYPE_ADMIN_PAID,
                 TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
+                TelegramOutboundEffectType::AdminOrderReviewNotification->value,
                 TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,
                 TelegramOutboundEffectService::TYPE_SALES_PROOF,
                 TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION,
@@ -126,6 +129,8 @@ class RecoverTelegramOutboundEffects extends Command
                     $dispatched++;
                 });
             $dispatched += $recovery->recoverMissingStoreBalanceTopUpEffects($pageLimit);
+            $dispatched += app(SalesProofDeliveryPipeline::class)->recoverMissingApiProofs($pageLimit);
+            $dispatched += app(AdminOrderNotificationDeliveryPipeline::class)->recoverMissingApiReviews($pageLimit);
 
             $salesProofPosts = SalesProofPost::query()
                 ->whereIn('status', [

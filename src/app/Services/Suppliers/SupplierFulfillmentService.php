@@ -618,7 +618,11 @@ final class SupplierFulfillmentService
         $f->update(['state' => $f->state === 'delivered' ? 'delivered' : 'review', 'last_error' => $error, 'next_attempt_at' => null]);
         $payment = $order->payments()->where('status', PaymentStatus::Paid)->first();
         if ($payment !== null) {
-            ManualFulfillmentReview::query()->firstOrCreate(['payment_id' => $payment->id], ['order_id' => $order->id, 'amount' => $payment->amount, 'currency' => $payment->currency, 'reason' => 'supplier_fulfillment', 'state' => ManualFulfillmentReview::STATE_PENDING]);
+            $review = ManualFulfillmentReview::query()->firstOrCreate(['payment_id' => $payment->id], ['order_id' => $order->id, 'amount' => $payment->amount, 'currency' => $payment->currency, 'reason' => 'supplier_fulfillment', 'state' => ManualFulfillmentReview::STATE_PENDING]);
+            $effect = app(TelegramOutboundEffectService::class)->recordAdminOrderReviewNotification($review);
+            if ($effect !== null) {
+                app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
+            }
         }
     }
 

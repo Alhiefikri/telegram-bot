@@ -4,6 +4,7 @@ namespace App\Services\Telegram;
 
 use App\Enums\PaymentStatus;
 use App\Exceptions\TelegramOutboundPreSendException;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -40,7 +41,7 @@ class TelegramAdminPaidOrderNotifier
      *
      * @return array<string, mixed>
      */
-    public function sendEffect(Order $order, string $chatId): array
+    public function sendEffect(Order $order, string $chatId, bool $reviewNotice = false): array
     {
         if (blank(config('services.telegram.token'))
             || preg_match('/^[1-9][0-9]*$/', $chatId) !== 1) {
@@ -54,21 +55,25 @@ class TelegramAdminPaidOrderNotifier
             'payment_mode' => $this->paymentMode($claimed),
             'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
             'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed)), $this->dashboardReplyMarkup($claimed)));
+        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed, $reviewNotice)), $this->dashboardReplyMarkup($claimed)));
     }
 
-    private function paidMessage(Order $order): string
+    private function paidMessage(Order $order, bool $reviewNotice): string
     {
         $payment = $this->relevantPayment($order);
 
         $lines = [
-            $this->uiIcons->renderLegacyIcons('🔔 Pembayaran diterima'),
+            $this->uiIcons->renderLegacyIcons($reviewNotice ? '🔔 Review fulfillment API' : '🔔 Pembayaran diterima'),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Pembeli: '.$this->buyerLabel($order),
             'Sumber: '.$this->sourceLabel($order),
-            'Status pembayaran: Paid',
+            'Status pembayaran: '.($order->api_order_claim_id !== null ? $order->payment_status->value : 'Paid'),
             ...$this->fulfillmentStatusLines($order),
+            ...($order->api_order_claim_id !== null ? [
+                'Status order: '.$order->order_status->value,
+                'Review operator: '.(ManualFulfillmentReview::query()->where('order_id', $order->id)->open()->exists() ? 'diperlukan; buka dashboard' : 'tidak ada review terbuka'),
+            ] : []),
             'Metode: '.$this->paymentLabel($payment),
             'Earning: '.$this->earningLabel($payment, $order),
             '',
@@ -95,6 +100,11 @@ class TelegramAdminPaidOrderNotifier
             ->orderBy('id')
             ->get();
         if ($fulfillments->isEmpty()) {
+            if ($order->api_order_claim_id !== null) {
+                return ['Pengiriman pelanggan: '.(app(SalesProofEligibility::class)->rejectionReason($order) === null
+                    ? 'Fulfillment API selesai · hasil tersedia melalui API'
+                    : 'Belum selesai; periksa dashboard'), 'Pembelian supplier: tidak digunakan'];
+            }
             $status = $order->order_status?->value ?? (string) $order->order_status;
             $deliveryState = $status === 'completed'
                 ? ($order->telegram_receipt_sent_at !== null ? 'Receipt Telegram tercatat terkirim' : 'Fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review')
@@ -113,9 +123,11 @@ class TelegramAdminPaidOrderNotifier
             if ($fulfillment->state === 'delivered' && $fulfillment->manualHandoffs->isNotEmpty()) {
                 $deliveryState = 'Selesai · handoff luar bot dicatat';
             } elseif ($fulfillment->state === 'delivered') {
-                $deliveryState = $order->telegram_receipt_sent_at !== null
+                $deliveryState = $order->api_order_claim_id !== null
+                    ? 'Fulfillment API selesai · hasil tersedia melalui API'
+                    : ($order->telegram_receipt_sent_at !== null
                     ? 'Receipt Telegram tercatat terkirim'
-                    : 'Supplier fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review';
+                        : 'Supplier fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review');
             }
             $delivery[] = $productName.': '.$deliveryState;
 
@@ -237,6 +249,10 @@ class TelegramAdminPaidOrderNotifier
 
     private function sourceLabel(Order $order): string
     {
+        if ($order->api_order_claim_id !== null) {
+            return 'Customer API';
+        }
+
         return $order->customer?->telegram_id ? 'Telegram Bot' : 'Web Shop';
     }
 

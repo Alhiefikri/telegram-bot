@@ -20,6 +20,7 @@ enum TelegramOutboundEffectType: string
     case AdminOrderPendingNotification = 'admin.order_pending_notification';
     case AdminOrderPaidNotification = 'admin.order_paid_notification';
     case AdminOrderExpiredNotification = 'admin.order_expired_notification';
+    case AdminOrderReviewNotification = 'admin.order_review_notification';
     case AdminBroadcastRecipient = 'admin.broadcast_recipient';
     case ManualPaymentProof = 'admin.manual_payment_proof';
     case SalesProofPost = 'sales_proof.post';

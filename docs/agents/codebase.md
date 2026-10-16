@@ -312,6 +312,17 @@ the committed obligation after volatile Redis loss; unknown dispatched purchases
 review/holds. Schemas, partial/refund semantics, query plans and disposable worker-loss
 HTTP evidence: [Customer API orders](../customer-api-orders.md#owned-history-status-and-delivery-s07).
 
+Customer API notifications (#625) snapshot `api_order_claim_id` before paid
+lifecycle work. `SalesProofEligibility` preserves other-channel proof timing
+and requires paid release authority, complete non-retired allocations, no
+pending supplier fulfillment and no open review for API proof. The existing
+public invoice/caption and private paid Owner notice identify API origin.
+Supplier review reuses the Admin pipeline and paid worker with an independent
+`admin.order_review_notification` effect per `ManualFulfillmentReview`.
+Bounded `telegram:recover-outbound` source discovery recovers missing API
+proof/review handoffs; the shared protocol retains sent/unknown semantics.
+Contract and evidence: [API notifications](../customer-api-orders.md#public-proof-and-private-owner-notifications-s09).
+
 
 ### Product dan stock
 

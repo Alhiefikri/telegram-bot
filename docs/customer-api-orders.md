@@ -1,4 +1,4 @@
-# Customer API Orders (S06 #623, S07 #624)
+# Customer API Orders (S06 #623, S07 #624, S09 #625)
 
 Contract: [#617 sections 4.2, 5, 5.1, 6, 7 and 10](https://github.com/Alhiefikri/telegram-bot/issues/617),
 implemented by [#623](https://github.com/Alhiefikri/telegram-bot/issues/623) and
@@ -179,6 +179,108 @@ credential fence, checkout locks the claim row and verifies its attempt token be
 creating a Cart or touching a wallet. An expired lease cannot be stolen during financial
 commit, and a suspended worker whose token was replaced returns 409 `in_progress`
 without purchasing. Acceptance cannot silently succeed for a stale token.
+
+## Public proof and private Owner notifications (S09)
+
+Order creation snapshots `api_order_claim_id` before the paid lifecycle runs.
+The existing Sales Proof and Admin notification pipelines render that immutable
+origin, independent of the current key, request retry or polling frequency.
+
+Public API proof requires the canonical paid credential-release decision,
+matching inventory sale proof, no pending supplier fulfillment or open Manual
+Fulfillment Review, and all ordered units allocated and non-retired. Partial
+supplier delivery, ambiguous acquisition and review cannot announce completion.
+An all-local balance Order can retain the historical `processing` Order label
+while its fulfillment is complete and its units are authorized for API reads.
+Proof does not depend on a buyer Telegram receipt. Other channels and historical
+Paid Order Proof Events keep their existing timing.
+
+The image's payment-method label and the caption identify API origin. They use
+the actual canonical Payment currency and immutable amount/item snapshots:
+IDR remains rupiah and internal USDT remains explicitly USDT, while HTTP API
+serializers continue exposing the USD denomination. Public fields retain the
+existing masked buyer and safe invoice conventions. They omit raw account
+identity, payment references, balances, credentials, keys and upstream economics.
+
+The ordinary private paid notice includes the Order, Customer, Product,
+actual amount/currency, API origin and useful current fulfillment/review state.
+Supplier processing appears there without claiming Telegram delivery. A
+canonical Manual Fulfillment Review adds one actionable Owner notice per
+review source, not per request, supplier poll or repeated worker execution.
+Delayed review notices show the current Order/review state.
+
+`telegram:recover-outbound` remains the recovery command. The original
+Order/event keys deduplicate delivery; the new review unit is
+`admin.order_review_notification`, keyed `order-review:{review-id}:owner:v1`.
+The committed review is its missing-target handoff. Bounded recovery also finds
+eligible API Orders without a public proof projection. Existing effect/projection
+recovery covers materialized units. Rendering and transport happen outside
+financial locks. `unknown` is never blindly resent; an operator uses the existing
+Manual Delivery Review protocol. Disabled/missing channels or notification
+failure cannot refund, debit again, reallocate or erase an accepted Order.
+
+Architecture clarification: [ADR-0007](adr/0007-telegram-outbound-effects.md#customer-api-public-proof-and-owner-notices-625).
+Behavior coverage: `CustomerApiOrderNotificationTest` alongside the existing
+Sales Proof, lifecycle/Admin, invoice and supplier tests.
+
+### Disposable outbound verification (2026-10-16)
+
+The local PHP worker used PostgreSQL 16 and Redis 7 on dedicated loopback
+ports, the real `TelegramBotClient`, HTTP transport fixtures, the actual
+`telegram:recover-outbound` command and `queue:work --queue=notifications
+--stop-when-empty`. The non-PHPUnit testing runtime normally binds
+`FakeTelegramBotClient`; the smoke explicitly replaced that binding with the
+real client before exercising its HTTP boundary.
+
+Four API purchases covered an exact USDT local purchase, an IDR local
+purchase with ambiguous public/Owner transport, a successful mixed local/
+supplier purchase and an ambiguous mixed acquisition. Redis `FLUSHALL`
+removed queue wakeups after commit. Supplier processing retained one purchase
+per fulfillment, completed only the successful mixed Order and left the
+ambiguous acquisition in review with no public proof.
+
+Recorded public effects were two `sent` and one `unknown`; the review Order
+had no public effect. Ordinary Owner effects were three `sent` and one
+`unknown`, plus one sent review effect. A second Redis flush, recovery and
+worker execution retained all those identities, attempts and outcomes without
+another public/Owner transport request. A missing fixture `getMe` identity
+initially produced definite proof failures; configuring the fixture identity
+recovered the same effects rather than creating new ones.
+
+The inspected 720×720 public images showed API origin, masked buyer and exact
+`2 USDT` / `Rp 10.000` totals, including the complete two-unit mixed purchase.
+Captured public captions and private paid/review notices carried the expected
+origin and current state. Public payloads/images and application logs omitted
+raw buyer identity, credentials and upstream source/key/cost data; private
+Owner messages retained the intended Customer account details.
+
+A fifth paid Order exercised the real renderer with PHP `imagepng` disabled:
+its public effect became `failed` / `telegram_render_failed`, while its Owner
+notice sent normally. Restoring PNG support and running recovery sent the same
+public effect without changing its identity. Before/after economic snapshots remained identical for
+every notification/recovery phase: accepted Orders/Payments and both ledgers
+were unchanged, no refunds appeared, and allocation/purchase counts stayed
+stable once fulfillment had completed. Fixture delivery is not live Telegram
+channel permission proof or supplier qualification. Existing exposure gates
+remain fail-closed; no CI/CD, production, activation or deployment was used.
+
+Local regression results:
+
+- SQLite compatibility batch: 137 tests, 1,583 assertions passed, covering
+  API checkout/reads/notifications, lifecycle/Admin outbound, supplier
+  fulfillment/independent regressions and public invoice/caption behavior.
+- PostgreSQL notification behavior: 7 tests, 119 assertions passed.
+- PostgreSQL API concurrency/crash/replay regression: 9 tests, 177 assertions passed.
+- Final exact-money/caption plus notification run: 15 tests, 161 assertions passed.
+  Caption formatting now uses the existing integer-only micro-USDT formatter;
+  its boundary regression preserves `9223372036854.775807 USDT`.
+- Pint passed. New eligibility and changed public/private pipeline LSP
+  diagnostics were clear.
+
+A broader PostgreSQL batch exceeded its 300-second local deadline; the two
+focused PostgreSQL runs above are the completed evidence, not a claim that
+the full PostgreSQL suite passed. Disposable service containers and smoke
+instrumentation were removed; the pre-existing PostgreSQL runtime was untouched.
 
 ## Owned history, status and delivery (S07)
 
