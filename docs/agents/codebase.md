@@ -330,6 +330,11 @@ Supplier review reuses the Admin pipeline and paid worker with an independent
 `admin.order_review_notification` effect per `ManualFulfillmentReview`.
 Bounded `telegram:recover-outbound` source discovery recovers missing API
 proof/review handoffs; the shared protocol retains sent/unknown semantics.
+Local numeric-stock checkout (#635) also commits one `local_credentials_missing`
+review per paid Payment when ordered units are positive, no local credentials are
+allocated and no supplier fulfillment exists. Its Owner review effect and missing-target
+recovery cover bot and API Orders; Late Payments reuse `late_payment`. API delivery
+counts remain allocation-derived, never fabricated for an external manual handoff.
 Contract and evidence: [API notifications](../customer-api-orders.md#public-proof-and-private-owner-notifications-s09).
 
 Customer API public documentation (#626) is published from one canonical description in

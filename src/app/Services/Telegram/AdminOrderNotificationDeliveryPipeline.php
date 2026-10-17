@@ -167,12 +167,11 @@ final class AdminOrderNotificationDeliveryPipeline
         return $repaired;
     }
 
-    public function recoverMissingApiReviews(int $chunk = 100): int
+    public function recoverMissingReviews(int $chunk = 100): int
     {
         $reviews = app(TelegramOutboundRecoveryPage::class)->load(
-            'api_owner_review_handoffs',
-            ManualFulfillmentReview::query()
-                ->whereHas('order', fn ($q) => $q->whereNotNull('api_order_claim_id'))
+            'owner_review_handoffs',
+            ManualFulfillmentReview::query()->ownerNotifiable()
                 ->whereNotExists(function ($effects): void {
                     $effects->selectRaw('1')->from('telegram_outbound_effects')
                         ->where('source_type', ManualFulfillmentReview::class)
@@ -196,7 +195,8 @@ final class AdminOrderNotificationDeliveryPipeline
     private function eligible(Order $order, string $effectType): bool
     {
         return match ($effectType) {
-            TelegramOutboundEffectType::AdminOrderReviewNotification->value => $order->api_order_claim_id !== null,
+            TelegramOutboundEffectType::AdminOrderReviewNotification->value => ManualFulfillmentReview::query()
+                ->where('order_id', $order->id)->ownerNotifiable()->exists(),
             TelegramOutboundEffectType::AdminOrderPendingNotification->value => $order->order_status === OrderStatus::PendingPayment
                 && $order->payment_status === PaymentStatus::Pending,
             TelegramOutboundEffectType::AdminOrderPaidNotification->value => in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)

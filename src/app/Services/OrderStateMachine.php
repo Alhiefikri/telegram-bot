@@ -16,8 +16,10 @@ use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\OrderRefund;
 use App\Models\Payment;
+use App\Models\ProductStockItem;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
+use App\Models\SupplierFulfillment;
 use App\Services\Bsc\BscConfirmationGrace;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
@@ -322,6 +324,20 @@ class OrderStateMachine implements OrderLifecycle
             'payment_status' => PaymentStatus::Paid,
             'order_status' => $this->supplierFulfillment()->hasPending($order) ? OrderStatus::Processing : $this->paidOrderStatus($payment),
         ]);
+        if ($this->needsLocalCredentialReview($order)) {
+            $review = ManualFulfillmentReview::query()->firstOrCreate(
+                ['payment_id' => $payment->id],
+                [
+                    'order_id' => $order->id,
+                    'amount' => $payment->provider_total_payment ?? $payment->amount,
+                    'currency' => $payment->currency,
+                    'reason' => ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING,
+                    'state' => ManualFulfillmentReview::STATE_PENDING,
+                    'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
+                ],
+            );
+            $this->dispatchManualReviewNotice($review);
+        }
         $this->recordGuestNotification($order, GuestOrderNotificationEvent::PaymentConfirmed);
         if ($order->order_status === OrderStatus::Completed) {
             $this->recordGuestNotification($order, GuestOrderNotificationEvent::FulfillmentCompleted);
@@ -362,6 +378,25 @@ class OrderStateMachine implements OrderLifecycle
         );
     }
 
+    private function needsLocalCredentialReview(Order $order): bool
+    {
+        return ! SupplierFulfillment::query()->where('order_id', $order->id)->exists()
+            && $order->orderItems()->sum('quantity') > 0
+            && ! ProductStockItem::query()
+                ->whereIn('order_item_id', $order->orderItems()->select('id'))
+                ->whereNull('supplier_purchase_id')
+                ->exists();
+    }
+
+    private function dispatchManualReviewNotice(ManualFulfillmentReview $review): void
+    {
+        $effect = ($this->outboundEffects ?? app(TelegramOutboundEffectService::class))
+            ->recordAdminOrderReviewNotification($review);
+        if ($effect !== null) {
+            ($this->outboundDispatcher ?? app(TelegramOutboundEffectDispatcher::class))->dispatch($effect);
+        }
+    }
+
     private function paidOrderStatus(Payment $payment): OrderStatus
     {
         return strtolower((string) $payment->provider) === 'pakasir'
@@ -400,7 +435,7 @@ class OrderStateMachine implements OrderLifecycle
             $changed = true;
         }
 
-        ManualFulfillmentReview::query()->firstOrCreate(
+        $review = ManualFulfillmentReview::query()->firstOrCreate(
             ['payment_id' => $payment->id],
             [
                 'order_id' => $order->id,
@@ -411,6 +446,9 @@ class OrderStateMachine implements OrderLifecycle
                 'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
             ],
         );
+        if ($this->needsLocalCredentialReview($order)) {
+            $this->dispatchManualReviewNotice($review);
+        }
 
         if ($changed) {
             $this->dispatchAdminPendingNotificationDelete($order);

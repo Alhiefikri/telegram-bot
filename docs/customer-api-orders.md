@@ -380,6 +380,21 @@ This is a disposable fixture response. `state` is `not_ready`, `partial` or `rea
 `progress` has the same schema as `OrderSummary.fulfillment`. A client waits or contacts
 support on review; it must not create a new purchase to recover an existing result.
 
+Local non-credential-managed Products (legacy numeric stock without Product Stock Items)
+remain purchasable. A paid Order with positive ordered units and no allocated local
+credentials creates one pending Manual Fulfillment Review with reason
+`local_credentials_missing` and a durable Owner review notice. Bot and API checkout use
+the same lifecycle rule. Supplier-backed Orders retain their own fulfillment flow.
+Replay reuses the review and notice; a Late Payment retains its existing `late_payment`
+review rather than creating a second obligation.
+
+For these Products, `fulfillment.state` is `review`, `review_required` is true, and
+`delivery.state` remains `not_ready` until the Owner fulfills manually. Contact support
+with the existing invoice, **do not buy again**. The API does not generate credentials
+or fabricate delivered units: `allocated_units` and `released_units` stay zero while no
+credentials are allocated. A manual handoff outside the API does not itself make API
+delivery ready or change those counts.
+
 Each released `units[]` object has exactly:
 
 | Field | Type / meaning |

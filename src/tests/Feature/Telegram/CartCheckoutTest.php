@@ -16,6 +16,7 @@ use App\Models\CartItem;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
+use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
@@ -206,6 +207,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_store_balance_cart_checkout_shows_balance_rail_and_finishes_paid_without_provider_instructions(): void
     {
         $this->fakeTelegramHttp();
+        config(['services.telegram.admin_telegram_chat_id' => '999123']);
         $customer = Customer::factory()->create(['telegram_id' => 12348, 'username' => 'balance-buyer', 'locale' => 'en']);
         $product = Product::factory()->create(['name' => 'Balance Product', 'price_amount' => 15_000, 'stock' => 2, 'reserved_stock' => 0]);
         app(CartService::class)->addItem(app(CartService::class)->activeCartFor($customer), $product, 1);
@@ -243,6 +245,14 @@ class CartCheckoutTest extends TelegramBotTestSupport
             'source_id' => (string) $order->id,
             'amount' => 15_000,
         ]);
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
+        $this->assertSame(ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING, $review->reason);
+        $this->assertSame(ManualFulfillmentReview::STATE_PENDING, $review->state);
+        $this->postTelegramWebhook($this->callbackUpdate(32, 'balance-checkout-replay', 'checkout:balance', [], 12348, 'private', 9001))
+            ->assertOk();
+        $this->assertSame(1, ManualFulfillmentReview::where('payment_id', $payment->id)->count());
+        $this->assertSame(1, TelegramOutboundEffect::where('source_type', ManualFulfillmentReview::class)
+            ->where('source_id', $review->id)->count());
         Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendPhoto')
             && str_contains((string) ($request['body'] ?? ''), 'Scan the QR'));
     }

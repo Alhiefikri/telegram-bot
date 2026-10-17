@@ -915,7 +915,7 @@ class TelegramOutboundEffectService
     {
         $chatId = $this->adminTargetChatId();
         if ($chatId === null || blank(config('services.telegram.token'))
-            || $review->order?->api_order_claim_id === null) {
+            || ! ManualFulfillmentReview::query()->whereKey($review->id)->ownerNotifiable()->exists()) {
             return null;
         }
         $key = 'order-review:'.$review->id.':owner:v1';

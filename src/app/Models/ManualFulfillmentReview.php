@@ -24,6 +24,8 @@ class ManualFulfillmentReview extends Model
 
     public const REASON_LATE_PAYMENT = 'late_payment';
 
+    public const REASON_LOCAL_CREDENTIALS_MISSING = 'local_credentials_missing';
+
     public const REASON_BSC_MISMATCH = 'bsc_mismatch';
 
     public const REASON_BSC_TRANSACTION_ALREADY_USED = 'bsc_transaction_already_used';
@@ -31,6 +33,20 @@ class ManualFulfillmentReview extends Model
     public const REASON_BSC_AMBIGUOUS = 'bsc_ambiguous';
 
     public const REASON_BSC_MANUAL_REVIEW = 'bsc_manual_review';
+
+    public function scopeOwnerNotifiable(Builder $query): void
+    {
+        $query->where(function (Builder $eligible): void {
+            $eligible->whereHas('order', fn (Builder $order) => $order->whereNotNull('api_order_claim_id'))
+                ->orWhere('reason', self::REASON_LOCAL_CREDENTIALS_MISSING)
+                ->orWhere(function (Builder $late): void {
+                    $late->where('reason', self::REASON_LATE_PAYMENT)
+                        ->whereHas('order.orderItems', fn (Builder $items) => $items->where('quantity', '>', 0))
+                        ->whereDoesntHave('order.orderItems.stockItems')
+                        ->whereDoesntHave('order.orderItems.supplierFulfillment');
+                });
+        });
+    }
 
     public function scopeOpen(Builder $query): void
     {

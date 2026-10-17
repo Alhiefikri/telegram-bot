@@ -327,6 +327,18 @@ Rendering and Telegram IO remain outside money locks; `unknown` remains
 auditable and is never automatically resent. Notification failure changes
 neither purchase authority nor balances, inventory, supplier holds or refunds.
 
+### Local numeric-stock manual fulfillment (#635)
+
+Paid local Orders with positive ordered units and zero local credential allocations
+commit one `ManualFulfillmentReview` per Payment with reason
+`local_credentials_missing`, together with the existing
+`admin.order_review_notification` effect. This applies to bot and API checkout;
+supplier-backed Orders keep their own review flow. Late Payments keep the existing
+`late_payment` review and receive the same notice when local credentials are absent.
+The per-review effect key deduplicates replay and recovery. Missing-target recovery
+also discovers these bot reviews, not only API reviews. No credential generation,
+stock accounting change or fabricated API delivery count is introduced.
+
 ## Consequences
 
 - A committed checkout or lifecycle transition cannot lose its durable Telegram effect merely because the process dies before queue dispatch.

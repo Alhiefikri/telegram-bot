@@ -63,14 +63,16 @@ class TelegramAdminPaidOrderNotifier
         $payment = $this->relevantPayment($order);
 
         $lines = [
-            $this->uiIcons->renderLegacyIcons($reviewNotice ? '🔔 Review fulfillment API' : '🔔 Pembayaran diterima'),
+            $this->uiIcons->renderLegacyIcons($reviewNotice
+                ? ($order->api_order_claim_id !== null ? '🔔 Review fulfillment API' : '🔔 Review fulfillment')
+                : '🔔 Pembayaran diterima'),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Pembeli: '.$this->buyerLabel($order),
             'Sumber: '.$this->sourceLabel($order),
             'Status pembayaran: '.($order->api_order_claim_id !== null ? $order->payment_status->value : 'Paid'),
             ...$this->fulfillmentStatusLines($order),
-            ...($order->api_order_claim_id !== null ? [
+            ...($order->api_order_claim_id !== null || $reviewNotice ? [
                 'Status order: '.$order->order_status->value,
                 'Review operator: '.(ManualFulfillmentReview::query()->where('order_id', $order->id)->open()->exists() ? 'diperlukan; buka dashboard' : 'tidak ada review terbuka'),
             ] : []),

@@ -130,7 +130,7 @@ class RecoverTelegramOutboundEffects extends Command
                 });
             $dispatched += $recovery->recoverMissingStoreBalanceTopUpEffects($pageLimit);
             $dispatched += app(SalesProofDeliveryPipeline::class)->recoverMissingApiProofs($pageLimit);
-            $dispatched += app(AdminOrderNotificationDeliveryPipeline::class)->recoverMissingApiReviews($pageLimit);
+            $dispatched += app(AdminOrderNotificationDeliveryPipeline::class)->recoverMissingReviews($pageLimit);
 
             $salesProofPosts = SalesProofPost::query()
                 ->whereIn('status', [

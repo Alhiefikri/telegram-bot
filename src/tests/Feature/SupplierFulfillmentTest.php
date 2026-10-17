@@ -77,6 +77,7 @@ class SupplierFulfillmentTest extends TestCase
         $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
         $this->assertSame('pending', $fulfillment->state);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertDatabaseCount('manual_fulfillment_reviews', 0);
         Http::assertNothingSent();
         $reads = app(CustomerApiOrders::class);
         $pending = $reads->detail($principal, $order->id)['data'];
@@ -135,6 +136,7 @@ class SupplierFulfillmentTest extends TestCase
         [$product, $supplier, $sku, $cart] = $this->fixture();
         $order = $this->checkout($cart);
         app(OrderLifecycle::class)->applyManualCompletion($order);
+        $this->assertDatabaseCount('manual_fulfillment_reviews', 0);
         config()->set('services.telegram.token', 'test-token');
         $messageId = 900000;
         Http::fake(function ($request) use (&$messageId) {
