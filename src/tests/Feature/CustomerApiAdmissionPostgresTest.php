@@ -87,6 +87,18 @@ class CustomerApiAdmissionPostgresTest extends TestCase
             ->assertHeader('X-RateLimit-Limit', '120')->assertHeader('X-RateLimit-Remaining', '0')->assertHeader('Retry-After');
     }
 
+    public function test_configured_proxy_keeps_invalid_auth_budgets_separate_for_forwarded_clients(): void
+    {
+        config(['app.trusted_proxies' => ['10.20.0.0/16']]);
+        $this->withServerVariables(['REMOTE_ADDR' => '10.20.0.5']);
+
+        for ($i = 0; $i < 30; $i++) {
+            $this->getJson('/api/v1/probe', ['X-Forwarded-For' => '192.0.2.10'])->assertStatus(401);
+        }
+        $this->getJson('/api/v1/probe', ['X-Forwarded-For' => '192.0.2.10'])->assertStatus(429);
+        $this->getJson('/api/v1/probe', ['X-Forwarded-For' => '192.0.2.11'])->assertStatus(401);
+    }
+
     public function test_delivery_quota_is_additional_and_body_bounds_apply_without_content_length(): void
     {
         $customer = Customer::factory()->create();

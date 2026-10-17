@@ -6,6 +6,8 @@ use App\Http\Middleware\AuthorizeStoreBalanceCompensation;
 use App\Http\Middleware\CustomerApiBoundary;
 use App\Http\Middleware\PreventAdminMiniAppCache;
 use App\Http\Middleware\RedirectToCanonicalHost;
+use App\Http\Middleware\TrustConfiguredHosts;
+use App\Http\Middleware\TrustConfiguredProxies;
 use App\Http\Middleware\ValidateStorefrontSignedInvoice;
 use App\Services\CustomerApi\CustomerApiFailure;
 use Illuminate\Foundation\Application;
@@ -16,8 +18,6 @@ use Illuminate\Foundation\Http\Middleware\InvokeDeferredCallbacks;
 use Illuminate\Foundation\Http\Middleware\PreventRequestsDuringMaintenance;
 use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Illuminate\Http\Middleware\HandleCors;
-use Illuminate\Http\Middleware\TrustHosts;
-use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Middleware\ValidatePathEncoding;
 use Illuminate\Http\Middleware\ValidatePostSize;
 use Illuminate\Http\Request;
@@ -42,44 +42,18 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->append(RedirectToCanonicalHost::class);
 
-        $trustedProxies = array_values(array_filter(array_map(
-            'trim',
-            explode(',', (string) env('TRUSTED_PROXIES', ''))
-        )));
-
-        if ($trustedProxies !== []) {
-            $middleware->trustProxies(
-                at: $trustedProxies,
-                headers: Request::HEADER_X_FORWARDED_FOR
-                    | Request::HEADER_X_FORWARDED_HOST
-                    | Request::HEADER_X_FORWARDED_PORT
-                    | Request::HEADER_X_FORWARDED_PROTO
-                    | Request::HEADER_X_FORWARDED_PREFIX
-            );
-        }
-
-        $trustedHosts = array_values(array_filter(array_map(
-            'trim',
-            explode(',', (string) env('TRUSTED_HOSTS', ''))
-        )));
-        if ($trustedHosts !== []) {
-            $middleware->trustHosts(at: fn () => RedirectToCanonicalHost::trustedHosts(
-                $trustedHosts,
-                (string) config('app.url'),
-            ));
-        }
-        $middleware->use(array_values(array_filter([
+        $middleware->use([
             ValidatePathEncoding::class,
             InvokeDeferredCallbacks::class,
-            $trustedHosts !== [] ? TrustHosts::class : null,
-            TrustProxies::class,
+            TrustConfiguredHosts::class,
+            TrustConfiguredProxies::class,
             CustomerApiBoundary::class,
             HandleCors::class,
             PreventRequestsDuringMaintenance::class,
             ValidatePostSize::class,
             TrimStrings::class,
             ConvertEmptyStringsToNull::class,
-        ])));
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->dontFlash(['api_key', 'credentials', 'token', 'code', 'challenge', 'state', 'access_key']);
