@@ -598,15 +598,61 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
         );
         $this->assertSame(CustomerApiOrderClaim::STATE_IN_PROGRESS, $claim->fresh()->state);
         $this->assertNull($claim->fresh()->order_id);
+        $attributes = $claim->getAttributes();
+        unset($attributes['id']);
+        $attributes['idempotency_key'] = 'invalid-insert';
+        $attributes['state'] = CustomerApiOrderClaim::STATE_ACCEPTED;
+        $this->assertDatabaseConstraintRejects(
+            fn () => DB::table('customer_api_order_claims')->insert($attributes),
+            'customer_api_order_claim_shape',
+        );
     }
 
-    /**
-     * The second request must not queue behind a holder that still owns the
-     * unconditional claim row lock: its wait is bounded by the documented
-     * deadline and it answers with the replay or `in_progress`, never a lock
-     * steal and never a second Order.
-     */
+    public function test_coupling_migration_preserves_valid_history_and_refuses_invalid_legacy_history(): void
+    {
+        $customer = $this->customer(5_000_000);
+        $product = $this->product(2);
+        $principal = $this->principal($customer);
+        $this->apiPlace($principal, 'migration-accepted', $product);
+        $accepted = CustomerApiOrderClaim::sole();
+        $pending = app(CustomerApiOrderClaims::class)->acquire($principal, $this->request('migration-pending', $product))->claim;
+        $pending->refresh();
+        $migration = require database_path('migrations/2026_10_17_120000_couple_accepted_api_order_claims.php');
+        $migration->down();
+        $migration->up();
+        $this->assertSame($accepted->getAttributes(), $accepted->fresh()->getAttributes());
+        $this->assertSame($pending->getAttributes(), $pending->fresh()->getAttributes());
+        $this->assertDatabaseConstraintRejects(
+            fn () => DB::table('customer_api_order_claims')->where('id', $pending->id)->update(['order_id' => $accepted->order_id]),
+            'customer_api_order_claim_shape',
+        );
+
+        $migration->down();
+        DB::table('customer_api_order_claims')->where('id', $pending->id)->update(['state' => 'accepted']);
+        $definition = DB::selectOne("SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname = 'customer_api_order_claim_shape'")->definition;
+        try {
+            $migration->up();
+            $this->fail('Invalid legacy acceptance must stop the migration.');
+        } catch (\RuntimeException $error) {
+            $this->assertStringContainsString('Reconcile claim history', $error->getMessage());
+        }
+        $this->assertSame($definition, DB::selectOne("SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname = 'customer_api_order_claim_shape'")->definition);
+        $this->assertSame('accepted', $pending->fresh()->state);
+        $this->assertNull($pending->fresh()->order_id);
+        $this->assertSame($accepted->getAttributes(), $accepted->fresh()->getAttributes());
+    }
+
+    public function test_acceptance_committed_during_the_wait_replays_the_holder_order(): void
+    {
+        $this->assertBoundedAcceptance(700_000, replay: true);
+    }
+
     public function test_takeover_of_an_expired_lease_never_waits_for_the_holder_lock(): void
+    {
+        $this->assertBoundedAcceptance(5_000_000, replay: false);
+    }
+
+    private function assertBoundedAcceptance(int $holdMicroseconds, bool $replay): void
     {
         $customer = $this->customer(6_000_000);
         $product = $this->product(1);
@@ -630,46 +676,35 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
 
         $directory = $this->createWorkspace('api-order-takeover-bound');
         try {
-            $children = [$this->forkWorker($directory, 0, function () use ($claim, $directory): string {
-                // The financial commit holds the claim row FOR UPDATE through its
-                // commit; this holder outlives the other request's deadline.
-                DB::transaction(function () use ($claim, $directory): void {
-                    CustomerApiOrderClaim::query()->whereKey($claim->getKey())->lockForUpdate()->firstOrFail();
-                    touch($directory.'/claim-locked');
-                    sleep(5);
-                });
+            $results = $this->runConcurrentWorkers(2, function (int $index) use ($principal, $product, $directory, $holdMicroseconds): string {
+                if ($index === 0) {
+                    return DB::transaction(function () use ($principal, $product, $directory, $holdMicroseconds): string {
+                        $result = $this->apiPlace($principal, 'api-bounded-takeover', $product);
+                        touch($directory.'/claim-locked');
+                        usleep($holdMicroseconds);
 
-                return 'held';
-            })];
-            $this->waitForMarker($directory.'/ready-0');
-            touch($directory.'/start');
-            $this->waitForMarker($directory.'/claim-locked');
+                        return $result;
+                    });
+                }
+                $this->waitForMarker($directory.'/claim-locked');
+                $started = hrtime(true);
+                $result = $this->apiPlace($principal, 'api-bounded-takeover', $product);
 
-            $started = microtime(true);
-            $outcome = null;
-            try {
-                $acquisition = app(CustomerApiOrderClaims::class)->acquire($principal, $request);
-                $outcome = $acquisition->acceptedOrderId !== null ? 'replay' : 'leased';
-                $leaseToken = $acquisition->claim?->attempt_token;
-            } catch (CustomerApiFailure $failure) {
-                $outcome = $failure->machineCode;
-                $leaseToken = null;
-            }
-            $elapsed = microtime(true) - $started;
-
-            $results = $this->collectResults($children, $directory);
-            $this->assertSame(['held'], array_column($results, 'value'));
-            $this->assertContains($outcome, ['replay', 'leased', 'in_progress'], 'The bounded wait answered with an outcome outside the documented set.');
-            if ($outcome === 'leased') {
-                $this->assertIsString($leaseToken);
-                $this->assertNotSame(str_repeat('a', 32), $leaseToken, 'A live holder lease was stolen.');
-            }
-            $this->assertLessThan(
-                CustomerApiOrderClaims::WAIT_SECONDS + 1.0,
-                $elapsed,
-                "The takeover waited {$elapsed}s behind the holder lock, past the documented ".CustomerApiOrderClaims::WAIT_SECONDS.'s bound.',
-            );
-            $this->assertSame(0, Order::count());
+                return json_encode(['result' => $result, 'elapsed' => (hrtime(true) - $started) / 1_000_000_000], JSON_THROW_ON_ERROR);
+            });
+            $this->assertWorkersSucceeded($results);
+            $waiter = json_decode($results[1]['value'], true, flags: JSON_THROW_ON_ERROR);
+            $this->assertSame($replay ? $results[0]['value'] : 'err:in_progress', $waiter['result']);
+            $this->assertLessThan(CustomerApiOrderClaims::WAIT_SECONDS + 0.3, $waiter['elapsed'], json_encode($waiter));
+            $order = Order::sole();
+            $this->assertSame('ok:'.$order->id, $results[0]['value']);
+            $this->assertSame('ok:'.$order->id, $this->apiPlace($principal, 'api-bounded-takeover', $product));
+            $this->assertSame($order->id, $claim->fresh()->order_id);
+            $this->assertSame(1, Order::count());
+            $this->assertSame(1, DB::table('payments')->count());
+            $this->assertSame(1, $this->usdtPurchaseDebits([$customer->id]));
+            $this->assertSame(4_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+            $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
         } finally {
             $this->cleanupWorkspace($directory);
         }

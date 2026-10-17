@@ -474,6 +474,27 @@ final class CustomerApiOrderTest extends TestCase
         $this->assertSame(CartOrigin::Api, $cart->fresh()->origin);
     }
 
+    public function test_model_rejects_acceptance_without_an_order_on_create_and_update(): void
+    {
+        $product = $this->product();
+        $this->assertSame('insufficient_funds', $this->failure($this->body($product), 'invalid-acceptance')->machineCode);
+        $claim = CustomerApiOrderClaim::sole();
+
+        foreach ([false, true] as $creating) {
+            $invalid = $creating ? $claim->replicate() : $claim->fresh();
+            $invalid->forceFill(['state' => CustomerApiOrderClaim::STATE_ACCEPTED, 'order_id' => null]);
+            try {
+                $invalid->save();
+                $this->fail('An acceptance without an Order was saved.');
+            } catch (LogicException $error) {
+                $this->assertSame('Customer API order claim acceptance requires exactly one Order.', $error->getMessage());
+            }
+        }
+
+        $this->assertSame(CustomerApiOrderClaim::STATE_IN_PROGRESS, $claim->fresh()->state);
+        $this->assertNull($claim->fresh()->order_id);
+    }
+
     /**
      * @param  array<string, mixed>|Product  $product
      * @return array<string, mixed>

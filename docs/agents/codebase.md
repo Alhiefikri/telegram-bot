@@ -311,6 +311,16 @@ transaction locks the Customer shared and calls `CustomerApiPrincipal::revalidat
 before any write. Contract, error table, lock order and evidence: [Customer API orders](../customer-api-orders.md);
 decision: [ADR-0025](../adr/0025-api-order-idempotency-claims.md).
 
+Issue #637 hardens that claim boundary: takeover lock waits use at most 500 ms and
+never more than the monotonic two-second wait's remaining time. Model saves and the
+PostgreSQL shape constraint require `accepted` if and only if `order_id` is present.
+The upgrade migration locks and checks existing claims before replacing the constraint
+atomically; inconsistent legacy bindings stop migration without changing claim history
+or dropping the old constraint. Reconcile those bindings before retrying migration.
+`CustomerApiOrderTest` covers application rejection; `CustomerApiOrderPostgresConcurrencyTest`
+covers direct writes, valid/invalid legacy upgrades, commit-during-wait replay and
+timeout without takeover, alongside the existing crash and recovery cases.
+
 Customer API order recovery (#624) uses `CustomerApiOrderReadController` and
 `CustomerApiOrders` for Customer + immutable API-origin history/status/results, independent
 of the creating key version. Ascending UUID keysets are bounded to 100 summaries;

@@ -42,9 +42,9 @@ final class CustomerApiOrderClaims
     public function acquire(CustomerApiPrincipal $principal, CustomerApiOrderRequest $request): CustomerApiOrderAcquisition
     {
         $fingerprint = $request->fingerprint();
-        $deadline = microtime(true) + self::WAIT_SECONDS;
+        $deadline = hrtime(true) + self::WAIT_SECONDS * 1_000_000_000;
 
-        while (microtime(true) < $deadline) {
+        while (hrtime(true) < $deadline) {
             $existing = $this->find($principal->customerId, $request->idempotencyKey);
             if ($existing === null) {
                 if (! Product::withTrashed()->whereKey($request->productId)->exists()) {
@@ -63,10 +63,13 @@ final class CustomerApiOrderClaims
             if ($existing->state === CustomerApiOrderClaim::STATE_ACCEPTED) {
                 return CustomerApiOrderAcquisition::accepted((string) $existing->order_id);
             }
-            if ($this->takeOver($existing)) {
+            if ($this->takeOver($existing, $deadline)) {
                 return CustomerApiOrderAcquisition::leased($existing);
             }
-            usleep(self::POLL_MICROSECONDS);
+            $remaining = $deadline - hrtime(true);
+            if ($remaining > 0) {
+                usleep((int) min(self::POLL_MICROSECONDS, $remaining / 1000));
+            }
         }
 
         throw new CustomerApiFailure(
@@ -155,16 +158,20 @@ final class CustomerApiOrderClaims
      * transaction, so the winner's token cannot be replaced by a concurrent
      * takeover between the `UPDATE` and the read.
      */
-    private function takeOver(CustomerApiOrderClaim $claim): bool
+    private function takeOver(CustomerApiOrderClaim $claim, int $deadline): bool
     {
         if ($claim->lease_expires_at !== null && $claim->lease_expires_at->isFuture()) {
             return false;
         }
+        $lockWait = (int) min(self::LOCK_WAIT_MILLISECONDS, ($deadline - hrtime(true)) / 1_000_000);
+        if ($lockWait < 1) {
+            return false;
+        }
         $token = bin2hex(random_bytes(16));
         try {
-            $updated = DB::transaction(function () use ($claim, $token): int {
+            $updated = DB::transaction(function () use ($claim, $token, $lockWait): int {
                 if (DB::getDriverName() === 'pgsql') {
-                    DB::statement('SET LOCAL lock_timeout = '.self::LOCK_WAIT_MILLISECONDS);
+                    DB::statement('SET LOCAL lock_timeout = '.$lockWait);
                 }
                 $updated = CustomerApiOrderClaim::query()->whereKey($claim->getKey())
                     ->where('state', CustomerApiOrderClaim::STATE_IN_PROGRESS)

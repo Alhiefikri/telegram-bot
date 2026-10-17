@@ -28,6 +28,11 @@ final class CustomerApiOrderClaim extends Model
 
     protected static function booted(): void
     {
+        self::saving(function (self $claim): void {
+            if (($claim->state === self::STATE_ACCEPTED) !== ($claim->order_id !== null)) {
+                throw new LogicException('Customer API order claim acceptance requires exactly one Order.');
+            }
+        });
         self::updating(function (self $claim): void {
             $frozen = ['customer_id', 'operation', 'idempotency_key', 'fingerprint', 'credential_id',
                 'preference', 'preference_source', 'product_id', 'quantity', 'expected_idr_total',
