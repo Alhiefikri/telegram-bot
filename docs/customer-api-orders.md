@@ -110,11 +110,13 @@ totals). Claims and the accepted Order association are unique at the database le
 | Same key, same payload, first acceptance | 201 with the new Order |
 | Same key, same payload, after a lost response / restart / rotation | 200 with the same accepted Order |
 | Same key, different payload | 409 `idempotency_conflict`; no effect |
-| Same key, an identical request still running | bounded wait (~2 s, no locks held), then 409 `in_progress` with `Retry-After` |
+| Same key, an identical request still running | bounded wait (~2 s), then 409 `in_progress` with `Retry-After` |
 | Same key, abandoned pre-order claim | one atomic takeover of the expired lease; loser gets the replay or `in_progress` |
 
 The pre-order lease is short and bounded; a request that never committed is recoverable,
-never a stuck lock. A financially rolled-back attempt releases its own lease and never
+never a stuck lock. Every takeover of an expired lease bounds its own row-lock wait, so a
+second request cannot hang behind the first one's transaction and still returns within the
+documented wait. A financially rolled-back attempt releases its own lease and never
 becomes an accepted claim, so the same key can retry the same local DB work after the cause
 is fixed (for example, after funding the wallet). Successful claims never expire, are never
 pruned and can never create a second purchase. API key rotation does not reset claims.

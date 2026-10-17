@@ -26,6 +26,7 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\CustomerApi\CustomerApiCredentials;
 use App\Services\CustomerApi\CustomerApiFailure;
 use App\Services\CustomerApi\CustomerApiOrderCheckout;
+use App\Services\CustomerApi\CustomerApiOrderClaims;
 use App\Services\CustomerApi\CustomerApiOrderRequest;
 use App\Services\CustomerApi\CustomerApiPrincipal;
 use App\Services\OrderCheckoutService;
@@ -566,6 +567,112 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
             'Cart origin is immutable',
         );
         $this->assertSame(CartOrigin::Api, Cart::where('origin', CartOrigin::Api)->sole()->origin);
+    }
+
+    public function test_database_rejects_an_accepted_claim_without_an_order(): void
+    {
+        $customer = $this->customer(5_000_000);
+        $product = $this->product(1);
+        $principal = $this->principal($customer);
+        $request = $this->request('api-accepted-without-order', $product);
+        $claim = CustomerApiOrderClaim::create([
+            'customer_id' => $customer->id,
+            'operation' => CustomerApiOrderClaim::OPERATION_CREATE_ORDER,
+            'idempotency_key' => 'api-accepted-without-order',
+            'fingerprint' => $request->fingerprint(),
+            'credential_id' => $principal->credentialId,
+            'state' => CustomerApiOrderClaim::STATE_IN_PROGRESS,
+            'attempt_token' => str_repeat('a', 32),
+            'lease_expires_at' => now()->addMinute(),
+            'preference' => BalancePaymentPreference::UsdFirst->value,
+            'preference_source' => 'account',
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'expected_usd_total_micro' => 2_000_000,
+        ]);
+
+        // A direct write outside the application cannot fake an acceptance.
+        $this->assertDatabaseConstraintRejects(
+            fn () => DB::table('customer_api_order_claims')->where('id', $claim->id)->update(['state' => CustomerApiOrderClaim::STATE_ACCEPTED]),
+            'customer_api_order_claim_shape',
+        );
+        $this->assertSame(CustomerApiOrderClaim::STATE_IN_PROGRESS, $claim->fresh()->state);
+        $this->assertNull($claim->fresh()->order_id);
+    }
+
+    /**
+     * The second request must not queue behind a holder that still owns the
+     * unconditional claim row lock: its wait is bounded by the documented
+     * deadline and it answers with the replay or `in_progress`, never a lock
+     * steal and never a second Order.
+     */
+    public function test_takeover_of_an_expired_lease_never_waits_for_the_holder_lock(): void
+    {
+        $customer = $this->customer(6_000_000);
+        $product = $this->product(1);
+        $principal = $this->principal($customer);
+        $request = $this->request('api-bounded-takeover', $product);
+        $claim = CustomerApiOrderClaim::create([
+            'customer_id' => $customer->id,
+            'operation' => CustomerApiOrderClaim::OPERATION_CREATE_ORDER,
+            'idempotency_key' => 'api-bounded-takeover',
+            'fingerprint' => $request->fingerprint(),
+            'credential_id' => $principal->credentialId,
+            'state' => CustomerApiOrderClaim::STATE_IN_PROGRESS,
+            'attempt_token' => str_repeat('a', 32),
+            'lease_expires_at' => now()->subMinute(),
+            'preference' => BalancePaymentPreference::UsdFirst->value,
+            'preference_source' => 'account',
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'expected_usd_total_micro' => 2_000_000,
+        ]);
+
+        $directory = $this->createWorkspace('api-order-takeover-bound');
+        try {
+            $children = [$this->forkWorker($directory, 0, function () use ($claim, $directory): string {
+                // The financial commit holds the claim row FOR UPDATE through its
+                // commit; this holder outlives the other request's deadline.
+                DB::transaction(function () use ($claim, $directory): void {
+                    CustomerApiOrderClaim::query()->whereKey($claim->getKey())->lockForUpdate()->firstOrFail();
+                    touch($directory.'/claim-locked');
+                    sleep(5);
+                });
+
+                return 'held';
+            })];
+            $this->waitForMarker($directory.'/ready-0');
+            touch($directory.'/start');
+            $this->waitForMarker($directory.'/claim-locked');
+
+            $started = microtime(true);
+            $outcome = null;
+            try {
+                $acquisition = app(CustomerApiOrderClaims::class)->acquire($principal, $request);
+                $outcome = $acquisition->acceptedOrderId !== null ? 'replay' : 'leased';
+                $leaseToken = $acquisition->claim?->attempt_token;
+            } catch (CustomerApiFailure $failure) {
+                $outcome = $failure->machineCode;
+                $leaseToken = null;
+            }
+            $elapsed = microtime(true) - $started;
+
+            $results = $this->collectResults($children, $directory);
+            $this->assertSame(['held'], array_column($results, 'value'));
+            $this->assertContains($outcome, ['replay', 'leased', 'in_progress'], 'The bounded wait answered with an outcome outside the documented set.');
+            if ($outcome === 'leased') {
+                $this->assertIsString($leaseToken);
+                $this->assertNotSame(str_repeat('a', 32), $leaseToken, 'A live holder lease was stolen.');
+            }
+            $this->assertLessThan(
+                CustomerApiOrderClaims::WAIT_SECONDS + 1.0,
+                $elapsed,
+                "The takeover waited {$elapsed}s behind the holder lock, past the documented ".CustomerApiOrderClaims::WAIT_SECONDS.'s bound.',
+            );
+            $this->assertSame(0, Order::count());
+        } finally {
+            $this->cleanupWorkspace($directory);
+        }
     }
 
     /**

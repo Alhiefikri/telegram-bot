@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\CustomerApiOrderClaim;
 use App\Models\Order;
 use App\Models\Product;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -27,6 +28,14 @@ final class CustomerApiOrderClaims
 
     /** Bounded wait for a concurrent identical request before answering in-progress. */
     public const WAIT_SECONDS = 2;
+
+    /**
+     * Upper bound on one takeover attempt's row-lock wait, far below
+     * {@see WAIT_SECONDS} so a holder that still owns the unconditional claim
+     * lock cannot push the public deadline past its documented bound. A timed-out
+     * attempt is a lost takeover, never an error and never a lock steal.
+     */
+    private const LOCK_WAIT_MILLISECONDS = 500;
 
     private const POLL_MICROSECONDS = 100_000;
 
@@ -134,21 +143,47 @@ final class CustomerApiOrderClaims
         }
     }
 
-    /** One atomic conditional takeover of an expired lease: exactly one winner. */
+    /**
+     * One atomic conditional takeover of an expired lease: exactly one winner.
+     *
+     * The conditional `UPDATE` is executed under a short row-lock bound, so a
+     * holder that still owns the unconditional claim lock (the financial commit
+     * holds it through its commit) can only delay a takeover attempt for that
+     * bound. A timed-out or deadlocked attempt is a lost takeover: it is never
+     * retried past the caller's public deadline, never steals a live lease and
+     * never surfaces as an error. The claim row is refreshed inside the same
+     * transaction, so the winner's token cannot be replaced by a concurrent
+     * takeover between the `UPDATE` and the read.
+     */
     private function takeOver(CustomerApiOrderClaim $claim): bool
     {
         if ($claim->lease_expires_at !== null && $claim->lease_expires_at->isFuture()) {
             return false;
         }
         $token = bin2hex(random_bytes(16));
-        $updated = CustomerApiOrderClaim::query()->whereKey($claim->getKey())
-            ->where('state', CustomerApiOrderClaim::STATE_IN_PROGRESS)
-            ->where(fn ($query) => $query->whereNull('lease_expires_at')->orWhere('lease_expires_at', '<', now()))
-            ->update(['attempt_token' => $token, 'lease_expires_at' => now()->addSeconds(self::LEASE_SECONDS), 'updated_at' => now()]);
+        try {
+            $updated = DB::transaction(function () use ($claim, $token): int {
+                if (DB::getDriverName() === 'pgsql') {
+                    DB::statement('SET LOCAL lock_timeout = '.self::LOCK_WAIT_MILLISECONDS);
+                }
+                $updated = CustomerApiOrderClaim::query()->whereKey($claim->getKey())
+                    ->where('state', CustomerApiOrderClaim::STATE_IN_PROGRESS)
+                    ->where(fn ($query) => $query->whereNull('lease_expires_at')->orWhere('lease_expires_at', '<', now()))
+                    ->update(['attempt_token' => $token, 'lease_expires_at' => now()->addSeconds(self::LEASE_SECONDS), 'updated_at' => now()]);
+                if ($updated === 1) {
+                    $claim->refresh();
+                }
+
+                return $updated;
+            });
+        } catch (QueryException) {
+            // The row lock outlived the bound (or a deadlock aborted us): the
+            // attempt never won, so the caller keeps polling until its deadline.
+            return false;
+        }
         if ($updated !== 1) {
             return false;
         }
-        $claim->refresh();
 
         return true;
     }

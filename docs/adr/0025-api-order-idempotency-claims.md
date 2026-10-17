@@ -34,14 +34,21 @@ Add `customer_api_order_claims`, owned by `App\Services\CustomerApi\CustomerApiO
   rotation cannot change that request's outcome.
 - **Fenced state machine.** `in_progress` with `attempt_token` and
   `lease_expires_at`; `accepted` with exactly one `order_id` (unique) and the
-  immutable `orders.api_order_claim_id` origin marker. A retry may take over an
+  immutable `orders.api_order_claim_id` origin marker. A claim is either accepted
+  against an Order or not accepted at all: the PostgreSQL shape constraint couples
+  `state = 'accepted'` with `order_id IS NOT NULL`, so no writer — in or outside the
+  application — can store an acceptance without its Order. A retry may take over an
   abandoned claim only through one atomic conditional `UPDATE` on an expired lease.
-  The financial transaction locks the claim after the Customer/credential fence,
-  verifies the token before any checkout write and retains the row lock through
-  commit. A suspended stale worker cannot purchase, and an expired lease cannot
-  be stolen during financial commit. Acceptance rejects a stale token.
-  Accepted claims never expire, are never pruned and can never create a second
-  purchase. After rollback, `abandon()` releases only its own token for recovery.
+  Each takeover attempt bounds its own row-lock wait (`lock_timeout`, hundreds of
+  milliseconds) so it cannot queue behind a holder's financial commit; a timed-out
+  attempt is a lost takeover, never an error and never a steal, and the public wait
+  still ends at its documented bound. The financial transaction locks the claim
+  after the Customer/credential fence, verifies the token before any checkout write
+  and retains the row lock through commit. A suspended stale worker cannot purchase,
+  and an expired lease cannot be stolen during financial commit. Acceptance rejects
+  a stale token. Accepted claims never expire, are never pruned and can never
+  create a second purchase. After rollback, `abandon()` releases only its own token
+  for recovery.
 - **Namespaced canonical checkout key.** `api-` + `sha256('api-order:<claim id>')[0..60]`,
   exactly 64 characters, derived only from the durable claim row, unique on
   `orders`. A bot key is a 64-character HMAC hex, so the namespaces cannot collide.
@@ -68,7 +75,8 @@ Add `customer_api_order_claims`, owned by `App\Services\CustomerApi\CustomerApiO
 
 - Three or more independent concurrent matching requests produce exactly one
   Order/Payment/debit/allocation; the losers either replay the accepted Order or
-  receive 409 `in_progress` with `Retry-After` after a bounded, lock-free wait.
+  receive 409 `in_progress` with `Retry-After` after a bounded wait that never
+  queues behind the winner's locks for longer than one takeover attempt.
 - Replay after a response loss, process restart, account preference edit, reseller
   price edit or API key rotation returns the same Order and the original
   currency/amount without reading current stock or price.
