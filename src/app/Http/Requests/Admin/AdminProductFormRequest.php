@@ -212,7 +212,7 @@ abstract class AdminProductFormRequest extends FormRequest
         return match (true) {
             str_contains($message, 'reseller IDR price') => 'Harga reseller IDR harus lebih besar dari 0.',
             str_contains($message, 'must be positive') => 'Harga reseller USDT harus lebih besar dari 0.',
-            default => 'Harga reseller USDT hanya berlaku jika produk memiliki harga USDT dasar. Isi Harga USDT atau kosongkan harga reseller USDT.',
+            default => 'Harga reseller USDT hanya berlaku jika produk memiliki harga USDT dasar di atas 0. Isi Harga USDT atau kosongkan harga reseller USDT.',
         };
     }
 

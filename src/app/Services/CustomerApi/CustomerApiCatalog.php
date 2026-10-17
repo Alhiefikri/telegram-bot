@@ -53,7 +53,7 @@ final class CustomerApiCatalog
         if ($product === null) {
             throw new CustomerApiFailure(404, 'not_found', 'Resource not found.');
         }
-        if ($currency === 'USD' && $product->usdt_price_amount === null) {
+        if ($currency === 'USD' && ! $this->hasUsdPrice($product)) {
             throw new CustomerApiFailure(422, 'currency_unavailable', 'This Product has no USD price.');
         }
 
@@ -120,8 +120,23 @@ final class CustomerApiCatalog
         $regularTotal = $usd ? $quote->baseUsdtSubtotal : $quote->baseIdrSubtotal;
         $format = static fn (?int $amount): ?string => $amount === null ? null : ($usd ? UsdtMicroAmount::formatUnits($amount) : (string) $amount);
 
-        return ['currency' => $usd ? 'USD' : 'IDR', 'eligible' => $base !== null,
+        return ['currency' => $usd ? 'USD' : 'IDR', 'eligible' => $usd ? $this->hasUsdPrice($quote) : $base !== null,
             'regular_unit' => $format($base), 'effective_unit' => $format($effective),
             'regular_total' => $format($regularTotal), 'total' => $format($total)];
+    }
+
+    /**
+     * A dollar quote is only usable above zero: a `0` micro-USDT base price can
+     * never be charged, so it is the absent-USD-price case rather than a free
+     * Product. Product and quote values are read over the same column set, so the
+     * check works for both.
+     */
+    private function hasUsdPrice(Product|ProductPriceQuote $priceSource): bool
+    {
+        $amount = $priceSource instanceof ProductPriceQuote
+            ? $priceSource->baseUsdtUnitAmount
+            : $priceSource->usdt_price_amount;
+
+        return $amount !== null && (int) $amount > 0;
     }
 }

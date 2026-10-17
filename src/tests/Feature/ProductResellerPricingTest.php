@@ -143,9 +143,46 @@ class ProductResellerPricingTest extends TestCase
         $this->assertSame(40_000, $quote->idrSubtotal);
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('the reseller USDT price requires a base USDT price');
+        $this->expectExceptionMessage('the reseller USDT price requires a positive base USDT price');
 
         app(ProductQuantityPricing::class)->validateResellerOverrides(null, null, 400_000);
+    }
+
+    public function test_reseller_usdt_override_never_manufactures_usd_eligibility_above_a_zero_base_price(): void
+    {
+        $context = ResellerPricingContext::forAuthenticatedApiRequest(619012);
+        $pricing = app(ProductQuantityPricing::class);
+        $product = Product::factory()->create(['price_amount' => 25_000, 'usdt_price_amount' => 0]);
+        DB::table('products')->where('id', $product->id)->update(['reseller_usdt_price_amount' => 400_000]);
+
+        $quote = $pricing->quote($product->refresh(), 2, $context);
+
+        $this->assertSame(0, $quote->baseUsdtUnitAmount);
+        $this->assertSame(0, $quote->effectiveUsdtUnitAmount);
+        $this->assertSame(0, $quote->usdtSubtotal);
+        $this->assertNull($quote->resellerUsdtUnitAmount);
+        $this->assertFalse($quote->hasUsdtResellerOverride());
+
+        try {
+            $pricing->validateResellerOverrides(null, 0, 400_000);
+            $this->fail('A reseller USDT override above a zero base USDT price must not validate.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('requires a positive base USDT price', $exception->getMessage());
+        }
+
+        // Bypass the model guard to stage an invalid row, then prove the guard
+        // refuses to write the override on top of the zero base price.
+        DB::table('products')->where('id', $product->id)->update(['reseller_usdt_price_amount' => null]);
+        $zeroBase = $product->refresh();
+
+        try {
+            $zeroBase->forceFill(['reseller_usdt_price_amount' => 400_000])->save();
+            $this->fail('A reseller USDT override above a zero base USDT price must not persist.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('requires a positive base USDT price', $exception->getMessage());
+        }
+
+        $this->assertNull($product->refresh()->reseller_usdt_price_amount);
     }
 
     public function test_corrupt_non_positive_reseller_amounts_fail_closed(): void
@@ -366,11 +403,76 @@ class ProductResellerPricingTest extends TestCase
             $product->forceFill(['reseller_price_amount' => null, 'reseller_usdt_price_amount' => 400_000])->save();
             $this->fail('A reseller USDT override without a base USDT price must not persist.');
         } catch (InvalidArgumentException $exception) {
-            $this->assertStringContainsString('requires a base USDT price', $exception->getMessage());
+            $this->assertStringContainsString('requires a positive base USDT price', $exception->getMessage());
         }
 
         $this->assertNull($product->fresh()->reseller_price_amount);
         $this->assertNull($product->fresh()->reseller_usdt_price_amount);
+
+        // Without an override a zero base USDT price stays storable: it is not a
+        // usable dollar rail, not an invalid Product.
+        $product = $product->fresh()->forceFill(['usdt_price_amount' => 0]);
+        $product->save();
+
+        $this->assertSame(0, $product->fresh()->usdt_price_amount);
+
+        // A rejected save leaves the instance dirty, so every later step starts
+        // from the persisted row, exactly like a fresh admin request.
+        $product = $product->fresh();
+
+        // The write that would persist the override above a zero base is rejected.
+        try {
+            $product->forceFill(['reseller_usdt_price_amount' => 400_000])->save();
+            $this->fail('A stored zero base USDT price must not authorize a reseller USDT override.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('requires a positive base USDT price', $exception->getMessage());
+        }
+
+        $this->assertNull($product->fresh()->reseller_usdt_price_amount);
+        $this->assertSame(0, $product->fresh()->usdt_price_amount);
+
+        // The same override is valid again once the base price is positive.
+        $product->forceFill(['usdt_price_amount' => 2_000_000, 'reseller_usdt_price_amount' => 400_000])->save();
+
+        $this->assertSame(2_000_000, $product->fresh()->usdt_price_amount);
+        $this->assertSame(400_000, $product->fresh()->reseller_usdt_price_amount);
+
+        // Dropping the base price to zero is a 422, not a silently dropped override.
+        try {
+            $product->forceFill(['usdt_price_amount' => 0, 'reseller_usdt_price_amount' => 0])->save();
+            $this->fail('A non-positive reseller USDT override must not persist.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('must be positive', $exception->getMessage());
+        }
+
+        try {
+            $product->fresh()->forceFill(['usdt_price_amount' => 0])->save();
+            $this->fail('A stored reseller USDT override must not survive a zero base USDT price.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('requires a positive base USDT price', $exception->getMessage());
+        }
+
+        $this->assertSame(2_000_000, $product->fresh()->usdt_price_amount);
+        $this->assertSame(400_000, $product->fresh()->reseller_usdt_price_amount);
+
+        // The same pair is rejected when one write introduces both values.
+        try {
+            Product::factory()->create(['price_amount' => 25_000, 'usdt_price_amount' => 0, 'reseller_usdt_price_amount' => 400_000]);
+            $this->fail('A zero base USDT price must not authorize a reseller USDT override.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('requires a positive base USDT price', $exception->getMessage());
+        }
+
+        // A stock-only update on a retained historical row is not price validation.
+        DB::table('products')->where('id', $product->id)->update(['usdt_price_amount' => 0]);
+        $historical = $product->refresh();
+        $this->assertSame(0, $historical->usdt_price_amount);
+        $this->assertSame(400_000, $historical->reseller_usdt_price_amount);
+
+        $stock = $historical->stock;
+        $historical->decrement('stock');
+
+        $this->assertSame($stock - 1, $product->fresh()->stock);
     }
 
     private function overriddenProduct(): Product

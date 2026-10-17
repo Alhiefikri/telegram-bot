@@ -332,6 +332,36 @@ final class CustomerApiOrderTest extends TestCase
         $this->assertSame(0, Cart::count());
     }
 
+    public function test_reseller_usd_override_above_a_zero_base_usd_price_never_charges_usd_at_checkout(): void
+    {
+        $product = $this->product();
+        // The guard rejects this pair on write, so the malformed row is staged the
+        // way legacy data exists: a zero base price that survived an override.
+        $product->forceFill(['usdt_price_amount' => 0])->save();
+        DB::table('products')->where('id', $product->id)->update(['reseller_usdt_price_amount' => 400_000]);
+        $this->fundUsd(5_000_000);
+
+        // The account preference is USD first, so the override amount is what the
+        // customer would try to acknowledge. The quote's dollar total is 0 instead,
+        // and a zero total is not even representable as consent, so the malformed
+        // row can never become a dollar charge.
+        $unacknowledged = $this->failure(['product_id' => (string) $product->id, 'quantity' => 1,
+            'preference' => 'usd_first', 'expected_totals' => ['USD' => '0.4']], 'zero-base-usd');
+        $this->assertSame(409, $unacknowledged->status);
+        $this->assertSame('price_changed', $unacknowledged->machineCode);
+        $this->assertContains(['currency' => 'USD', 'total' => '0'], $unacknowledged->details['quotes']);
+
+        $zeroConsent = $this->failure(['product_id' => (string) $product->id, 'quantity' => 1,
+            'preference' => 'usd_first', 'expected_totals' => ['USD' => '0']], 'zero-base-usd-zero');
+        $this->assertSame(422, $zeroConsent->status);
+        $this->assertSame('invalid_input', $zeroConsent->machineCode);
+
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(5_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($this->customer)->balanceMicro());
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->where('kind', 'purchase_debit')->count());
+    }
+
     public function test_api_carts_stay_invisible_to_bot_and_storefront_cart_surfaces(): void
     {
         $product = $this->product();

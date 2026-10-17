@@ -242,6 +242,24 @@ final class AdminProductWorkspaceTest extends TestCase
         $this->assertSame(1, $product->quantityPriceTiers()->count());
     }
 
+    public function test_reseller_usdt_override_requires_a_strictly_positive_base_price(): void
+    {
+        $this->manager();
+        $product = $this->tieredProduct();
+        $auditCount = AuditLog::query()->count();
+
+        foreach ([null, '0'] as $base) {
+            $this->saveSection($product->refresh(), 'price', [
+                'usdt_price_amount' => $base,
+                'reseller_usdt_price_amount' => '7.5',
+            ])->assertUnprocessable()->assertJsonValidationErrors('reseller_usdt_price_amount');
+        }
+
+        $this->assertSame(10_000_000, $product->fresh()->usdt_price_amount);
+        $this->assertNull($product->fresh()->reseller_usdt_price_amount);
+        $this->assertSame($auditCount, AuditLog::query()->count());
+    }
+
     public function test_reseller_override_validation_rejects_unbacked_and_malformed_values_without_mutating(): void
     {
         $this->manager();

@@ -10,6 +10,7 @@
             <file>tests/Feature/Telegram/WebhookIngressTest.php</file>
             <file>tests/Feature/ProductInventoryRaceTest.php</file>
             <file>tests/Feature/ProductResellerPricePostgresConcurrencyTest.php</file>
+            <file>tests/Feature/ProductResellerUsdtBasePriceConstraintTest.php</file>
             <file>tests/Feature/StorefrontProductCheckoutTest.php</file>
             <file>tests/Feature/StorefrontShopCheckoutTest.php</file>
             <file>tests/Feature/Telegram/CartCheckoutTest.php</file>

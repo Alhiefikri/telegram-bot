@@ -71,7 +71,7 @@ final class ProductQuantityPricing
         }
 
         $resellerIdrUnitAmount = $this->resellerUnitAmount($product->reseller_price_amount ?? null, $context !== null, 'IDR');
-        $resellerUsdtUnitAmount = $baseUsdtUnitAmount === null
+        $resellerUsdtUnitAmount = $baseUsdtUnitAmount === null || $baseUsdtUnitAmount <= 0
             ? null
             : $this->resellerUnitAmount($product->reseller_usdt_price_amount ?? null, $context !== null, 'USDT');
 
@@ -156,9 +156,10 @@ final class ProductQuantityPricing
      * Validate the optional Product-owned reseller overrides before persistence.
      *
      * Both currencies are independent and optional; a reseller USDT override is
-     * only valid while the Product keeps a base USDT price, so an override can
-     * never manufacture dollar eligibility. The reseller IDR override is
-     * normalized when the caller passes it.
+     * only valid while the Product keeps a strictly positive base USDT price, so
+     * an override can never manufacture dollar eligibility on a base price the
+     * retail dollar rail cannot charge. The reseller IDR override is normalized
+     * when the caller passes it.
      */
     public function validateResellerOverrides(?int $resellerIdrUnitAmount, ?int $baseUsdtUnitAmount, ?int $resellerUsdtUnitAmount): void
     {
@@ -174,8 +175,8 @@ final class ProductQuantityPricing
             throw $this->invalidResellerPrice('the reseller USDT price must be positive');
         }
 
-        if ($baseUsdtUnitAmount === null) {
-            throw $this->invalidResellerPrice('the reseller USDT price requires a base USDT price');
+        if ($baseUsdtUnitAmount === null || $baseUsdtUnitAmount <= 0) {
+            throw $this->invalidResellerPrice('the reseller USDT price requires a positive base USDT price');
         }
     }
 

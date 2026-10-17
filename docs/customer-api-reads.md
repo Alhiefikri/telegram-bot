@@ -113,7 +113,9 @@ strings `regular_unit`, `effective_unit`, `regular_total`, `total`.
 override. `effective_unit` and `total` come from `ProductQuantityPricing` with
 trusted API context: a configured reseller override wins independently per
 currency, otherwise normal quantity-tier pricing applies. Overrides never stack
-with tiers and never manufacture USD eligibility. Supplier identity, pricing
+with tiers, require a strictly positive base price in their currency, and never
+manufacture USD eligibility: a base USD price of `0` or absent keeps the USD
+quote at `eligible: false`. Supplier identity, pricing
 source diagnostics, costs, profit, purchase evidence and credentials are absent.
 
 If one Product's canonical schedule cannot be quoted safely, the list still

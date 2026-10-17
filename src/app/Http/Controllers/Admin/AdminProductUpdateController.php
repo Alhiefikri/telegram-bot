@@ -110,7 +110,7 @@ class AdminProductUpdateController extends Controller
                     );
                 } catch (\InvalidArgumentException $exception) {
                     throw ValidationException::withMessages([
-                        str_contains($exception->getMessage(), 'reseller IDR price') ? 'reseller_price_amount' : 'reseller_usdt_price_amount' => 'Harga reseller USDT hanya berlaku jika produk memiliki harga USDT dasar. Isi Harga USDT atau kosongkan harga reseller USDT.',
+                        str_contains($exception->getMessage(), 'reseller IDR price') ? 'reseller_price_amount' : 'reseller_usdt_price_amount' => 'Harga reseller USDT hanya berlaku jika produk memiliki harga USDT dasar di atas 0. Isi Harga USDT atau kosongkan harga reseller USDT.',
                     ]);
                 }
                 $locked->save();

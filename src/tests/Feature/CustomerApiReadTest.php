@@ -104,6 +104,32 @@ final class CustomerApiReadTest extends TestCase
         $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
     }
 
+    public function test_zero_base_usd_and_reseller_override_are_not_usd_eligible_anywhere(): void
+    {
+        // Direction B (#638): a zero base dollar price that somehow carries an
+        // override. The model guard rejects it on write, so the row is staged the
+        // way legacy data exists: it must still never look dollar eligible.
+        $product = Product::factory()->create(['price_amount' => 15_000, 'usdt_price_amount' => 0]);
+        DB::table('products')->where('id', $product->id)->update(['reseller_usdt_price_amount' => 400_000]);
+
+        $row = $this->read('product', [], (string) $product->id)['data'];
+        $this->assertSame([
+            'currency' => 'IDR', 'eligible' => true, 'regular_unit' => '15000', 'effective_unit' => '15000',
+            'regular_total' => '15000', 'total' => '15000',
+        ], $row['quotes'][0]);
+        $this->assertSame([
+            'currency' => 'USD', 'eligible' => false, 'regular_unit' => '0', 'effective_unit' => '0',
+            'regular_total' => '0', 'total' => '0',
+        ], $row['quotes'][1]);
+        $this->assertStringNotContainsString('400000', json_encode($row['quotes'][1], JSON_THROW_ON_ERROR));
+        $this->failure('product', ['currency' => 'USD'], (string) $product->id, 422, 'currency_unavailable');
+
+        $page = $this->read('products', ['quantity' => '1']);
+        $listed = collect($page['data'])->firstWhere('id', (string) $product->id);
+        $this->assertNotNull($listed);
+        $this->assertSame($row['quotes'], $listed['quotes']);
+    }
+
     public function test_missing_currency_hidden_products_overflow_and_invalid_inputs_fail_without_side_effects(): void
     {
         $product = Product::factory()->create();
@@ -142,7 +168,15 @@ final class CustomerApiReadTest extends TestCase
     public function test_unquotable_products_do_not_poison_catalog_pages_or_cursors(array $prices): void
     {
         $healthy = Product::factory()->create(['price_amount' => 15000, 'reseller_price_amount' => 8000]);
-        $broken = Product::factory()->create(array_replace(['price_amount' => 15000, 'usdt_price_amount' => 2000000], $prices));
+        // A zero base price is not writable together with an override, so that
+        // combination reaches the read surfaces only as staged legacy data.
+        $legacyZeroBaseOverride = ($prices['usdt_price_amount'] ?? null) === 0;
+        $broken = Product::factory()->create($legacyZeroBaseOverride
+            ? ['price_amount' => 15000, 'usdt_price_amount' => 0]
+            : array_replace(['price_amount' => 15000, 'usdt_price_amount' => 2000000], $prices));
+        if ($legacyZeroBaseOverride) {
+            DB::table('products')->where('id', $broken->id)->update(['reseller_usdt_price_amount' => 400_000]);
+        }
         if ($prices === []) {
             $broken->quantityPriceTiers()->create(['minimum_quantity' => 2, 'price_amount' => 20000, 'usdt_price_amount' => 1000000]);
         }
@@ -154,11 +188,24 @@ final class CustomerApiReadTest extends TestCase
         $this->assertSame([(string) $healthy->id, (string) $broken->id], array_column($page['data'], 'id'));
         $this->assertSame('16000', $page['data'][0]['quotes'][0]['total']);
         $this->assertSame(['next_cursor' => (string) $broken->id, 'has_more' => true], $page['pagination']);
-        foreach ($page['data'][1]['quotes'] as $index => $quote) {
+        if ($legacyZeroBaseOverride) {
+            // The malformed row is refused per currency: IDR still quotes, while
+            // the zero base price leaves the dollar quote unusable.
             $this->assertSame([
-                'currency' => $index === 0 ? 'IDR' : 'USD', 'eligible' => false,
-                'regular_unit' => null, 'effective_unit' => null, 'regular_total' => null, 'total' => null,
-            ], $quote);
+                'currency' => 'IDR', 'eligible' => true, 'regular_unit' => '15000', 'effective_unit' => '15000',
+                'regular_total' => '30000', 'total' => '30000',
+            ], $page['data'][1]['quotes'][0]);
+            $this->assertSame([
+                'currency' => 'USD', 'eligible' => false, 'regular_unit' => '0', 'effective_unit' => '0',
+                'regular_total' => '0', 'total' => '0',
+            ], $page['data'][1]['quotes'][1]);
+        } else {
+            foreach ($page['data'][1]['quotes'] as $index => $quote) {
+                $this->assertSame([
+                    'currency' => $index === 0 ? 'IDR' : 'USD', 'eligible' => false,
+                    'regular_unit' => null, 'effective_unit' => null, 'regular_total' => null, 'total' => null,
+                ], $quote);
+            }
         }
         $this->assertSame(array_keys($page['data'][0]), array_keys($page['data'][1]));
         $this->assertStringNotContainsString('must-not-be-exposed', json_encode($page));

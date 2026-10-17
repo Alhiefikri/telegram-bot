@@ -1,6 +1,6 @@
 # Reseller price overrides (Product-owned)
 
-Status: implemented and development-verified for GitHub issue #619 (work package S02 of the #617 map). No production activation, deployment, or CI operation is part of this record.
+Status: implemented and development-verified for GitHub issue #619 (work package S02 of the #617 map), then corrected by `S02-fix-A` (#638) so a zero base dollar price can never carry a reseller dollar override. No production activation, deployment, or CI operation is part of this record.
 
 ## Outcome
 
@@ -18,7 +18,7 @@ Owner/Admin can set one optional reseller price per sellable Product and currenc
 - Overrides are independent per currency. One currency may use an override while the other still uses its normal tier schedule.
 - An applied override never stacks with a quantity tier. `appliedTierMinimum` (IDR) and `appliedUsdtTierMinimum` (USDT) are null for the overridden currency, and `ProductPriceQuote` rejects a quote that tries to hold both.
 - `null` is "no override": the currency falls back to the normal quantity quote. Clearing an override in Admin deletes the value and restores normal behavior on the next quote.
-- A USDT override requires the Product's base `usdt_price_amount`. Without it the override is not persisted (Admin validation, PostgreSQL CHECK `products_reseller_usdt_price_amount_requires_base_price`) and never applies at quote time, so an override cannot manufacture dollar eligibility.
+- A USDT override requires a **strictly positive** base `usdt_price_amount`. Without it the override is not persisted (Admin validation, PostgreSQL CHECK `products_reseller_usdt_price_amount_requires_base_price`) and never applies at quote time, so an override cannot manufacture dollar eligibility. A base dollar price of `0` is not a usable dollar rail either: it cannot be stored together with an override and every USD quote reports `eligible: false` for it.
 - Persisted overrides must be positive. A non-positive stored value (data that bypassed validation) fails closed with an `InvalidArgumentException` instead of quoting `0` or a negative amount; subtotal overflow is rejected by the same multiply guard as base and tier prices.
 - Every amount stays an integer: whole IDR and integer micro-USDT. No floating point and no FX conversion is introduced.
 - The overrides live on the `products` row, so a caller that selects a partial Product column set without them quotes retail pricing. API catalog and quote readers must select `reseller_price_amount` and `reseller_usdt_price_amount` together with the `quantityPriceTiers` relation.
@@ -30,7 +30,7 @@ Owner/Admin can set one optional reseller price per sellable Product and currenc
 - `CheckoutPricingSnapshot::fromCartItems($items, $products, $pricing, ?ResellerPricingContext $resellerContext = null)` quotes every Cart Item once with the same channel and stores the context (`isResellerChannel()`, `resellerOrigin()`).
 - `OrderCheckoutService::checkout(..., ?ResellerPricingContext $resellerContext = null)` passes the trusted context into that snapshot after its existing lock order (`cart → balance account when applicable → maintenance → cart items/products → payment setting`). Order, `OrderItem.unit_price`/`subtotal`/`usdt_*`, the balance debit amount and every payment preparation consume the identical snapshot, so the previewed quote and the charged total cannot diverge.
 - Because both currencies are quoted in the same pass and `OrderItem.quantity_price_tier_minimum` comes from that quote, a reseller order records `null` there when the override replaced the tier: no incidental discount stacking.
-- Supplier economics are preserved: `SupplierFulfillmentService::reserve()` and `SupplierPricing::isEligible()`/`maximumCostIdr()` keep using the charged IDR subtotal and the Product's `SupplierPricePolicy` minimum profit, so a reduced reseller price makes eligibility stricter and can fail closed with `InsufficientStock` instead of buying external units below the guard. Ineligible products simply stay unbuyable through the reseller channel.
+- Supplier economics are preserved on the IDR basis only: `SupplierFulfillmentService::reserve()` prices external units from the charged IDR subtotal and `SupplierPricing::isEligible()`/`maximumCostIdr()` compare that subtotal against the Product's `SupplierPricePolicy` minimum profit. A reduced reseller **IDR** price therefore makes eligibility stricter and can fail closed with `InsufficientStock` instead of buying external units below the guard. A reseller **USDT**-only override does not change that basis: it leaves the IDR subtotal, and therefore the supplier guard, exactly as retail, so it can neither tighten nor loosen supplier eligibility and no FX rate is introduced to translate the dollar price back into a guard. Ineligible products simply stay unbuyable through the reseller channel.
 - Locking is unchanged: Product rows are locked before the snapshot is built, and Admin price/tier replacement runs under the same Product row lock, so a checkout observes one complete old or one complete new schedule.
 
 ## Admin surfaces
@@ -39,7 +39,7 @@ Both existing Admin paths carry the overrides, with the existing role, validatio
 
 - Workspace price section (`PATCH /admin/products/{product}` with `workspace_section=price`): `reseller_price_amount` and `reseller_usdt_price_amount` joined `AdminProductWorkspaceData::SECTIONS['price']`, so they participate in the per-section SHA-256 `workspace_version` token and a stale save still fails with 409 before any write.
 - Dashboard product create/edit modal: the same fields are validated by `AdminProductFormRequest::productRules()` (`nullable|integer|min:1` after the decimal-to-micro-USDT normalization shared with `usdt_price_amount`) and written by the create/update controllers.
-- Cross-field rule: an effective USDT override without an effective base USDT price is a 422 on `reseller_usdt_price_amount` (also enforced under the Product lock and by the PostgreSQL CHECK). `0`, negatives, malformed decimals, and absent-base `usdt_price_amount` are rejected without mutating the Product or writing audit rows.
+- Cross-field rule: an effective USDT override without an effective **positive** base USDT price (`null` or `0`) is a 422 on `reseller_usdt_price_amount` (also enforced under the Product lock, by the model guard, and by the PostgreSQL CHECK). `0`, negatives, malformed decimals, and absent-base `usdt_price_amount` are rejected without mutating the Product or writing audit rows.
 - Identity, role, audit, and lock handling are inherited: Owner/Admin only (`ProductPolicy`), `product.created`/`product.updated` audit includes the override columns in `old_values`/`new_values`, and rejected saves write no audit.
 - A reseller-only price change does not create a customer `ProductPriceChangeEvent` (that pipeline reads base retail prices), so retail customers are not notified about a channel they cannot buy from.
 

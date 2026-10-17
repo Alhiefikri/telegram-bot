@@ -28,11 +28,13 @@ class Product extends Model
     /**
      * Mirror the PostgreSQL reseller-override CHECK constraints for the SQLite
      * lane: an override must be positive, and a dollar override can never
-     * manufacture dollar eligibility without a base dollar price.
+     * manufacture dollar eligibility without a base dollar price the retail
+     * dollar rail can actually charge.
      */
     protected static function booted(): void
     {
         static::saving(function (Product $product): void {
+            $dirty = $product->getDirty();
             $resellerIdr = $product->reseller_price_amount === null ? null : (int) $product->reseller_price_amount;
             $resellerUsdt = $product->reseller_usdt_price_amount === null ? null : (int) $product->reseller_usdt_price_amount;
 
@@ -40,8 +42,29 @@ class Product extends Model
                 throw new InvalidArgumentException('A Product reseller price override must be positive.');
             }
 
-            if ($resellerUsdt !== null && $product->usdt_price_amount === null) {
-                throw new InvalidArgumentException('A Product reseller USDT override requires a base USDT price.');
+            // Validate the state this write produces: the override this write
+            // persists (otherwise the stored one) against the base price this write
+            // persists (otherwise the stored one). A write that touches no price
+            // column (stock, copy, images) never re-evaluates a stored override
+            // against a historical zero base price.
+            if (! $product->isDirty(['price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount'])) {
+                return;
+            }
+
+            $effectiveResellerUsdt = array_key_exists('reseller_usdt_price_amount', $product->getAttributes())
+                ? $product->getAttributes()['reseller_usdt_price_amount']
+                : $product->getOriginal('reseller_usdt_price_amount');
+
+            if ($effectiveResellerUsdt === null) {
+                return;
+            }
+
+            $effectiveBaseUsdt = array_key_exists('usdt_price_amount', $dirty)
+                ? $dirty['usdt_price_amount']
+                : $product->getOriginal('usdt_price_amount');
+
+            if ($effectiveBaseUsdt === null || (int) $effectiveBaseUsdt <= 0) {
+                throw new InvalidArgumentException('A Product reseller USDT override requires a positive base USDT price.');
             }
         });
     }
