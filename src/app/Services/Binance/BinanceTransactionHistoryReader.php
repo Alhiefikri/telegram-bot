@@ -23,7 +23,7 @@ final class BinanceTransactionHistoryReader
         private ?int $maxDurationSeconds = null,
     ) {}
 
-    public function read(int $startTimeMs, ?int $endTimeMs = null): BinanceHistoryReadResult
+    public function read(int $startTimeMs, ?int $endTimeMs = null, bool $fresh = false): BinanceHistoryReadResult
     {
         $bucketMs = 60_000;
         $startTimeMs = intdiv($startTimeMs, $bucketMs) * $bucketMs;
@@ -48,7 +48,9 @@ final class BinanceTransactionHistoryReader
                 break;
             }
 
-            $page = $this->client->payTransactions($windowStart, $windowEnd, self::PAGE_SIZE);
+            $page = $fresh
+                ? $this->client->payTransactions($windowStart, $windowEnd, self::PAGE_SIZE, fresh: true)
+                : $this->client->payTransactions($windowStart, $windowEnd, self::PAGE_SIZE);
             $requests++;
             foreach ($page as $payload) {
                 if (! is_array($payload)) {

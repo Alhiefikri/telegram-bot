@@ -42,6 +42,7 @@
             <file>tests/Feature/UsdtReconciliationPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtReorgIncidentPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtTopUpReviewPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/BinanceUsdtTopUpTest.php</file>
             <file>tests/Feature/UsdtTopUpSettlementPostgresConcurrencyTest.php</file>
             <file>tests/Feature/BscUsdtRailPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SupplierClientTest.php</file>

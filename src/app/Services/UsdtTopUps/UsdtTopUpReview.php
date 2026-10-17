@@ -12,6 +12,8 @@ use App\Models\CustomerUsdtTopUp;
 use App\Models\UsdtBscRailInvoice;
 use App\Models\UsdtTopUpReviewRequest;
 use App\Models\User;
+use App\Services\Binance\BinancePayTransaction;
+use App\Services\Binance\BinanceTransactionHistoryReader;
 use App\Services\Bsc\BscChainFacts;
 use App\Services\Bsc\BscFinalReceiptInspector;
 use App\Services\Bsc\BscReadiness;
@@ -20,16 +22,19 @@ use App\Services\Bsc\BscTransactionHash;
 use App\Services\Bsc\BscTransferEvidence;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptClaims;
+use App\Services\MoneyReceipts\MoneyReceiptAlias;
 use App\Services\MoneyReceipts\MoneyReceiptIdentity;
 use App\Services\MoneyReceipts\MoneyReceiptParentClaim;
 use App\Services\MoneyReceipts\MoneyReceiptTarget;
 use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
 use App\Services\StoreBalance\BalanceAdjustmentPasswordConfirmation;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\UsdtTopUpOutbound;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
 use App\Services\UsdtFunding\CustomerUsdtFundingReservationService;
+use Carbon\CarbonImmutable;
 use DomainException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Auth;
@@ -49,6 +54,8 @@ final class UsdtTopUpReview
         private readonly ExternalMoneyReceiptClaims $receipts,
         private readonly CustomerUsdtFundingReservationService $reservations,
         private readonly UsdtTopUpOutbound $outbound,
+        private readonly BinanceTransactionHistoryReader $binanceHistory,
+        private readonly TelegramOutboundEffectService $effects,
     ) {}
 
     /** Trusted authenticated Customer adapter supplies actor; Owner cannot choose a beneficiary. */
@@ -101,6 +108,14 @@ final class UsdtTopUpReview
     {
         $this->outsideTransaction();
         $actor = $this->owner($actor);
+        $target = CustomerUsdtTopUp::query()->findOrFail($topUpId);
+        if ($target->rail === 'binance_pay') {
+            if ($refundTransactionHash !== null || $refundAuthorizationId !== null) {
+                throw new DomainException('Binance review does not support external refund evidence.');
+            }
+
+            return $this->requestBinance($actor, $target, $decision, $amountDecimal, $transactionHash, $reason);
+        }
         if (! in_array($decision, ['settled', 'resolved_by_compensation', 'externally_refunded'], true)
             || trim($reason) === '' || mb_strlen($reason) > 1000) {
             throw new DomainException('Invalid USDT review decision or reason.');
@@ -122,7 +137,6 @@ final class UsdtTopUpReview
         } elseif ($refundTransactionHash !== null || $refundAuthorizationId !== null) {
             throw new DomainException('Outbound evidence is only valid for external refund.');
         }
-        $target = CustomerUsdtTopUp::query()->findOrFail($topUpId);
         $invoice = $this->invoice($target);
         if ($decision !== 'externally_refunded' && $amount->units() <= (int) $target->fee_micro) {
             throw new DomainException('Actual deposit does not cover the original application fee.');
@@ -189,6 +203,9 @@ final class UsdtTopUpReview
             return $existing;
         }
         $target = CustomerUsdtTopUp::query()->findOrFail($preview->top_up_id);
+        if ($target->rail === 'binance_pay') {
+            return $this->confirmBinance($actor, $preview, $target, $fingerprint, $version, $password);
+        }
         $invoice = $this->invoice($target);
         $amount = UsdtMicroAmount::fromUnits($preview->amount_micro);
         // Fresh RPC before KDF/money locks, never in retry closures.
@@ -280,6 +297,209 @@ final class UsdtTopUpReview
         } catch (Throwable $exception) {
             $this->passwords->release($actor, $authority->token);
             throw $exception;
+        }
+    }
+
+    private function requestBinance(User $actor, CustomerUsdtTopUp $target, string $decision,
+        string $amountDecimal, string $orderId, string $reason): UsdtTopUpReviewRequest
+    {
+        $orderId = trim($orderId);
+        if (! in_array($decision, ['settled', 'rejected'], true) || trim($reason) === ''
+            || mb_strlen($reason) > 1000 || $orderId === '' || strlen($orderId) > 191) {
+            throw new DomainException('Invalid Binance review decision, Order ID or reason.');
+        }
+        $amount = UsdtMicroAmount::fromDecimalString($amountDecimal);
+        $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->firstOrFail();
+        $inspection = $this->inspectBinance($target, $orderId, $amount, $decision);
+        $attributes = ['id' => (string) Str::uuid(), 'top_up_id' => $target->id,
+            'owner_user_id' => $actor->id, 'decision' => $decision, 'amount_micro' => $amount->units(),
+            'transaction_hash' => null, 'provider_reference' => $orderId, 'reason' => trim($reason), 'version' => 1,
+            'work_version' => (int) $work->version, 'target_fingerprint' => $target->request_fingerprint,
+            'session_binding' => hash('sha256', request()->session()->getId()),
+            'credential_binding' => hash('sha256', $actor->password), 'chain_evidence' => $inspection['evidence'],
+            'created_at' => now(), 'expires_at' => now()->addMinutes(5)];
+        $attributes['fingerprint'] = hash('sha256', json_encode($attributes, JSON_THROW_ON_ERROR));
+
+        return DB::transaction(function () use ($actor, $target, $attributes): UsdtTopUpReviewRequest {
+            $this->owner($actor);
+            Customer::query()->whereKey($target->customer_id)->lockForUpdate()->firstOrFail();
+            CustomerUsdtTopUp::query()->whereKey($target->id)->lockForUpdate()->firstOrFail();
+            $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->lockForUpdate()->firstOrFail();
+            $reservation = CustomerUsdtFundingReservation::query()->whereKey($target->reservation_id)->lockForUpdate()->firstOrFail();
+            $this->assertBinanceReviewable($target, $work, $reservation, $attributes['work_version']);
+            $preview = new UsdtTopUpReviewRequest;
+            $preview->forceFill($attributes)->save();
+
+            return $preview;
+        }, 5);
+    }
+
+    private function inspectBinance(CustomerUsdtTopUp $target, string $orderId, UsdtMicroAmount $amount, string $decision): array
+    {
+        try {
+            // Late deposits require an extended lookup, not relaxed automatic settlement.
+            $history = $this->binanceHistory->read($target->created_at->getTimestampMs(), now()->getTimestampMs(), fresh: true);
+        } catch (Throwable $error) {
+            throw new DomainException('Fresh Binance verification unavailable.', previous: $error);
+        }
+        if (! $history->complete) {
+            throw new DomainException('Fresh Binance history is incomplete.');
+        }
+        $matches = [];
+        foreach ($history->transactions as $payload) {
+            $transaction = BinancePayTransaction::fromPayload($payload);
+            if ($transaction !== null && hash_equals($orderId, $transaction->orderId())) {
+                $rawStatus = $payload['status'] ?? $payload['transactionStatus'] ?? '';
+                $status = is_string($rawStatus) ? strtoupper(trim($rawStatus)) : '';
+                $matches[] = ['transaction' => $transaction, 'evidence' => $transaction->sanitizedPayload() + [
+                    'order_identity' => hash('sha256', $transaction->orderId()),
+                    'transaction_identity' => hash('sha256', $transaction->transactionId()),
+                    'status' => $status]];
+            }
+        }
+        if (count($matches) !== 1) {
+            throw new DomainException('One fresh authoritative Binance Order ID is required.');
+        }
+        $inspection = $matches[0];
+        $transaction = $inspection['transaction'];
+        if ($transaction->amountMicro() !== $amount->units()) {
+            throw new DomainException('Review amount differs from the fresh provider amount.');
+        }
+        if ($decision === 'settled') {
+            $snapshot = $target->payment_snapshot;
+            if (! in_array($inspection['evidence']['status'], ['SUCCESS', 'COMPLETED', 'PAID'], true)
+                || $transaction->currency() !== 'USDT'
+                || ! $transaction->isIncomingToConfiguredReceiver($snapshot['receiver_pay_id'] ?? null, $snapshot['receiver_uid'] ?? null)
+                || $transaction->transactionTimeMs() < $target->created_at->getTimestampMs()
+                || $transaction->transactionTimeMs() > now()->getTimestampMs()
+                || $amount->units() <= (int) $target->fee_micro) {
+                throw new DomainException('Binance transfer is not eligible for reviewed credit.');
+            }
+            if (CustomerUsdtTopUp::query()->where('customer_id', $target->customer_id)->where('rail', 'binance_pay')
+                ->where('intent_id', '>', $target->intent_id)
+                ->where('created_at', '<=', CarbonImmutable::createFromTimestampMs($transaction->transactionTimeMs()))->exists()) {
+                throw new DomainException('Binance transfer belongs to a later payment window.');
+            }
+        }
+
+        return $inspection;
+    }
+
+    private function assertBinanceReviewable(CustomerUsdtTopUp $target, object $work,
+        CustomerUsdtFundingReservation $reservation, int $workVersion): void
+    {
+        if (! in_array($work->state, ['manual_review', 'expired_unresolved'], true)
+            || (int) $work->version !== $workVersion || $reservation->resolved_at !== null
+            || DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->exists()) {
+            throw new DomainException('Binance target resolved or evidence changed; request a fresh preview.');
+        }
+    }
+
+    private function confirmBinance(User $actor, UsdtTopUpReviewRequest $preview, CustomerUsdtTopUp $target,
+        string $fingerprint, int $version, string $password): object
+    {
+        $amount = UsdtMicroAmount::fromUnits($preview->amount_micro);
+        $inspection = $this->inspectBinance($target, $preview->provider_reference, $amount, $preview->decision);
+        if ($inspection['evidence'] !== $preview->chain_evidence) {
+            throw new DomainException('Binance evidence changed; request a fresh preview.');
+        }
+        $authority = $this->passwords->verify($this->owner($actor), $password, $preview);
+        try {
+            return DB::transaction(function () use ($actor, $preview, $target, $fingerprint, $version, $amount, $inspection, $authority): object {
+                $freshActor = User::query()->whereKey($actor->id)->lockForUpdate()->firstOrFail();
+                $this->binding($freshActor, $preview, $fingerprint, $version);
+                $authority->assertMatches($preview);
+                $customer = Customer::query()->whereKey($target->customer_id)->lockForUpdate()->firstOrFail();
+                if ($preview->decision === 'settled') {
+                    $this->ledger->lockForTransaction($customer);
+                }
+                $lockedTarget = CustomerUsdtTopUp::query()->whereKey($target->id)->lockForUpdate()->firstOrFail();
+                $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->lockForUpdate()->firstOrFail();
+                $reservation = CustomerUsdtFundingReservation::query()->whereKey($target->reservation_id)->lockForUpdate()->firstOrFail();
+                $existing = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->first();
+                if ($existing !== null && $existing->review_request_id === $preview->id) {
+                    $this->passwords->consume($freshActor, $authority->token);
+
+                    return $existing;
+                }
+                $this->assertBinanceReviewable($lockedTarget, $work, $reservation, $preview->work_version);
+                if ($lockedTarget->request_fingerprint !== $preview->target_fingerprint) {
+                    throw new DomainException('Binance target binding changed.');
+                }
+                $this->passwords->consume($freshActor, $authority->token);
+                $transaction = $inspection['transaction'];
+                DB::table('customer_usdt_top_up_inbox')->insertOrIgnore(['top_up_id' => $target->id,
+                    'provider_reference' => $preview->provider_reference, 'tx_hash' => null,
+                    'state' => 'review', 'attempts' => 0, 'next_check_at' => now(), 'created_at' => now()]);
+                $inbox = DB::table('customer_usdt_top_up_inbox')->where('top_up_id', $target->id)
+                    ->where('provider_reference', $preview->provider_reference)->firstOrFail();
+                $evidenceId = DB::table('customer_usdt_top_up_evidence')->insertGetId(['top_up_id' => $target->id,
+                    'inbox_id' => $inbox->id, 'version' => (int) $work->evidence_version + 1,
+                    'status' => $preview->decision === 'settled' ? 'verified' : 'review',
+                    'reason' => 'owner_verified_'.$preview->decision,
+                    'chain_evidence' => json_encode($inspection['evidence'], JSON_THROW_ON_ERROR), 'created_at' => now()]);
+                $receiptId = null;
+                $entry = null;
+                $late = $target->expires_at->isPast() || $transaction->transactionTimeMs() > $target->expires_at->getTimestampMs();
+                $snapshot = $target->payment_snapshot;
+                $claimable = $transaction->currency() === 'USDT'
+                    && in_array($inspection['evidence']['status'], ['SUCCESS', 'COMPLETED', 'PAID'], true)
+                    && $transaction->isIncomingToConfiguredReceiver($snapshot['receiver_pay_id'] ?? null, $snapshot['receiver_uid'] ?? null)
+                    && $transaction->transactionTimeMs() <= now()->getTimestampMs();
+                if ($claimable) {
+                    $payId = $snapshot['receiver_pay_id'] ?? null;
+                    $type = filled($payId) ? 'pay_id' : 'uid';
+                    $receiver = filled($payId) ? $payId : ($snapshot['receiver_uid'] ?? '');
+                    $identity = MoneyReceiptIdentity::binancePay($type, $receiver, $transaction->transactionId());
+                    $aliases = $transaction->orderId() !== $transaction->transactionId()
+                        ? [new MoneyReceiptAlias('binance_order_id', MoneyReceiptIdentity::binancePay($type, $receiver, $transaction->orderId()))] : [];
+                    $receipt = new VerifiedMoneyReceipt($identity, 'customer:'.$customer->id, 'USDT',
+                        (string) $amount->units(), 6, MoneyReceiptTarget::customerUsdtTopUp($target->id),
+                        $transaction->sanitizedPayload(), $aliases);
+                    if (! $this->receipts->claim($receipt)->allowsMoneyEffect()) {
+                        throw new DomainException('Binance receipt is claimed for another economic target.');
+                    }
+                    $receiptId = DB::table('external_money_receipts')->where('canonical_key', $receipt->canonicalKey())->value('id');
+                }
+                if ($preview->decision === 'settled') {
+                    $result = $this->ledger->creditVerifiedTopUp($customer,
+                        new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits($amount->units() - $target->fee_micro),
+                            $target->id, (string) $receiptId, (string) $evidenceId, $preview->id, $authority), 'usdt-top-up:'.$target->id);
+                    $entry = CustomerUsdtBalanceEntry::query()->findOrFail($result->entryId);
+                }
+                DB::table('customer_usdt_top_up_resolutions')->insert(['top_up_id' => $target->id,
+                    'kind' => $preview->decision, 'receipt_id' => $receiptId, 'entry_id' => $entry?->id,
+                    'evidence_id' => $evidenceId, 'review_request_id' => $preview->id,
+                    'resolved_amount_micro' => $amount->units(), 'late' => $late, 'created_at' => now()]);
+                if ($entry !== null) {
+                    if ($target->fee_micro > 0) {
+                        DB::table('customer_usdt_top_up_fee_events')->insert(['top_up_id' => $target->id,
+                            'receipt_id' => $receiptId, 'amount_micro' => $target->fee_micro, 'created_at' => now()]);
+                    }
+                    $this->reservations->markReviewedSettled($customer, $target->reservation_id, $entry->id, $target->id, $preview->id);
+                    $this->outbound->recordReceipt($target, $entry, $late);
+                } else {
+                    $reservation->forceFill(['state' => 'released', 'resolved_at' => now(), 'resolution_kind' => 'rejected',
+                        'resolution_reference' => $preview->id, 'resolution_actor' => 'owner:'.$freshActor->id])->save();
+                }
+                DB::table('customer_usdt_top_up_inbox')->where('id', $inbox->id)->update(['state' => $preview->decision]);
+                DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->update([
+                    'state' => $preview->decision, 'version' => (int) $work->version + 1,
+                    'evidence_version' => (int) $work->evidence_version + 1, 'lease_token' => null, 'lease_until' => null,
+                    'last_error' => null, 'next_check_at' => now()->addMinute(), 'updated_at' => now()]);
+                AuditLog::create(['user_id' => $freshActor->id, 'action' => 'usdt_top_up.review_resolved',
+                    'subject_type' => CustomerUsdtTopUp::class, 'subject_id' => $target->id,
+                    'new_values' => ['request_id' => $preview->id, 'decision' => $preview->decision, 'rail' => 'binance_pay',
+                        'amount_micro' => (string) $amount->units(), 'provider_currency' => $transaction->currency(),
+                        'entry_id' => $entry?->id, 'receipt_id' => $receiptId]]);
+                $this->effects->recordBalanceAdjustmentNotice('usdt-review:'.$preview->id, 'owner',
+                    'Resolusi Binance USDT '.$target->id.': '.$preview->decision.'. Nominal provider '.$amount->decimal().' '.$transaction->currency().'.');
+
+                return DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->firstOrFail();
+            }, 5);
+        } catch (Throwable $error) {
+            $this->passwords->release($actor, $authority->token);
+            throw $error;
         }
     }
 

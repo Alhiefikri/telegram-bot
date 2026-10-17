@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\CustomerUsdtFundingRail;
+use App\Enums\UserRole;
 use App\Models\Customer;
 use App\Models\CustomerUsdtFundingIntent;
 use App\Models\CustomerUsdtFundingPolicy;
@@ -10,9 +11,13 @@ use App\Models\CustomerUsdtFundingReservation;
 use App\Models\CustomerUsdtTopUp;
 use App\Models\ManualPaymentSetting;
 use App\Models\TelegramNavigationRoot;
+use App\Models\UsdtTopUpReviewRequest;
+use App\Models\User;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\UsdtTopUps\BinanceUsdtTopUpSettlement;
+use App\Services\UsdtTopUps\UsdtTopUpReview;
 use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
+use DomainException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -443,6 +448,210 @@ final class BinanceUsdtTopUpTest extends TestCase
         $this->assertSame(400_000, $target->fresh()->payable_micro);
         $this->assertSame('12345678', $target->fresh()->payment_snapshot['receiver_pay_id']);
         $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
+    }
+
+    public function test_owner_can_resolve_binance_amount_mismatch_once(): void
+    {
+        $target = $this->target(771020);
+        $this->fakeHistory($this->transaction($target, ['amount' => '2']));
+        $settlement = app(BinanceUsdtTopUpSettlement::class);
+        $settlement->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $settlement->check($target->id);
+        $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
+        $owner = $this->reviewOwner();
+        $review = app(UsdtTopUpReview::class);
+        $preview = $review->request($owner, $target->id, 'settled', '2',
+            '445011487581044736', 'Resolve verified Binance amount mismatch');
+        $resolution = $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $replay = $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $this->assertSame($resolution->entry_id, $replay->entry_id);
+        $this->assertSame(2_000_000, (int) DB::table('customer_usdt_balance_entries')->sole()->amount_micro);
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $this->assertSame(1, DB::table('audit_logs')->where('action', 'usdt_top_up.review_resolved')->count());
+        $this->assertSame(1, DB::table('telegram_outbound_effects')->where('effect_key', 'balance-adjustment:usdt-review:'.$preview->id.':owner:v1')->count());
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
+    }
+
+    public function test_owner_can_credit_expired_binance_deposit_using_original_fee_and_receiver(): void
+    {
+        $target = $this->historicalTarget();
+        $original = $target->fresh()->getAttributes();
+        $this->travel(16)->minutes();
+        DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->update(['state' => 'expired_unresolved', 'version' => DB::raw('version + 1')]);
+        config(['services.binance.pay_id' => '87654321']);
+        CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 900_000, 'version' => 2]);
+        $this->fakeHistory($this->transaction($target, ['amount' => '0.6', 'transactionTime' => now()->getTimestampMs()]));
+        $owner = $this->reviewOwner();
+        $review = app(UsdtTopUpReview::class);
+        $preview = $review->request($owner, $target->id, 'settled', '0.6', '445011487581044736', 'Verified late deposit');
+        $resolution = $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $this->assertTrue((bool) $resolution->late);
+        $this->assertSame(500_000, (int) DB::table('customer_usdt_balance_entries')->sole()->amount_micro);
+        $this->assertSame(100_000, (int) DB::table('customer_usdt_top_up_fee_events')->sole()->amount_micro);
+        $this->assertSame('settled', CustomerUsdtFundingReservation::findOrFail($target->reservation_id)->state->value);
+        $this->assertSame($original, $target->fresh()->getAttributes());
+    }
+
+    #[DataProvider('reviewMismatchCases')]
+    public function test_owner_can_reject_but_cannot_credit_invalid_binance_transfer(array $changes): void
+    {
+        $target = $this->target(771021);
+        $changes = array_replace($changes, ['amount' => '2']);
+        if (isset($changes['transactionTime'])) {
+            $changes['transactionTime'] = $target->created_at->subSecond()->getTimestampMs();
+        }
+        $this->fakeHistory($this->transaction($target, $changes));
+        $settlement = app(BinanceUsdtTopUpSettlement::class);
+        $settlement->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $settlement->check($target->id);
+        $owner = $this->reviewOwner();
+        $review = app(UsdtTopUpReview::class);
+        try {
+            $review->request($owner, $target->id, 'settled', '2', '445011487581044736', 'Must not credit mismatch');
+            $this->fail('Invalid provider transfer authorized credit.');
+        } catch (DomainException) {
+            $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        }
+        $preview = $review->request($owner, $target->id, 'rejected', '2', '445011487581044736', 'Reject verified mismatch');
+        $resolution = $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $this->assertSame('rejected', $resolution->kind);
+        $this->assertNull($resolution->entry_id);
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame('released', CustomerUsdtFundingReservation::findOrFail($target->reservation_id)->state->value);
+        $this->assertSame('rejected', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
+        $this->assertSame(1, DB::table('audit_logs')->where('action', 'usdt_top_up.review_resolved')->count());
+        $this->assertSame(1, DB::table('telegram_outbound_effects')->where('effect_key', 'balance-adjustment:usdt-review:'.$preview->id.':owner:v1')->count());
+    }
+
+    public static function reviewMismatchCases(): array
+    {
+        return [
+            'asset' => [['currency' => 'BTC']],
+            'receiver' => [['receiverInfo' => ['accountId' => '87654321']]],
+            'window' => [['transactionTime' => 1]],
+            'failed status' => [['status' => 'FAILED']],
+            'unknown status' => [['status' => '']],
+        ];
+    }
+
+    #[DataProvider('reviewDecisionCases')]
+    public function test_owner_decision_requires_uncached_provider_verification(string $decision): void
+    {
+        config(['services.binance.history_cache_seconds' => 60]);
+        $target = $this->target(771022);
+        $payload = $this->transaction($target, ['amount' => '2']);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::sequence()
+            ->push(['code' => '000000', 'success' => true, 'data' => [$payload]])
+            ->push(['code' => '000000', 'success' => true, 'data' => [$payload]])
+            ->push(['code' => '000000', 'success' => true, 'data' => []])]);
+        $settlement = app(BinanceUsdtTopUpSettlement::class);
+        $settlement->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $settlement->check($target->id);
+        $owner = $this->reviewOwner();
+        $review = app(UsdtTopUpReview::class);
+        $preview = $review->request($owner, $target->id, $decision, '2', '445011487581044736', 'Fresh verification required');
+        try {
+            $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+            $this->fail('Stored or cached evidence authorized a decision.');
+        } catch (DomainException) {
+            Http::assertSentCount(3);
+            $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+            $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+            $this->assertSame(0, DB::table('external_money_receipts')->count());
+        }
+    }
+
+    public static function reviewDecisionCases(): array
+    {
+        return [['settled'], ['rejected']];
+    }
+
+    public function test_owner_binance_review_uses_existing_admin_routes(): void
+    {
+        $target = $this->target(771023);
+        DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->update(['state' => 'manual_review', 'version' => DB::raw('version + 1')]);
+        $this->fakeHistory($this->transaction($target, ['amount' => '2']));
+        $this->reviewOwner();
+        $this->get(route('admin.store-balance.usdt-review.index', ['top_up' => $target->id]))->assertOk();
+        $this->post(route('admin.store-balance.usdt-review.previews.store'), [
+            'top_up_id' => $target->id, 'decision' => 'settled', 'amount' => '2',
+            'provider_reference' => '445011487581044736', 'reason' => 'Provider verified credit',
+        ])->assertSessionHasNoErrors()->assertRedirect();
+        $preview = UsdtTopUpReviewRequest::query()->sole();
+        $this->withCookie(config('session.cookie'), session()->getId());
+        $this->get(route('admin.store-balance.usdt-review.index', ['preview' => $preview->id]))->assertOk();
+        $this->post(route('admin.store-balance.usdt-review.previews.confirm', $preview->id), [
+            'fingerprint' => $preview->fingerprint, 'version' => 1, 'password' => 'wrong-password',
+        ])->assertSessionHasErrors('review');
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        $this->post(route('admin.store-balance.usdt-review.previews.confirm', $preview->id), [
+            'fingerprint' => $preview->fingerprint, 'version' => 1, 'password' => 'owner-password',
+        ])->assertSessionHasNoErrors()->assertRedirect();
+        $this->assertSame(2_000_000, (int) DB::table('customer_usdt_balance_entries')->sole()->amount_micro);
+    }
+
+    public function test_review_cannot_reuse_receipt_or_order_alias_claimed_by_another_customer(): void
+    {
+        $this->freezeTime();
+        $first = $this->target(771024);
+        $second = $this->target(771025);
+        $aliasPayload = $this->transaction($second, ['transactionId' => 'different-transaction']);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::sequence()
+            ->push(['code' => '000000', 'success' => true, 'data' => [$this->transaction($first)]])
+            ->push(['code' => '000000', 'success' => true, 'data' => [$aliasPayload]])
+            ->push(['code' => '000000', 'success' => true, 'data' => [$aliasPayload]])]);
+        $settlement = app(BinanceUsdtTopUpSettlement::class);
+        $settlement->submit(Customer::findOrFail($first->customer_id), $first->id, '445011487581044736');
+        $settlement->check($first->id);
+        DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $second->id)
+            ->update(['state' => 'manual_review', 'version' => DB::raw('version + 1')]);
+        $owner = $this->reviewOwner();
+        $review = app(UsdtTopUpReview::class);
+        $preview = $review->request($owner, $second->id, 'settled', '1.5', '445011487581044736', 'Conflicting alias');
+        try {
+            $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+            $this->fail('A claimed Order ID funded another Customer.');
+        } catch (DomainException) {
+            $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+            $this->assertSame(1, DB::table('external_money_receipts')->count());
+            $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $second->id)->count());
+            $this->assertSame(0, DB::table('audit_logs')->where('action', 'usdt_top_up.review_resolved')->count());
+        }
+    }
+
+    public function test_provider_outage_cannot_finalize_stored_binance_review(): void
+    {
+        $target = $this->target(771026);
+        DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)
+            ->update(['state' => 'expired_unresolved', 'version' => DB::raw('version + 1')]);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::sequence()
+            ->push(['code' => '000000', 'success' => true, 'data' => [$this->transaction($target)]])
+            ->push(['code' => 'ERROR', 'success' => false], 503)]);
+        $owner = $this->reviewOwner();
+        $review = app(UsdtTopUpReview::class);
+        $preview = $review->request($owner, $target->id, 'settled', '1.5', '445011487581044736', 'Provider outage');
+        config(['services.binance.history_max_attempts' => 1]);
+        try {
+            $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+            $this->fail('Unavailable provider authorized credit.');
+        } catch (DomainException) {
+            $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+            $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+            $this->assertSame(0, DB::table('external_money_receipts')->count());
+        }
+    }
+
+    private function reviewOwner(): User
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner, 'password' => 'owner-password']);
+        $this->actingAs($owner);
+        $session = app('session')->driver();
+        $session->start();
+        request()->setLaravelSession($session);
+        config(['services.telegram.admin_telegram_chat_id' => '998877']);
+
+        return $owner;
     }
 
     private function fakeHistory(array $transaction): void

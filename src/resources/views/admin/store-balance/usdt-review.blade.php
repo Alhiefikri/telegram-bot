@@ -14,7 +14,7 @@
     <div class="space-y-5">
         <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Ringkasan Admin</a>
         <h1 class="text-2xl font-semibold tracking-tight text-admin-ink">Review deposit USDT dan insiden</h1>
-        <x-admin-dashboard.notice tone="warning">Hash publik hanya petunjuk lookup. Customer terikat receiver permanen. Invoice asli tidak berubah; deposit sub-micro atau bukti ambigu tetap unresolved, tanpa pembulatan atau grant. Review tidak mengaktifkan pendanaan produksi.</x-admin-dashboard.notice>
+        <x-admin-dashboard.notice tone="warning">Hash dan Order ID hanya petunjuk lookup, bukan bukti dana. Invoice asli tidak berubah; bukti ambigu tetap unresolved, tanpa pembulatan atau grant. Review memerlukan verifikasi provider terkini dan tidak mengaktifkan pendanaan produksi.</x-admin-dashboard.notice>
         @if(session('status'))
             <x-admin-dashboard.notice tone="success" role="status">{{ session('status') }}</x-admin-dashboard.notice>
         @endif
@@ -29,14 +29,16 @@
             <h2 class="text-lg font-semibold text-admin-ink">Periksa resolusi sebelum konfirmasi</h2>
             <p class="mt-2 break-all font-mono text-xs font-medium text-admin-muted">Target {{ $preview->top_up_id }} · {{ $preview->decision }}</p>
             <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $previewOriginal->customer_id }} · Telegram {{ $previewOriginal->telegram_id }} · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($previewOriginal->amount_micro)->decimal() }} USDT · fee awal {{ $previewOriginal->fee_micro }} micro-USDT</p>
-            <p class="mt-2 font-semibold text-admin-ink">Nominal deposit terverifikasi {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($preview->amount_micro)->decimal() }} USDT</p>
-            @if($preview->decision !== 'externally_refunded')
+            <p class="mt-2 font-semibold text-admin-ink">Nominal transfer terverifikasi {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($preview->amount_micro)->decimal() }} {{ $preview->provider_reference !== null ? ($preview->chain_evidence['currency'] ?? 'USDT') : 'USDT' }}</p>
+            @if($preview->decision === 'rejected')
+                <p class="mt-2 font-semibold text-admin-ink">Target ditutup sebagai ditolak; tidak ada kredit saldo.</p>
+            @elseif($preview->decision !== 'externally_refunded')
                 <p class="mt-2 font-semibold text-admin-ink">Kredit disetujui setelah fee awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($preview->amount_micro - $previewOriginal->fee_micro)->decimal() }} USDT</p>
             @else
                 <p class="mt-2 font-semibold text-admin-ink">Seluruh nominal deposit dikembalikan secara eksternal; tidak ada kredit saldo.</p>
             @endif
             <p class="mt-2 text-sm font-medium text-admin-ink">{{ $preview->reason }}</p>
-            <p class="mt-2 text-sm font-medium text-admin-muted">Bukti transfer <span class="break-all font-mono text-xs">{{ substr($preview->transaction_hash, 0, 10) }}…{{ substr($preview->transaction_hash, -6) }}</span> · berlaku sampai {{ $preview->expires_at }}</p>
+            <p class="mt-2 text-sm font-medium text-admin-muted">Bukti transfer <span class="break-all font-mono text-xs">{{ substr($preview->provider_reference ?? $preview->transaction_hash, 0, 10) }}…{{ substr($preview->provider_reference ?? $preview->transaction_hash, -6) }}</span> · berlaku sampai {{ $preview->expires_at }}</p>
             <p class="mt-2 text-sm font-medium text-admin-muted">Invoice asli tidak berubah. Satu resolusi menutup settlement berikutnya; uang tambahan tetap unresolved.</p>
             @if(now()->lt($preview->expires_at))
                 <form method="POST" action="{{ route('admin.store-balance.usdt-review.previews.confirm', $preview->id) }}" class="mt-4 space-y-3">
@@ -81,7 +83,7 @@
                 <tbody class="divide-y divide-admin-line">
                 @forelse($targets as $target)
                     <tr>
-                        <td class="px-3 py-2 align-top"><span class="break-all font-mono text-xs font-medium text-admin-ink">{{ $target->id }}</span><br><span class="text-xs font-medium text-admin-muted">Customer #{{ $target->customer_id }} · Telegram {{ $target->telegram_id }}</span></td>
+                        <td class="px-3 py-2 align-top"><span class="break-all font-mono text-xs font-medium text-admin-ink">{{ $target->id }}</span><br><span class="text-xs font-medium text-admin-muted">{{ $target->rail }} · Customer #{{ $target->customer_id }} · Telegram {{ $target->telegram_id }}</span></td>
                         <td class="px-3 py-2 align-top font-medium text-admin-ink">{{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($target->amount_micro)->decimal() }} / {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($target->payable_micro)->decimal() }} USDT</td>
                         <td class="px-3 py-2 align-top text-xs font-medium text-admin-ink">{{ $target->resolution_kind ?? $target->state }}<br>Persiapan: {{ $target->preparation_state }}<br>{{ $target->last_error }}</td>
                         <td class="px-3 py-2 align-top"><a class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline" href="{{ route('admin.store-balance.usdt-review.index', ['top_up' => $target->id]) }}">Tinjau</a></td>
@@ -98,6 +100,7 @@
     @if($selected)
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Bukti target">
             <h2 class="text-lg font-semibold text-admin-ink">Target {{ $selected->id }}</h2>
+            <p class="mt-2 text-sm font-semibold text-admin-ink">Rail: {{ $selected->rail === 'binance_pay' ? 'Binance Pay' : 'BSC USDT' }}</p>
             <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $selected->customer_id }} · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($selected->amount_micro)->decimal() }} USDT · fee {{ $selected->fee_micro }} micro-USDT</p>
             <h3 class="mt-4 text-sm font-semibold text-admin-ink">Riwayat pemeriksaan authoritative</h3>
             @forelse($evidence as $item)
@@ -112,20 +115,33 @@
                 <x-admin-dashboard.field-label for="review-decision">Keputusan</x-admin-dashboard.field-label>
                 <x-admin-dashboard.select id="review-decision" name="decision" required>
                     <option value="settled">Settlement nominal terverifikasi (termasuk revisi)</option>
-                    <option value="resolved_by_compensation">Kompensasi deposit terverifikasi</option>
-                    <option value="externally_refunded">Pengembalian eksternal yang sudah terbukti</option>
+                    @if($selected->rail === 'binance_pay')
+                        <option value="rejected">Tolak tanpa kredit saldo</option>
+                    @else
+                        <option value="resolved_by_compensation">Kompensasi deposit terverifikasi</option>
+                        <option value="externally_refunded">Pengembalian eksternal yang sudah terbukti</option>
+                    @endif
                 </x-admin-dashboard.select>
                 <x-admin-dashboard.field-label for="review-amount">Nominal resolusi USDT (exact, maksimal 6 desimal)</x-admin-dashboard.field-label>
                 <x-admin-dashboard.input id="review-amount" name="amount" type="text" inputmode="decimal" autocomplete="off" maxlength="32" required />
-                <x-admin-dashboard.field-label for="review-hash">Transaction hash deposit</x-admin-dashboard.field-label>
-                <x-admin-dashboard.input id="review-hash" name="transaction_hash" type="text" autocomplete="off" maxlength="66" required />
+                @if($selected->rail === 'binance_pay')
+                    <x-admin-dashboard.field-label for="review-order-id">Binance Order ID</x-admin-dashboard.field-label>
+                    <x-admin-dashboard.input id="review-order-id" name="provider_reference" type="text" autocomplete="off" maxlength="191" required />
+                @else
+                    <x-admin-dashboard.field-label for="review-hash">Transaction hash deposit</x-admin-dashboard.field-label>
+                    <x-admin-dashboard.input id="review-hash" name="transaction_hash" type="text" autocomplete="off" maxlength="66" required />
+                @endif
                 <x-admin-dashboard.field-label for="review-reason">Alasan resolusi</x-admin-dashboard.field-label>
                 <x-admin-dashboard.textarea id="review-reason" name="reason" :rows="3" maxlength="1000" required />
+                @if($selected->rail !== 'binance_pay')
                 <x-admin-dashboard.field-label for="refund-hash">Transaction hash pengembalian (hanya external refund)</x-admin-dashboard.field-label>
                 <x-admin-dashboard.input id="refund-hash" name="refund_transaction_hash" type="text" autocomplete="off" maxlength="66" />
                 <x-admin-dashboard.field-label for="refund-authorization">ID persetujuan Customer terautentikasi (hanya external refund)</x-admin-dashboard.field-label>
                 <x-admin-dashboard.input id="refund-authorization" name="refund_authorization_id" type="text" autocomplete="off" maxlength="36" />
                 <p class="text-sm font-medium text-admin-muted">Owner tidak dapat memilih alamat pengembalian. Hash/screenshot bukan bukti. Preview memeriksa ulang finalitas, receiver, token dan nominal melalui RPC; bukti ambigu ditahan.</p>
+                @else
+                    <p class="text-sm font-medium text-admin-muted">Preview dan konfirmasi membaca ulang Binance tanpa cache. Kredit hanya untuk transfer USDT sukses ke receiver tersnapshot; nominal aktual dikurangi fee awal. Mismatch aset, receiver atau status hanya dapat ditolak, tanpa kredit.</p>
+                @endif
                 <x-admin-dashboard.button type="submit" variant="ink">Buat preview resolusi</x-admin-dashboard.button>
             </form>
         </x-admin-dashboard.card>

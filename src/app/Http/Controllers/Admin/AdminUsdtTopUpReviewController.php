@@ -34,7 +34,7 @@ final class AdminUsdtTopUpReviewController extends Controller
             ->join('customers', 'customers.id', '=', 'targets.customer_id')
             ->leftJoin('customer_usdt_top_up_work as preparation', 'preparation.top_up_id', '=', 'targets.id')
             ->leftJoin('customer_usdt_top_up_resolutions as resolution', 'resolution.top_up_id', '=', 'targets.id')
-            ->select(['targets.id', 'targets.customer_id', 'targets.amount_micro', 'targets.payable_micro', 'targets.fee_micro', 'targets.created_at', 'customers.telegram_id', 'work.state', 'work.last_error', 'preparation.state as preparation_state', 'resolution.kind as resolution_kind'])
+            ->select(['targets.id', 'targets.rail', 'targets.customer_id', 'targets.amount_micro', 'targets.payable_micro', 'targets.fee_micro', 'targets.created_at', 'customers.telegram_id', 'work.state', 'work.last_error', 'preparation.state as preparation_state', 'resolution.kind as resolution_kind'])
             ->orderByDesc('targets.created_at')->orderByDesc('targets.id')
             ->paginate(25, pageName: 'targets_page')->withQueryString();
 
@@ -88,18 +88,22 @@ final class AdminUsdtTopUpReviewController extends Controller
 
     public function preview(Request $request, UsdtTopUpReview $reviews): RedirectResponse
     {
+        $request->validate(['top_up_id' => ['required', 'uuid']]);
+        $target = CustomerUsdtTopUp::query()->findOrFail($request->input('top_up_id'));
+        $binance = $target->rail === 'binance_pay';
         $data = $request->validate([
             'top_up_id' => ['required', 'uuid'],
-            'decision' => ['required', 'in:settled,resolved_by_compensation,externally_refunded'],
+            'decision' => ['required', $binance ? 'in:settled,rejected' : 'in:settled,resolved_by_compensation,externally_refunded'],
             'amount' => ['required', 'string', 'max:32'],
-            'transaction_hash' => ['required', 'string', 'regex:/\A0x[a-fA-F0-9]{64}\z/'],
+            'transaction_hash' => $binance ? ['prohibited'] : ['required', 'string', 'regex:/\A0x[a-fA-F0-9]{64}\z/'],
+            'provider_reference' => $binance ? ['required', 'string', 'max:191'] : ['prohibited'],
             'reason' => ['required', 'string', 'max:1000'],
-            'refund_transaction_hash' => ['nullable', 'string', 'regex:/\A0x[a-fA-F0-9]{64}\z/'],
-            'refund_authorization_id' => ['nullable', 'uuid'],
+            'refund_transaction_hash' => $binance ? ['prohibited'] : ['nullable', 'string', 'regex:/\A0x[a-fA-F0-9]{64}\z/'],
+            'refund_authorization_id' => $binance ? ['prohibited'] : ['nullable', 'uuid'],
         ]);
         try {
             $preview = $reviews->request($request->user(), $data['top_up_id'], $data['decision'],
-                $data['amount'], $data['transaction_hash'], $data['reason'],
+                $data['amount'], $binance ? $data['provider_reference'] : $data['transaction_hash'], $data['reason'],
                 $data['refund_transaction_hash'] ?? null, $data['refund_authorization_id'] ?? null);
         } catch (DomainException|InvalidArgumentException $error) {
             return redirect()->route('admin.store-balance.usdt-review.index', ['top_up' => $data['top_up_id']])

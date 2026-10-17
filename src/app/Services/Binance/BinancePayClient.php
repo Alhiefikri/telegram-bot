@@ -25,7 +25,7 @@ class BinancePayClient
      *
      * @return list<array<string, mixed>> raw transaction payloads, newest first
      */
-    public function payTransactions(?int $startTimeMs = null, ?int $endTimeMs = null, int $limit = 100): array
+    public function payTransactions(?int $startTimeMs = null, ?int $endTimeMs = null, int $limit = 100, bool $fresh = false): array
     {
         if (! $this->configured()) {
             throw new RuntimeException('Binance Pay API credentials are not configured.');
@@ -33,7 +33,7 @@ class BinancePayClient
 
         $limit = max(1, min(100, $limit));
         $cacheSeconds = max(0, (int) config('services.binance.history_cache_seconds', 20));
-        if ($cacheSeconds === 0) {
+        if ($fresh || $cacheSeconds === 0) {
             return $this->requestPayTransactions($startTimeMs, $endTimeMs, $limit);
         }
 
