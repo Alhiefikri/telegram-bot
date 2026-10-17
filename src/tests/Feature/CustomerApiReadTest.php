@@ -21,6 +21,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 final class CustomerApiReadTest extends TestCase
@@ -124,6 +125,48 @@ final class CustomerApiReadTest extends TestCase
         $this->assertDatabaseCount('orders', 0);
         $this->assertDatabaseCount('inventory_movements', 0);
         $this->assertDatabaseCount('customer_balance_accounts', 0);
+    }
+
+    public static function unquotablePrices(): array
+    {
+        return [
+            'retail IDR overflow' => [['price_amount' => PHP_INT_MAX]],
+            'retail USD overflow' => [['usdt_price_amount' => PHP_INT_MAX]],
+            'reseller IDR overflow' => [['reseller_price_amount' => PHP_INT_MAX]],
+            'reseller USD overflow' => [['reseller_usdt_price_amount' => PHP_INT_MAX]],
+            'invalid tier schedule' => [[]],
+        ];
+    }
+
+    #[DataProvider('unquotablePrices')]
+    public function test_unquotable_products_do_not_poison_catalog_pages_or_cursors(array $prices): void
+    {
+        $healthy = Product::factory()->create(['price_amount' => 15000, 'reseller_price_amount' => 8000]);
+        $broken = Product::factory()->create(array_replace(['price_amount' => 15000, 'usdt_price_amount' => 2000000], $prices));
+        if ($prices === []) {
+            $broken->quantityPriceTiers()->create(['minimum_quantity' => 2, 'price_amount' => 20000, 'usdt_price_amount' => 1000000]);
+        }
+        $last = Product::factory()->create(['price_amount' => 20000]);
+        ProductStockItem::create(['product_id' => $broken->id, 'secret' => 'must-not-be-exposed']);
+        DB::table('product_stock_items')->update(['secret' => 'invalid ciphertext']);
+
+        $page = $this->read('products', ['limit' => '2', 'quantity' => '2']);
+        $this->assertSame([(string) $healthy->id, (string) $broken->id], array_column($page['data'], 'id'));
+        $this->assertSame('16000', $page['data'][0]['quotes'][0]['total']);
+        $this->assertSame(['next_cursor' => (string) $broken->id, 'has_more' => true], $page['pagination']);
+        foreach ($page['data'][1]['quotes'] as $index => $quote) {
+            $this->assertSame([
+                'currency' => $index === 0 ? 'IDR' : 'USD', 'eligible' => false,
+                'regular_unit' => null, 'effective_unit' => null, 'regular_total' => null, 'total' => null,
+            ], $quote);
+        }
+        $this->assertSame(array_keys($page['data'][0]), array_keys($page['data'][1]));
+        $this->assertStringNotContainsString('must-not-be-exposed', json_encode($page));
+        $this->assertStringNotContainsString('ciphertext', json_encode($page));
+        $next = $this->read('products', ['limit' => '2', 'quantity' => '2', 'cursor' => $page['pagination']['next_cursor']]);
+        $this->assertSame([(string) $last->id], array_column($next['data'], 'id'));
+        $this->assertSame(['next_cursor' => null, 'has_more' => false], $next['pagination']);
+        $this->failure('product', ['quantity' => '2'], (string) $broken->id, 422, 'quote_unavailable');
     }
 
     public function test_cursor_pagination_is_stable_and_family_metadata_and_icons_are_batched(): void

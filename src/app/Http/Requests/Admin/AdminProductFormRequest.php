@@ -75,7 +75,11 @@ abstract class AdminProductFormRequest extends FormRequest
             }
 
             if (preg_match('/^(\d+)(?:\.(\d{1,3}))?$/', $value, $m)) {
-                $this->merge([$field => ((int) $m[1] * 1_000_000) + (int) str_pad($m[2] ?? '', 6, '0')]);
+                $whole = filter_var(ltrim($m[1], '0') ?: '0', FILTER_VALIDATE_INT);
+                $fraction = (int) str_pad($m[2] ?? '', 6, '0');
+                if ($whole !== false && $whole <= intdiv(PHP_INT_MAX - $fraction, 1_000_000)) {
+                    $this->merge([$field => ($whole * 1_000_000) + $fraction]);
+                }
             }
         }
     }
@@ -252,19 +256,29 @@ abstract class AdminProductFormRequest extends FormRequest
      */
     protected function productRules(): array
     {
+        $maximumPrice = intdiv(PHP_INT_MAX, 100);
+
         return [
             'name' => ['required', 'string', 'max:255'],
             'icon' => ['nullable', 'string', 'max:32'],
-            'price_amount' => ['required', 'integer', 'min:0'],
-            'usdt_price_amount' => ['nullable', 'integer', 'min:0'],
-            'reseller_price_amount' => ['nullable', 'integer', 'min:1'],
-            'reseller_usdt_price_amount' => ['nullable', 'integer', 'min:1'],
+            'price_amount' => ['required', 'integer', 'min:0', 'max:'.$maximumPrice],
+            'usdt_price_amount' => ['nullable', 'integer', 'min:0', 'max:'.$maximumPrice],
+            'reseller_price_amount' => ['nullable', 'integer', 'min:1', 'max:'.$maximumPrice],
+            'reseller_usdt_price_amount' => ['nullable', 'integer', 'min:1', 'max:'.$maximumPrice],
             'quantity_price_tiers_present' => ['sometimes', 'boolean'],
             'quantity_price_tiers' => ['sometimes', 'array', 'max:5'],
             'quantity_price_tiers.*' => ['array'],
             'quantity_price_tiers.*.minimum_quantity' => ['required', 'integer', 'between:2,20'],
-            'quantity_price_tiers.*.price_amount' => ['required', 'integer', 'min:1'],
-            'quantity_price_tiers.*.usdt_price_amount' => ['nullable', 'regex:/^\d+(?:\.\d{1,3})?$/', 'gt:0'],
+            'quantity_price_tiers.*.price_amount' => ['required', 'integer', 'min:1', 'max:'.$maximumPrice],
+            'quantity_price_tiers.*.usdt_price_amount' => [
+                'nullable', 'regex:/^\d+(?:\.\d{1,3})?$/', 'gt:0',
+                function (string $attribute, mixed $value, Closure $fail) use ($maximumPrice): void {
+                    $tier = app(AdminProductQuantityPricing::class)->normalizeInput([['usdt_price_amount' => $value]])[0];
+                    if ($tier['usdt_price_amount'] === null || $tier['usdt_price_amount'] > $maximumPrice) {
+                        $fail('Harga USDT tingkat melebihi batas representasi untuk quantity 100.');
+                    }
+                },
+            ],
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')->whereNull('deleted_at')],
             'product_family_id' => ['nullable', 'integer', Rule::exists('product_families', 'id')->whereNull('deleted_at')],
             'description' => ['required', 'string'],

@@ -116,6 +116,12 @@ currency, otherwise normal quantity-tier pricing applies. Overrides never stack
 with tiers and never manufacture USD eligibility. Supplier identity, pricing
 source diagnostics, costs, profit, purchase evidence and credentials are absent.
 
+If one Product's canonical schedule cannot be quoted safely, the list still
+returns 200 and keeps that Product in its original position. Both of its quote
+objects have `eligible: false` and all four amounts null. Healthy Products,
+stock metadata and keyset cursors are unaffected. Detail requests for that
+Product return 422 `quote_unavailable`; no raw exception reaches the response.
+
 Synthetic quote for quantity 2, base IDR 15000 with an IDR reseller override of
 8000, and no USD price:
 
@@ -145,7 +151,7 @@ Errors always have `error.code`, `error.message` and `error.request_id` matching
 | 404 | `not_found` | Missing or nonpublic Product, indistinguishable response |
 | 422 | `invalid_input` | Unsupported/malformed fields, IDs, quantity or pagination |
 | 422 | `currency_unavailable` | Explicit USD assertion without a base USD price |
-| 422 | `quote_unavailable` | Canonical schedule or representational overflow prevents a safe quote; no partial quote |
+| 422 | `quote_unavailable` | Detail only: canonical schedule or representational overflow prevents a safe quote; no partial quote |
 | 429 | `rate_limited` | Shared read/IP quota exhausted; observe `Retry-After` |
 | 503 | `temporarily_unavailable` | Shared admission or local read readiness failure; never fake a zero wallet |
 
@@ -167,6 +173,40 @@ allowlisted response. It delegates all economic and visibility rules to existing
 owners. It loads at most limit + 1 Products, category/family/icon/tier relations
 in bulk, then quotes at most limit Products. It never loads Product Stock Item
 models, performs provider HTTP or adds catalog caching/indexes.
+
+## Price representation bounds (#633)
+
+Admin create/update validation caps base, reseller and tier prices independently
+at `intdiv(PHP_INT_MAX, 100)` in stored units: 92233720368547758 whole IDR or
+micro-USDT on the supported 64-bit runtime. Dollar form inputs retain their
+existing three-decimal precision and use exact integer normalization.
+
+Migration `2026_10_17_000001_bound_product_quote_prices.php` adds six PostgreSQL
+`CHECK ... NOT VALID` constraints. It leaves legacy rows untouched and does not
+scan them for validation. New inserts and updated rows must satisfy the bounds;
+an outlier must have its prices repaired before any update to that row can
+succeed. No automatic price rewrite or conversion occurs. SQLite keeps the
+existing schema convention: these PostgreSQL checks are not installed there.
+
+Disposable PostgreSQL 16/Redis 7 HTTP-kernel smoke verified a legacy overflow
+Product alongside 99 healthy Products: list requests returned 200 with five SQL
+statements at limits 1, 20 and 100; healthy reseller totals remained 16000 for
+quantity 2. Detail returned sanitized 422 `quote_unavailable`, and Admin create
+returned 422 field validation. All six DB bounds rejected oversized writes;
+migration application preserved the legacy price and rollback removed all six
+constraints.
+
+SQLite verification: 170 tests / 2830 assertions passed across
+`AdminDashboardProductFormsTest`, `AdminProductWorkspaceTest`,
+`AdminProductWorkspaceQueryTest`, `AdminCatalogPolicyAndStockAuditTest`,
+`AdminProductPriceBoundsTest`, `ProductQuantityPricingTest`,
+`ProductResellerPricingTest`, `CustomerApiReadTest`, `StorefrontApiDocsTest`
+and `ProductFamilyCatalogTest`. Regressions cover create/update rejection for
+all six price inputs, accepted boundary values, and per-Product isolation for
+retail/reseller overflow in either currency and invalid schedules. A broader
+name-filtered Admin/catalog run hit its 180-second timeout; it is not a suite
+pass.
+
 
 ## Disposable verification, 2026-10-16
 

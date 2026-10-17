@@ -266,6 +266,8 @@ final class CustomerApiDocumentation
                         'en' => 'Inactive, soft-deleted and private-category Products behave exactly like a missing id.'],
                     ['id' => 'Stok bersifat informasional: angka gabungan, tanpa rincian sumber lokal atau supplier, dan bukan reservasi.',
                         'en' => 'Stock is informational: an aggregate number without local or supplier source breakdown, and it is not a reservation.'],
+                    ['id' => 'Jika satu Produk gagal dikutip dengan aman, halaman tetap 200. Kedua kutipan Produk itu memakai `eligible: false` dan nilai harga null; Produk lain dan cursor tidak berubah. Detail Produk itu mengembalikan 422 `quote_unavailable`.',
+                        'en' => 'If one Product cannot be quoted safely, the page still returns 200. Both quotes for that Product have `eligible: false` and null amounts; other Products and cursors are unchanged. Its detail returns 422 `quote_unavailable`.'],
                 ],
             ],
             [
@@ -507,7 +509,7 @@ final class CustomerApiDocumentation
                 'description' => 'Price quote for one currency at the requested quantity. `regular_*` is the base price before any tier or reseller override; `effective_unit` and `total` are what checkout charges.',
                 'properties' => [
                     'currency' => ['type' => 'string', 'enum' => ['IDR', 'USD'], 'description' => 'Public denomination of this quote.'],
-                    'eligible' => ['type' => 'boolean', 'description' => 'True when this Product has a base price in this currency.'],
+                    'eligible' => ['type' => 'boolean', 'description' => 'True when this Product has a base price in this currency and can be quoted safely. A list row with an unsafe canonical quote has both currencies ineligible with null amounts.'],
                     'regular_unit' => ['type' => ['string', 'null'], 'description' => 'Base unit price, or null when the currency is ineligible.'],
                     'effective_unit' => ['type' => ['string', 'null'], 'description' => 'Unit price after quantity tier or reseller override precedence.'],
                     'regular_total' => ['type' => ['string', 'null'], 'description' => 'Base unit price multiplied by quantity.'],

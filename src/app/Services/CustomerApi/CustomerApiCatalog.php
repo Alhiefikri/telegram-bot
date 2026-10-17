@@ -57,7 +57,7 @@ final class CustomerApiCatalog
             throw new CustomerApiFailure(422, 'currency_unavailable', 'This Product has no USD price.');
         }
 
-        return ['data' => $this->serialize(collect([$product]), $quantity, $principal)[0]];
+        return ['data' => $this->serialize(collect([$product]), $quantity, $principal, failOnUnavailable: true)[0]];
     }
 
     private function query(): Builder
@@ -69,17 +69,20 @@ final class CustomerApiCatalog
         ]);
     }
 
-    private function serialize(Collection $products, int $quantity, CustomerApiPrincipal $principal): array
+    private function serialize(Collection $products, int $quantity, CustomerApiPrincipal $principal, bool $failOnUnavailable = false): array
     {
-        try {
-            $quotes = $this->pricing->quoteMany($products, $quantity, ResellerPricingContext::forAuthenticatedApiRequest($principal->customerId));
-        } catch (InvalidArgumentException) {
-            throw new CustomerApiFailure(422, 'quote_unavailable', 'The requested quantity cannot be quoted safely.');
-        }
+        $context = ResellerPricingContext::forAuthenticatedApiRequest($principal->customerId);
         $icons = $this->icons->forProducts($products);
 
-        return $products->map(function (Product $product) use ($quotes, $icons, $quantity): array {
-            $quote = $quotes[$product->id];
+        return $products->map(function (Product $product) use ($context, $icons, $quantity, $failOnUnavailable): array {
+            try {
+                $quote = $this->pricing->quote($product, $quantity, $context);
+            } catch (InvalidArgumentException) {
+                if ($failOnUnavailable) {
+                    throw new CustomerApiFailure(422, 'quote_unavailable', 'The requested quantity cannot be quoted safely.');
+                }
+                $quote = null;
+            }
             $stock = $product->availableStock();
             $metadata = [];
             foreach (['product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items',
@@ -104,8 +107,13 @@ final class CustomerApiCatalog
         })->values()->all();
     }
 
-    private function money(ProductPriceQuote $quote, bool $usd): array
+    private function money(?ProductPriceQuote $quote, bool $usd): array
     {
+        if ($quote === null) {
+            return ['currency' => $usd ? 'USD' : 'IDR', 'eligible' => false,
+                'regular_unit' => null, 'effective_unit' => null, 'regular_total' => null, 'total' => null];
+        }
+
         $base = $usd ? $quote->baseUsdtUnitAmount : $quote->baseIdrUnitAmount;
         $effective = $usd ? $quote->effectiveUsdtUnitAmount : $quote->effectiveIdrUnitAmount;
         $total = $usd ? $quote->usdtSubtotal : $quote->idrSubtotal;
