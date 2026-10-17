@@ -24,6 +24,15 @@ rules, receipt ordering, and operator-confirmed finalization. The family policy
 supplies attempt limits and ordering constraints without becoming a second
 state machine.
 
+A successful Telegram response that omits a provable positive message
+identifier is ambiguous, not a definite failure. `TelegramOutboundResponseValidator`
+raises the shared ambiguous outcome for `sendMessage`, `sendPhoto`, and
+`sendDocument` alike, so the effect finalizes as `unknown` for Manual Delivery
+Review and scheduled recovery never resends it. Only a non-successful response,
+a pre-send validation failure, or a definite HTTP rejection remains a failure
+according to the family retry policy. Callers that genuinely need the
+identifier for a later edit still fail closed instead of inventing one.
+
 Receipt adapters use the protocol's `nextReceiptEffect()` successor seam for
 both initial group materialization (sequence `0`) and continuation selection;
 version-specific predecessor exceptions therefore have one query/readiness

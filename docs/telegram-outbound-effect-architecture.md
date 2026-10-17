@@ -270,15 +270,21 @@ by this pipeline. See [integrated acceptance evidence](customer-api-s11-acceptan
 | sending | A worker owns the effect under a lease and claim token. | A live lease remains with that worker; an expired lease becomes unknown. |
 | sent | Telegram returned a successful response with a valid positive integer message identifier, or an operator verified the delivery. | Never dispatch again. |
 | failed | Delivery failed definitely before completion. | Retry only when the family policy marks the failure retryable and the next-attempt time is due. |
-| unknown | The remote outcome cannot be proven because of transport or worker ambiguity. | Never automatically redispatch; expose it for Manual Delivery Review. |
+| unknown | The remote outcome cannot be proven because of transport, worker, or unproven-response ambiguity. | Never automatically redispatch; expose it for Manual Delivery Review. |
 | manual_review | An operator-controlled review state for an Ambiguous Telegram Delivery. | Never automatically redispatch. Mark sent after evidence or create an explicit resend. |
 
 The protocol rejects a sent transition unless the Telegram response is
-successful and its message identifier is a positive integer. A timeout,
+successful and its message identifier is a positive integer. A successful
+Telegram response that omits that identifier or carries an invalid one proves
+neither delivery nor rejection, so `TelegramOutboundResponseValidator` raises
+the shared ambiguous outcome and every family — `sendMessage`, `sendPhoto`,
+and `sendDocument` alike — finalizes the effect as `unknown` instead of a
+retryable definite failure. A timeout,
 connection failure, worker interruption, HTTP 408, or uncertain 5xx response
 is an Ambiguous Telegram Delivery unless a pre-send validation error proves
 that no request could have been sent. HTTP 400/403 and family terminal errors
-remain definite failures according to policy.
+remain definite failures according to policy. Callers that need the identifier
+for a later edit still fail closed on both shapes and never invent one.
 
 Legacy receipt effects have one explicit non-credential exception. The first
 `invoice` `sendPhoto` unit is a public-safe presentation unit: a definite
@@ -309,6 +315,9 @@ and `test_ambiguous_invoice_is_unknown_but_product_detail_still_delivers`
 cover the invoice exception, while
 `test_ordered_receipt_stops_after_an_ambiguous_credential_unit_without_resending_previous_units`
 proves that a later unit remains pending after credential ambiguity.
+`test_accepted_receipt_chunk_without_a_proven_message_id_is_ambiguous_and_never_resent`
+proves that an accepted-but-unproven chunk response becomes `unknown` and is
+never resent by `telegram:recover-outbound`.
 
 `test_recovery_repairs_a_complete_sent_receipt_without_resending_it` proves
 that recovery repairs a lost completion projection without redispatching the

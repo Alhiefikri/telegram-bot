@@ -11,24 +11,27 @@ use Tests\TestCase;
 class TelegramOutboundResponseValidatorTest extends TestCase
 {
     #[DataProvider('invalidMessageIds')]
-    public function test_message_id_must_be_a_positive_integer(mixed $messageId): void
+    public function test_invalid_message_ids_are_never_valid(mixed $messageId): void
     {
-        $validator = app(TelegramOutboundResponseValidator::class);
+        $this->assertFalse(app(TelegramOutboundResponseValidator::class)->isValidMessageId($messageId));
+    }
 
-        $this->assertFalse($validator->isValidMessageId($messageId));
+    #[DataProvider('invalidMessageIds')]
+    public function test_successful_response_without_a_proven_message_id_is_ambiguous(mixed $messageId): void
+    {
+        $this->expectException(TelegramAmbiguousResponseException::class);
 
-        $this->expectException(RuntimeException::class);
-        $validator->messageIdFromResponse([
+        app(TelegramOutboundResponseValidator::class)->messageIdFromResponse([
             'ok' => true,
             'result' => ['message_id' => $messageId],
         ]);
     }
 
-    public function test_successful_document_response_without_a_valid_message_id_is_ambiguous(): void
+    public function test_successful_response_without_a_result_is_ambiguous(): void
     {
         $this->expectException(TelegramAmbiguousResponseException::class);
 
-        app(TelegramOutboundResponseValidator::class)->messageIdFromDocumentResponse([
+        app(TelegramOutboundResponseValidator::class)->messageIdFromResponse([
             'ok' => true,
         ], 'Telegram sendDocument');
     }
@@ -45,14 +48,20 @@ class TelegramOutboundResponseValidatorTest extends TestCase
         ]));
     }
 
-    public function test_successful_message_id_is_not_accepted_when_telegram_reports_failure(): void
+    public function test_message_id_is_not_accepted_when_telegram_reports_failure(): void
     {
-        $this->expectException(RuntimeException::class);
+        try {
+            app(TelegramOutboundResponseValidator::class)->messageIdFromResponse([
+                'ok' => false,
+                'result' => ['message_id' => 123],
+            ]);
 
-        app(TelegramOutboundResponseValidator::class)->messageIdFromResponse([
-            'ok' => false,
-            'result' => ['message_id' => 123],
-        ]);
+            $this->fail('A definite Telegram rejection must not produce a message ID.');
+        } catch (TelegramAmbiguousResponseException $exception) {
+            $this->fail('A definite Telegram rejection must not be ambiguous: '.$exception->getMessage());
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('successful message ID', $exception->getMessage());
+        }
     }
 
     /** @return iterable<string, array{mixed}> */

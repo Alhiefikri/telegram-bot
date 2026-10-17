@@ -648,8 +648,10 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('invalidTelegramResponses')]
-    public function test_stock_notification_rejects_invalid_telegram_responses(array $response): void
-    {
+    public function test_stock_notification_rejects_invalid_telegram_responses(
+        array $response,
+        TelegramOutboundEffectState $expectedState,
+    ): void {
         Customer::factory()->create(['telegram_id' => 991005, 'locale' => 'id']);
         $product = $this->stockedProduct(stock: 0, secrets: []);
         $admin = User::factory()->create();
@@ -664,11 +666,16 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
             ->where('source_id', (string) $recipient->id)
             ->sole();
 
+        $definite = $expectedState === TelegramOutboundEffectState::Failed;
+
         $this->assertSame(1, $result['processed']);
-        $this->assertSame(1, $result['transient_failures']);
-        $this->assertTrue($result['has_more']);
-        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
-        $this->assertSame('telegram_response_missing_message_id', $effect->last_error_code);
+        $this->assertSame($definite ? 1 : 0, $result['transient_failures']);
+        $this->assertSame($definite, $result['has_more']);
+        $this->assertSame($expectedState, $effect->state);
+        $this->assertSame(
+            $definite ? 'telegram_response_missing_message_id' : 'telegram_transport_ambiguous',
+            $effect->last_error_code,
+        );
         $this->assertNull($effect->telegram_message_id);
         $this->assertNull($effect->claim_token);
         $this->assertNull($effect->lease_until);
@@ -1140,14 +1147,17 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         $this->assertSame($expected, $count);
     }
 
-    /** @return iterable<string, array{array<string, mixed>}> */
+    /** @return iterable<string, array{array<string, mixed>, TelegramOutboundEffectState}> */
     public static function invalidTelegramResponses(): iterable
     {
-        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
-        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
-        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
-        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
-        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
-        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]], TelegramOutboundEffectState::Failed];
+        yield 'ok false without result' => [['ok' => false], TelegramOutboundEffectState::Failed];
+        yield 'accepted without result' => [['ok' => true], TelegramOutboundEffectState::Unknown];
+        yield 'accepted with empty result' => [['ok' => true, 'result' => []], TelegramOutboundEffectState::Unknown];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]], TelegramOutboundEffectState::Unknown];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]], TelegramOutboundEffectState::Unknown];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]], TelegramOutboundEffectState::Unknown];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']], TelegramOutboundEffectState::Unknown];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']], TelegramOutboundEffectState::Unknown];
     }
 }

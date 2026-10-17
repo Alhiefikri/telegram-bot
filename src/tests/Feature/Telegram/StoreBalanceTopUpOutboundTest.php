@@ -184,7 +184,11 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
 
         $this->fakeTelegramHttp([
             $topUp->provider_qris_url => Http::response("\x89PNG\r\n\x1A\nqris", 200, ['Content-Type' => 'image/png']),
-            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true]),
+            'https://api.telegram.org/*/sendPhoto' => Http::response([
+                'ok' => false,
+                'error_code' => 500,
+                'description' => 'Internal Server Error: temporary Telegram failure',
+            ]),
         ]);
 
         try {
@@ -192,14 +196,14 @@ final class StoreBalanceTopUpOutboundTest extends TelegramBotTestSupport
                 (string) $topUp->getKey(),
                 effectId: (string) $effect->getKey(),
             ))->handle();
-            $this->fail('A Telegram response without a message identifier must fail the instruction effect.');
+            $this->fail('A definite Telegram rejection must fail the instruction effect.');
         } catch (\RuntimeException $exception) {
-            $this->assertStringContainsString('successful message ID', $exception->getMessage());
+            $this->assertStringContainsString('not successful', $exception->getMessage());
         }
 
         $failed = $effect->fresh();
         $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
-        $this->assertSame('telegram_response_missing_message_id', $failed->last_error_code);
+        $this->assertSame('telegram_delivery_failed', $failed->last_error_code);
         $this->assertNotNull($failed->failed_at);
         $this->assertNotNull($failed->next_attempt_at);
         $this->assertNull($failed->telegram_message_id);

@@ -1073,11 +1073,10 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertFalse($ledger->readyToDispatchQuery()->whereKey($second->getKey())->exists());
     }
 
-    #[DataProvider('invalidTelegramResponses')]
-    public function test_invalid_telegram_responses_never_mark_a_receipt_chunk_sent(array $response): void
+    #[DataProvider('rejectedTelegramResponses')]
+    public function test_rejected_telegram_responses_never_mark_a_receipt_chunk_sent(array $response): void
     {
         $order = $this->multiChunkPaidOrder();
-        $outboundEffects = app(TelegramOutboundEffectService::class);
         $effect = $this->recordLegacyReceiptGroup($order);
         $this->assertNotNull($effect);
         Http::fake([
@@ -1091,6 +1090,78 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(TelegramOutboundEffectState::Failed, $freshEffect->state);
         $this->assertNull($freshEffect->telegram_message_id);
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    #[DataProvider('acceptedTelegramResponsesWithoutAProvenMessageId')]
+    public function test_accepted_receipt_chunk_without_a_proven_message_id_is_ambiguous_and_never_resent(array $response): void
+    {
+        $order = $this->multiChunkPaidOrder();
+        $first = $this->recordLegacyReceiptGroup($order);
+        $summary = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->where('sequence', 2)
+            ->firstOrFail();
+        $credential = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->where('sequence', 3)
+            ->firstOrFail();
+        $later = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->where('sequence', 4)
+            ->firstOrFail();
+
+        $photoCount = 0;
+        $sendCount = 0;
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/*/sendPhoto' => function () use (&$photoCount): mixed {
+                $photoCount++;
+
+                return Http::response(['ok' => true, 'result' => ['message_id' => 700 + $photoCount]]);
+            },
+            'https://api.telegram.org/*/sendMessage' => function () use (&$sendCount, $response): mixed {
+                $sendCount++;
+
+                return $sendCount < 2
+                    ? Http::response(['ok' => true, 'result' => ['message_id' => 710 + $sendCount]])
+                    : Http::response($response);
+            },
+        ]);
+
+        $pipeline = app(ReceiptDeliveryPipeline::class);
+        $pipeline->deliver($first, dispatchNext: false);
+        $pipeline->deliver($summary, dispatchNext: false);
+        $pipeline->deliver($credential, dispatchNext: false);
+
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $ambiguous = $credential->fresh();
+
+        $this->assertSame(1, $photoCount);
+        $this->assertSame(2, $sendCount);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $ambiguous->state);
+        $this->assertSame('telegram_transport_ambiguous', $ambiguous->last_error_code);
+        $this->assertNull($ambiguous->next_attempt_at);
+        $this->assertNull($ambiguous->telegram_message_id);
+        $this->assertFalse($ledger->isDispatchable($ambiguous));
+        $this->assertFalse($ledger->readyToDispatchQuery()->whereKey($ambiguous->getKey())->exists());
+        $this->assertSame(TelegramOutboundEffectState::Pending, $later->fresh()->state);
+
+        $this->travel(10)->minutes();
+
+        $this->assertFalse($ledger->isDispatchable($credential->fresh()));
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])
+            ->assertSuccessful();
+
+        $this->assertSame(1, $photoCount);
+        $this->assertSame(2, $sendCount);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $credential->fresh()->state);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $later->fresh()->state);
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertStringNotContainsString(
+            'buyer0@example.test',
+            json_encode($credential->fresh()->getAttributes(), JSON_THROW_ON_ERROR),
+        );
     }
 
     public function test_overflow_receipt_uses_one_photo_and_one_complete_document(): void
@@ -1926,13 +1997,19 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
     }
 
     /** @return iterable<string, array{array<string, mixed>}> */
-    public static function invalidTelegramResponses(): iterable
+    public static function rejectedTelegramResponses(): iterable
     {
         yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
+        yield 'ok false without result' => [['ok' => false]];
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function acceptedTelegramResponsesWithoutAProvenMessageId(): iterable
+    {
+        yield 'missing result' => [['ok' => true]];
+        yield 'empty result' => [['ok' => true, 'result' => []]];
         yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
-        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
-        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
-        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
+        yield 'empty string' => [['ok' => true, 'result' => ['message_id' => '']]];
         yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
     }
 }

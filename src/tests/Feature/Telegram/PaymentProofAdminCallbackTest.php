@@ -1689,8 +1689,10 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('invalidSalesProofTelegramResponses')]
-    public function test_invalid_sales_proof_telegram_responses_never_mark_the_post_sent(array $response): void
-    {
+    public function test_invalid_sales_proof_telegram_responses_never_mark_the_post_sent(
+        array $response,
+        TelegramOutboundEffectState $expectedState,
+    ): void {
         StoreChannelSetting::create([
             'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
             'sales_proof_enabled' => true,
@@ -1706,8 +1708,13 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
 
         $post = SalesProofPost::query()->where('order_id', $order->id)->sole();
         $effect = TelegramOutboundEffect::query()->where('effect_type', TelegramOutboundEffectService::TYPE_SALES_PROOF)->sole();
-        $this->assertSame(SalesProofPost::STATUS_FAILED, $post->status);
-        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
+        $definite = $expectedState === TelegramOutboundEffectState::Failed;
+
+        $this->assertSame(
+            $definite ? SalesProofPost::STATUS_FAILED : SalesProofPost::STATUS_UNKNOWN,
+            $post->status,
+        );
+        $this->assertSame($expectedState, $effect->state);
         $this->assertNull($post->telegram_message_id);
         $this->assertNull($effect->telegram_message_id);
         $this->assertNull($post->sent_at);
@@ -2289,14 +2296,17 @@ class PaymentProofAdminCallbackTest extends TelegramBotTestSupport
         return $order;
     }
 
-    /** @return iterable<string, array{array<string, mixed>}> */
+    /** @return iterable<string, array{array<string, mixed>, TelegramOutboundEffectState}> */
     public static function invalidSalesProofTelegramResponses(): iterable
     {
-        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
-        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
-        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
-        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
-        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
-        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]], TelegramOutboundEffectState::Failed];
+        yield 'ok false without result' => [['ok' => false], TelegramOutboundEffectState::Failed];
+        yield 'accepted without result' => [['ok' => true], TelegramOutboundEffectState::Unknown];
+        yield 'accepted with empty result' => [['ok' => true, 'result' => []], TelegramOutboundEffectState::Unknown];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]], TelegramOutboundEffectState::Unknown];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]], TelegramOutboundEffectState::Unknown];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]], TelegramOutboundEffectState::Unknown];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']], TelegramOutboundEffectState::Unknown];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']], TelegramOutboundEffectState::Unknown];
     }
 }

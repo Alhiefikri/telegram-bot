@@ -23,6 +23,7 @@ use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramCheckoutIntents;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -30,6 +31,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\TelegramBotTestSupport;
@@ -377,51 +379,35 @@ class TelegramCheckoutOutboundEffectTest extends TelegramBotTestSupport
         }
     }
 
-    public function test_checkout_delivery_without_a_successful_message_id_stays_failed_and_retryable(): void
-    {
+    #[DataProvider('checkoutResponsesWithoutAProvenMessageId')]
+    public function test_checkout_delivery_without_a_proven_message_id_is_ambiguous_and_never_retried(
+        array $response,
+    ): void {
         $order = $this->checkout(CheckoutPaymentIntents::manualQris());
         $intents = $this->mock(TelegramCheckoutIntents::class);
         $intents->shouldReceive('sendPaymentInstructions')
             ->once()
-            ->andReturn(['ok' => true]);
+            ->andReturn($response);
 
-        try {
-            (new SendManualCheckoutNotifications($order->id))->handle($intents);
-            $this->fail('A checkout response without a message identifier must fail the effect.');
-        } catch (\RuntimeException $exception) {
-            $this->assertStringContainsString('successful message ID', $exception->getMessage());
-        }
+        (new SendManualCheckoutNotifications($order->id))->handle($intents);
 
         $effect = TelegramOutboundEffect::query()->sole();
-        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
-        $this->assertSame('telegram_response_missing_message_id', $effect->last_error_code);
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->state);
+        $this->assertSame('telegram_transport_ambiguous', $effect->last_error_code);
         $this->assertNull($effect->telegram_message_id);
         $this->assertNull($effect->claim_token);
-        $this->assertNotNull($effect->next_attempt_at);
+        $this->assertNull($effect->next_attempt_at);
+        $this->assertFalse($ledger->isDispatchable($effect));
         $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 
-    public function test_checkout_delivery_with_a_non_positive_message_id_stays_failed_and_retryable(): void
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function checkoutResponsesWithoutAProvenMessageId(): iterable
     {
-        $order = $this->checkout(CheckoutPaymentIntents::manualQris());
-        $intents = $this->mock(TelegramCheckoutIntents::class);
-        $intents->shouldReceive('sendPaymentInstructions')
-            ->once()
-            ->andReturn(['ok' => true, 'result' => ['message_id' => 0]]);
-
-        try {
-            (new SendManualCheckoutNotifications($order->id))->handle($intents);
-            $this->fail('A checkout response with a non-positive message identifier must fail the effect.');
-        } catch (\RuntimeException $exception) {
-            $this->assertStringContainsString('successful message ID', $exception->getMessage());
-        }
-
-        $effect = TelegramOutboundEffect::query()->sole();
-        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->state);
-        $this->assertSame('telegram_response_missing_message_id', $effect->last_error_code);
-        $this->assertNull($effect->telegram_message_id);
-        $this->assertNotNull($effect->next_attempt_at);
-        $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
+        yield 'accepted without a result' => [['ok' => true]];
+        yield 'accepted with a non-positive message id' => [['ok' => true, 'result' => ['message_id' => 0]]];
     }
 
     public function test_checkout_worker_rejects_an_effect_id_owned_by_another_order(): void

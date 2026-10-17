@@ -331,8 +331,10 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('invalidAdminNotificationTelegramResponses')]
-    public function test_invalid_admin_notification_telegram_responses_never_mark_the_effect_sent(array $response): void
-    {
+    public function test_invalid_admin_notification_telegram_responses_never_mark_the_effect_sent(
+        array $response,
+        TelegramOutboundEffectState $expectedState,
+    ): void {
         $this->configureAdminTarget();
         Queue::fake();
         $order = $this->checkoutOrder();
@@ -347,7 +349,13 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
             // Queue workers retry definite delivery failures through the job.
         }
 
-        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->fresh()->state);
+        $this->assertSame($expectedState, $effect->fresh()->state);
+        $this->assertSame(
+            $expectedState === TelegramOutboundEffectState::Unknown
+                ? 'telegram_transport_ambiguous'
+                : 'telegram_response_missing_message_id',
+            $effect->fresh()->last_error_code,
+        );
         $this->assertNull($effect->fresh()->telegram_message_id);
         $this->assertNull($order->fresh()->admin_paid_order_notified_at);
     }
@@ -746,8 +754,10 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
     }
 
     #[DataProvider('invalidManualProofTelegramResponses')]
-    public function test_invalid_manual_payment_proof_telegram_responses_are_not_marked_sent(array $response): void
-    {
+    public function test_invalid_manual_payment_proof_telegram_responses_are_not_marked_sent(
+        array $response,
+        TelegramOutboundEffectState $expectedState,
+    ): void {
         $this->configureAdminTarget();
         Http::preventStrayRequests();
         Http::fake(['https://api.telegram.org/*/sendPhoto' => Http::response($response)]);
@@ -761,7 +771,13 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
             // Queue workers retry definite delivery failures through the job.
         }
 
-        $this->assertSame(TelegramOutboundEffectState::Failed, $effect->fresh()->state);
+        $this->assertSame($expectedState, $effect->fresh()->state);
+        $this->assertSame(
+            $expectedState === TelegramOutboundEffectState::Unknown
+                ? 'telegram_transport_ambiguous'
+                : 'telegram_delivery_failed',
+            $effect->fresh()->last_error_code,
+        );
         $this->assertNull($payment->fresh()->payment_proof_forwarded_at);
     }
 
@@ -823,25 +839,31 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         return [$order->fresh(['customer', 'orderItems']), $payment->fresh()];
     }
 
-    /** @return iterable<string, array{array<string, mixed>}> */
+    /** @return iterable<string, array{array<string, mixed>, TelegramOutboundEffectState}> */
     public static function invalidAdminNotificationTelegramResponses(): iterable
     {
-        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
-        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
-        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
-        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
-        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
-        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]], TelegramOutboundEffectState::Failed];
+        yield 'ok false without result' => [['ok' => false], TelegramOutboundEffectState::Failed];
+        yield 'accepted without result' => [['ok' => true], TelegramOutboundEffectState::Unknown];
+        yield 'accepted with empty result' => [['ok' => true, 'result' => []], TelegramOutboundEffectState::Unknown];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]], TelegramOutboundEffectState::Unknown];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]], TelegramOutboundEffectState::Unknown];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]], TelegramOutboundEffectState::Unknown];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']], TelegramOutboundEffectState::Unknown];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']], TelegramOutboundEffectState::Unknown];
     }
 
-    /** @return iterable<string, array{array<string, mixed>}> */
+    /** @return iterable<string, array{array<string, mixed>, TelegramOutboundEffectState}> */
     public static function invalidManualProofTelegramResponses(): iterable
     {
-        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]]];
-        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]]];
-        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]]];
-        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]]];
-        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']]];
-        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']]];
+        yield 'ok false with numeric result' => [['ok' => false, 'result' => ['message_id' => 901]], TelegramOutboundEffectState::Failed];
+        yield 'ok false without result' => [['ok' => false], TelegramOutboundEffectState::Failed];
+        yield 'accepted without result' => [['ok' => true], TelegramOutboundEffectState::Unknown];
+        yield 'accepted with empty result' => [['ok' => true, 'result' => []], TelegramOutboundEffectState::Unknown];
+        yield 'zero' => [['ok' => true, 'result' => ['message_id' => 0]], TelegramOutboundEffectState::Unknown];
+        yield 'negative' => [['ok' => true, 'result' => ['message_id' => -1]], TelegramOutboundEffectState::Unknown];
+        yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]], TelegramOutboundEffectState::Unknown];
+        yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']], TelegramOutboundEffectState::Unknown];
+        yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']], TelegramOutboundEffectState::Unknown];
     }
 }

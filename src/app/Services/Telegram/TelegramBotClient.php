@@ -334,7 +334,7 @@ class TelegramBotClient
             ),
         );
         $response = $this->successfulResponse('sendDocument', $response);
-        $this->responseValidator->messageIdFromDocumentResponse($response, 'Telegram sendDocument');
+        $this->responseValidator->messageIdFromResponse($response, 'Telegram sendDocument');
 
         return $response;
     }
