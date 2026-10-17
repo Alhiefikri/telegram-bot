@@ -15,6 +15,11 @@ use App\Models\CustomerApiOrderClaim;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\ProductSupplierSource;
+use App\Models\Supplier;
+use App\Models\SupplierCatalogItem;
+use App\Models\SupplierFulfillment;
+use App\Models\SupplierPricePolicy;
 use App\Models\User;
 use App\Services\Admin\AdminProductWorkspaceData;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -24,6 +29,7 @@ use App\Services\CustomerApi\CustomerApiOrderCheckout;
 use App\Services\CustomerApi\CustomerApiOrderRequest;
 use App\Services\CustomerApi\CustomerApiPrincipal;
 use App\Services\OrderCheckoutService;
+use App\Services\Suppliers\SupplierAvailability;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
@@ -146,9 +152,47 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
 
     public function test_distinct_customers_can_buy_after_both_api_carts_hold_product_foreign_keys(): void
     {
+        $product = $this->product(2);
+        $this->assertForeignKeyBarrierCheckout($product);
+        $this->assertSame(2, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+    }
+
+    public function test_distinct_customers_can_buy_supplier_stock_after_both_api_carts_hold_product_foreign_keys(): void
+    {
+        $product = $this->product(0);
+        $supplier = Supplier::forceCreate([
+            'name' => 'API race supplier', 'provider' => 'prodseller', 'api_key' => 'concurrency-fixture',
+            'currency' => 'USDT', 'currency_confirmed' => true, 'exchange_rate_idr' => 1000,
+            'balance_micros' => 10_000_000, 'is_active' => true,
+            'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5),
+        ]);
+        $sku = SupplierCatalogItem::create([
+            'supplier_id' => $supplier->id, 'external_id' => 'api-race-sku', 'name' => 'API race SKU',
+            'unit_price_micros' => 1_000_000, 'stock' => 10, 'orderable' => true,
+            'requires_input' => false, 'synced_at' => now(), 'price_tiers' => [], 'bulk_discounts' => [],
+        ]);
+        SupplierPricePolicy::create(['product_id' => $product->id, 'mode' => 'manual', 'rounding_idr' => 1]);
+        ProductSupplierSource::create([
+            'product_id' => $product->id, 'supplier_catalog_item_id' => $sku->id,
+            'is_active' => true, 'priority' => 0,
+        ]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+
+        $this->assertForeignKeyBarrierCheckout($product);
+
+        $this->assertSame(2, SupplierFulfillment::where('state', 'pending')->count());
+        $this->assertSame(2, $sku->fresh()->reserved_quantity);
+        $this->assertSame(2_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(8, $product->fresh()->supplier_available_stock);
+        $this->assertSame(0, ProductStockItem::count());
+    }
+
+    private function assertForeignKeyBarrierCheckout(Product $product): void
+    {
         $customers = [$this->customer(2_000_000), $this->customer(2_000_000)];
         $principals = array_map(fn (Customer $customer) => $this->principal($customer), $customers);
-        $product = $this->product(2);
         $directory = $this->createWorkspace('api-cart-product-foreign-keys');
 
         try {
@@ -168,14 +212,12 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
         }
 
         $this->assertCount(2, $this->orderTokens(array_column($results, 'value')), json_encode($results));
+        $this->assertSame(2, Order::count());
         $this->assertSame(2, DB::table('payments')->count());
         $this->assertSame(2, $this->usdtPurchaseDebits(array_map(fn (Customer $customer) => $customer->id, $customers)));
         foreach ($customers as $customer) {
             $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
         }
-        $this->assertSame(2, ProductStockItem::whereNotNull('order_item_id')->count());
-        $this->assertSame(0, $product->fresh()->stock);
-        $this->assertSame(0, $product->fresh()->reserved_stock);
     }
 
     /**

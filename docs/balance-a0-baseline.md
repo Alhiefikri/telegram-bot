@@ -379,6 +379,10 @@ The Customer/credential/claim/wallet/policy/restore/maintenance/resource order
 is unchanged. Other database drivers retain the original update lock.
 Nested paid/supplier paths must not upgrade these Product locks back to
 `FOR UPDATE` while another isolated API Cart can hold its FK lock.
+`SupplierAvailability::refreshProducts()` now retains that mode too (#631):
+the original local-stock barrier skipped this nested supplier reservation
+refresh. The supplier-backed barrier and live tuple-lock evidence are recorded
+in [S11 integrated acceptance](customer-api-s11-acceptance.md#supplier-availability-refresh-upgraded-the-product-lock-631).
 
 Normal and late sold-out sales now register the existing durable
 `StockNotificationEvent` instead of expanding all recipients in the financial

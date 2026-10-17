@@ -23,6 +23,66 @@ flowchart LR
 
 [PostgreSQL 16 row-lock compatibility](https://www.postgresql.org/docs/16/explicit-locking.html#LOCKING-ROWS) defines the distinction. The retained two-Customer regression barriers both API Cart inserts before either checkout, sets a bounded lock deadline ahead of deadlock detection, and checks two paid Orders/debits/allocations. It failed before the fix with one `temporarily_unavailable` outcome; after the fix it passed with nine assertions. This avoids treating a successful deadlock retry as proof that the inversion disappeared.
 
+### Supplier availability refresh upgraded the Product lock (#631)
+
+The #628 FK-barrier fixture used local stock, so it never called
+`SupplierFulfillmentService::reserve()` and its nested
+`SupplierAvailability::refreshProducts()`. That refresh still requested Product
+`FOR UPDATE`, recreating the maintenance/FK cycle for supplier-backed API Orders.
+The new supplier-only fixture failed with one accepted Order and one
+`err:temporarily_unavailable`. PostgreSQL 16.15 logged
+`canceling statement due to lock timeout` on `checkout_maintenance_settings`.
+
+`refreshProducts()` now uses PostgreSQL `FOR NO KEY UPDATE`, retaining the
+existing update lock on other drivers. It changes only non-key availability
+and retail-price columns. Product IDs remain sorted before Supplier IDs and
+SupplierCatalogItem IDs; reserve/price/hold semantics, maintenance locking,
+database constraints and existing `FOR UPDATE SKIP LOCKED` acquisitions are unchanged.
+
+Lock-site audit: `EloquentInventoryLedger::lockedCheckoutProducts()` and
+`orderInventoryState()`, and
+`SupplierFulfillmentService::lockedOrderResources()` already retain
+`FOR NO KEY UPDATE`. Supplier reserve, release, delivery, fallback and refund
+paths all use the corrected availability refresh. `OrderStateMachine` and
+`UsdtOrderRefundService` add no direct Product lock. A multiline search for
+`Product::` through `lockForUpdate()` found only separate cart-edit, Admin,
+supplier management/catalog-sync and notification worker operations after
+this correction; none is a nested Product acquisition in this financial chain.
+Those independent entry points were not changed.
+
+Verification on PHP 8.4.26, PostgreSQL 16.15 and disposable Redis:
+
+- The local-stock and supplier-stock FK barriers passed together:
+  2 tests, 22 assertions. Each forces both `CartItem::created` callbacks to
+  finish their Product FK checks before checkout proceeds, with a two-second
+  lock timeout preceding five-second deadlock detection.
+  A second isolated run passed the same 2 tests/22 assertions; PostgreSQL logs
+  for its complete 2026-10-17 08:18:29–08:18:54 UTC window contained zero
+  lock-timeout or deadlock records.
+- The supplier regression requires two distinct accepted Orders, two Payments,
+  two USD purchase debits, both Customer wallets exhausted, two pending
+  supplier fulfillments, SKU quantity held at 2 and supplier wallet held at
+  2,000,000 micro-USDT. No local credentials are allocated.
+- A separate runtime smoke held Product `KEY SHARE` on another connection,
+  acquired the checkout's `FOR NO KEY UPDATE`, then committed the actual nested
+  refresh with a one-second lock timeout. `pgrowlocks('products')` observed
+  `{"Key Share","For No Key Update","No Key Update"}` simultaneously.
+  Supplier capacity remained 8 with the two-unit and 2,000,000-micro holds.
+- All three required concurrency classes passed with no skips:
+  41 tests, 639 assertions (329.227 seconds), using `phpunit.concurrency.xml`.
+  The isolated test database was `issue631_test` in disposable
+  `issue631-postgres`, with `issue631-redis` on the local Docker test network,
+  `DB_CONNECTION=pgsql` and `RUN_CONCURRENCY_TESTS=1`. Invocation inside the
+  PHP 8.4 application image:
+
+  ```sh
+  php vendor/bin/phpunit -c phpunit.concurrency.xml \
+    --filter 'CustomerApiOrderPostgresConcurrencyTest|UsdtBalanceCheckoutPostgresConcurrencyTest|SupplierPostgresConcurrencyTest' \
+    --fail-on-skipped
+  ```
+
+- `vendor/bin/pint --test` passed for both changed PHP files.
+
 ### Last-stock checkout expanded every notification recipient inside the money transaction
 
 After fresh workers loaded the lock correction, last-stock checkout reached `StockNotificationDeliveryPipeline::materialize()` inside `recordSales()`. With more than 10,000 synthetic Telegram Customers, recipient/effect expansion exceeded the client's 60-second timeout. A snapshot of `pg_stat_activity` identified recipient materialization, not a new financial lock cycle.

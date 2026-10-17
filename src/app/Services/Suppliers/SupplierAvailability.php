@@ -31,7 +31,9 @@ final class SupplierAvailability
         sort($ids, SORT_NUMERIC);
         foreach (array_chunk($ids, 200) as $batch) {
             DB::transaction(function () use ($batch): void {
-                $products = Product::withTrashed()->whereIn('id', $batch)->orderBy('id')->lockForUpdate()->get();
+                // Nested checkout/lifecycle refreshes must remain compatible with API Cart FK locks.
+                $products = Product::withTrashed()->whereIn('id', $batch)->orderBy('id')
+                    ->lock(DB::getDriverName() === 'pgsql' ? 'for no key update' : true)->get();
                 $sources = ProductSupplierSource::query()->whereIn('product_id', $batch)->orderBy('priority')->orderBy('id')->get();
                 $itemIds = $sources->pluck('supplier_catalog_item_id')->unique();
                 $supplierIds = SupplierCatalogItem::query()->whereIn('id', $itemIds)->pluck('supplier_id')->unique();
