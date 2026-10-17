@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\BalancePaymentPreference;
 use App\Enums\CartOrigin;
 use App\Enums\CartStatus;
+use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InsufficientUsdtBalance;
 use App\Models\Cart;
@@ -14,6 +15,8 @@ use App\Models\CustomerApiOrderClaim;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\User;
+use App\Services\Admin\AdminProductWorkspaceData;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\CustomerApi\CustomerApiCredentials;
 use App\Services\CustomerApi\CustomerApiFailure;
@@ -112,6 +115,67 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
         $this->assertLastFundsOrdering(apiFirst: false);
         $this->assertLastStockOrdering(apiFirst: true);
         $this->assertLastStockOrdering(apiFirst: false);
+    }
+
+    public function test_distinct_api_intents_and_bot_contend_for_one_funded_local_unit(): void
+    {
+        $customer = $this->customer(2_000_000);
+        $product = $this->product(1);
+        $principal = $this->principal($customer);
+        $botCart = $this->botCart($customer, $product);
+        $results = $this->runConcurrentWorkers(3, fn (int $index): string => $index === 2
+            ? $this->botPlace($botCart, 'three-way-bot')
+            : $this->apiPlace($principal, 'three-way-api-'.$index, $product));
+        $values = array_column($results, 'value');
+        $this->assertCount(1, $this->orderTokens($values), json_encode($results));
+        foreach ($values as $value) {
+            $this->assertTrue(str_starts_with((string) $value, 'ok:')
+                || in_array($value, ['err:insufficient_funds', 'err:stock_conflict'], true), json_encode($results));
+        }
+        $order = Order::sole();
+        $this->assertSame(1, DB::table('payments')->count());
+        $this->assertSame(1, $this->usdtPurchaseDebits([$customer->id]));
+        $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, ProductStockItem::where('order_item_id', $order->orderItems()->sole()->id)->count());
+        $this->assertSame(0, ProductStockItem::whereNull('order_item_id')->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(1, Cart::where('status', CartStatus::CheckedOut)->count());
+        $this->assertSame($order->api_order_claim_id === null ? CartStatus::CheckedOut : CartStatus::Active, $botCart->fresh()->status);
+    }
+
+    public function test_distinct_customers_can_buy_after_both_api_carts_hold_product_foreign_keys(): void
+    {
+        $customers = [$this->customer(2_000_000), $this->customer(2_000_000)];
+        $principals = array_map(fn (Customer $customer) => $this->principal($customer), $customers);
+        $product = $this->product(2);
+        $directory = $this->createWorkspace('api-cart-product-foreign-keys');
+
+        try {
+            $results = $this->runConcurrentWorkers(2, function (int $index) use ($principals, $product, $directory): string {
+                // Surface a lock inversion before PostgreSQL retries can mask it.
+                DB::statement("SET deadlock_timeout TO '5s'");
+                DB::statement("SET lock_timeout TO '2s'");
+                CartItem::created(function () use ($index, $directory): void {
+                    touch($directory.'/cart-'.$index);
+                    $this->waitForMarker($directory.'/cart-'.(1 - $index));
+                });
+
+                return $this->apiPlace($principals[$index], 'foreign-key-race-'.$index, $product);
+            });
+        } finally {
+            $this->cleanupWorkspace($directory);
+        }
+
+        $this->assertCount(2, $this->orderTokens(array_column($results, 'value')), json_encode($results));
+        $this->assertSame(2, DB::table('payments')->count());
+        $this->assertSame(2, $this->usdtPurchaseDebits(array_map(fn (Customer $customer) => $customer->id, $customers)));
+        foreach ($customers as $customer) {
+            $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        }
+        $this->assertSame(2, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
     }
 
     /**
@@ -229,6 +293,52 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
             $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
             $this->assertSame(1, DB::table('customer_usdt_balance_entries')->where('kind', 'purchase_debit')->count());
             $this->assertSame(0, $product->fresh()->stock);
+        }
+    }
+
+    public function test_admin_tier_and_reseller_edits_racing_api_checkout_cannot_charge_unacknowledged_prices(): void
+    {
+        foreach ([false, true] as $reseller) {
+            $customer = $this->customer(8_000_000);
+            $product = $this->product(2);
+            $product->update(['usdt_price_amount' => 4_000_000, 'reseller_usdt_price_amount' => $reseller ? 2_000_000 : null]);
+            $product->quantityPriceTiers()->create(['minimum_quantity' => 2, 'price_amount' => 12_000, 'usdt_price_amount' => 2_000_000]);
+            $principal = $this->principal($customer);
+            $admin = User::factory()->create(['role' => UserRole::Owner]);
+            $payload = [
+                'workspace_section' => 'price',
+                'workspace_version' => app(AdminProductWorkspaceData::class)->version($product->fresh(), 'price'),
+                'price_amount' => 20_000,
+                'usdt_price_amount' => '5',
+                'reseller_usdt_price_amount' => $reseller ? '3' : null,
+                'quantity_price_tiers_present' => true,
+                'quantity_price_tiers' => [['minimum_quantity' => 2, 'price_amount' => 18_000, 'usdt_price_amount' => '3.5']],
+            ];
+            $key = $reseller ? 'reseller-edit' : 'tier-edit';
+            $results = $this->runConcurrentWorkers(2, function (int $index) use ($admin, $product, $payload, $principal, $key): string {
+                if ($index === 0) {
+                    $this->actingAs($admin);
+
+                    return (string) $this->patchJson(route('admin.products.update', $product->id), $payload)->getStatusCode();
+                }
+
+                return $this->apiPlace($principal, $key, $product, quantity: 2, expected: ['USD' => '4']);
+            });
+            $this->assertSame('200', $results[0]['value'], json_encode($results));
+            $order = Order::where('customer_id', $customer->id)->first();
+            if ($order === null) {
+                $this->assertSame('err:price_changed', $results[1]['value'], json_encode($results));
+                $this->assertSame(8_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+                $this->assertSame(0, $this->usdtPurchaseDebits([$customer->id]));
+                $this->assertSame(2, $product->fresh()->stock);
+            } else {
+                $this->assertSame('ok:'.$order->id, $results[1]['value'], json_encode($results));
+                $this->assertSame(4_000_000, (int) $order->payments()->sole()->amount);
+                $this->assertSame(4_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+                $this->assertSame(1, $this->usdtPurchaseDebits([$customer->id]));
+                $this->assertSame(2, ProductStockItem::where('order_item_id', $order->orderItems()->sole()->id)->count());
+            }
+            $this->assertSame(0, $product->fresh()->reserved_stock);
         }
     }
 

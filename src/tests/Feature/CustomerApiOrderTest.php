@@ -21,6 +21,8 @@ use App\Services\CustomerApi\CustomerApiCredentials;
 use App\Services\CustomerApi\CustomerApiFailure;
 use App\Services\CustomerApi\CustomerApiPrincipal;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
+use App\Services\Telegram\TelegramProductNotificationService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
@@ -32,6 +34,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use LogicException;
+use Mockery;
 use Tests\TestCase;
 
 final class CustomerApiOrderTest extends TestCase
@@ -109,6 +112,44 @@ final class CustomerApiOrderTest extends TestCase
         $this->assertSame(1, DB::table('payments')->count());
         $this->assertSame(1, Cart::count());
         Http::assertNothingSent();
+    }
+
+    public function test_sold_out_recipient_failure_does_not_rollback_purchase_and_recovers_without_charging_again(): void
+    {
+        $product = $this->product();
+        $this->fundUsd(2_000_000);
+        $notifications = app(TelegramProductNotificationService::class);
+        $unavailable = Mockery::mock(TelegramProductNotificationService::class);
+        $unavailable->shouldReceive('productSoldOutDeliveryBatch')->andThrow(new \RuntimeException('Recipient renderer unavailable'));
+        $this->app->instance(TelegramProductNotificationService::class, $unavailable);
+
+        $response = $this->send($this->body($product), 'sold-out-renderer');
+        $this->assertSame(201, $response->getStatusCode());
+        $order = Order::sole();
+        $sale = InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->sole();
+        try {
+            app(StockNotificationDeliveryPipeline::class)->deliver($sale->id);
+            $this->fail('The unavailable renderer must prevent notification delivery.');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('Recipient renderer unavailable', $error->getMessage());
+        }
+
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($this->customer)->balanceMicro());
+        $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->app->instance(TelegramProductNotificationService::class, $notifications);
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        $pipeline->materialize($sale->id);
+        $recipients = DB::table('stock_notification_recipients')->where('customer_id', $this->customer->id)->get();
+        $this->assertCount(1, $recipients);
+        $this->assertStringContainsString($product->name, $recipients->first()->text);
+        $pipeline->materialize($sale->id);
+        $replay = $this->send($this->body($product), 'sold-out-renderer');
+        $this->assertSame((string) $order->id, $replay->getData(true)['data']['id']);
+        $this->assertSame(1, DB::table('stock_notification_recipients')->where('customer_id', $this->customer->id)->count());
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->where('kind', 'purchase_debit')->count());
+        $this->assertSame(1, DB::table('payments')->count());
+        $this->assertSame(0, $product->fresh()->reserved_stock);
     }
 
     public function test_request_override_wins_and_an_unacknowledged_secondary_price_is_never_charged(): void

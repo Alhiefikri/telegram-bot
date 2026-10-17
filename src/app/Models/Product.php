@@ -126,7 +126,13 @@ class Product extends Model
         }
 
         return $query
-            ->withExists(['stockItems as local_stock_items_exists' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')])
+            // A scalar LIMIT keeps this a per-page index probe; PostgreSQL can
+            // otherwise hash the entire stock-key table for an EXISTS projection.
+            ->addSelect(['local_stock_items_exists' => ProductStockItem::query()
+                ->selectRaw('1')
+                ->whereColumn('product_stock_items.product_id', $this->qualifyColumn('id'))
+                ->whereNull('supplier_purchase_id')
+                ->limit(1)])
             ->withCount(['stockItems as local_available_stock_items_count' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
     }
 

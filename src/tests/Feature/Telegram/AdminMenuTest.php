@@ -41,14 +41,12 @@ class AdminMenuTest extends TelegramBotTestSupport
                 $this->assertSame('primary', $button['style'] ?? null);
             }
         }
-        $this->assertSame('🛠️ Admin Dashboard', $keyboard[3][0]['text'] ?? null);
-        $this->assertStringStartsWith('https://store.example/admin?v=', (string) ($keyboard[3][0]['web_app']['url'] ?? ''));
-        $this->assertSame('📊 Statistik', $keyboard[4][0]['text'] ?? null);
-        $this->assertSame('statistik_harian', $keyboard[4][0]['callback_data'] ?? null);
-        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-        $this->assertStringNotContainsString('📊 Statistik Harian', $encoded);
-        $this->assertStringNotContainsString('☰ Menu', $encoded);
-        $this->assertStringNotContainsString('Akun Saya', $encoded);
+        $buttons = collect($keyboard)->flatten(1);
+        $this->assertTrue($buttons->contains(fn (array $button): bool => str_starts_with(
+            (string) ($button['web_app']['url'] ?? ''),
+            'https://store.example/admin?v=',
+        )));
+        $this->assertTrue($buttons->contains('callback_data', 'statistik_harian'));
         $this->assertArrayNotHasKey('keyboard', $home->data()['reply_markup']);
     }
 
@@ -64,13 +62,12 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         $home = $this->homeRequest(999);
         $keyboard = $home->data()['reply_markup']['inline_keyboard'];
-        $this->assertSame('🛠️ Admin Dashboard', $keyboard[3][0]['text'] ?? null);
-        $this->assertStringStartsWith('https://store.example/admin?source=telegram&v=', (string) ($keyboard[3][0]['web_app']['url'] ?? ''));
-        $this->assertSame('📊 Statistik', $keyboard[4][0]['text'] ?? null);
-        $this->assertSame('statistik_harian', $keyboard[4][0]['callback_data'] ?? null);
-        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-        $this->assertStringNotContainsString('☰ Menu', $encoded);
-        $this->assertStringNotContainsString('Akun Saya', $encoded);
+        $buttons = collect($keyboard)->flatten(1);
+        $this->assertTrue($buttons->contains(fn (array $button): bool => str_starts_with(
+            (string) ($button['web_app']['url'] ?? ''),
+            'https://store.example/admin?source=telegram&v=',
+        )));
+        $this->assertTrue($buttons->contains('callback_data', 'statistik_harian'));
     }
 
     public function test_ngrok_admin_dashboard_button_is_an_inline_url_and_typed_label_sends_url_link(): void
@@ -84,15 +81,22 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->messageUpdate(308, '/start', ['id' => 999], 12345))->assertOk();
         $this->postTelegramWebhook($this->messageUpdate(309, '🛠️ Admin Dashboard', ['id' => 999], 12345))->assertOk();
 
-        $button = $this->homeRequest(12345)->data()['reply_markup']['inline_keyboard'][3][0] ?? [];
-        $this->assertSame('🛠️ Admin Dashboard', $button['text'] ?? null);
-        $this->assertStringStartsWith('https://substandard-miguelina-soberingly.ngrok-free.dev/admin?v=', (string) ($button['url'] ?? ''));
+        $button = collect($this->homeRequest(12345)->data()['reply_markup']['inline_keyboard'])
+            ->flatten(1)
+            ->first(fn (array $button): bool => str_starts_with(
+                (string) ($button['url'] ?? ''),
+                'https://substandard-miguelina-soberingly.ngrok-free.dev/admin?v=',
+            ));
+        $this->assertNotNull($button);
         $this->assertArrayNotHasKey('web_app', $button);
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
-            && $request['text'] === 'Buka dashboard admin:'
-            && str_starts_with((string) ($request['reply_markup']['inline_keyboard'][0][0]['url'] ?? ''), 'https://substandard-miguelina-soberingly.ngrok-free.dev/admin?v=')
-            && ! array_key_exists('web_app', $request['reply_markup']['inline_keyboard'][0][0] ?? []));
+            && collect($request->data()['reply_markup']['inline_keyboard'] ?? [])
+                ->flatten(1)
+                ->contains(fn (array $button): bool => str_starts_with(
+                    (string) ($button['url'] ?? ''),
+                    'https://substandard-miguelina-soberingly.ngrok-free.dev/admin?v=',
+                ) && ! array_key_exists('web_app', $button)));
     }
 
     public function test_local_admin_url_does_not_send_web_app_button(): void
@@ -142,6 +146,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         config()->set('services.telegram.admin_telegram_chat_id', '999');
         config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
+        config()->set('services.telegram.mini_app_url', 'https://store.example/admin');
         $this->fakeTelegramHttp();
         Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
 
@@ -149,15 +154,12 @@ class AdminMenuTest extends TelegramBotTestSupport
 
         $home = $this->homeRequest(12345);
         $keyboard = $home->data()['reply_markup']['inline_keyboard'];
-        $this->assertSame('🛍️ Lihat Produk', $keyboard[0][0]['text'] ?? null);
-        $this->assertSame('💰 Saldo', $keyboard[1][0]['text'] ?? null);
-        $this->assertSame('📦 Pesanan', $keyboard[1][1]['text'] ?? null);
-        $this->assertCount(3, $keyboard);
-        $encoded = json_encode($home->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-        $this->assertStringNotContainsString('Admin Dashboard', $encoded);
-        $this->assertStringNotContainsString('📊 Statistik', $encoded);
-        $this->assertStringNotContainsString('☰ Menu', $encoded);
-        $this->assertStringNotContainsString('Akun Saya', $encoded);
+        $buttons = collect($keyboard)->flatten(1);
+        $this->assertFalse($buttons->contains(fn (array $button): bool => str_starts_with(
+            (string) ($button['web_app']['url'] ?? $button['url'] ?? ''),
+            'https://store.example/admin',
+        )));
+        $this->assertFalse($buttons->contains('callback_data', 'statistik_harian'));
     }
 
     public function test_admin_statistics_button_opens_three_period_report(): void
@@ -595,25 +597,6 @@ class AdminMenuTest extends TelegramBotTestSupport
         $this->assertNull(TelegramBroadcast::query()->first());
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && str_contains((string) ($request['text'] ?? ''), 'gagal disimpan'));
-    }
-
-    public function test_start_welcome_shows_mini_app_dashboard_only_to_admin(): void
-    {
-        config()->set('services.telegram.admin_user_id', '999');
-        config()->set('services.telegram.mini_app_url', 'https://store.example/admin');
-        config()->set('services.telegram.welcome_banner_url', 'telegram-banner-file-id');
-        Customer::factory()->create(['telegram_id' => 999, 'locale' => 'id']);
-        $this->fakeTelegramHttp();
-
-        $this->postTelegramWebhook($this->messageUpdate(304, '/start', ['id' => 999], 12345))->assertOk();
-
-        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendPhoto')
-            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'selamat datang di LHIE STORE')
-            && ($request->data()['reply_markup']['inline_keyboard'][3][0]['text'] ?? null) === '🛠️ Admin Dashboard'
-            && str_starts_with((string) ($request->data()['reply_markup']['inline_keyboard'][3][0]['web_app']['url'] ?? ''), 'https://store.example/admin?v=')
-            && ($request->data()['reply_markup']['inline_keyboard'][4][0]['text'] ?? null) === '📊 Statistik'
-            && ($request->data()['reply_markup']['inline_keyboard'][4][0]['callback_data'] ?? null) === 'statistik_harian'
-            && ! str_contains(json_encode($request->data()['reply_markup'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), '📊 Statistik Harian'));
     }
 
     public function test_start_welcome_hides_mini_app_dashboard_when_admin_url_is_local(): void

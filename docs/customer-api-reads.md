@@ -234,3 +234,17 @@ this evidence. Existing financial exposure gates remain unchanged. Public
 website/OpenAPI publishing is implemented by S10 #626 and documented in
 [Customer API public documentation](customer-api-public-docs.md); this file remains
 the implemented read contract.
+
+## Integrated bounded-read qualification (S11 #628)
+
+[S11 evidence](customer-api-s11-acceptance.md) supersedes the historical S05
+hashed-existence plan above. `Product::withAvailability()` now projects local
+credential existence through a correlated scalar `SELECT 1 ... LIMIT 1`;
+PostgreSQL need not hash every stock key for that projection. The existing
+available-unit count, legacy numeric fallback, retired-unit exclusion,
+visibility, quote and response allowlists are unchanged. No new index,
+provider call, financial cache or credential hydration is introduced.
+Current 1/20/100-row measurements and representative plans are retained with
+the integrated readiness report; they do not certify the proposed production
+admission rates.
+

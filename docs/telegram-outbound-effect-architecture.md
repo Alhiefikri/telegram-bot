@@ -241,19 +241,26 @@ token or recovery rules.
 
 ### Deferred Stock Notification materialization
 
-Canonical positive stock intake records the `StockNotificationEvent` handoff
-inside the inventory transaction, but defers customer recipient rendering and
-Telegram effect materialization until after commit. A null
+Canonical positive stock intake, supplier availability, stock deletion and
+normal/late sold-out sales record the `StockNotificationEvent` handoff inside
+the inventory transaction, but defer recipient rendering and Telegram effect
+materialization until after commit. A null
 `recipients_snapshotted_at` is the durable marker that the immutable audience
 snapshot is still owed; `materialization_cursor` bounds each worker pass.
 
 The `telegram-stock` job snapshots at most 100 customers per pass, creates
-missing ledger effects idempotently, then sends at most one recipient effect per
-job execution. It self-dispatches while the event or its effects still have
+missing ledger effects idempotently, then claims at most 25 due recipient
+effects for delivery per job execution. It self-dispatches while the event or its effects still have
 work. `telegram:reconcile-stock-notifications` and the stock branch of
 `telegram:recover-outbound` discover null snapshot markers and lost dispatches.
 The source event therefore closes the interval between the inventory commit and
 queue pickup without holding the inventory transaction during customer fan-out.
+
+S11 (#628) moved sold-out sales from eager compatibility materialization to
+this existing handoff after a 10,000-Customer checkout exceeded its HTTP
+deadline while expanding recipients under financial locks. Renderer failure
+now leaves the paid Order/debit/allocation committed; recovery remains owned
+by this pipeline. See [integrated acceptance evidence](customer-api-s11-acceptance.md).
 
 ## Ledger state contract
 

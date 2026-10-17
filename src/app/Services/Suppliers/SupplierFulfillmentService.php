@@ -596,7 +596,9 @@ final class SupplierFulfillmentService
     private function lockedOrderResources(Order $order): array
     {
         $items = $order->orderItems()->orderBy('product_id')->lockForUpdate()->get();
-        Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get();
+        // Retain checkout's FK-compatible Product lock during the paid lifecycle.
+        Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')
+            ->lock(DB::getDriverName() === 'pgsql' ? 'for no key update' : true)->get();
         $initial = SupplierFulfillment::query()->where('order_id', $order->id)->get();
         $catalogIds = [];
         foreach ($initial as $f) {

@@ -238,12 +238,15 @@ recovery guarantee that closes that interval.
 
 ### Deferred Stock Notification materialization
 
-Canonical positive stock intake is the second deferred-materialization
-exception. The inventory transaction durably creates a
-`StockNotificationEvent`; its nullable `recipients_snapshotted_at` and
+Canonical stock mutations use the second deferred-materialization exception.
+Stock intake, supplier availability, stock deletion and normal/late sold-out
+sales durably create a `StockNotificationEvent` inside their inventory
+transaction. Its nullable `recipients_snapshotted_at` and
 `materialization_cursor` identify the audience snapshot still owed. The
 transaction does not render every customer message or create every Telegram
-effect while product and stock rows are locked.
+effect while Product and stock rows are locked. S11 (#628) moved sold-out sales
+onto this existing seam after disposable load exposed eager fan-out under
+financial locks; no notification policy or second recovery path was added.
 
 The after-commit `telegram-stock` worker snapshots at most 100 customers per
 pass, inserts recipient rows idempotently, and materializes missing ledger

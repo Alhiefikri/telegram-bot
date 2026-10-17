@@ -45,11 +45,11 @@ The implemented S05 balance/catalog endpoints and their allowlisted schemas are 
 
 ### Financial revalidation and lock order
 
-Admission is not financial authorization. S06 must call `CustomerApiPrincipal::revalidateForMutation()` **inside its owning transaction, after acquiring every canonical financial/resource lock and before any financial write**. It refuses calls outside a transaction. It acquires a shared credential-row lock scoped to both admitted credential and Customer. Acquire no new unrelated resource locks after this terminal authentication fence, do no network work, and retain the shared lock through commit.
+Admission is not financial authorization. `CustomerApiOrderCheckout::commit()` calls `CustomerApiPrincipal::revalidateForMutation()` inside its transaction immediately after locking the Customer shared and before creating the API Cart or touching money. The credential shared lock is retained through commit. This is the terminal **authentication** check, not the last financial/resource lock: the durable claim and canonical checkout resources follow it.
 
-Lock graph: existing deterministic checkout resources -> shared credential row -> already-owned resource writes/commit. Key lifecycle: Customer -> current navigation root (adapter only) -> credential update. Key lifecycle never locks wallets, inventory, Orders or supplier resources. It does not hold a key lock and then ask for financial resources.
+Lock graph: Customer shared → credential shared → claim FOR UPDATE → isolated API Cart → canonical wallet/policy/restore/inventory checkout chain. Key lifecycle: Customer exclusive → current navigation root (adapter only) → credential update. The Customer lock orders both paths before the credential fence; lifecycle never asks for wallets, inventory, Orders or supplier resources. See the full [API Order lock graph](customer-api-orders.md#lock-order) and [ADR-0025](adr/0025-api-order-idempotency-claims.md).
 
-Revocation linearizes at the credential update transaction's commit. Reads authenticated earlier may finish. Mutations that acquired/revalidated the key lock before revocation may finish; revocation waits for them. A request merely admitted before revocation but not yet revalidated must fail its later mutation fence. A request after revocation never authenticates. Rotation does not erase account Orders/idempotency. This ticket does not implement checkout; the fence is a required S06 integration seam, not a substitute for its durable claims.
+Revocation linearizes at the credential update transaction's commit. Reads authenticated earlier may finish. Mutations that acquired/revalidated the shared fence before revocation may finish; revocation waits for them. A request merely admitted before revocation but not yet revalidated must fail its later mutation fence. A request after revocation never authenticates. Rotation does not erase account Orders/idempotency. The integrated checkout and revocation races verify this boundary; the fence does not replace durable claims.
 
 ## Shared limits
 
@@ -185,3 +185,13 @@ UI delivery gate, scoped to the new Telegram surface:
 - Craftsmanship PASS: no-key, active-key, destructive confirmation, limiter error and ambiguous-display recovery paths work; ID/EN/MS catalogs pass the translation audit. The first-secret warning states backend-only storage, save-now and Telegram-history persistence without promising deletion.
 
 Limitations: in-process HTTP-kernel requests and deterministic Telegram transport fixtures are not live network/Telegram-client proof. No production origin, deployment, CI, throughput benchmark, TLS/CDN/APM inspection or custody/provider qualification was performed. Existing fail-closed admission and financial release gates remain in force. Disposable containers and the throwaway walkthrough were removed after verification.
+
+## Integrated qualification (#628)
+
+[S11 acceptance evidence](customer-api-s11-acceptance.md) exercises the integrated
+commerce routes under cross-worker quotas, rotation, natural crashed-permit
+expiry, dedicated Redis outage, IDOR/parser/proxy abuse and real application-log
+suppression. It also corrects the S04 lock-order prose above to match the
+Customer-first S06 mutation fence. Local qualification does not approve
+production exposure or the proposed global admission rates.
+

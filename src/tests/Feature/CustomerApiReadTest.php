@@ -62,6 +62,27 @@ final class CustomerApiReadTest extends TestCase
         $this->assertSame('0', (string) $this->read('products', ['available' => 'false'])['data'][0]['stock']['available']);
     }
 
+    public function test_catalog_distinguishes_legacy_stock_from_exhausted_credential_inventory_without_decryption(): void
+    {
+        $legacy = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);
+        $managed = Product::factory()->create(['stock' => 5, 'reserved_stock' => 0]);
+        $exhausted = Product::factory()->create(['stock' => 5, 'reserved_stock' => 0]);
+        foreach ([$managed, $managed] as $product) {
+            ProductStockItem::create(['product_id' => $product->id, 'secret' => 'synthetic-available']);
+        }
+        foreach ([$managed, $exhausted] as $product) {
+            ProductStockItem::create(['product_id' => $product->id, 'secret' => 'synthetic-retired', 'retired_at' => now()]);
+        }
+        DB::table('product_stock_items')->update(['secret' => 'invalid ciphertext']);
+
+        $rows = $this->read('products', ['quantity' => '3'])['data'];
+        $stock = array_column($rows, 'stock', 'id');
+        $this->assertSame(['available' => 3, 'is_available' => true, 'quantity_available' => true], $stock[$legacy->id]);
+        $this->assertSame(['available' => 2, 'is_available' => true, 'quantity_available' => false], $stock[$managed->id]);
+        $this->assertSame(['available' => 0, 'is_available' => false, 'quantity_available' => false], $stock[$exhausted->id]);
+        $this->assertSame(0, DB::table('orders')->count());
+    }
+
     public function test_quotes_use_canonical_quantity_and_per_currency_override_precedence_exactly(): void
     {
         foreach ([[null, null], [8000, null], [null, 765432], [8000, 765432]] as [$idr, $usd]) {

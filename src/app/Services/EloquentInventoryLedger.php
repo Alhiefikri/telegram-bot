@@ -53,7 +53,9 @@ class EloquentInventoryLedger implements InventoryLedger
             ->withAvailability()
             ->whereIn('id', $items->pluck('product_id'))
             ->orderBy('id')
-            ->lockForUpdate()
+            // Cart-item FK checks already hold KEY SHARE before checkout.
+            // Stock/pricing writes must exclude writers without waiting on those checks.
+            ->lock(DB::getDriverName() === 'pgsql' ? 'for no key update' : true)
             ->get()
             ->keyBy('id');
 
@@ -74,7 +76,8 @@ class EloquentInventoryLedger implements InventoryLedger
     {
         $items = $order->orderItems()->orderBy('product_id')->lockForUpdate()->get();
         $movements = InventoryMovement::where('order_id', $order->id)->lockForUpdate()->get();
-        $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $products = Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')
+            ->lock(DB::getDriverName() === 'pgsql' ? 'for no key update' : true)->get()->keyBy('id');
 
         return [$items, $movements, $products];
     }
@@ -166,7 +169,7 @@ class EloquentInventoryLedger implements InventoryLedger
             );
 
             if ($sale->wasRecentlyCreated && $becameUnavailable) {
-                $this->stockNotifications->materialize($sale->id);
+                $this->stockNotifications->register($sale->id);
                 DB::afterCommit(fn () => SendProductStockNotifications::dispatch($sale->id)->onQueue(StockNotificationDeliveryPipeline::QUEUE));
             }
         }
@@ -209,7 +212,7 @@ class EloquentInventoryLedger implements InventoryLedger
             );
 
             if ($sale->wasRecentlyCreated && $becameUnavailable) {
-                $this->stockNotifications->materialize($sale->id);
+                $this->stockNotifications->register($sale->id);
                 DB::afterCommit(fn () => SendProductStockNotifications::dispatch($sale->id)->onQueue(StockNotificationDeliveryPipeline::QUEUE));
             }
         }

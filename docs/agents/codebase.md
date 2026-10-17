@@ -340,6 +340,22 @@ optional language, sample, filter and copy controls. All artifacts render from t
 classes, so a contract change lands in one place. Contract, accessibility decisions and
 evidence: [Customer API public documentation](../customer-api-public-docs.md).
 
+S11 integrated acceptance (#628) is recorded in
+[Customer API qualification](../customer-api-s11-acceptance.md). Independent
+PostgreSQL API/Bot/price/refund/receipt/revocation races are combined with
+actual disposable HTTP, worker/Redis-loss, Telegram-adapter, browser and
+1/20/100-row measurements. Qualification found the API Cart FK/Product lock
+cycle: checkout and nested inventory/supplier lifecycle Product writes use
+PostgreSQL `FOR NO KEY UPDATE`, not an FK-conflicting `FOR UPDATE`. Sold-out
+normal/late sales now register the existing durable Stock Notification Event
+and defer audience fan-out to the stock worker, matching other stock writers.
+`Product::withAvailability()` uses an indexed scalar `SELECT 1 ... LIMIT 1`
+for local credential existence, avoiding PostgreSQL's whole-stock-key hashed
+projection; availability counts and legacy/retired-stock semantics remain
+unchanged. The qualification retains actual plans, not just query counts.
+No new financial architecture, queue or production activation gate is introduced.
+
+
 
 ### Product dan stock
 

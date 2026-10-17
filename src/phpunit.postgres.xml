@@ -33,6 +33,8 @@
             <file>tests/Feature/UsdtFundingPostgresConcurrencyTest.php</file>
             <file>tests/Feature/CustomerUsdtBalancePostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtBalanceCheckoutPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/CustomerApiCredentialsPostgresTest.php</file>
+            <file>tests/Feature/CustomerApiAdmissionPostgresTest.php</file>
             <file>tests/Feature/CustomerApiOrderPostgresConcurrencyTest.php</file>
             <file>tests/Feature/CustomerApiOrderReadTest.php</file>
             <file>tests/Feature/CustomerApiOrderNotificationTest.php</file>

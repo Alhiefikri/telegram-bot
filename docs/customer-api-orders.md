@@ -180,6 +180,20 @@ creating a Cart or touching a wallet. An expired lease cannot be stolen during f
 commit, and a suspended worker whose token was replaced returns 409 `in_progress`
 without purchasing. Acceptance cannot silently succeed for a stale token.
 
+S11 (#628) accounts for the Product FK `KEY SHARE` lock taken by the isolated
+Cart item insert. PostgreSQL checkout/inventory/supplier lifecycle Product
+write locks use `FOR NO KEY UPDATE`, preserving exclusion against price/stock
+writers and deletion without conflicting with those FK checks. Upgrading a
+nested Product lock to `FOR UPDATE` would recreate the maintenance/Product
+cycle between different Customers.
+
+Normal and late last-stock sales commit only the existing
+`StockNotificationEvent` handoff, not the entire recipient audience, inside
+the financial transaction. The existing stock worker/recovery pipeline owns
+bounded recipient materialization. See [S11 integrated acceptance](customer-api-s11-acceptance.md)
+for the failing-before/passing-after boundaries, HTTP/worker recovery,
+measured query/performance evidence and unchanged production qualification gates.
+
 ## Public proof and private Owner notifications (S09)
 
 Order creation snapshots `api_order_claim_id` before the paid lifecycle runs.

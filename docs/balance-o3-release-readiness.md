@@ -137,3 +137,21 @@ unavailable/deficit, a receipt collision appears, or delivery/recovery backlog
 does not drain. Preserve the report, reconciliation run IDs and sanitized
 diagnostics; do not delete ledger, receipt, claim, reservation, resolution, or
 outbound history. The existing rollback runbook governs replay and reopening.
+
+## Customer API qualification boundary (S11 #628)
+
+[S11 integrated acceptance](customer-api-s11-acceptance.md) records disposable
+cross-surface financial/security/recovery evidence, local query plans and
+measured HTTP diagnostics for the Customer API. It fixes the API Cart
+FK/Product lock inversion and removes sold-out audience expansion from the
+money transaction by using the existing durable stock handoff.
+
+This report is not a candidate-bound V1/V2 full-profile manifest, a production
+capacity acceptance, H1/A1/provider/custody qualification, H2 live-money
+evidence or an Owner activation decision. The proposed API admission rates
+remain unqualified for production. Financial/API exposure stays NO-GO until
+the existing operator/provider gates and intended-runtime capacity review
+pass; no closed legacy ticket or synthetic provider response waives them.
+No production readiness command, CI run, deployment or setting change was
+performed as part of S11.
+

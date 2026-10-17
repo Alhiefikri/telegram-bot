@@ -362,3 +362,33 @@ migration and this ticket's `2026_10_16_130000_create_customer_api_order_claims.
 `CREATE OR REPLACE FUNCTION`, matching the S03 convention; the shared test helper was left
 unchanged.
 
+
+## S11 FK-compatible Product locks and sold-out handoff (#628)
+
+The S06 API Cart item insert takes an implicit PostgreSQL Product `KEY SHARE`
+lock before the canonical checkout chain. Two different Customers can both
+hold that FK lock: `Product FOR UPDATE` after maintenance then forms a cycle
+with the other request waiting for maintenance. The integrated 80-attempt
+HTTP workload observed 237 deadlocks and 79 unavailable responses before the
+correction; a deterministic two-Customer FK barrier also failed before it.
+
+Checkout inventory, inventory lifecycle and supplier lifecycle Product locks
+now use `FOR NO KEY UPDATE` on PostgreSQL. This excludes concurrent stock/price
+writers and deletion/key changes while remaining compatible with FK checks.
+The Customer/credential/claim/wallet/policy/restore/maintenance/resource order
+is unchanged. Other database drivers retain the original update lock.
+Nested paid/supplier paths must not upgrade these Product locks back to
+`FOR UPDATE` while another isolated API Cart can hold its FK lock.
+
+Normal and late sold-out sales now register the existing durable
+`StockNotificationEvent` instead of expanding all recipients in the financial
+transaction. Aftercommit dispatch and the existing stock recovery facet
+perform bounded recipient work; recipient-rendering failure cannot roll back
+money. This also removes the eager recipient-FK edge described in the
+historical S03 deadlock observations above, without claiming that every
+unrelated lock graph is deadlock-free.
+
+Current commands, before/after observations, PostgreSQL/read performance,
+crash/queue loss and operator limitations:
+[S11 integrated acceptance](customer-api-s11-acceptance.md).
+
