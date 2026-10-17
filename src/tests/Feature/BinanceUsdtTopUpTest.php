@@ -12,6 +12,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\UsdtTopUps\BinanceUsdtTopUpSettlement;
+use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -32,7 +33,7 @@ final class BinanceUsdtTopUpTest extends TestCase
         config(['services.binance.api_key' => 'test-key', 'services.binance.api_secret' => 'test-secret',
             'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '', 'services.binance.history_cache_seconds' => 0]);
         ManualPaymentSetting::create(['is_active' => true, 'payment_mode' => 'manual', 'binance_pay_enabled' => true]);
-        CustomerUsdtFundingPolicy::current()->update(['funding_enabled' => true]);
+        CustomerUsdtFundingPolicy::current()->update(['funding_enabled' => true, 'version' => 1]);
     }
 
     public function test_verified_receipt_credits_once_and_cannot_be_reused_by_another_customer(): void
@@ -56,6 +57,102 @@ final class BinanceUsdtTopUpTest extends TestCase
         $service->check($other->id);
         $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
         $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $other->id)->value('state'));
+    }
+
+    public function test_wrong_order_hint_does_not_starve_a_later_correct_hint(): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771014);
+        $customer = Customer::findOrFail($target->customer_id);
+        $this->fakeHistory($this->transaction($target));
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit($customer, $target->id, 'not-a-real-order-id');
+        $this->assertTrue($service->check($target->id));
+        $service->submit($customer, $target->id, '445011487581044736');
+        $this->travel(61)->seconds();
+        $this->assertTrue($service->check($target->id));
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $this->assertSame(1500000, (int) DB::table('customer_usdt_balance_entries')->sole()->amount_micro);
+        Http::assertSentCount(2);
+        $this->travel(10)->minutes();
+        $service->submit($customer, $target->id, 'another-wrong-id');
+        $this->assertFalse($service->check($target->id));
+        $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+        Http::assertSentCount(2);
+    }
+
+    #[DataProvider('nonSettlingHints')]
+    public function test_non_settling_hint_backoff_bounds_history_reads(bool $receiptConflict): void
+    {
+        $this->freezeTime();
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        if ($receiptConflict) {
+            $owner = $this->target(771015);
+            $this->fakeHistory($this->transaction($owner));
+            $service->submit(Customer::findOrFail($owner->customer_id), $owner->id, '445011487581044736');
+            $service->check($owner->id);
+        } else {
+            Http::fake(['*sapi/v1/pay/transactions*' => Http::response(['code' => '000000', 'success' => true, 'data' => []])]);
+        }
+        $target = $this->target(771016);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $requests = $receiptConflict ? 1 : 0;
+        foreach ([10, 20, 40, 80, 160, 300, 300] as $index => $delay) {
+            $checkedAt = now()->toImmutable();
+            $this->assertTrue($service->check($target->id));
+            $requests++;
+            $hint = DB::table('customer_usdt_top_up_inbox')->where('top_up_id', $target->id)->sole();
+            $this->assertSame($index + 1, (int) $hint->attempts);
+            $this->assertSame($checkedAt->addSeconds($delay)->toDateTimeString(), $hint->next_check_at);
+            $this->travel(max(60, $delay) - 1)->seconds();
+            $this->assertFalse($service->check($target->id));
+            Http::assertSentCount($requests);
+            $this->travel(61)->seconds();
+        }
+        $this->assertSame($receiptConflict ? 1 : 0, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->count());
+    }
+
+    public static function nonSettlingHints(): array
+    {
+        return ['missing order' => [false], 'receipt conflict' => [true]];
+    }
+
+    #[DataProvider('historyAvailability')]
+    public function test_target_inspection_budget_survives_expiry_and_new_hints(bool $available): void
+    {
+        $this->freezeTime();
+        config(['services.binance.history_max_attempts' => 1]);
+        $target = $this->target(771017);
+        $customer = Customer::findOrFail($target->customer_id);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::response(
+            $available ? ['code' => '000000', 'success' => true, 'data' => []] : ['code' => 'ERROR', 'success' => false],
+            $available ? 200 : 503,
+        )]);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit($customer, $target->id, 'never-matches');
+        for ($i = 0; $i < 100; $i++) {
+            $service->recover();
+            $this->travel(10)->minutes();
+        }
+        $service->submit($customer, $target->id, 'new-hint-after-exhaustion');
+        $service->recover();
+        $this->travel(1)->day();
+        $this->assertFalse($service->check($target->id));
+        Http::assertSentCount(100);
+        $work = DB::table('customer_usdt_top_up_settlement_work')->sole();
+        $this->assertSame(100, (int) $work->attempts);
+        $this->assertSame('expired_unresolved', $work->state);
+        $this->assertSame('expired_unresolved', app(UsdtTopUpStatusReader::class)->for($target)->state);
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertNull(DB::table('customer_usdt_funding_reservations')->sole()->resolved_at);
+    }
+
+    public static function historyAvailability(): array
+    {
+        return ['not found' => [true], 'provider unavailable' => [false]];
     }
 
     public function test_mismatched_amount_does_not_credit(): void

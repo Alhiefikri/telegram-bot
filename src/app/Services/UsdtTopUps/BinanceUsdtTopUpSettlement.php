@@ -30,6 +30,8 @@ final class BinanceUsdtTopUpSettlement
 {
     private const TERMINAL = ['settled', 'externally_refunded', 'resolved_by_compensation', 'rejected'];
 
+    private const MAX_INSPECTIONS = 100;
+
     public function __construct(
         private readonly BinanceTransactionHistoryReader $history,
         private readonly CustomerUsdtBalanceLedger $ledger,
@@ -97,6 +99,17 @@ final class BinanceUsdtTopUpSettlement
                 || ($work->lease_until !== null && CarbonImmutable::parse($work->lease_until)->isFuture())) {
                 return null;
             }
+            if (in_array($work->state, self::TERMINAL, true)) {
+                return null;
+            }
+            if ((int) $work->attempts >= self::MAX_INSPECTIONS) {
+                $this->finish($work, [
+                    'state' => $work->state === 'manual_review' ? 'manual_review' : ($target->expires_at->isPast() ? 'expired_unresolved' : 'manual_review'),
+                    'next_check_at' => now()->addMinutes(5), 'last_error' => 'binance_inspection_budget_exhausted',
+                ]);
+
+                return null;
+            }
             $inbox = DB::table('customer_usdt_top_up_inbox')->where('top_up_id', $topUpId)->where('state', 'pending')
                 ->whereNotNull('provider_reference')->where('next_check_at', '<=', now())->orderBy('next_check_at')->orderBy('id')->first();
             if ($inbox === null) {
@@ -154,6 +167,7 @@ final class BinanceUsdtTopUpSettlement
             }
             $state = $resolution?->kind ?? $work->state;
             if ($transaction === null) {
+                $this->deferHint($claim['inbox']);
                 $this->finish($work, ['state' => $target->expires_at->isPast() ? 'expired_unresolved' : $state, 'next_check_at' => now()->addMinute(), 'last_error' => 'binance_order_not_found']);
 
                 return;
@@ -192,6 +206,7 @@ final class BinanceUsdtTopUpSettlement
                 MoneyReceiptTarget::customerUsdtTopUp($target->id), $transaction->sanitizedPayload(), $aliases);
             $outcome = $this->receipts->claim($receipt);
             if (! $outcome->allowsMoneyEffect()) {
+                $this->deferHint($claim['inbox']);
                 $this->finish($work, ['state' => 'manual_review', 'evidence_version' => $evidenceVersion, 'next_check_at' => now()->addMinute(), 'last_error' => 'receipt_'.$outcome->value]);
 
                 return;
@@ -217,6 +232,15 @@ final class BinanceUsdtTopUpSettlement
             DB::table('customer_usdt_top_up_inbox')->where('id', $claim['inbox']->id)->update(['state' => 'settled', 'attempts' => (int) $claim['inbox']->attempts + 1, 'next_check_at' => now()->addMinute()]);
             $this->finish($work, ['state' => 'settled', 'evidence_version' => $evidenceVersion, 'next_check_at' => now()->addMinute(), 'last_error' => null]);
         }, 5);
+    }
+
+    private function deferHint(object $inbox): void
+    {
+        $attempts = (int) $inbox->attempts + 1;
+        DB::table('customer_usdt_top_up_inbox')->where('id', $inbox->id)->update([
+            'attempts' => $attempts,
+            'next_check_at' => now()->addSeconds(min(300, 5 * (2 ** min(6, $attempts)))),
+        ]);
     }
 
     private function finish(object $work, array $values): void
