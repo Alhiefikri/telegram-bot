@@ -99,7 +99,11 @@ final class BinanceUsdtTopUpSettlement
                 || ($work->lease_until !== null && CarbonImmutable::parse($work->lease_until)->isFuture())) {
                 return null;
             }
-            if (in_array($work->state, self::TERMINAL, true)) {
+            $inbox = DB::table('customer_usdt_top_up_inbox')->where('top_up_id', $topUpId)->where('state', 'pending')
+                ->whereNotNull('provider_reference')->where('next_check_at', '<=', now())->orderBy('next_check_at')->orderBy('id')->first();
+            if ($inbox === null) {
+                $this->updateWork($work, ['next_check_at' => now()->addMinute()]);
+
                 return null;
             }
             if ((int) $work->attempts >= self::MAX_INSPECTIONS) {
@@ -107,13 +111,6 @@ final class BinanceUsdtTopUpSettlement
                     'state' => $work->state === 'manual_review' ? 'manual_review' : ($target->expires_at->isPast() ? 'expired_unresolved' : 'manual_review'),
                     'next_check_at' => now()->addMinutes(5), 'last_error' => 'binance_inspection_budget_exhausted',
                 ]);
-
-                return null;
-            }
-            $inbox = DB::table('customer_usdt_top_up_inbox')->where('top_up_id', $topUpId)->where('state', 'pending')
-                ->whereNotNull('provider_reference')->where('next_check_at', '<=', now())->orderBy('next_check_at')->orderBy('id')->first();
-            if ($inbox === null) {
-                $this->updateWork($work, ['next_check_at' => now()->addMinute()]);
 
                 return null;
             }
@@ -157,15 +154,7 @@ final class BinanceUsdtTopUpSettlement
                 return;
             }
             $resolution = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->first();
-            if ($resolution?->kind === 'settled') {
-                DB::table('customer_usdt_top_up_inbox')->where('id', $claim['inbox']->id)->update([
-                    'state' => 'settled', 'attempts' => (int) $claim['inbox']->attempts + 1, 'next_check_at' => now()->addMinute(),
-                ]);
-                $this->finish($work, ['state' => 'settled', 'next_check_at' => now()->addMinute(), 'last_error' => null]);
-
-                return;
-            }
-            $state = $resolution?->kind ?? $work->state;
+            $state = $resolution !== null ? 'manual_review' : $work->state;
             if ($transaction === null) {
                 $this->deferHint($claim['inbox']);
                 $this->finish($work, ['state' => $target->expires_at->isPast() ? 'expired_unresolved' : $state, 'next_check_at' => now()->addMinute(), 'last_error' => 'binance_order_not_found']);
@@ -190,11 +179,11 @@ final class BinanceUsdtTopUpSettlement
                 'status' => $valid ? 'verified' : 'review', 'reason' => $valid ? 'verified' : 'binance_snapshot_or_amount_mismatch',
                 'chain_evidence' => json_encode($transaction->sanitizedPayload(), JSON_THROW_ON_ERROR), 'created_at' => now(),
             ]);
-            if (! $valid || in_array($state, self::TERMINAL, true)) {
+            if (! $valid) {
                 DB::table('customer_usdt_top_up_inbox')->where('id', $claim['inbox']->id)->update([
                     'state' => 'review', 'attempts' => (int) $claim['inbox']->attempts + 1, 'next_check_at' => now()->addMinute(),
                 ]);
-                $this->finish($work, ['state' => in_array($state, self::TERMINAL, true) ? $state : 'manual_review', 'evidence_version' => $evidenceVersion, 'next_check_at' => now()->addMinute(), 'last_error' => 'binance_snapshot_or_amount_mismatch']);
+                $this->finish($work, ['state' => 'manual_review', 'evidence_version' => $evidenceVersion, 'next_check_at' => now()->addMinute(), 'last_error' => 'binance_snapshot_or_amount_mismatch']);
 
                 return;
             }
@@ -208,6 +197,15 @@ final class BinanceUsdtTopUpSettlement
             if (! $outcome->allowsMoneyEffect()) {
                 $this->deferHint($claim['inbox']);
                 $this->finish($work, ['state' => 'manual_review', 'evidence_version' => $evidenceVersion, 'next_check_at' => now()->addMinute(), 'last_error' => 'receipt_'.$outcome->value]);
+
+                return;
+            }
+            if ($resolution !== null || in_array($state, self::TERMINAL, true)) {
+                DB::table('customer_usdt_top_up_inbox')->where('id', $claim['inbox']->id)->update([
+                    'state' => 'review', 'attempts' => (int) $claim['inbox']->attempts + 1, 'next_check_at' => now()->addMinute(),
+                ]);
+                $this->finish($work, ['state' => 'manual_review', 'evidence_version' => $evidenceVersion,
+                    'next_check_at' => now()->addMinute(), 'last_error' => 'receipt_after_resolution']);
 
                 return;
             }

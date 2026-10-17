@@ -59,6 +59,88 @@ final class BinanceUsdtTopUpTest extends TestCase
         $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $other->id)->value('state'));
     }
 
+    public function test_second_transfer_after_settlement_is_claimed_for_review_without_another_credit(): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771018);
+        $customer = Customer::findOrFail($target->customer_id);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $first = $this->transaction($target);
+        $second = $this->transaction($target, ['orderId' => 'ORDER-P2', 'transactionId' => 'TX-P2']);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::response([
+            'code' => '000000', 'success' => true, 'data' => [$first, $second],
+        ])]);
+        $service->submit($customer, $target->id, $first['orderId']);
+        $this->assertTrue($service->check($target->id));
+        $resolution = DB::table('customer_usdt_top_up_resolutions')->sole();
+        $entry = DB::table('customer_usdt_balance_entries')->sole();
+        $service->submit($customer, $target->id, $second['orderId']);
+        $this->travel(61)->seconds();
+        $this->assertTrue($service->check($target->id));
+        $this->assertSame(2, DB::table('external_money_receipts')->count());
+        $this->assertSame(2, DB::table('customer_usdt_top_up_evidence')->count());
+        $this->assertSame('review', DB::table('customer_usdt_top_up_inbox')->where('provider_reference', 'ORDER-P2')->value('state'));
+        $work = DB::table('customer_usdt_top_up_settlement_work')->sole();
+        $this->assertSame('manual_review', $work->state);
+        $this->assertSame('receipt_after_resolution', $work->last_error);
+        $this->assertEquals($resolution, DB::table('customer_usdt_top_up_resolutions')->sole());
+        $this->assertEquals($entry, DB::table('customer_usdt_balance_entries')->sole());
+        $this->assertSame(1500000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+        $this->assertSame(1, DB::table('telegram_outbound_effects')->count());
+        $settledHint = DB::table('customer_usdt_top_up_inbox')->where('state', 'settled')->sole();
+        $this->assertSame($settledHint->id, DB::table('customer_usdt_top_up_evidence')->where('id', $resolution->evidence_id)->value('inbox_id'));
+        $this->assertSame((int) $resolution->entry_id, (int) $entry->id);
+        $this->assertSame($target->id, $entry->source_id);
+        foreach ([$first, $second] as $transfer) {
+            $service->submit($customer, $target->id, $transfer['orderId']);
+        }
+        $this->travel(61)->seconds();
+        $this->assertFalse($service->check($target->id));
+        $service->recover();
+        $this->assertSame(2, DB::table('external_money_receipts')->count());
+        $this->assertSame(2, DB::table('customer_usdt_top_up_evidence')->count());
+        $this->assertEquals($entry, DB::table('customer_usdt_balance_entries')->sole());
+        Http::assertSentCount(2);
+    }
+
+    #[DataProvider('postSettlementInvalidTransfers')]
+    public function test_post_settlement_invalid_transfer_does_not_claim_new_money(array $changes, string $error, string $inboxState): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771019);
+        $customer = Customer::findOrFail($target->customer_id);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::response([
+            'code' => '000000', 'success' => true, 'data' => [
+                $this->transaction($target),
+                $this->transaction($target, ['orderId' => 'ORDER-P2', ...$changes]),
+            ],
+        ])]);
+        $service->submit($customer, $target->id, '445011487581044736');
+        $this->assertTrue($service->check($target->id));
+        $resolution = DB::table('customer_usdt_top_up_resolutions')->sole();
+        $service->submit($customer, $target->id, 'ORDER-P2');
+        $this->travel(61)->seconds();
+        $this->assertTrue($service->check($target->id));
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(2, DB::table('customer_usdt_top_up_evidence')->count());
+        $this->assertEquals($resolution, DB::table('customer_usdt_top_up_resolutions')->sole());
+        $this->assertSame($inboxState, DB::table('customer_usdt_top_up_inbox')->where('provider_reference', 'ORDER-P2')->value('state'));
+        $work = DB::table('customer_usdt_top_up_settlement_work')->sole();
+        $this->assertSame('manual_review', $work->state);
+        $this->assertSame($error, $work->last_error);
+    }
+
+    public static function postSettlementInvalidTransfers(): array
+    {
+        return [
+            'amount mismatch' => [['transactionId' => 'TX-P2', 'amount' => '2'], 'binance_snapshot_or_amount_mismatch', 'review'],
+            'receiver mismatch' => [['transactionId' => 'TX-P2', 'receiverInfo' => ['accountId' => '99999999']], 'binance_snapshot_or_amount_mismatch', 'review'],
+            'claimed order alias' => [['transactionId' => '445011487581044736'], 'receipt_conflict', 'pending'],
+        ];
+    }
+
     public function test_wrong_order_hint_does_not_starve_a_later_correct_hint(): void
     {
         $this->freezeTime();
@@ -76,10 +158,12 @@ final class BinanceUsdtTopUpTest extends TestCase
         Http::assertSentCount(2);
         $this->travel(10)->minutes();
         $service->submit($customer, $target->id, 'another-wrong-id');
-        $this->assertFalse($service->check($target->id));
+        $this->assertTrue($service->check($target->id));
         $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
         $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
-        Http::assertSentCount(2);
+        $this->assertSame('pending', DB::table('customer_usdt_top_up_inbox')->where('provider_reference', 'another-wrong-id')->value('state'));
+        $this->assertSame('binance_order_not_found', DB::table('customer_usdt_top_up_settlement_work')->sole()->last_error);
+        Http::assertSentCount(3);
     }
 
     #[DataProvider('nonSettlingHints')]
