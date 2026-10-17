@@ -125,22 +125,22 @@ existing key is always a conflict.
 ## Errors
 
 Errors keep `error.code`, `error.message` and `error.request_id` matching `X-Request-ID`.
-`price_changed` additionally carries `error.quotes` with the safe new totals.
+`price_changed` additionally carries `error.quotes`: the fresh IDR total is always present;
+USD follows only when the locked snapshot has a complete USD total. IDR-only Products
+therefore return one quote, not a null or invented USD total.
 
-| Status | Code | Meaning |
-| --- | --- | --- |
-| 401 | `unauthenticated` | Missing, invalid or revoked key; also a key revoked before the financial fence |
-| 402 | `insufficient_funds` | No authorized eligible wallet fully covers the Order |
-| 403 | `backend_only` | Browser `Origin` with a Customer key |
-| 404 | `not_found` | Product does not exist or is not publicly purchasable |
-| 409 | `idempotency_conflict` | The key was already used with a different payload |
-| 409 | `price_changed` | An authorized expected total no longer matches; `error.quotes` lists fresh IDR/USD totals |
-| 409 | `stock_conflict` | The requested quantity is no longer available |
-| 409 | `in_progress` | An identical request is still running; retry with the same key after `Retry-After` |
-| 413 | `payload_too_large` | Body over 32 KiB |
-| 422 | `invalid_input` | Malformed, unknown or missing input, including a missing expected total for the resolved primary currency |
-| 429 | `rate_limited` | Shared admission quota exhausted |
-| 503 | `temporarily_unavailable` | Shared admission, checkout maintenance, funding/restore gate or drift failure; nothing was charged |
+The published [Markdown reference](/api-docs/reference.md) and
+[OpenAPI document](/api-docs/openapi.json) contain the error/status table generated from
+`CustomerApiDocumentation::errors()` and each operation's canonical error list.
+Every `503`, including delivery-bound rejection, carries `Retry-After` (five seconds by
+default). Invalid UTF-8 paths under `/api/v1` return `400 invalid_path` before admission,
+with the same JSON error envelope, UUID `X-Request-ID`, private `no-store` policy and
+`Referrer-Policy: no-referrer` as routed errors. No CORS headers are added.
+
+`GET /api/v1/balance` rejects stray query parameters or a body with `422 invalid_input`.
+Following S05-fix-A, an unquotable Product on a catalog page stays in the `200` response
+with both quotes ineligible and their amounts null; only its detail route returns
+`422 quote_unavailable`. The list route must not advertise a page-wide quote failure.
 
 No error mutates financial state: a rejected request leaves no Order, Payment, debit,
 reservation, stock allocation or API cart row.

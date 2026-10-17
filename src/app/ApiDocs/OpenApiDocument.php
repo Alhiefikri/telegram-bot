@@ -88,10 +88,12 @@ final class OpenApiDocument
         foreach ($operation['errors'] as $code) {
             $status = (string) $errors[$code]['status'];
             $responses[$status] ??= [
-                'description' => $errors[$code]['meaning']['en'],
+                'description' => '',
                 'headers' => $this->errorHeaders($errors[$code]['status']),
                 'content' => ['application/json' => $this->content('ErrorEnvelope')],
             ];
+            $responses[$status]['description'] .= ($responses[$status]['description'] === '' ? '' : "\n\n")
+                .'`'.$code.'`: '.$errors[$code]['meaning']['en'];
         }
 
         ksort($responses, SORT_NUMERIC);

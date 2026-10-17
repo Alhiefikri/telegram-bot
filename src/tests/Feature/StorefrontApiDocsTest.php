@@ -99,11 +99,62 @@ class StorefrontApiDocsTest extends TestCase
         $this->assertSame($expectedCodes, $actualCodes);
 
         $balanceResponses = $document['paths']['/api/v1/balance']['get']['responses'];
-        foreach (['401', '403', '429', '503'] as $status) {
+        foreach (['400', '401', '403', '422', '429', '503'] as $status) {
             $this->assertArrayHasKey($status, $balanceResponses);
         }
 
         $this->assertEveryReferenceResolves($document);
+    }
+
+    public function test_error_statuses_codes_and_meanings_match_across_all_public_formats(): void
+    {
+        $documentation = new CustomerApiDocumentation;
+        $html = (string) $this->get('/api-docs/')->assertOk()->getContent();
+        $reference = (string) $this->get('/api-docs/reference.md')->assertOk()->getContent();
+        $openapi = $this->get('/api-docs/openapi.json')->assertOk()->json();
+        $dom = new \DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $dom->loadHTML($html);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        $xpath = new \DOMXPath($dom);
+        $this->assertSame(array_keys($documentation->errors()), $openapi['components']['schemas']['Error']['properties']['code']['enum']);
+
+        foreach ($documentation->operations() as $operation) {
+            $heading = '### `'.$operation['method'].' '.$operation['path'].'`';
+            $section = explode("\n### ", explode($heading, $reference, 2)[1], 2)[0];
+            $responses = $openapi['paths'][$operation['path']][strtolower($operation['method'])]['responses'];
+            $expected = [];
+            foreach ($operation['errors'] as $code) {
+                $error = $documentation->errors()[$code];
+                $expected[$code] = (string) $error['status'];
+                $this->assertStringContainsString('| `'.$error['status'].'` | `'.$code.'` | '.$error['meaning']['en'].' |', $section);
+                $this->assertStringContainsString('`'.$code.'`: '.$error['meaning']['en'], $responses[$error['status']]['description']);
+                if ($error['status'] === 503) {
+                    $this->assertArrayHasKey('Retry-After', $responses[503]['headers']);
+                }
+            }
+            foreach (['id', 'en'] as $locale) {
+                $rows = $xpath->query('//article[@id="endpoint-'.strtolower($operation['id']).'"]//div[@lang="'.$locale.'"]//table[caption="'.$operation['method'].' '.$operation['path'].' error codes"]/tbody/tr');
+                $actual = [];
+                foreach ($rows as $row) {
+                    $cells = $row->getElementsByTagName('td');
+                    $code = trim($cells->item(1)->textContent);
+                    $actual[$code] = trim($cells->item(0)->textContent);
+                    $this->assertSame($documentation->errors()[$code]['meaning'][$locale], trim($cells->item(2)->textContent));
+                }
+                ksort($actual);
+                ksort($expected);
+                $this->assertSame($expected, $actual, $operation['id'].' '.$locale);
+            }
+            preg_match_all('/^\| `([0-9]{3})` \| `([a-z_]+)` \|/m', $section, $matches);
+            $markdownErrors = array_combine($matches[2], $matches[1]);
+            ksort($markdownErrors);
+            $this->assertSame($expected, $markdownErrors, $operation['id'].' Markdown');
+        }
     }
 
     public function test_openapi_document_publishes_valid_examples_and_implementation_bounds(): void

@@ -4,12 +4,16 @@ namespace App\Services\CustomerApi;
 
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Http\Exceptions\MalformedUrlException;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 final class CustomerApiFailure extends RuntimeException
 {
+    /** @var array<string, string> */
+    public readonly array $headers;
+
     /**
      * @param  array<string, string>  $headers
      * @param  array<string, mixed>  $details  Extra allowlisted machine-readable error members.
@@ -18,15 +22,16 @@ final class CustomerApiFailure extends RuntimeException
         public readonly int $status,
         public readonly string $machineCode,
         string $message,
-        public readonly array $headers = [],
+        array $headers = [],
         public readonly array $details = [],
     ) {
         parent::__construct($message);
+        $this->headers = $status === 503 ? $headers + ['Retry-After' => '5'] : $headers;
     }
 
     public static function unavailable(): self
     {
-        return new self(503, 'temporarily_unavailable', 'API admission is temporarily unavailable.', ['Retry-After' => '5']);
+        return new self(503, 'temporarily_unavailable', 'API admission is temporarily unavailable.');
     }
 
     public static function fromException(\Throwable $error): self
@@ -42,11 +47,12 @@ final class CustomerApiFailure extends RuntimeException
             default => 503,
         };
         $code = match ($status) {
+            400 => $error instanceof MalformedUrlException ? 'invalid_path' : 'request_failed',
             401 => 'unauthenticated', 403 => 'not_authorized', 404 => 'not_found', 405 => 'method_not_allowed',
             413 => 'payload_too_large', 422 => 'invalid_input', 429 => 'rate_limited',
             503 => 'temporarily_unavailable', default => 'request_failed',
         };
-        $headers = $status === 503 ? ['Retry-After' => '5'] : [];
+        $headers = [];
         if ($status === 429) {
             $retry = $error instanceof HttpExceptionInterface
                 ? ($error->getHeaders()['Retry-After'] ?? 60) : 60;

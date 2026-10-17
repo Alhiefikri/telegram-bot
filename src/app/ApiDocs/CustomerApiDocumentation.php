@@ -132,6 +132,9 @@ final class CustomerApiDocumentation
     public function errors(): array
     {
         return [
+            'invalid_path' => ['status' => 400, 'meaning' => [
+                'id' => 'Path permintaan bukan UTF-8 yang valid. Ditolak sebelum autentikasi dengan envelope JSON dan X-Request-ID.',
+                'en' => 'The request path is not valid UTF-8. Rejected before authentication with a JSON envelope and X-Request-ID.']],
             'unauthenticated' => ['status' => 401, 'meaning' => [
                 'id' => 'Key hilang, tidak valid, atau sudah dicabut. Verifikasi juga gagal bila key dicabut sebelum fence finansial.',
                 'en' => 'Missing, invalid or revoked key. Verification also fails when the key was revoked before the financial fence.']],
@@ -151,8 +154,8 @@ final class CustomerApiDocumentation
                 'id' => 'Key ini sudah pernah diterima dengan payload berbeda. Kirim payload yang ingin diubah memakai key baru.',
                 'en' => 'The key was already accepted with a different payload. Send the changed payload with a new key.']],
             'price_changed' => ['status' => 409, 'meaning' => [
-                'id' => 'Salah satu total yang diotorisasi tidak lagi cocok. `error.quotes` berisi total IDR dan USD terbaru; tidak ada debit atau alokasi.',
-                'en' => 'An authorized expected total no longer matches. `error.quotes` carries the fresh IDR and USD totals; nothing was debited or allocated.']],
+                'id' => 'Salah satu total yang diotorisasi tidak lagi cocok. `error.quotes` selalu berisi total IDR terbaru; total USD hanya ada bila snapshot terkunci memiliki total USD lengkap. Tidak ada debit atau alokasi.',
+                'en' => 'An authorized expected total no longer matches. `error.quotes` always includes the fresh IDR total; USD is included only when the locked snapshot has a complete USD total. Nothing was debited or allocated.']],
             'stock_conflict' => ['status' => 409, 'meaning' => [
                 'id' => 'Kuantitas yang diminta sudah tidak tersedia.',
                 'en' => 'The requested quantity is no longer available.']],
@@ -189,7 +192,7 @@ final class CustomerApiDocumentation
     public function operations(): array
     {
         return array_map(static function (array $operation): array {
-            $operation['errors'] = array_values(array_unique([...$operation['errors'], 'method_not_allowed', 'payload_too_large']));
+            $operation['errors'] = array_values(array_unique([...$operation['errors'], 'invalid_path', 'method_not_allowed', 'payload_too_large']));
 
             return $operation;
         }, $this->definedOperations());
@@ -220,7 +223,7 @@ final class CustomerApiDocumentation
                 'responses' => [
                     ['status' => 200, 'schema' => 'BalanceEnvelope', 'description' => ['id' => 'Snapshot dompet akun ini.', 'en' => 'Wallet snapshot for this account.']],
                 ],
-                'errors' => ['unauthenticated', 'backend_only', 'rate_limited', 'temporarily_unavailable'],
+                'errors' => ['unauthenticated', 'backend_only', 'invalid_input', 'rate_limited', 'temporarily_unavailable'],
                 'notes' => [
                     ['id' => 'Saldo yang dilaporkan adalah snapshot ledger akun, bukan izin belanja: pause pengeluaran dan restore gate tetap dinilai saat checkout.',
                         'en' => 'A reported balance is an account ledger snapshot, not spend authorization: spending pauses and the restore gate are still evaluated at checkout.'],
@@ -760,10 +763,10 @@ final class CustomerApiDocumentation
                 'required' => ['code', 'message', 'request_id'],
                 'description' => 'Stable machine code, human message and request id. Parse `code`, never the message.',
                 'properties' => [
-                    'code' => ['type' => 'string', 'description' => 'Stable machine code from the error table.'],
+                    'code' => ['type' => 'string', 'enum' => array_keys($this->errors()), 'description' => 'Stable machine code from the error table.'],
                     'message' => ['type' => 'string', 'description' => 'Human-readable message that may change without notice.'],
                     'request_id' => ['type' => 'string', 'format' => 'uuid', 'description' => 'Matches the `X-Request-ID` response header.'],
-                    'quotes' => ['type' => 'array', 'description' => 'Only on 409 `price_changed`: fresh totals to authorize before retrying.', 'items' => ['$ref' => '#/components/schemas/PriceChangeQuote']],
+                    'quotes' => ['type' => 'array', 'minItems' => 1, 'maxItems' => 2, 'description' => 'Only on 409 `price_changed`: always the fresh IDR total, followed by USD only when the locked snapshot has a complete USD total.', 'items' => ['$ref' => '#/components/schemas/PriceChangeQuote']],
                 ],
             ],
             'ErrorEnvelope' => [

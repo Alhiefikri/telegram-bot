@@ -21,6 +21,7 @@ use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Middleware\ValidatePathEncoding;
 use Illuminate\Http\Middleware\ValidatePostSize;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -82,16 +83,19 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->dontFlash(['api_key', 'credentials', 'token', 'code', 'challenge', 'state', 'access_key']);
-        $exceptions->dontReportWhen(fn (Throwable $error) => request()->is('api/v1', 'api/v1/*'));
+        $exceptions->dontReportWhen(fn (Throwable $error) => CustomerApiBoundary::matches(request()));
         $exceptions->render(function (Throwable $error, Request $request) {
-            if (! $request->is('api/v1', 'api/v1/*')) {
+            if (! CustomerApiBoundary::matches($request)) {
                 return null;
             }
             $failure = CustomerApiFailure::fromException($error);
+            $requestId = $request->attributes->get('customer_api_request_id') ?? (string) Str::uuid();
 
             return response()->json(['error' => ['code' => $failure->machineCode, 'message' => $failure->getMessage(),
-                'request_id' => $request->attributes->get('customer_api_request_id')] + $failure->details], $failure->status, $failure->headers)
-                ->header('Cache-Control', 'no-store, private');
+                'request_id' => $requestId] + $failure->details], $failure->status, $failure->headers)
+                ->header('X-Request-ID', $requestId)
+                ->header('Cache-Control', 'no-store, private')
+                ->header('Referrer-Policy', 'no-referrer');
         });
         $exceptions->render(function (HttpExceptionInterface $exception, Request $request) {
             if ($exception->getStatusCode() !== 429 || ! $request->is('akun', 'akun/*') || $request->expectsJson()) {
@@ -104,6 +108,6 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
         });
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*'),
+            fn (Request $request) => CustomerApiBoundary::matches($request) || $request->is('api/*'),
         );
     })->create();

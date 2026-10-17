@@ -16,9 +16,16 @@ final class CustomerApiBoundary
 {
     public function __construct(private CustomerApiCredentials $credentials, private CustomerApiAdmission $admission, private CustomerApiUsage $usage) {}
 
+    public static function matches(Request $request): bool
+    {
+        $path = $request->decodedPath();
+
+        return $path === 'api/v1' || str_starts_with($path, 'api/v1/');
+    }
+
     public function handle(Request $request, Closure $next): Response
     {
-        if (! $request->is('api/v1', 'api/v1/*')) {
+        if (! self::matches($request)) {
             return $next($request);
         }
         $requestId = (string) Str::uuid();
