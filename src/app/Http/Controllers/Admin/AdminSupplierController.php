@@ -7,6 +7,7 @@ use App\Exceptions\InvalidOrderTransition;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\SupplierAdminRequest;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
@@ -141,14 +142,38 @@ final class AdminSupplierController extends Controller
     public function purchases(Request $request)
     {
         $this->authorizeManager($request);
-        $purchases = SupplierPurchase::query()->select(['id', 'supplier_fulfillment_id', 'supplier_id', 'reference', 'supplier_order_id', 'quantity', 'expected_cost_micros', 'actual_cost_micros', 'state', 'last_error', 'created_at', 'updated_at'])->orderByDesc('id')->paginate(25);
-        $fulfillments = SupplierFulfillment::query()->with(['currentPurchase.supplier', 'currentPurchase.latestHistoryReconciliation'])
-            ->select(['id', 'order_id', 'order_item_id', 'quantity', 'state', 'last_error', 'current_purchase_id', 'created_at'])
-            ->where(fn ($query) => $query->whereNotIn('state', ['delivered', 'cancelled'])
-                ->orWhereHas('purchases', fn ($purchases) => $purchases->whereNotIn('state', ['delivered', 'settled', 'rejected', 'cancelled'])))
-            ->orderByDesc('id')->paginate(25, ['*'], 'fulfillments_page');
+        $invoice = is_string($request->query('invoice')) ? trim($request->query('invoice')) : '';
+        abort_if(strlen($invoice) > 100, 422);
+        if ($invoice !== '') {
+            $request->session()->put('url.intended', route('admin.suppliers.purchases', ['invoice' => $invoice]));
+        }
+        $purchases = SupplierPurchase::query()->select(['id', 'supplier_fulfillment_id', 'supplier_id', 'reference', 'supplier_order_id', 'quantity', 'expected_cost_micros', 'actual_cost_micros', 'state', 'last_error', 'created_at', 'updated_at'])
+            ->when($invoice !== '', fn ($q) => $q->whereHas('fulfillment.order', fn ($order) => $order->where('invoice_number', $invoice)))
+            ->orderByDesc('id')->paginate(25)->withQueryString();
+        $fulfillments = SupplierFulfillment::query()->with([
+            'currentPurchase.supplier', 'currentPurchase.latestHistoryReconciliation',
+            'reservedSupplier', 'manualHandoffs:id,supplier_fulfillment_id,quantity',
+            'order:id,customer_id,invoice_number,order_status,payment_status,telegram_receipt_sent_at',
+            'order.customer:id,telegram_id',
+            'orderItem:id,product_name',
+        ])
+            ->select(['supplier_fulfillments.*'])
+            ->when($invoice !== '',
+                fn ($q) => $q->whereHas('order', fn ($order) => $order->where('invoice_number', $invoice)),
+                fn ($q) => $q->where(fn ($query) => $query->whereNotIn('state', ['delivered', 'cancelled'])
+                    ->orWhere('reserved_quantity', '>', 0)
+                    ->orWhereHas('purchases', fn ($purchases) => $purchases->whereNotIn('state', ['delivered', 'settled', 'rejected', 'cancelled']))))
+            ->orderByDesc('id')->paginate(25, ['*'], 'fulfillments_page')->withQueryString();
+        $allocated = ProductStockItem::query()
+            ->whereIn('order_item_id', $fulfillments->pluck('order_item_id'))
+            ->whereHas('supplierPurchase', fn ($q) => $q->whereNull('warranty_claim_id'))
+            ->selectRaw('order_item_id, count(*) as quantity')->groupBy('order_item_id')->pluck('quantity', 'order_item_id');
+        foreach ($fulfillments as $fulfillment) {
+            $fulfillment->remaining_quantity = max(0, $fulfillment->quantity - $fulfillment->refunded_quantity
+                - (int) $fulfillment->manualHandoffs->sum('quantity') - (int) ($allocated[$fulfillment->order_item_id] ?? 0));
+        }
 
-        return view('admin.suppliers.purchases', compact('purchases', 'fulfillments'));
+        return view('admin.suppliers.purchases', compact('purchases', 'fulfillments', 'invoice'));
     }
 
     public function operate(SupplierAdminRequest $request, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service, SupplierOrderHistoryReconciliationService $history)

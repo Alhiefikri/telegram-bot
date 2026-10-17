@@ -391,6 +391,39 @@ final class SupplierPostgresConcurrencyTest extends TestCase
     }
 
     #[Group('postgres-release')]
+    public function test_concurrent_owner_attestations_release_one_hold_without_replacing_manual_delivery(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $purchase = SupplierPurchase::create([
+            'supplier_fulfillment_id' => $fulfillment->id, 'supplier_id' => $supplier->id,
+            'supplier_catalog_item_id' => $sku->id, 'reference' => (string) Str::uuid(),
+            'quantity' => 1, 'expected_cost_micros' => 1_000_000, 'exchange_rate_idr' => 1000,
+            'state' => 'ambiguous', 'dispatched_at' => now()->subMinute(),
+        ]);
+        $fulfillment->update(['state' => 'review', 'current_purchase_id' => $purchase->id]);
+        app(SupplierFulfillmentService::class)->provideManualCredentials($fulfillment->id, ['manually-supplied-account']);
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $confirm = function () use ($fulfillment, $actor, $purchase): array {
+            app(SupplierFulfillmentService::class)->confirmOwnerNoDebit($fulfillment->id, $actor, $purchase->id);
+
+            return ['state' => $purchase->fresh()->state];
+        };
+        $this->assertSame([['state' => 'rejected'], ['state' => 'rejected']], $this->race([$confirm, $confirm]));
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(10_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(1, $purchase->evidence()->where('evidence_source', 'owner_attestation')->count());
+        $this->assertSame(1, AuditLog::where('action', 'supplier_fulfillment.owner_no_debit_confirmed')->count());
+        $this->assertSame('manually-supplied-account', ProductStockItem::sole()->secret);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        Http::assertNothingSent();
+    }
+
+    #[Group('postgres-release')]
     public function test_csx_history_candidate_confirmation_race_and_replay_commit_one_delivery_and_receipt_obligation(): void
     {
         [$product, $supplier, $sku, $order, $fulfillment, $purchase] = $this->csxReviewFixture();

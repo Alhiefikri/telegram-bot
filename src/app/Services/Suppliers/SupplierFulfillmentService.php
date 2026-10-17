@@ -8,6 +8,7 @@ use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\SupplierProvider;
+use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\ProcessSupplierFulfillment;
@@ -1109,13 +1110,72 @@ final class SupplierFulfillmentService
         DB::transaction(fn () => $this->finalize($id, $purchase->id, $token, $result, true, $debitEvidence), 5);
     }
 
+    /**
+     * Owner attestation is recorded as such, never as provider-verified evidence.
+     * Known orders, observed costs and live transport cannot be overridden here.
+     */
+    public function confirmOwnerNoDebit(int $id, User $actor, int $expectedPurchaseId): void
+    {
+        if ($actor->role !== UserRole::Owner) {
+            throw new InvalidOrderTransition('Only the Owner may attest supplier economics.');
+        }
+        DB::transaction(function () use ($id, $actor, $expectedPurchaseId): void {
+            $initial = SupplierFulfillment::query()->findOrFail($id);
+            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
+            $this->assertActive($order);
+            $f = $fulfillments->get($id);
+            $purchase = $f->currentPurchase;
+            if ((int) $f->current_purchase_id !== $expectedPurchaseId
+                || ! in_array($f->state, ['review', 'delivered'], true)) {
+                throw new InvalidOrderTransition('Reload the invoice before resolving its reservation.');
+            }
+            if ($purchase !== null) {
+                $manualOnly = $purchase->last_error === 'manual_delivery' && $purchase->dispatched_at === null;
+                if ($purchase->committed_at !== null || $purchase->supplier_order_id !== null
+                    || $purchase->actual_cost_micros !== null || $purchase->lease_expires_at?->isFuture()
+                    || (! $manualOnly && ! in_array($purchase->state, ['ambiguous', 'review', 'rejected'], true))) {
+                    throw new InvalidOrderTransition('Existing supplier evidence requires exact-order recovery.');
+                }
+                $existing = $purchase->evidence()->where('kind', SupplierPurchaseEvidence::KIND_NO_DEBIT)->first();
+                if ($existing === null) {
+                    $purchase->evidence()->create([
+                        'actor_user_id' => $actor->id,
+                        'kind' => SupplierPurchaseEvidence::KIND_NO_DEBIT,
+                        'evidence_source' => 'owner_attestation',
+                        'provider_reference' => $order->invoice_number,
+                        'note' => 'Owner confirms the original purchase did not debit the supplier account.',
+                        'observed_at' => now(),
+                    ]);
+                }
+                if (! $manualOnly) {
+                    $purchase->update(['state' => 'rejected', 'last_error' => 'owner_no_debit_confirmed', 'next_attempt_at' => null, 'claim_token' => null, 'lease_expires_at' => null]);
+                }
+            } elseif ($f->purchases()->exists()) {
+                throw new InvalidOrderTransition('Historical purchases require review.');
+            }
+            if ($f->reserved_quantity === 0) {
+                return;
+            }
+            $before = ['reserved_cost_micros' => $f->reserved_cost_micros, 'reserved_quantity' => $f->reserved_quantity];
+            $this->unhold($f, $suppliers, $catalog);
+            $this->audit->log('supplier_fulfillment.owner_no_debit_confirmed', $f, $before, [
+                'reserved_cost_micros' => 0,
+                'evidence_source' => $purchase === null ? 'not_dispatched' : 'owner_attestation',
+                'invoice_number' => $order->invoice_number,
+            ], $actor);
+            $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
+        }, 5);
+    }
+
     public function provideManualCredentials(int $id, array $credentials): void
     {
         DB::transaction(function () use ($id, $credentials): void {
             $initial = SupplierFulfillment::findOrFail($id);
             $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
             Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
-            [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
+            [$fulfillments] = $this->lockedOrderResources($order);
             $f = $fulfillments->get($id);
             $lateManual = $order->payment_status === PaymentStatus::Paid && $f->state === 'cancelled'
                 && ManualFulfillmentReview::query()->where('order_id', $order->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->where('state', ManualFulfillmentReview::STATE_PENDING)->exists();
@@ -1149,7 +1209,6 @@ final class SupplierFulfillmentService
                 $candidate = collect($f->sources_snapshot)->first(fn ($c) => $c['catalog_item_id'] === $f->reserved_catalog_item_id);
                 $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $candidate['supplier_id'], 'supplier_catalog_item_id' => $candidate['catalog_item_id'], 'reference' => (string) Str::uuid(), 'quantity' => $quantity, 'expected_cost_micros' => 0, 'exchange_rate_idr' => $candidate['exchange_rate_idr'], 'state' => 'delivered', 'delivery_payload' => $credentials, 'last_error' => 'manual_delivery']);
                 $f->update(['current_purchase_id' => $purchase->id]);
-                $this->unhold($f, $suppliers, $catalog);
             }
             if ($purchase->committed_at !== null && $purchase->supplier_order_id !== null
                 && $purchase->observed_quantity === $purchase->quantity && $purchase->actual_cost_micros !== null) {

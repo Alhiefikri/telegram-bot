@@ -4,15 +4,37 @@
 <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mb-3" aria-labelledby="supplier-purchases-title">
     <p class="text-xs font-medium text-admin-muted">Supplier</p>
     <h2 id="supplier-purchases-title" class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">Monitor pembelian supplier</h2>
-    <p class="mt-2 text-sm leading-6 text-admin-muted">Metadata privat saja: tidak ada API key, payload mentah, atau kredensial pembeli. Ambiguitas tidak mengizinkan pembelian ulang, fallback, atau refund sebelum ada bukti. Tindakan memerlukan konfirmasi password dalam 15 menit dan tetap diperiksa oleh layanan fulfillment. Riwayat ToolOraX maksimal 100 baris memerlukan coverage/timezone terverifikasi untuk no-debit. Histori CSxStore hanya halaman pertama (maks. 100); kosong/error/truncated tidak membuktikan no-debit dan tidak melepas hold.</p>
+    <p class="mt-2 text-sm leading-6 text-admin-muted">Cari invoice, selesaikan pengiriman pelanggan, lalu tangani saldo supplier secara terpisah.</p>
+    <form method="GET" action="{{ route('admin.suppliers.purchases') }}" class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+        <x-admin-dashboard.field-label class="min-w-0 flex-1">
+            Nomor invoice
+            <x-admin-dashboard.input name="invoice" :value="$invoice" maxlength="100" placeholder="Tempel nomor invoice lengkap" autocomplete="off" class="mt-1 border-admin-muted!" />
+        </x-admin-dashboard.field-label>
+        <x-admin-dashboard.button type="submit" variant="primary">Cari invoice</x-admin-dashboard.button>
+        @if($invoice !== '')
+            <x-admin-dashboard.button :href="route('admin.suppliers.purchases')" variant="neutral">Lihat semua kendala</x-admin-dashboard.button>
+        @endif
+    </form>
 </x-admin-dashboard.card>
+@if(session('supplier_sync_warning'))
+    <x-admin-dashboard.notice tone="warning" class="mb-3">{{ session('supplier_sync_warning') }}</x-admin-dashboard.notice>
+@endif
 <section class="mt-3 grid gap-3">
-    <h2 class="text-lg font-semibold text-admin-ink">Fulfillment / komitmen belum terselesaikan</h2>
-    @foreach($fulfillments as $fulfillment)
+    <h2 class="text-lg font-semibold text-admin-ink">{{ $invoice !== '' ? 'Penanganan invoice' : 'Invoice yang perlu ditangani' }}</h2>
+    @forelse($fulfillments as $fulfillment)
         <x-admin-dashboard.card as="article" padding="compact" shadow="sm">
-            <h3 class="text-base font-semibold text-admin-ink">Fulfillment #{{ $fulfillment->id }} · <x-admin-dashboard.badge tone="slate">{{ $fulfillment->state }}</x-admin-dashboard.badge></h3>
-            <p class="mt-1 break-words text-sm text-admin-ink">Pesanan {{ $fulfillment->order_id }} · Item #{{ $fulfillment->order_item_id }} · {{ $fulfillment->quantity }} unit</p>
-            <a class="mt-2 inline-block text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline" href="{{ route('admin.orders.show', $fulfillment->order_id) }}">Pesanan / refund melalui alur keuangan yang ada</a>
+            <h3 class="break-all text-base font-semibold text-admin-ink">{{ $fulfillment->order->invoice_number }}</h3>
+            <p class="mt-1 text-sm text-admin-ink">{{ $fulfillment->orderItem->product_name }} · {{ $fulfillment->quantity }} unit</p>
+            <a class="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline" href="{{ route('admin.orders.show', $fulfillment->order_id) }}">Lihat detail pesanan dan pengiriman</a>
+            @if($invoice !== '')
+                @include('admin.suppliers.invoice-recovery')
+            @else
+                <p class="mt-1 text-sm text-admin-ink">{{ $fulfillment->state === 'delivered' ? 'Akun pelanggan sudah dipenuhi' : $fulfillment->remaining_quantity.' akun belum dipenuhi' }} · {{ $fulfillment->reserved_cost_micros > 0 ? 'Masih ada dana supplier ditahan' : 'Tanpa hold supplier' }}</p>
+                <x-admin-dashboard.button :href="route('admin.suppliers.purchases', ['invoice' => $fulfillment->order->invoice_number])" variant="primary" class="mt-3">Tangani invoice</x-admin-dashboard.button>
+            @endif
+            <details class="mt-4 border-t border-admin-line pt-3">
+                <summary class="min-h-11 cursor-pointer text-sm font-medium text-admin-ink">Pemeriksaan lanjutan supplier</summary>
+                <p class="mb-3 text-sm text-admin-muted">Fulfillment #{{ $fulfillment->id }} · {{ $fulfillment->state }}. Gunakan bagian ini untuk mencocokkan bukti transaksi supplier, bukan untuk membeli ulang saat hasilnya belum jelas.</p>
             @if($fulfillment->state === 'delivered')
                 <x-admin-dashboard.notice tone="warning" class="mt-3">Delivery customer sudah selesai. Pulihkan hanya bukti pembelian asli; jangan membeli atau mengirim kredensial pengganti lagi.</x-admin-dashboard.notice>
             @endif
@@ -55,8 +77,6 @@
                     @endif
                 </div>
             @endif
-            <details class="mt-3">
-                <summary class="min-h-11 cursor-pointer text-sm font-medium text-admin-ink">Tindakan aman (tidak boleh menghapus ambiguitas)</summary>
                 <div class="mt-3 border-t border-admin-line pt-3">
                     <form method="POST" action="{{ route('admin.suppliers.operate', $fulfillment) }}" class="grid gap-3">
                         @csrf
@@ -75,9 +95,6 @@
                                 @if($fulfillment->currentPurchase && in_array($fulfillment->currentPurchase->state, ['ambiguous', 'review'], true) && $fulfillment->currentPurchase->supplier_order_id === null)
                                     <option value="debit_confirmed">Konfirmasi debit dengan order ID, jumlah dan biaya</option>
                                     <option value="no_debit">Konfirmasi no-debit dengan bukti provider</option>
-                                @endif
-                                @if($fulfillment->state !== 'delivered')
-                                    <option value="manual">Kredensial manual (kewajiban pembelian asli tetap harus diselesaikan)</option>
                                 @endif
                             </x-admin-dashboard.select>
                         </x-admin-dashboard.field-label>
@@ -122,22 +139,19 @@
                             Catatan verifikasi / bukti
                             <x-admin-dashboard.textarea name="proof_note" maxlength="4000" rows="4" class="mt-1" />
                         </x-admin-dashboard.field-label>
-                        @if($fulfillment->state !== 'delivered')
-                            <x-admin-dashboard.field-label>
-                                Kredensial manual, satu unit per baris (tidak disimpan dalam session)
-                                <x-admin-dashboard.textarea name="credentials" maxlength="64000" autocomplete="off" spellcheck="false" rows="4" class="mt-1" />
-                            </x-admin-dashboard.field-label>
-                        @endif
                         <x-admin-dashboard.button type="submit" variant="primary" size="sm">Jalankan tindakan fulfillment</x-admin-dashboard.button>
                     </form>
                 </div>
             </details>
         </x-admin-dashboard.card>
-    @endforeach
+    @empty
+        <x-admin-dashboard.notice tone="info">{{ $invoice !== '' ? 'Tidak ada penanganan supplier untuk nomor invoice ini. Periksa nomor invoice lengkap atau buka detail pesanan.' : 'Tidak ada invoice dengan kendala supplier saat ini.' }}</x-admin-dashboard.notice>
+    @endforelse
     {{ $fulfillments->links() }}
 </section>
-<section class="mt-3 grid gap-3">
-    <h2 class="text-lg font-semibold text-admin-ink">Riwayat pembelian (read-only)</h2>
+<details class="mt-5">
+    <summary class="min-h-11 cursor-pointer text-lg font-semibold text-admin-ink">Riwayat pembelian supplier</summary>
+    <section class="mt-3 grid gap-3">
     @foreach($purchases as $purchase)
         <x-admin-dashboard.card as="article" padding="compact" shadow="sm">
             <h3 class="text-base font-semibold text-admin-ink">Pembelian #{{ $purchase->id }} · <x-admin-dashboard.badge tone="slate">{{ $purchase->state }}</x-admin-dashboard.badge></h3>
@@ -146,5 +160,6 @@
         </x-admin-dashboard.card>
     @endforeach
     {{ $purchases->links() }}
-</section>
+    </section>
+</details>
 @endsection

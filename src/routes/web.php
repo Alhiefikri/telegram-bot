@@ -47,6 +47,7 @@ use App\Http\Controllers\Admin\AdminStoreChannelTestController;
 use App\Http\Controllers\Admin\AdminStorefrontBannersController;
 use App\Http\Controllers\Admin\AdminStorefrontPlaceholderController;
 use App\Http\Controllers\Admin\AdminSupplierController;
+use App\Http\Controllers\Admin\AdminSupplierInvoiceRecoveryController;
 use App\Http\Controllers\Admin\AdminSupportSettingsController;
 use App\Http\Controllers\Admin\AdminTelegramOutboundEffectController;
 use App\Http\Controllers\Admin\AdminTelegramWelcomeBannerController;
@@ -282,6 +283,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::delete('catalog/{catalogItem}/map', [AdminSupplierController::class, 'detach'])->name('detach');
                 Route::get('monitor/purchases', [AdminSupplierController::class, 'purchases'])->name('purchases');
                 Route::post('fulfillments/{fulfillment}/operate', [AdminSupplierController::class, 'operate'])->middleware('throttle:10,1')->name('operate');
+                Route::post('fulfillments/{fulfillment}/resolve-invoice', AdminSupplierInvoiceRecoveryController::class)->middleware('throttle:10,1')->name('resolve-invoice');
             });
             Route::get('products/{product}/workspace', AdminProductWorkspaceController::class)->name('products.workspace');
             Route::get('products/{product}/workspace/catalog', [AdminProductWorkspaceController::class, 'catalog'])->name('products.workspace.catalog');

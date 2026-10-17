@@ -10,11 +10,13 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\ProcessSupplierFulfillment;
+use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
 use App\Models\InventoryMovement;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -56,6 +58,161 @@ class SupplierFulfillmentTest extends TestCase
         parent::setUp();
         Queue::fake();
         Http::preventStrayRequests();
+    }
+
+    public function test_invoice_recovery_delivers_manual_accounts_once_without_releasing_an_undispatched_hold(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone');
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $sku->update(['orderable' => false]);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($f->id);
+        $this->assertSame('source_unavailable', $f->fresh()->last_error);
+        $this->assertSame(0, SupplierPurchase::count());
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $url = route('admin.suppliers.resolve-invoice', $f);
+        $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()])
+            ->post($url, ['action' => 'send_accounts', 'purchase_id' => 0, 'confirmed' => 1, 'credentials' => 'manual-account@example.test | private-password'])
+            ->assertRedirect(route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]));
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame('manual-account@example.test | private-password', ProductStockItem::sole()->secret);
+        $this->assertSame('fulfilled', ManualFulfillmentReview::sole()->state);
+        $this->post($url, ['action' => 'send_accounts', 'purchase_id' => 0, 'confirmed' => 1, 'credentials' => 'duplicate-account'])->assertSessionHasErrors('recovery');
+        $this->assertSame(1, ProductStockItem::count());
+        $this->assertStringNotContainsString('private-password', json_encode(session()->all()));
+        $this->assertStringNotContainsString('private-password', AuditLog::query()->get()->toJson());
+        $this->get(route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]))->assertOk()
+            ->assertViewHas('fulfillments', fn ($rows) => $rows->count() === 1 && $rows->first()->id === $f->id)
+            ->assertDontSee('private-password');
+        config()->set('services.telegram.token', 'test-token');
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 912345]]));
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $pipeline = app(ReceiptDeliveryPipeline::class);
+        $group = TelegramOutboundEffectService::receiptEffectGroupKey($order->id);
+        while ($effect = $ledger->nextReceiptEffect($group)) {
+            $pipeline->deliver($effect, dispatchNext: false);
+        }
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        Http::assertSent(fn ($request) => str_contains($request->body(), 'manual-account@example.test'));
+        $sentCount = Http::recorded()->count();
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $this->assertSame($sentCount, Http::recorded()->count());
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        app(SupplierFulfillmentService::class)->confirmOwnerNoDebit($f->id, $owner, SupplierPurchase::sole()->id);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame('delivered', $f->fresh()->state);
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+    }
+
+    public function test_invoice_recovery_records_external_handoff_and_separately_releases_only_its_undispatched_reservation(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone');
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $sku->update(['orderable' => false]);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($f->id);
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]))->withSession(['auth.password_confirmed_at' => time()]);
+        $url = route('admin.suppliers.resolve-invoice', $f);
+        $this->post($url, ['action' => 'handed_off', 'purchase_id' => 0, 'confirmed' => 1])->assertSessionHasNoErrors();
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(1, $f->manualHandoffs()->sum('quantity'));
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        Http::fake(fn () => Http::response([], 503));
+        $this->post($url, ['action' => 'not_debited', 'purchase_id' => 0, 'confirmed' => 1])->assertSessionHasNoErrors();
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(10_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(0, SupplierPurchase::count());
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'supplier_fulfillment.owner_no_debit_confirmed']);
+        $this->assertSame(1, $supplier->fresh()->sync_failures);
+        $this->assertNull($supplier->fresh()->balance_observed_at);
+    }
+
+    public function test_owner_no_debit_attestation_preserves_manual_delivery_and_replays_without_a_second_release(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone');
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(fn () => Http::response([], 500));
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $purchase = SupplierPurchase::sole();
+        $this->assertSame('ambiguous', $purchase->state);
+        $service->provideManualCredentials($f->id, ['owner-replacement']);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $service->confirmOwnerNoDebit($f->id, $owner, $purchase->id);
+        $service->confirmOwnerNoDebit($f->id, $owner, $purchase->id);
+        $this->assertSame('rejected', $purchase->fresh()->state);
+        $this->assertSame('owner_attestation', $purchase->evidence()->sole()->evidence_source);
+        $this->assertSame($owner->id, $purchase->evidence()->sole()->actor_user_id);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(10_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame('delivered', $f->fresh()->state);
+        $this->assertSame('owner-replacement', ProductStockItem::sole()->secret);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(1, AuditLog::where('action', 'supplier_fulfillment.owner_no_debit_confirmed')->count());
+    }
+
+    public function test_invoice_recovery_rejects_stale_purchase_and_existing_debit_evidence_without_leaking_credentials(): void
+    {
+        [, $supplier, , $cart] = $this->fixture(provider: 'warzone');
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(fn () => Http::response([], 500));
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($f->id);
+        $purchase = SupplierPurchase::sole();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $url = route('admin.suppliers.resolve-invoice', $f);
+        $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()]);
+        $this->post($url, ['action' => 'not_debited', 'purchase_id' => $purchase->id + 1, 'confirmed' => 1])->assertSessionHasErrors('recovery');
+        foreach ([
+            ['supplier_order_id' => 'known-supplier-order'],
+            ['actual_cost_micros' => 1_000_000],
+            ['lease_expires_at' => now()->addMinute()],
+        ] as $conflict) {
+            $purchase->forceFill(['supplier_order_id' => null, 'actual_cost_micros' => null, 'lease_expires_at' => null])->forceFill($conflict)->save();
+            $this->post($url, ['action' => 'not_debited', 'purchase_id' => $purchase->id, 'confirmed' => 1])->assertSessionHasErrors('recovery');
+            $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+            $this->assertSame(0, $purchase->evidence()->count());
+        }
+        $this->post($url, ['action' => 'send_accounts', 'purchase_id' => $purchase->id, 'confirmed' => 1, 'credentials' => 'private-rejected-account'])->assertSessionHasErrors('recovery');
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertStringNotContainsString('private-rejected-account', json_encode(session()->all()));
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+    }
+
+    public function test_invoice_recovery_requires_owner_attestation_confirmation_and_recent_password(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone');
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $sku->update(['orderable' => false]);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($f->id);
+        $url = route('admin.suppliers.resolve-invoice', $f);
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))->withSession(['auth.password_confirmed_at' => time()])
+            ->post($url, ['action' => 'not_debited', 'purchase_id' => 0, 'confirmed' => 1])->assertForbidden();
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]))->withSession(['auth.password_confirmed_at' => time()])
+            ->post($url, ['action' => 'not_debited', 'purchase_id' => 0])->assertSessionHasErrors('recovery');
+        $this->withSession(['auth.password_confirmed_at' => time() - 901])
+            ->post($url, ['action' => 'send_accounts', 'purchase_id' => 0, 'confirmed' => 1, 'credentials' => 'expired-password-private-account'])
+            ->assertRedirect(route('password.confirm'));
+        $this->assertStringNotContainsString('expired-password-private-account', json_encode(session()->all()));
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, ProductStockItem::count());
+        Http::assertNothingSent();
     }
 
     public function test_api_replay_and_lost_queue_recovery_preserve_an_unknown_supplier_purchase(): void
