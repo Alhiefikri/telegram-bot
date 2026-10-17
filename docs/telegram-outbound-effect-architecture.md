@@ -149,6 +149,16 @@ StockNotificationDeliveryPipeline, ProductPriceChangeNotificationService,
 BalanceTopUpPaymentProofDeliveryPipeline, BalanceTopUpOwnerAlertDeliveryPipeline,
 and BalanceTopUpChannelProofDeliveryPipeline. They all use the same ledger seam.
 
+The Order-lifecycle and manual payment-proof families share one retry policy.
+Pending, paid, and expired admin Order notifications and the forwarded manual
+payment proof each stop after three definite-failure attempts: the ledger
+records `admin_order_pending_notification_attempts_exhausted`,
+`admin_order_paid_notification_attempts_exhausted`,
+`admin_order_expired_notification_attempts_exhausted`, or
+`manual_payment_proof_attempts_exhausted`, makes the effect terminal, and
+removes it from `telegram:recover-outbound` discovery. Ambiguous send/ACK and
+expired leases keep their `unknown` Manual Delivery Review contract.
+
 The Store Balance top-up admin review family is delivered by
 `BalanceTopUpPaymentProofDeliveryPipeline` under the
 `admin.balance_top_up_payment_proof` effect type on the `notifications` queue.
@@ -269,7 +279,7 @@ by this pipeline. See [integrated acceptance evidence](customer-api-s11-acceptan
 | pending | A durable effect is owed and may be dispatched when its retry window is due. | Dispatch through the shared dispatcher. |
 | sending | A worker owns the effect under a lease and claim token. | A live lease remains with that worker; an expired lease becomes unknown. |
 | sent | Telegram returned a successful response with a valid positive integer message identifier, or an operator verified the delivery. | Never dispatch again. |
-| failed | Delivery failed definitely before completion. | Retry only when the family policy marks the failure retryable and the next-attempt time is due. |
+| failed | Delivery failed definitely before completion. | Retry only when the family policy marks the failure retryable, the family attempt limit is not exhausted, and the next-attempt time is due; an exhausted family becomes terminal. |
 | unknown | The remote outcome cannot be proven because of transport, worker, or unproven-response ambiguity. | Never automatically redispatch; expose it for Manual Delivery Review. |
 | manual_review | An operator-controlled review state for an Ambiguous Telegram Delivery. | Never automatically redispatch. Mark sent after evidence or create an explicit resend. |
 
@@ -336,6 +346,10 @@ Manual payment-proof recovery evidence is kept at
 proves the sent effect is repaired without queue redispatch, while
 `test_recovery_repairs_a_late_manual_payment_proof_without_changing_payment_evidence`
 proves late-payment state and effect evidence remain unchanged.
+`test_issue_270_notification_families_become_terminal_after_three_definite_failures`
+proves the pending, paid, and expired admin Order notifications and the manual
+payment proof each stop after three definite attempts, record their exhausted
+terminal code, and are never redispatched by `telegram:recover-outbound`.
 
 Sales Proof recovery evidence is covered by
 `test_recovery_repairs_a_sent_sales_proof_projection_without_resending_it`,

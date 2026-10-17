@@ -781,6 +781,98 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $this->assertNull($payment->fresh()->payment_proof_forwarded_at);
     }
 
+    /**
+     * Issue #270 families must bound definite-failure retries like every other
+     * durable family: three delivery attempts, then one terminal failure.
+     *
+     * Without a family attempt limit the effect stayed claimable, so a
+     * permanent Telegram rejection (for example `ok:false` because the bot was
+     * blocked) was re-dispatched by `telegram:recover-outbound` forever.
+     */
+    #[DataProvider('issue270NotificationFamilies')]
+    public function test_issue_270_notification_families_become_terminal_after_three_definite_failures(
+        string $family,
+        string $effectType,
+        string $exhaustedCode,
+        string $jobClass,
+    ): void {
+        $this->configureAdminTarget();
+        Queue::fake();
+
+        [$effect, $pipeline, $order, $payment] = $this->materializeIssue270Family($family);
+        $this->assertSame($effectType, $effect->effect_type);
+
+        $sends = 0;
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/*/'.$effect->telegram_method => function () use (&$sends) {
+                $sends++;
+
+                return Http::response(['ok' => false, 'description' => 'Forbidden: bot was blocked by the user']);
+            },
+            'https://api.telegram.org/*' => Http::response(['ok' => true]),
+        ]);
+
+        for ($round = 0; $round < 6 && (int) $effect->fresh()->attempts < 3; $round++) {
+            TelegramOutboundEffect::query()
+                ->whereKey($effect->getKey())
+                ->update(['next_attempt_at' => now()->subMinute()]);
+
+            try {
+                $pipeline->deliver($effect->fresh());
+            } catch (\Throwable) {
+                // Queue workers retry definite failures through the job.
+            }
+        }
+
+        $failed = $effect->fresh();
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+
+        $this->assertSame(3, (int) $failed->attempts);
+        $this->assertSame(3, $sends);
+        $this->assertSame(TelegramOutboundEffectState::Failed, $failed->state);
+        $this->assertSame($exhaustedCode, $failed->last_error_code);
+        $this->assertNull($failed->next_attempt_at);
+        $this->assertTrue($ledger->isTerminalFailure($failed));
+        $this->assertFalse($ledger->isDispatchable($failed));
+        $this->assertSame(
+            null,
+            $payment !== null
+                ? $payment->fresh()->payment_proof_forwarded_at
+                : $order?->fresh()->{$this->issue270ProjectionColumn($effectType)},
+        );
+
+        // A terminal effect stays terminal: two more due rounds must not send.
+        for ($round = 0; $round < 2; $round++) {
+            TelegramOutboundEffect::query()
+                ->whereKey($effect->getKey())
+                ->update(['next_attempt_at' => now()->subMinute()]);
+
+            try {
+                $pipeline->deliver($effect->fresh());
+            } catch (\Throwable) {
+                // Claiming a terminal effect is a no-op, so nothing throws.
+            }
+        }
+
+        $this->assertSame(3, $sends);
+        $this->assertSame(3, (int) $effect->fresh()->attempts);
+
+        Queue::fake();
+        TelegramOutboundEffect::query()
+            ->whereKey($effect->getKey())
+            ->update(['next_attempt_at' => now()->subMinute()]);
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+
+        Queue::assertNotPushed(
+            $jobClass,
+            fn (object $job): bool => ($job->effectId ?? null) === $effect->id,
+        );
+        $this->assertSame(3, $sends);
+        $this->assertSame(3, (int) $effect->fresh()->attempts);
+    }
+
     private function configureAdminTarget(): void
     {
         ManualPaymentSetting::create([
@@ -839,6 +931,56 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         return [$order->fresh(['customer', 'orderItems']), $payment->fresh()];
     }
 
+    /**
+     * @return array{0: TelegramOutboundEffect, 1: AdminOrderNotificationDeliveryPipeline|ManualPaymentProofDeliveryPipeline, 2: ?Order, 3: ?Payment}
+     */
+    private function materializeIssue270Family(string $family): array
+    {
+        if ($family === 'proof') {
+            [$order, $payment] = $this->manualProof();
+
+            $effect = app(TelegramOutboundEffectService::class)->recordManualPaymentProof($order, $payment);
+            if ($effect === null) {
+                $this->fail('The manual payment proof effect could not be materialized.');
+            }
+
+            return [$effect, app(ManualPaymentProofDeliveryPipeline::class), null, $payment];
+        }
+
+        $order = $this->checkoutOrder();
+
+        if ($family === 'paid') {
+            app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->sole());
+        } elseif ($family === 'expired') {
+            $order->forceFill(['expires_at' => now()->subMinute()])->save();
+            $order->payments()->sole()->update(['expired_at' => now()->subMinute()]);
+            app(OrderStateMachine::class)->applyPendingExpiry($order->fresh());
+        }
+
+        $effectType = match ($family) {
+            'pending' => TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
+            'paid' => TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+            'expired' => TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
+            default => $this->fail('Unknown issue #270 notification family.'),
+        };
+        $effect = app(TelegramOutboundEffectService::class)->forOrder($order->id, $effectType);
+        if ($effect === null) {
+            $this->fail('The admin Order notification effect could not be materialized.');
+        }
+
+        return [$effect, app(AdminOrderNotificationDeliveryPipeline::class), $order, null];
+    }
+
+    private function issue270ProjectionColumn(string $effectType): string
+    {
+        return match ($effectType) {
+            TelegramOutboundEffectService::TYPE_ADMIN_PENDING => 'admin_pending_order_notified_at',
+            TelegramOutboundEffectService::TYPE_ADMIN_PAID => 'admin_paid_order_notified_at',
+            TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED => 'admin_expired_order_notified_at',
+            default => $this->fail('Unknown issue #270 notification family.'),
+        };
+    }
+
     /** @return iterable<string, array{array<string, mixed>, TelegramOutboundEffectState}> */
     public static function invalidAdminNotificationTelegramResponses(): iterable
     {
@@ -865,5 +1007,34 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         yield 'fractional' => [['ok' => true, 'result' => ['message_id' => 1.5]], TelegramOutboundEffectState::Unknown];
         yield 'empty' => [['ok' => true, 'result' => ['message_id' => '']], TelegramOutboundEffectState::Unknown];
         yield 'non numeric' => [['ok' => true, 'result' => ['message_id' => 'invalid']], TelegramOutboundEffectState::Unknown];
+    }
+
+    /** @return iterable<string, array{string, string, string, class-string}> */
+    public static function issue270NotificationFamilies(): iterable
+    {
+        yield 'pending admin notification' => [
+            'pending',
+            TelegramOutboundEffectService::TYPE_ADMIN_PENDING,
+            'admin_order_pending_notification_attempts_exhausted',
+            SendAdminOrderPendingNotification::class,
+        ];
+        yield 'paid admin notification' => [
+            'paid',
+            TelegramOutboundEffectService::TYPE_ADMIN_PAID,
+            'admin_order_paid_notification_attempts_exhausted',
+            SendAdminOrderPaidNotification::class,
+        ];
+        yield 'expired admin notification' => [
+            'expired',
+            TelegramOutboundEffectService::TYPE_ADMIN_EXPIRED,
+            'admin_order_expired_notification_attempts_exhausted',
+            SendAdminOrderExpiredNotification::class,
+        ];
+        yield 'manual payment proof' => [
+            'proof',
+            TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF,
+            'manual_payment_proof_attempts_exhausted',
+            ForwardManualPaymentProof::class,
+        ];
     }
 }
