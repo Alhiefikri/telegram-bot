@@ -28,6 +28,7 @@ use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Throwable;
 
 /**
  * Private-chat USDT presentation adapter. It only selects surfaces and passes
@@ -114,7 +115,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
                 $matches[3],
                 bin2hex(random_bytes(16)),
             );
-        } catch (\Throwable $error) {
+        } catch (Throwable $error) {
             if (! $error instanceof AuthorizationException && ! $error instanceof \DomainException && ! $error instanceof InvalidArgumentException) {
                 throw $error;
             }
@@ -386,9 +387,11 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
                 && ($targetRail !== '' ? $targetRail : (string) (is_array($target->payment_snapshot) ? ($target->payment_snapshot['rail'] ?? '') : '')) === CustomerUsdtFundingRail::BinancePay->value) {
                 try {
                     $this->binanceSettlement->check((string) $target->id);
-                } catch (AuthorizationException|InvalidArgumentException) {
-                    // Status remains the durable, honest state when a check is
-                    // no longer authorized or the provider rejects the hint.
+                } catch (Throwable) {
+                    // A provider/history failure must never fail the webhook
+                    // update. Durable work stays leased and the existing
+                    // recovery keeps retrying, while the surface below still
+                    // renders the honest durable state for this target.
                 }
             }
             if (in_array($prefix, [self::HASH_PREFIX, self::ORDER_PREFIX], true)

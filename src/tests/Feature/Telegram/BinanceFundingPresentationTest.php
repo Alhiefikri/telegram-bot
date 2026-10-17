@@ -11,7 +11,9 @@ use App\Models\CustomerUsdtTopUp;
 use App\Models\ManualPaymentSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Telegram\Callbacks\TelegramUsdtFundingCallbackHandler;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramUsdtFundingActions;
@@ -109,6 +111,102 @@ final class BinanceFundingPresentationTest extends TestCase
         }
         $this->assertSame(0, CustomerUsdtBalanceEntry::count());
         Http::assertNothingSent();
+    }
+
+    public function test_comma_and_dot_amounts_reach_one_identical_preview(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-10-16 08:00:00 UTC'));
+        $actions = app(TelegramUsdtFundingActions::class);
+        $dot = $actions->preview('771050', '771050', 'private', 100, '0.3', CustomerUsdtFundingRail::BinancePay);
+        $this->assertSame('opened', $dot->outcome);
+
+        $comma = $actions->preview('771050', '771050', 'private', 100, '0,3', CustomerUsdtFundingRail::BinancePay);
+        // Same canonical money reuses the same open target instead of creating a
+        // second preview, and the zero-padded form resolves to it as well.
+        $this->assertSame('replayed', $comma->outcome);
+        $this->assertSame($dot->intent->id, $comma->intent->id);
+        $this->assertSame($dot->intent->amount_micro, $comma->intent->amount_micro);
+        $this->assertSame($dot->intent->payable_micro, $comma->intent->payable_micro);
+        $this->assertSame('pending', $comma->intent->fresh()->state);
+        $this->assertSame(
+            $dot->intent->id,
+            $actions->preview('771050', '771050', 'private', 100, '0.300000', CustomerUsdtFundingRail::BinancePay)->intent->id,
+        );
+        $this->assertSame(1, CustomerUsdtFundingIntent::where('state', 'pending')->count());
+        $this->assertSame(0, CustomerUsdtTopUp::count());
+
+        foreach (['0,3,4', '1,000,000', '1,2.3', '1.2,3', '0,1234567', '-0,3', '1e2'] as $invalid) {
+            $rejected = $actions->preview('771050', '771050', 'private', 100, $invalid, CustomerUsdtFundingRail::BinancePay);
+            $this->assertSame('invalid_amount', $rejected->outcome, $invalid);
+        }
+        $this->assertSame(1, CustomerUsdtFundingIntent::count());
+        $this->assertSame(0, CustomerUsdtTopUp::count());
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+    }
+
+    public function test_check_renders_durable_status_when_the_provider_fails(): void
+    {
+        $target = $this->confirm($this->preview('0.3'));
+        app(BinanceUsdtTopUpSettlement::class)->submit($this->customer, $target->id, '445011487581044736');
+        config([
+            'services.telegram.api_base_url' => 'https://api.telegram.org',
+            'services.telegram.webhook_secret' => 'secret',
+            'services.binance.history_cache_seconds' => 0,
+            'services.binance.history_max_attempts' => 1,
+        ]);
+        // The provider rejects the first lookup and then answers; a stub array
+        // would accumulate (later fakes are appended), so the order lives in one
+        // sequence.
+        Http::fakeSequence('*sapi/v1/pay/transactions*')
+            ->push(['code' => '100001001', 'success' => false, 'message' => 'Signature for this request is not valid.'], 400)
+            ->push(['code' => '000000', 'success' => true, 'data' => [[
+                'orderId' => '445011487581044736', 'transactionId' => 'TX-445011487581044736',
+                'amount' => '0.3', 'currency' => 'USDT', 'transactionTime' => now()->getTimestampMs(),
+                'orderType' => 'C2C', 'receiverInfo' => ['accountId' => '12345678'],
+            ]]])
+            ->push(['code' => '000000', 'success' => true, 'data' => [[
+                'orderId' => '445011487581044736', 'transactionId' => 'TX-445011487581044736',
+                'amount' => '0.3', 'currency' => 'USDT', 'transactionTime' => now()->getTimestampMs(),
+                'orderType' => 'C2C', 'receiverInfo' => ['accountId' => '12345678'],
+            ]]]);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 902]])]);
+
+        // The Check callback must not let a provider failure escape into the
+        // webhook update: no exception leaves the handler.
+        app(TelegramUsdtFundingCallbackHandler::class)->handle(new TelegramCallbackContext(
+            customer: $this->customer,
+            chatId: '771050',
+            callbackQueryId: 'check-provider-failure',
+            data: 'usdt:check:'.$target->id,
+            chatType: 'private',
+            messageId: 100,
+        ));
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/sapi/v1/pay/transactions'));
+
+        $edits = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'));
+        $this->assertCount(1, $edits);
+        $copy = $this->visible((string) $edits->sole()[0]['text']);
+        $this->assertStringContainsString('Status refreshed from durable records', $copy);
+        $this->assertStringContainsString('Status: Awaiting payment', $copy);
+        $this->assertStringContainsString($target->reference, $copy);
+        $this->assertStringNotContainsString('100001001', $copy);
+        $this->assertStringNotContainsString('Signature for this request is not valid.', $copy);
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+        $this->assertSame(0, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+
+        // The durable work stays owned by the automatic recovery path and no
+        // money moved while the provider was failing.
+        $this->assertSame('awaiting_payment', app(UsdtTopUpStatusReader::class)->for($target)->state);
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+        $this->assertSame(0, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+
+        // Recovery resolves the same durably leased work once the provider
+        // answers again, including after the failed check.
+        $this->travel(3)->minutes();
+        $this->assertTrue(app(BinanceUsdtTopUpSettlement::class)->check($target->id));
+        $this->assertSame('settled', app(UsdtTopUpStatusReader::class)->for($target)->state);
+        $this->assertSame(300_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+        $this->assertSame(1, CustomerUsdtBalanceEntry::count());
     }
 
     public function test_uid_only_receiver_remains_copyable_after_confirmation(): void

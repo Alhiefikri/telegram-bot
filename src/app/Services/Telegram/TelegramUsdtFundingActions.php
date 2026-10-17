@@ -14,6 +14,8 @@ use Illuminate\Auth\Access\AuthorizationException;
 /** U6 boundary for U9 presentation. Caller supplies authenticated update facts. */
 final class TelegramUsdtFundingActions
 {
+    private const MAX_INPUT_LENGTH = 32;
+
     public function __construct(
         private readonly UsdtFundingIntentService $intents,
         private readonly UsdtTopUpReview $reviews,
@@ -32,12 +34,38 @@ final class TelegramUsdtFundingActions
             return new UsdtFundingIntentResult('unauthorized');
         }
         try {
-            $money = UsdtMicroAmount::fromDecimalString($amount);
+            // Human boundary: `0,3` is the same user intent as `0.3`. Every
+            // Telegram entry point funnels through here so the command and the
+            // amount prompt cannot drift; the money parser stays strict.
+            $money = UsdtMicroAmount::fromDecimalString(self::normalizeDecimalInput($amount));
         } catch (\InvalidArgumentException) {
             return new UsdtFundingIntentResult('invalid_amount');
         }
 
         return $this->intents->open($context['customer'], $chatId, $context['root']->id, $messageId, $money, $rail);
+    }
+
+    /**
+     * Normalize one human-typed USDT amount. A lone comma with up to six
+     * fractional digits is the supported Indonesian decimal separator, so it is
+     * rewritten to the dot form; mixed separators, grouping separators,
+     * exponents, zero, negatives, more than six decimals and overflow keep
+     * flowing into the strict parser unchanged and stay rejected there.
+     */
+    private static function normalizeDecimalInput(string $amount): string
+    {
+        $amount = trim($amount);
+        if (strlen($amount) > self::MAX_INPUT_LENGTH) {
+            return $amount;
+        }
+        if (preg_match('/\A[0-9]+,[0-9]{1,6}\z/D', $amount) === 1) {
+            return str_replace(',', '.', $amount);
+        }
+        if (str_contains($amount, ',')) {
+            throw new \InvalidArgumentException('USDT amount must use one decimal separator.');
+        }
+
+        return $amount;
     }
 
     public function callback(string $actorId, string $chatId, string $chatType, int $messageId, string $data): UsdtFundingIntentResult

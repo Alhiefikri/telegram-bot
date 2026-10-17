@@ -590,11 +590,12 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         $snapshot = $preview['snapshot'];
         $products = $preview['products'];
         $usdtBalance = app(CustomerUsdtBalanceLedger::class)->snapshot($context->customer);
+        $spendingAvailable = app(CustomerUsdtFundingGate::class)->spendingAvailability()->available;
         $usdtBalanceSelectable = $context->isPrivate()
             && $context->chatId === (string) $context->customer->telegram_id
             && $snapshot->usdtTotal() !== null
             && $usdtBalance->isAvailable() && ! $usdtBalance->isFrozen()
-            && app(CustomerUsdtFundingGate::class)->spendingAvailability()->available;
+            && $spendingAvailable;
         $showUsdtPricing = ($this->checkoutIntents->binanceRailSelectable() || $usdtBalanceSelectable) && $snapshot->usdtTotal() !== null;
         $summaryLines = [$this->locale->translate($context->customer, 'checkout.payment_method')];
         foreach ($cart->cartItems as $item) {
@@ -685,7 +686,13 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             ])),
             'callback_data' => 'checkout:balance',
         ]];
-        $buttons = [$qrisButton, $balanceButton];
+        $buttons = [$qrisButton];
+        if ($spendingAvailable) {
+            // The IDR store-balance rail shares the USDT spending/restore
+            // barrier, so an active pause hides it instead of offering a
+            // button that is guaranteed to be rejected.
+            $buttons[] = $balanceButton;
+        }
         if ($usdtBalanceSelectable) {
             $buttons[] = [[
                 ...$this->uiIcons->apply('menu.balance', $this->locale->translate($context->customer, 'checkout.payment.usdt_balance', [

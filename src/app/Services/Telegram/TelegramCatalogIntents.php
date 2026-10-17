@@ -23,6 +23,7 @@ use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\Pricing\ProductPriceQuote;
 use App\Services\Pricing\ProductPriceTierQuote;
 use App\Services\Pricing\ProductQuantityPricing;
+use App\Services\UsdtFunding\CustomerUsdtFundingGate;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
 
@@ -50,6 +51,7 @@ class TelegramCatalogIntents
         private TelegramCatalogProjectionCache $projectionCache,
         private TelegramUiIcons $uiIcons,
         private TelegramProductContent $content,
+        private CustomerUsdtFundingGate $usdtFundingGate,
     ) {}
 
     public function sendCategoryCatalog(
@@ -542,12 +544,17 @@ class TelegramCatalogIntents
                     'callback_data' => 'detail:pay:qris:'.$productId.':'.$token,
                     'style' => 'primary',
                 ]];
-                $keyboard[] = [[
-                    ...$this->uiIcons->apply('menu.balance', $this->locale->translate($customer, 'catalog.detail.pay_balance', [
-                        'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
-                    ])),
-                    'callback_data' => 'detail:pay:balance:'.$productId.':'.$token,
-                ]];
+                if ($this->usdtFundingGate->spendingAvailability()->available) {
+                    // The IDR store-balance rail shares the USDT spending and
+                    // post-restore barrier, so an active pause hides this
+                    // button instead of offering a guaranteed rejection.
+                    $keyboard[] = [[
+                        ...$this->uiIcons->apply('menu.balance', $this->locale->translate($customer, 'catalog.detail.pay_balance', [
+                            'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
+                        ])),
+                        'callback_data' => 'detail:pay:balance:'.$productId.':'.$token,
+                    ]];
+                }
                 if ($binanceAvailable) {
                     $keyboard[] = [[
                         'text' => $this->locale->translate($customer, 'catalog.detail.pay_binance', [

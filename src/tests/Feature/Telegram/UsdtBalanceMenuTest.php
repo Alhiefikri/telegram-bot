@@ -355,6 +355,24 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $pending = CustomerUsdtFundingIntent::query()->where('state', 'pending')->sole();
         $this->assertSame(2_000_000, (int) $pending->amount_micro);
         $this->assertSame('superseded', $intent->fresh()->state);
+
+        // The advertised comma form is the same preview as the dot form, so the
+        // command may not reject an amount the prompt copy explicitly allows.
+        $this->sendText('/usdt 0,3');
+        $comma = CustomerUsdtFundingIntent::query()->where('state', 'pending')->sole();
+        $this->assertSame(300_000, (int) $comma->amount_micro);
+        $this->assertSame(300_000, (int) $comma->payable_micro);
+        $this->assertSame('superseded', $pending->fresh()->state);
+        $this->assertStringContainsString('Kredit diminta: 0.3 USDT', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
+
+        // The dot form resolves to the same money and replays that preview
+        // instead of opening a second one.
+        $this->sendText('/usdt 0.3');
+        $this->assertSame(300_000, (int) CustomerUsdtFundingIntent::query()->where('state', 'pending')->sole()->amount_micro);
+        $this->assertSame(1, CustomerUsdtFundingIntent::query()->where('state', 'pending')->count());
+        $this->assertSame('pending', $comma->fresh()->state);
+        $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
+        $this->assertNoMoneyOrOutbound();
     }
 
     public function test_usdt_chooser_keeps_history_navigation_on_the_canonical_root(): void
@@ -388,10 +406,31 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->sendText('/usdt abc');
         $this->assertStringContainsString('Nominal USDT tidak valid', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
 
+        // Strict money parsing survives the comma normalization: grouping,
+        // mixed and over-precision comma forms stay rejected.
+        foreach (['1,000,000', '1,2.3', '1.2,3', '0,1234567', '1 000,3'] as $invalid) {
+            $this->sendText('/usdt '.$invalid);
+            $this->assertStringContainsString('Nominal USDT tidak valid', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)), $invalid);
+        }
+
         $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
         $this->assertSame(0, CustomerUsdtTopUp::query()->count());
-        $this->assertSame(2, $this->editCount(self::CHAT_ID));
+        $this->assertSame(7, $this->editCount(self::CHAT_ID));
         $this->assertSame($root->message_id, $root->fresh()->message_id);
+        $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
+        $this->assertNoMoneyOrOutbound();
+    }
+
+    public function test_single_comma_is_a_decimal_separator_not_a_grouping_separator(): void
+    {
+        $root = $this->startRoot();
+
+        // `1,000` stays the decimal form of 1.000 USDT; grouping would need a
+        // second separator, which the strict parser rejects.
+        $this->sendText('/usdt 1,000');
+        $intent = CustomerUsdtFundingIntent::query()->where('state', 'pending')->sole();
+        $this->assertSame(1_000_000, (int) $intent->amount_micro);
+        $this->assertStringContainsString('Kredit diminta: 1 USDT', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
         $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
         $this->assertNoMoneyOrOutbound();
     }

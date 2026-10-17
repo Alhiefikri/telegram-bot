@@ -108,9 +108,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             $chatId,
             'private',
             $prompt['message_id'],
-            preg_match('/\A[0-9]+,[0-9]{1,6}\z/D', trim($text)) === 1
-                ? str_replace(',', '.', trim($text))
-                : trim($text),
+            trim($text),
             $rail,
         );
         if ($result->outcome !== 'invalid_amount') {
