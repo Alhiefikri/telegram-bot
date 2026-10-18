@@ -299,6 +299,49 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 
 The artifact bundle is deliberately bounded and secret-safe: it includes `compose-ps.json`, `health-summary.json`, and a redacted 120-line Compose log. Do not add resolved Compose configuration or `.env` files to workflow artifacts.
 
+### Local webhook observation verification (#644)
+
+`ops:check-telegram-webhook` measures its observation window with monotonic
+elapsed time, including HTTP request time. A zero-second window makes one
+request. Positive windows wait for the smaller of the sample interval and
+remaining budget (rounded up to microseconds), then take a terminal sample.
+A request that consumes the remaining budget ends observation without another
+wait or request. The terminal request may finish after the window: the bound is
+the observation window plus one request timeout from
+`TelegramBotApiRequestFactory` (10 seconds by default), plus scheduler overhead.
+Intervals must be positive integers; the window and pending threshold must be
+nonnegative integers. Health thresholds and cutover-error tolerance are unchanged.
+
+Run the local regression suite from `src/`:
+
+```bash
+vendor/bin/phpunit tests/Feature/ProductionReleaseHardeningTest.php
+```
+
+The isolated subprocess fixture replaces clock/sleep functions only in that
+process and injects `getWebhookInfo` responses; it never calls live Telegram.
+It reproduces a start at Unix time `1000.990` with a 20 ms first request:
+the former integer-clock deadline stopped at sample `1` after 20 ms.
+The regression now observes `1,0` and succeeds. Slow-first-request, deadline
+equality, interval/window, zero-window and fail-closed cases run without real
+sleeps as their correctness oracle.
+
+For a disposable application smoke with the actual Artisan command and native
+monotonic clock/sleep, run from `src/`:
+
+```bash
+APP_ENV=testing CACHE_STORE=array SESSION_DRIVER=array DB_CONNECTION=sqlite DB_DATABASE=:memory: \
+  php tests/Fixtures/telegram-webhook-observation.php '{"pending":[1,0],"real_clock":true}'
+APP_ENV=testing CACHE_STORE=array SESSION_DRIVER=array DB_CONNECTION=sqlite DB_DATABASE=:memory: \
+  php tests/Fixtures/telegram-webhook-observation.php '{"pending":[1],"real_clock":true}'
+```
+
+The fixture reports the Artisan exit code in JSON, not as its process exit.
+Local verification observed exit `0` with samples `1,0` for drain, and exit `1`
+with samples `1,1` for persistent backlog. The focused release-hardening suite
+passed 44 tests / 419 assertions. This is command-behavior evidence only, not
+live Telegram, deployment qualification, or permission to operate CI/CD.
+
 ## Emergency manual recovery
 
 Use this only when automatic rollback reports `deploy-failed-rollback-failed`. Read `previous-commit.txt` and `previous-image.txt` from the deployment artifact, then run on the VPS from `PRODUCTION_PATH`:

@@ -19,9 +19,9 @@ class CheckTelegramWebhook extends Command
 
     public function handle(TelegramBotApiRequestFactory $requests): int
     {
-        $maxPending = (int) $this->option('max-pending');
-        $observationSeconds = (int) $this->option('observation-seconds');
-        $sampleInterval = (int) $this->option('sample-interval');
+        $maxPending = filter_var($this->option('max-pending'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+        $observationSeconds = filter_var($this->option('observation-seconds'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+        $sampleInterval = filter_var($this->option('sample-interval'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         $tolerateErrorsSince = $this->option('tolerate-errors-since');
         $token = trim((string) config('services.telegram.token'));
         $secret = trim((string) config('services.telegram.webhook_secret'));
@@ -29,7 +29,7 @@ class CheckTelegramWebhook extends Command
         $target = $appUrl.'/api/webhook/telegram';
         $healthy = true;
 
-        if ($maxPending < 0 || $observationSeconds < 0 || $sampleInterval <= 0) {
+        if ($maxPending === false || $observationSeconds === false || $sampleInterval === false) {
             $this->error('Telegram webhook: pending-update thresholds must be zero or greater and sample interval must be positive');
 
             return self::FAILURE;
@@ -63,7 +63,7 @@ class CheckTelegramWebhook extends Command
             return self::FAILURE;
         }
 
-        $deadline = time() + $observationSeconds;
+        $deadline = hrtime(true) / 1_000_000_000 + $observationSeconds;
         $samples = [];
         $firstResponse = null;
         do {
@@ -79,11 +79,14 @@ class CheckTelegramWebhook extends Command
             $samples[] = $body;
             $firstResponse ??= $response;
 
-            if (time() >= $deadline) {
+            $remaining = $deadline - hrtime(true) / 1_000_000_000;
+            if ($remaining <= 0) {
                 break;
             }
 
-            sleep(min($sampleInterval, max(1, $deadline - time())));
+            // Cap the wait to the remaining budget. One terminal probe may finish
+            // after the deadline, bounded by the request factory's HTTP timeout.
+            usleep((int) ceil(min($sampleInterval, $remaining) * 1_000_000));
         } while (true);
 
         $body = $samples[0];

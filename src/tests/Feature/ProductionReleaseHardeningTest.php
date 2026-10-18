@@ -385,18 +385,70 @@ class ProductionReleaseHardeningTest extends TestCase
 
     public function test_telegram_webhook_observation_accepts_a_transient_pending_update_that_drains(): void
     {
-        config()->set('app.url', 'https://store.example.com');
-        config()->set('services.telegram.token', 'bot-token');
-        config()->set('services.telegram.webhook_secret', 'webhook-secret');
-        config()->set('services.telegram.api_base_url', 'https://api.telegram.org');
+        $result = $this->observeTelegramWebhook(['pending' => [1, 0]]);
 
-        Http::fakeSequence('https://api.telegram.org/botbot-token/getWebhookInfo')
-            ->push(['ok' => true, 'result' => ['url' => 'https://store.example.com/api/webhook/telegram', 'pending_update_count' => 1]])
-            ->push(['ok' => true, 'result' => ['url' => 'https://store.example.com/api/webhook/telegram', 'pending_update_count' => 0]]);
+        $this->assertSame(0, $result['exit'], $result['output']);
+        $this->assertSame([1, 0], $result['samples']);
+        $this->assertEqualsWithDelta(1.02, $result['elapsed'], 0.000002);
+    }
 
-        $this->artisan('ops:check-telegram-webhook --max-pending=0 --observation-seconds=1 --sample-interval=1')
-            ->expectsOutputToContain('Telegram webhook pending_update_count_samples=1,0')
-            ->assertSuccessful();
+    public function test_telegram_webhook_observation_counts_request_time_and_caps_the_final_wait(): void
+    {
+        foreach ([
+            ['pending' => [1, 0], 'latency' => 1.2, 'samples' => [1], 'elapsed' => 1.2, 'exit' => 1],
+            ['pending' => [1, 0], 'latency' => 1, 'samples' => [1], 'elapsed' => 1, 'exit' => 1],
+            ['pending' => [1, 0], 'interval' => 5, 'samples' => [1, 0], 'elapsed' => 1.02, 'exit' => 0],
+            ['pending' => [1, 1, 0], 'window' => 2, 'samples' => [1, 1, 0], 'elapsed' => 2.02, 'exit' => 0],
+            ['pending' => [1], 'window' => 0, 'samples' => [1], 'elapsed' => 0.02, 'exit' => 1],
+            ['pending' => [0], 'window' => 0, 'samples' => [0], 'elapsed' => 0.02, 'exit' => 0],
+        ] as $fixture) {
+            $result = $this->observeTelegramWebhook($fixture);
+            $this->assertSame($fixture['exit'], $result['exit'], $result['output']);
+            $this->assertSame($fixture['samples'], $result['samples']);
+            $this->assertEqualsWithDelta($fixture['elapsed'], $result['elapsed'], 0.000002);
+        }
+    }
+
+    public function test_telegram_webhook_observation_remains_fail_closed(): void
+    {
+        foreach ([
+            ['pending' => [1]],
+            ['pending' => [null]],
+            ['pending' => [0], 'ok' => false],
+            ['pending' => [0], 'target' => 'https://other.example/api/webhook/telegram'],
+            ['pending' => [1, 0], 'failure_at' => 1],
+            ['pending' => [0], 'app_url' => 'http://store.example.com'],
+            ['pending' => [0], 'window' => -1],
+            ['pending' => [0], 'interval' => 0],
+            ['pending' => [0], 'interval' => -1],
+            ['pending' => [0], 'window' => 'invalid'],
+            ['pending' => [0], 'interval' => '1.5'],
+        ] as $fixture) {
+            $result = $this->observeTelegramWebhook($fixture);
+            $this->assertSame(1, $result['exit'], json_encode($fixture).$result['output']);
+            $this->assertStringNotContainsString('fixture-token', $result['output']);
+            $this->assertStringNotContainsString('fixture-secret', $result['output']);
+            $this->assertStringNotContainsString('https://store.example.com', $result['output']);
+        }
+    }
+
+    private function observeTelegramWebhook(array $fixture): array
+    {
+        $process = new Process([
+            PHP_BINARY,
+            base_path('tests/Fixtures/telegram-webhook-observation.php'),
+            json_encode($fixture, JSON_THROW_ON_ERROR),
+        ], base_path(), [
+            'APP_ENV' => 'testing',
+            'CACHE_STORE' => 'array',
+            'SESSION_DRIVER' => 'array',
+            'DB_CONNECTION' => 'sqlite',
+            'DB_DATABASE' => ':memory:',
+        ]);
+        $process->setTimeout(15);
+        $process->mustRun();
+
+        return json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR);
     }
 
     public function test_release_health_summary_is_machine_readable_and_secret_free(): void
