@@ -6,6 +6,9 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
+use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\VerifySakurupiahWebhookPayment;
 use App\Models\Customer;
@@ -435,11 +438,6 @@ class SakurupiahWebhookTest extends TestCase
         $payment = $this->payment();
         $payment->order->customer()->update(['telegram_id' => 123456]);
         $orderItem = $payment->order->orderItems()->sole();
-        ProductStockItem::create([
-            'product_id' => $orderItem->product_id,
-            'order_item_id' => $orderItem->id,
-            'secret' => 'sakurupiah-cardinality@example.test|password',
-        ]);
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
             $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount),
@@ -642,11 +640,14 @@ class SakurupiahWebhookTest extends TestCase
         $this->postCallback($expired)->assertOk()->assertExactJson(['success' => true]);
         $this->postCallback($pending)->assertOk()->assertExactJson(['success' => true]);
 
+        $order = $payment->order->fresh();
+        $orderItem = $order->orderItems()->sole();
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(PaymentStatus::Paid, $payment->order->fresh()->payment_status);
-        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
         $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
-        $this->assertSame(1, SalesProofPost::query()->count());
+        $this->assertSame(1, ProductStockItem::query()->where('order_item_id', $orderItem->id)->count());
+        $this->assertSame(1, SalesProofPost::query()->where('order_id', $order->id)->count());
         $this->assertSame(0, ManualFulfillmentReview::query()->count());
         $events = PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->orderBy('id')->get();
         $this->assertCount(3, $events);
@@ -654,7 +655,76 @@ class SakurupiahWebhookTest extends TestCase
         $this->assertTrue($events->every(fn (PaymentEvent $event): bool => $event->processed_at !== null));
     }
 
-    private function payment(array $attributes = []): Payment
+    public function test_paid_callback_with_numeric_only_stock_records_one_review_without_releasing_credentials(): void
+    {
+        Queue::fake();
+        config()->set('services.telegram.token', 'bot-token');
+        ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::MANUAL,
+            'admin_telegram_chat_id' => '123456',
+            'is_active' => true,
+        ]);
+        $payment = $this->payment(managed: false);
+        $order = $payment->order;
+        $orderItem = $order->orderItems()->sole();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $paid = $this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]);
+        $this->postCallback($paid)->assertOk()->assertExactJson(['success' => true]);
+        $this->postCallback($paid)->assertOk()->assertExactJson(['success' => true]);
+
+        $payment->refresh();
+        $order = $payment->order->fresh();
+        $this->assertSame(PaymentStatus::Paid, $payment->status);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(0, ProductStockItem::query()->where('order_item_id', $orderItem->id)->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->where('source_id', (string) $order->id)
+            ->count());
+
+        $review = ManualFulfillmentReview::query()->sole();
+        $this->assertSame(ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING, $review->reason);
+        $this->assertSame(ManualFulfillmentReview::STATE_PENDING, $review->state);
+        $this->assertSame($payment->id, $review->payment_id);
+
+        $paidEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PAID)
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $order->id)
+            ->sole();
+        $reviewEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)
+            ->where('source_type', ManualFulfillmentReview::class)
+            ->where('source_id', (string) $review->id)
+            ->sole();
+        $this->assertNotSame($paidEffect->id, $reviewEffect->id);
+        $this->assertNotSame($paidEffect->effect_key, $reviewEffect->effect_key);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $paidEffect->state);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $reviewEffect->state);
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)
+            ->count());
+
+        Queue::assertPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->orderId === (string) $order->id
+                && $job->effectId === $paidEffect->id,
+        );
+        Queue::assertPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $reviewEffect->id,
+        );
+    }
+
+    private function payment(array $attributes = [], bool $managed = true): Payment
     {
         $amount = (int) ($attributes['amount'] ?? 12000);
         $customer = Customer::factory()->create([
@@ -672,11 +742,21 @@ class SakurupiahWebhookTest extends TestCase
             'stock' => 1,
             'reserved_stock' => 1,
         ]);
-        OrderItem::factory()->for($order, 'order')->for($product, 'product')->create([
+        $orderItem = OrderItem::factory()->for($order, 'order')->for($product, 'product')->create([
             'quantity' => 1,
             'unit_price' => $amount,
             'subtotal' => $amount,
         ]);
+        if ($managed) {
+            // Checkout allocates a real Product Stock Item for managed stock;
+            // mirror that here so an ordinary paid callback is not also a
+            // missing-credential review case.
+            ProductStockItem::create([
+                'product_id' => $product->id,
+                'order_item_id' => $orderItem->id,
+                'secret' => 'sakurupiah-fixture@example.test|password',
+            ]);
+        }
         InventoryMovement::create([
             'product_id' => $product->id,
             'order_id' => $order->id,

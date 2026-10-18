@@ -347,6 +347,11 @@ review per paid Payment when ordered units are positive, no local credentials ar
 allocated and no supplier fulfillment exists. Its Owner review effect and missing-target
 recovery cover bot and API Orders; Late Payments reuse `late_payment`. API delivery
 counts remain allocation-derived, never fabricated for an external manual handoff.
+Lifecycle fixtures keep the distinction explicit: managed-stock cases allocate a real
+Product Stock Item before checkout, while numeric-stock cases opt out and assert the
+durable review with no credential release. Paid and review notices are separate
+`admin.order_paid_notification` / `admin.order_review_notification` effects, so
+queue assertions match `effectId`, not the shared PHP job class.
 Contract and evidence: [API notifications](../customer-api-orders.md#public-proof-and-private-owner-notifications-s09).
 
 Customer API public documentation (#626) is published from one canonical description in

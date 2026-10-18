@@ -6,6 +6,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\ForwardManualPaymentProof;
 use App\Jobs\PublishSalesProofPost;
 use App\Jobs\SendAdminOrderExpiredNotification;
@@ -13,10 +14,12 @@ use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
+use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramOutboundEffect;
@@ -110,15 +113,152 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(1, InventoryMovement::query()->where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(1, ProductStockItem::query()->where('order_item_id', $order->orderItems()->sole()->id)->count());
+        $this->assertSame(0, ManualFulfillmentReview::query()->where('order_id', $order->id)->count());
         $this->assertNotNull($effect);
         $this->assertSame(TelegramOutboundEffectState::Pending, $effect->state);
         $this->assertSame('notifications', $effect->queue);
-        Queue::assertPushed(SendAdminOrderPaidNotification::class, 1);
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PAID)
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $order->id)
+            ->count());
         Queue::assertPushed(
             SendAdminOrderPaidNotification::class,
             fn (SendAdminOrderPaidNotification $job): bool => $job->orderId === $order->id
                 && $job->effectId === $effect->id,
         );
+    }
+
+    public function test_numeric_only_paid_stock_records_one_review_and_distinct_paid_and_review_effects(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+
+        $order = $this->checkoutOrder(managed: false);
+        $payment = $order->payments()->sole();
+
+        $first = app(OrderStateMachine::class)->applyPaymentPaid($payment);
+        $replay = app(OrderStateMachine::class)->applyPaymentPaid($payment->fresh());
+
+        $order = $order->fresh();
+        $orderItem = $order->orderItems()->sole();
+
+        $this->assertTrue($first->newlyApplied);
+        $this->assertFalse($replay->newlyApplied);
+        $this->assertSame(PaymentStatus::Paid, $order->payment_status);
+        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(1, InventoryMovement::query()->where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(0, ProductStockItem::query()->where('order_item_id', $orderItem->id)->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->where('source_id', (string) $order->id)
+            ->count());
+
+        $review = ManualFulfillmentReview::query()->where('order_id', $order->id)->sole();
+        $this->assertSame(ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING, $review->reason);
+        $this->assertSame(ManualFulfillmentReview::STATE_PENDING, $review->state);
+        $this->assertSame($payment->id, $review->payment_id);
+
+        $paidEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PAID)
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $order->id)
+            ->sole();
+        $reviewEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)
+            ->where('source_type', ManualFulfillmentReview::class)
+            ->where('source_id', (string) $review->id)
+            ->sole();
+
+        $this->assertNotSame($paidEffect->id, $reviewEffect->id);
+        $this->assertNotSame($paidEffect->effect_key, $reviewEffect->effect_key);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $paidEffect->state);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $reviewEffect->state);
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)
+            ->count());
+        Queue::assertPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $paidEffect->id,
+        );
+        Queue::assertPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $reviewEffect->id,
+        );
+    }
+
+    public function test_recovery_keeps_a_sent_paid_notice_while_recovering_the_independent_review_effect(): void
+    {
+        $this->configureAdminTarget();
+        Queue::fake();
+
+        $order = $this->checkoutOrder(managed: false);
+        app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->sole());
+
+        $review = ManualFulfillmentReview::query()->where('order_id', $order->id)->sole();
+        $paidEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PAID)
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $order->id)
+            ->sole();
+        $reviewEffect = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)
+            ->where('source_type', ManualFulfillmentReview::class)
+            ->where('source_id', (string) $review->id)
+            ->sole();
+        $paidFinalized = $this->finalizeSentEffect($paidEffect, '907');
+
+        Queue::fake();
+        Http::preventStrayRequests();
+
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])
+            ->assertSuccessful();
+
+        $repairedOrder = $order->fresh();
+        $this->assertNotNull($repairedOrder->admin_paid_order_notified_at);
+        $this->assertTrue($paidFinalized->sent_at->equalTo($repairedOrder->admin_paid_order_notified_at));
+        $this->assertSame(TelegramOutboundEffectState::Sent, $paidEffect->fresh()->state);
+        $this->assertSame('907', (string) $paidEffect->fresh()->telegram_message_id);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $reviewEffect->fresh()->state);
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_type', ManualFulfillmentReview::class)
+            ->where('source_id', (string) $review->id)
+            ->count());
+
+        Queue::assertNotPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $paidEffect->id,
+        );
+        Queue::assertPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $reviewEffect->id,
+        );
+
+        $this->fakeTelegramHttp();
+        app(AdminOrderNotificationDeliveryPipeline::class)->deliver($reviewEffect->fresh());
+        $this->assertSame(TelegramOutboundEffectState::Sent, $reviewEffect->fresh()->state);
+        $this->assertSame('123457', (string) $reviewEffect->fresh()->telegram_message_id);
+        $reviewSentAt = $reviewEffect->fresh()->sent_at;
+
+        Queue::fake();
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+
+        $this->assertTrue($reviewSentAt->equalTo($reviewEffect->fresh()->sent_at));
+        $this->assertSame('907', (string) $paidEffect->fresh()->telegram_message_id);
+        Queue::assertNotPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $paidEffect->id,
+        );
+        Queue::assertNotPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $reviewEffect->id,
+        );
+        $this->assertSame(1, TelegramOutboundEffect::query()
+            ->where('source_type', ManualFulfillmentReview::class)
+            ->where('source_id', (string) $review->id)
+            ->count());
     }
 
     public function test_paid_lifecycle_records_one_sales_proof_effect_and_dispatches_it_after_commit(): void
@@ -527,6 +667,9 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         $this->assertNull($pendingOrder->fresh()->admin_pending_order_notified_at);
         $this->assertNull($paidOrder->fresh()->admin_paid_order_notified_at);
         $this->assertNull($expiredOrder->fresh()->admin_expired_order_notified_at);
+        $this->assertSame(0, ManualFulfillmentReview::query()
+            ->whereIn('order_id', [$pendingOrder->id, $paidOrder->id, $expiredOrder->id])
+            ->count());
 
         Queue::fake();
         Http::preventStrayRequests();
@@ -549,16 +692,31 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
             SendAdminOrderPendingNotification::class,
             fn (SendAdminOrderPendingNotification $job): bool => $job->effectId === $pendingEffect->id,
         );
-        Queue::assertNotPushed(SendAdminOrderPaidNotification::class);
-        Queue::assertNotPushed(SendAdminOrderExpiredNotification::class);
+        Queue::assertNotPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $paidEffect->id,
+        );
+        Queue::assertNotPushed(
+            SendAdminOrderExpiredNotification::class,
+            fn (SendAdminOrderExpiredNotification $job): bool => $job->effectId === $expiredEffect->id,
+        );
 
         $pendingNotifiedAt = $repairedPending->admin_pending_order_notified_at;
+        Queue::fake();
         $this->artisan('telegram:recover-outbound', ['--chunk' => 25])
             ->assertSuccessful();
         $this->assertTrue($pendingNotifiedAt->equalTo($pendingOrder->fresh()->admin_pending_order_notified_at));
         Queue::assertNotPushed(
             SendAdminOrderPendingNotification::class,
             fn (SendAdminOrderPendingNotification $job): bool => $job->effectId === $pendingEffect->id,
+        );
+        Queue::assertNotPushed(
+            SendAdminOrderPaidNotification::class,
+            fn (SendAdminOrderPaidNotification $job): bool => $job->effectId === $paidEffect->id,
+        );
+        Queue::assertNotPushed(
+            SendAdminOrderExpiredNotification::class,
+            fn (SendAdminOrderExpiredNotification $job): bool => $job->effectId === $expiredEffect->id,
         );
     }
 
@@ -902,10 +1060,18 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         return $finalized;
     }
 
-    private function checkoutOrder($paymentIntent = null, int $telegramId = 12345): Order
+    private function checkoutOrder($paymentIntent = null, int $telegramId = 12345, bool $managed = true): Order
     {
         $customer = Customer::factory()->create(['telegram_id' => $telegramId, 'username' => 'buyer'.$telegramId]);
         $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 0]);
+        if ($managed) {
+            // Ordinary checkout allocates a real credential unit. Tests about
+            // missing-credential review opt out explicitly.
+            ProductStockItem::create([
+                'product_id' => $product->id,
+                'secret' => 'lifecycle-order@example.test|password',
+            ]);
+        }
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
 

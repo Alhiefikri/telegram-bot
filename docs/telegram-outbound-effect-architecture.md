@@ -378,6 +378,29 @@ sent ledger effects without queue redispatch; the companion cleanup test keeps
 an already-recorded pending deletion marker intact, and the version test keeps
 older sent resends from overwriting the latest projection.
 
+Paid and missing-credential review notices share the
+`SendAdminOrderPaidNotification` job class but are distinct durable effects:
+the paid notice is keyed to the Order
+(`order:<order id>:admin.order_paid_notification:v1`) while the review notice
+is keyed to the `ManualFulfillmentReview`
+(`order-review:<review id>:owner:v1`, `admin.order_review_notification`).
+Queue assertions therefore identify jobs by `effectId`, never by job class
+alone. Managed-stock lifecycle fixtures allocate a real Product Stock Item
+before checkout; numeric-stock fixtures opt out explicitly so the paid
+transition exercises `local_credentials_missing`.
+`TelegramLifecycleOutboundEffectTest::test_numeric_only_paid_stock_records_one_review_and_distinct_paid_and_review_effects`
+pins one sale and one allocation for managed stock, one durable review and
+zero credential allocation for numeric-only stock, and distinct paid/review
+effect identities. The companion
+`test_recovery_keeps_a_sent_paid_notice_while_recovering_the_independent_review_effect`
+proves recovery repairs the sent paid notice without resending it while the
+independent pending review effect is still redispatched and delivered, then
+leaves both sent identities unchanged. `SakurupiahWebhookTest` applies the
+same fixture distinction: `test_out_of_order_callbacks_cause_one_paid_sale_and_stale_callbacks_are_acknowledged`
+uses an allocated credential and asserts one sale/allocation with no review,
+and `test_paid_callback_with_numeric_only_stock_records_one_review_without_releasing_credentials`
+asserts the review path with no credential release.
+
 The scheduler runs `telegram:recover-outbound --queue=notifications` every
 minute with a bounded 10-minute `withoutOverlapping` mutex. Production cutover
 also clears stale scheduler mutexes. The command performs source discovery and
