@@ -109,7 +109,7 @@ final class CustomerApiOrderNotificationTest extends NonTransactionalDatabaseTes
         $this->assertNotNull(app(SalesProofEligibility::class)->rejectionReason($order));
         $economic = $this->economics($order);
         $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
-        Http::fake(fn () => Http::response(['message' => 'unknown purchase'], 500));
+        Http::fake(fn () => Http::response(['status' => 'delivered', 'quantity' => 1, 'deliveredKeys' => ['untrusted-fixture-key']]));
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
         $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
         $notice = $effects->recordAdminOrderReviewNotification($review);

@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\ProcessSupplierFulfillment;
 use App\Jobs\SendTelegramReceipt;
@@ -10,6 +12,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
@@ -20,6 +23,7 @@ use App\Models\SupplierManualHandoff;
 use App\Models\SupplierOrderHistoryReconciliation;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardProductsData;
 use App\Services\Admin\AdminSupplierDashboardData;
@@ -32,7 +36,9 @@ use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierClient;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
-use App\Services\Telegram\TelegramAdminPaidOrderNotifier;
+use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
+use App\Services\Telegram\ReceiptDeliveryPipeline;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
@@ -690,27 +696,22 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         }
     }
 
-    public function test_admin_paid_notification_states_payment_customer_delivery_and_supplier_purchase_separately(): void
+    public function test_supplier_unknown_notifies_once_without_claiming_rejection_or_releasing_hold(): void
     {
         [$order, $fulfillment] = $this->paidSupplierOrder();
         Http::fake(fn () => throw new ConnectionException('The supplier may have debited the request.'));
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
-        config()->set('services.telegram.token', 'test-token');
-        Http::swap(new Factory);
-        Http::preventStrayRequests();
-        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
-
-        app(TelegramAdminPaidOrderNotifier::class)->sendEffect($order, '123456');
-
-        $recorded = Http::recorded();
-        $this->assertCount(1, $recorded, json_encode($recorded->map(fn ($pair) => [$pair[0]->url(), $pair[0]->data()])));
-        $text = (string) ($recorded->first()[0]['text'] ?? '');
-        $this->assertStringContainsString('Status pembayaran: Paid', $text, $text);
-        $this->assertStringContainsString('Pengiriman pelanggan:', $text, $text);
-        $this->assertStringContainsString('Perlu review operator', $text, $text);
-        $this->assertStringContainsString('Pembelian supplier:', $text, $text);
-        $this->assertStringContainsString('ambiguous', $text, $text);
-        $this->assertStringNotContainsString('Produk terjual!', $text, $text);
+        $effect = $this->adminEffect($order);
+        $pipeline = app(AdminOrderNotificationDeliveryPipeline::class);
+        $pipeline->deliver($effect);
+        $pipeline->deliver($effect);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        $this->assertFalse($effect->fresh()->outcome_metadata['paid_outcome']['resolved']);
+        $this->assertGreaterThan(0, Supplier::sole()->reserved_balance_micros);
+        $text = (string) Http::recorded()->sole()[0]['text'];
+        $this->assertStringContainsString('belum dapat dipastikan', $text);
+        $this->assertStringContainsString('jangan beli ulang', $text);
+        $this->assertStringNotContainsString('pembelian ditolak', $text);
     }
 
     public function test_completed_supplier_acquisition_without_receipt_does_not_claim_customer_delivery(): void
@@ -733,9 +734,187 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         Http::preventStrayRequests();
         config()->set('services.telegram.token', 'test-token');
         Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
-        app(TelegramAdminPaidOrderNotifier::class)->sendEffect($order, '123456');
+        $effect = app(TelegramOutboundEffectService::class)->recordAdminOrderPaidNotification($order->fresh(), '123456');
+        app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
+        Http::assertNothingSent();
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->fresh()->state);
+    }
+
+    public function test_admin_result_waits_for_all_receipts_and_deadline_recovery_emits_only_one_update(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder(3);
+        $effect = $this->adminEffect($order);
+        $pipeline = app(AdminOrderNotificationDeliveryPipeline::class);
+        $pipeline->deliver($effect);
+        Http::assertNothingSent();
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->travel(119)->seconds();
+        $pipeline->deliver($effect);
+        Http::assertNothingSent();
+        $this->travel(1)->seconds();
+        $pipeline->deliver($effect);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        $this->assertFalse($effect->fresh()->outcome_metadata['paid_outcome']['resolved']);
+        $this->completeSupplierAndReceipts($order, $fulfillment, 3);
+        $pipeline->recoverPaidOutcomeUpdates();
+        $pipeline->recoverPaidOutcomeUpdates();
+        $updates = TelegramOutboundEffect::where('supersedes_effect_id', $effect->id)->get();
+        $this->assertCount(1, $updates);
+        $pipeline->deliver($updates->sole());
+        $pipeline->deliver($updates->sole());
+        $this->assertTrue($updates->sole()->fresh()->outcome_metadata['paid_outcome']['resolved']);
+        $adminRequests = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage') && (string) $request['chat_id'] === '123456');
+        $this->assertCount(1, $adminRequests);
+        $text = (string) $adminRequests->sole()[0]['text'];
+        $this->assertStringContainsString('3/3 unit terkirim', $text);
+        $this->assertStringContainsString($order->invoice_number, $text);
+        $this->assertStringNotContainsString('sending', $text);
+        $this->assertStringNotContainsString('Cek dashboard untuk proses', $text);
+        $this->assertSame(1, SupplierPurchase::count());
+    }
+
+    public function test_success_without_escalation_never_precedes_receipt_acknowledgement(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder(3);
+        $effect = $this->adminEffect($order);
+        $this->completeSupplierAndReceipts($order, $fulfillment, 3, $effect);
+        $pipeline = app(AdminOrderNotificationDeliveryPipeline::class);
+        $pipeline->deliver($effect);
+        $pipeline->deliver($effect);
+        $this->assertTrue($effect->fresh()->outcome_metadata['paid_outcome']['resolved']);
+        $this->assertSame(1, $effect->fresh()->attempts);
+        $this->assertSame(0, TelegramOutboundEffect::where('supersedes_effect_id', $effect->id)->count());
+    }
+
+    public function test_acknowledged_buyer_delivery_does_not_hide_supplier_evidence_review(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        $effect = $this->adminEffect($order);
+        $this->completeSupplierAndReceipts($order, $fulfillment, 1);
+        SupplierPurchase::sole()->update(['state' => 'review', 'last_error' => 'economic_evidence_conflict']);
+        app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
+        $outcome = $effect->fresh()->outcome_metadata['paid_outcome'];
+        $this->assertFalse($outcome['resolved']);
+        $this->assertStringContainsString('1/1 unit terkirim', implode(' ', $outcome['lines']));
+        $this->assertStringContainsString('Manual Delivery Review', $outcome['action']);
+        $this->assertSame(1, SupplierPurchase::count());
+    }
+
+    public static function buyerDeliveryFailures(): array
+    {
+        return ['definite rejection' => [false], 'unknown transport' => [true]];
+    }
+
+    #[DataProvider('buyerDeliveryFailures')]
+    public function test_buyer_delivery_failure_never_relabels_proven_supplier_acquisition(bool $unknown): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        $effect = $this->adminEffect($order);
+        $this->completeSupplierAndReceipts($order, $fulfillment, 1, deliverReceipts: false);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(function ($request) use ($unknown) {
+            if ((string) $request['chat_id'] === '123456') {
+                return Http::response(['ok' => true, 'result' => ['message_id' => 7003]]);
+            }
+            if ($unknown) {
+                throw new ConnectionException('Possible Telegram delivery');
+            }
+
+            return Http::response(['ok' => false, 'description' => 'Forbidden'], 403);
+        });
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        app(ReceiptDeliveryPipeline::class)->deliver($receipt, dispatchNext: false);
+        app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
+        $outcome = $effect->fresh()->outcome_metadata['paid_outcome'];
+        $this->assertSame(! $unknown, $outcome['resolved']);
+        $text = (string) Http::recorded(fn ($request) => (string) $request['chat_id'] === '123456')->sole()[0]['text'];
+        $this->assertStringContainsString('pembelian berhasil', $text);
+        $this->assertStringContainsString($unknown ? 'hasil pengiriman Telegram belum dapat dipastikan' : 'akun belum terkirim', $text);
+        $this->assertStringNotContainsString('pembelian ditolak', $text);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertNotNull(SupplierPurchase::sole()->committed_at);
+    }
+
+    public function test_authoritative_supplier_rejection_reports_no_acquisition_without_automatic_resolution(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        Http::fake(fn () => Http::response(['error' => 'forbidden'], 403));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $this->assertSame('rejected', SupplierPurchase::sole()->state);
+        $effect = $this->adminEffect($order);
+        app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
         $text = (string) Http::recorded()->sole()[0]['text'];
-        $this->assertStringContainsString('Supplier fulfillment selesai · receipt Telegram belum terkonfirmasi; periksa Manual Delivery Review', $text);
+        $this->assertStringContainsString('pembelian ditolak', $text);
+        $this->assertStringContainsString('buyer belum menerima', $text);
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertNull(SupplierPurchase::sole()->committed_at);
+        $this->assertSame(1, SupplierPurchase::count());
+    }
+
+    public function test_mixed_order_reports_partial_outside_bot_handoff_without_inventing_telegram_delivery(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder(2, includeLocal: true);
+        Http::fake(fn () => throw new ConnectionException('Supplier acquisition unknown'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
+        $owner = User::factory()->create(['role' => 'owner']);
+        app(ManualFulfillmentResolutionService::class)->recordExternalHandoff($review, $owner, $fulfillment->id, 1, 'One unit handed over outside bot.');
+        $effect = $this->adminEffect($order);
+        app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
+        $outcome = $effect->fresh()->outcome_metadata['paid_outcome'];
+        $this->assertFalse($outcome['resolved']);
+        $text = (string) Http::recorded()->sole()[0]['text'];
+        foreach ($order->orderItems as $item) {
+            $this->assertStringContainsString($item->product_name.' x '.$item->quantity.':', $text);
+        }
+        $this->assertStringContainsString('1/2 unit handoff luar bot', $text);
+        $this->assertStringContainsString('jumlah unit terkirim belum terkonfirmasi', $text);
+        $this->assertStringNotContainsString('unit terkirim ke buyer (receipt Telegram acknowledged)', $text);
+        $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
+        $this->assertSame(2_000_000, Supplier::sole()->reserved_balance_micros);
+    }
+
+    private function adminEffect(Order $order): TelegramOutboundEffect
+    {
+        config()->set('services.telegram.token', 'test-token');
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 9001]])]);
+
+        return app(TelegramOutboundEffectService::class)->recordAdminOrderPaidNotification($order->fresh(), '123456');
+    }
+
+    private function completeSupplierAndReceipts(Order $order, SupplierFulfillment $fulfillment, int $quantity, ?TelegramOutboundEffect $adminEffect = null, bool $deliverReceipts = true): void
+    {
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 9002]]),
+            '*' => Http::response(['status' => 'delivered', 'order_id' => 'exact-disposable-order',
+                'service_id' => 'review-sku', 'quantity' => $quantity, 'total_cost' => (string) $quantity,
+                'products' => array_map(fn ($i) => 'disposable-unit-'.$i, range(1, $quantity))]),
+        ]);
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        if ($adminEffect !== null) {
+            app(AdminOrderNotificationDeliveryPipeline::class)->deliver($adminEffect);
+            $this->assertSame(TelegramOutboundEffectState::Pending, $adminEffect->fresh()->state);
+        }
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $this->assertNotNull($receipt);
+        if (! $deliverReceipts) {
+            return;
+        }
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        while ($receipt !== null) {
+            if ($adminEffect !== null) {
+                app(AdminOrderNotificationDeliveryPipeline::class)->deliver($adminEffect);
+                $this->assertSame(TelegramOutboundEffectState::Pending, $adminEffect->fresh()->state);
+            }
+            app(ReceiptDeliveryPipeline::class)->deliver($receipt, dispatchNext: false);
+            $receipt = $ledger->nextReceiptEffect($receipt->effect_group_key, $receipt->sequence);
+        }
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_owner_sees_delivery_status_while_read_only_roles_cannot_read_private_supplier_economics(): void
@@ -955,7 +1134,7 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         );
     }
 
-    private function paidSupplierOrder(int $quantity = 1, string $provider = 'warzone'): array
+    private function paidSupplierOrder(int $quantity = 1, string $provider = 'warzone', bool $includeLocal = false): array
     {
         Queue::fake();
         Http::preventStrayRequests();
@@ -979,6 +1158,11 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         $customer = Customer::factory()->create(['telegram_id' => 798001]);
         $cart = Cart::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addHour()]);
         CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => $quantity]);
+        if ($includeLocal) {
+            $local = Product::factory()->create(['name' => 'Local credential', 'stock' => 1, 'reserved_stock' => 0]);
+            ProductStockItem::create(['product_id' => $local->id, 'secret' => 'local-disposable-credential']);
+            CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $local->id, 'quantity' => 1]);
+        }
         $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
         Http::assertNothingSent();
         app(OrderLifecycle::class)->applyManualCompletion($order);

@@ -140,6 +140,8 @@ final class ReceiptDeliveryPipeline
             if ($finalized !== null && $dispatchNext && $this->isInvoiceEffect($finalized)) {
                 $this->dispatchNextReceiptEffect($finalized);
             }
+        } finally {
+            app(AdminOrderNotificationDeliveryPipeline::class)->wakePaidOrder((string) $claimed->source_id);
         }
     }
 

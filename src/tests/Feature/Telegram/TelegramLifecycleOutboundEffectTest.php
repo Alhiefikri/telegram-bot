@@ -448,6 +448,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         Queue::fake();
         $order = $this->checkoutOrder();
         app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->sole());
+        $this->travel(120)->seconds();
         $outboundEffects = app(TelegramOutboundEffectService::class);
         $effect = $outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PAID);
         $sendCount = 0;
@@ -479,6 +480,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         Queue::fake();
         $order = $this->checkoutOrder();
         app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->sole());
+        $this->travel(120)->seconds();
         $outboundEffects = app(TelegramOutboundEffectService::class);
         $effect = $outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_ADMIN_PAID);
         Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response($response)]);
@@ -1117,6 +1119,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
 
         if ($family === 'paid') {
             app(OrderStateMachine::class)->applyPaymentPaid($order->payments()->sole());
+            $this->travel(120)->seconds();
         } elseif ($family === 'expired') {
             $order->forceFill(['expires_at' => now()->subMinute()])->save();
             $order->payments()->sole()->update(['expired_at' => now()->subMinute()]);

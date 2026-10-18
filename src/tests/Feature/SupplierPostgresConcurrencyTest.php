@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
@@ -23,6 +24,7 @@ use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
 use App\Models\SupplierPurchaseEvidence;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
@@ -36,6 +38,8 @@ use App\Services\Suppliers\SupplierManager;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
 use App\Services\Suppliers\SupplierPricing;
+use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
+use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\ConnectionException;
@@ -64,6 +68,61 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(0, PostgresTestDatabase::migrateFresh());
         Queue::fake();
         Http::preventStrayRequests();
+    }
+
+    #[Group('postgres-release')]
+    public function test_admin_escalation_and_recovered_result_are_each_sent_once_by_competing_workers(): void
+    {
+        [, , , $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        config()->set('services.telegram.token', 'disposable-token');
+        $effect = app(TelegramOutboundEffectService::class)->recordAdminOrderPaidNotification($order->fresh(), '123456');
+        $this->travel(120)->seconds();
+        $deliver = function () use ($effect): array {
+            Http::swap(new Factory);
+            Http::fake(function () {
+                usleep(100000);
+
+                return Http::response(['ok' => true, 'result' => ['message_id' => 9101]]);
+            });
+            app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect->fresh());
+
+            return ['sends' => Http::recorded()->count()];
+        };
+        $this->assertSame(1, array_sum(array_column($this->race([$deliver, $deliver, $deliver]), 'sends')));
+        $this->assertFalse($effect->fresh()->outcome_metadata['paid_outcome']['resolved']);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $this->process($fulfillment->id);
+        Http::swap(new Factory);
+        Http::fake(['*' => Http::response(['ok' => true, 'result' => ['message_id' => 9102]])]);
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        while ($receipt !== null) {
+            $claimed = $ledger->claim($receipt->id);
+            $this->assertNotNull($claimed);
+            $ledger->finalizeSent($claimed->id, $claimed->claim_token, '9102');
+            $receipt = $ledger->nextReceiptEffect($receipt->effect_group_key, $receipt->sequence);
+        }
+        $recover = function () use ($effect): array {
+            Http::swap(new Factory);
+            Http::fake(function () {
+                usleep(100000);
+
+                return Http::response(['ok' => true, 'result' => ['message_id' => 9103]]);
+            });
+            $pipeline = app(AdminOrderNotificationDeliveryPipeline::class);
+            $pipeline->recoverPaidOutcomeUpdates();
+            $update = TelegramOutboundEffect::where('supersedes_effect_id', $effect->id)->sole();
+            $pipeline->deliver($update);
+
+            return ['sends' => Http::recorded()->count()];
+        };
+        $this->assertSame(1, array_sum(array_column($this->race([$recover, $recover, $recover]), 'sends')));
+        $update = TelegramOutboundEffect::where('supersedes_effect_id', $effect->id)->sole();
+        $this->assertTrue($update->outcome_metadata['paid_outcome']['resolved']);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $update->state);
+        $this->assertSame(1, SupplierPurchase::count());
     }
 
     #[Group('postgres-release')]

@@ -9,6 +9,7 @@ use App\Enums\TelegramOutboundEffectType;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Throwable;
 
@@ -38,6 +39,11 @@ final class AdminOrderNotificationDeliveryPipeline
     {
         if (! in_array((string) $effect->effect_type, self::EFFECT_TYPES, true)) {
             throw new InvalidArgumentException('Unsupported Telegram admin notification effect type.');
+        }
+
+        if ($effect->effect_type === TelegramOutboundEffectType::AdminOrderPaidNotification->value
+            && ! $this->preparePaidOutcome($effect)) {
+            return;
         }
 
         $claimed = $this->ledger->claim((string) $effect->getKey());
@@ -79,6 +85,7 @@ final class AdminOrderNotificationDeliveryPipeline
                 TelegramOutboundEffectType::AdminOrderPaidNotification->value => $this->adminPaidOrderNotifier->sendEffect(
                     $order,
                     (string) $claimed->telegram_chat_id,
+                    outcome: $claimed->outcome_metadata['paid_outcome'] ?? null,
                 ),
                 TelegramOutboundEffectType::AdminOrderReviewNotification->value => $this->adminPaidOrderNotifier->sendEffect(
                     $order,
@@ -165,6 +172,79 @@ final class AdminOrderNotificationDeliveryPipeline
         }
 
         return $repaired;
+    }
+
+    private function preparePaidOutcome(TelegramOutboundEffect $effect): bool
+    {
+        return DB::transaction(function () use ($effect): bool {
+            $order = Order::query()->with(['customer', 'orderItems', 'payments'])->lockForUpdate()->findOrFail($effect->source_id);
+            $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($effect->id);
+            if (! $this->eligible($order, (string) $locked->effect_type)) {
+                return true;
+            }
+            if (isset($locked->outcome_metadata['paid_outcome'])) {
+                return true;
+            }
+            $reader = app(AdminPaidOrderOutcome::class);
+            if (! $reader->applies($order)) {
+                return true;
+            }
+            $outcome = $reader->read($order);
+            if (! $outcome['ready'] || ($locked->supersedes_effect_id !== null && ! $outcome['resolved'])) {
+                return false;
+            }
+            if (in_array($locked->state, [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed], true)) {
+                $locked->outcome_metadata = array_merge($locked->outcome_metadata ?? [], ['paid_outcome' => $outcome]);
+                $locked->save();
+            }
+
+            return true;
+        });
+    }
+
+    public function wakePaidOrder(string $orderId): void
+    {
+        DB::afterCommit(function () use ($orderId): void {
+            try {
+                TelegramOutboundEffect::query()
+                    ->where('source_type', Order::class)->where('source_id', $orderId)
+                    ->where('effect_type', TelegramOutboundEffectType::AdminOrderPaidNotification->value)
+                    ->whereIn('state', ['pending', 'failed'])
+                    ->each(fn ($effect) => app(TelegramOutboundEffectDispatcher::class)->dispatch($effect));
+                $this->recoverPaidOutcomeUpdates(100, $orderId);
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        });
+    }
+
+    public function recoverPaidOutcomeUpdates(int $chunk = 100, ?string $orderId = null): int
+    {
+        $effects = app(TelegramOutboundRecoveryPage::class)->load(
+            'admin_paid_outcome_updates',
+            TelegramOutboundEffect::query()
+                ->when($orderId !== null, fn ($query) => $query->where('source_id', $orderId))
+                ->where('effect_type', TelegramOutboundEffectType::AdminOrderPaidNotification->value)
+                ->where('outcome_metadata->paid_outcome->resolved', false)
+                ->whereIn('state', ['sent', 'unknown', 'manual_review'])
+                ->whereNotExists(function ($updates): void {
+                    $updates->selectRaw('1')->from('telegram_outbound_effects as updates')
+                        ->whereColumn('updates.supersedes_effect_id', 'telegram_outbound_effects.id');
+                }),
+            max(1, $chunk),
+        );
+        $count = 0;
+        foreach ($effects as $effect) {
+            $order = Order::query()->with(['customer', 'orderItems', 'payments'])->find($effect->source_id);
+            if ($order === null || ! app(AdminPaidOrderOutcome::class)->read($order)['resolved']) {
+                continue;
+            }
+            $update = app(TelegramOutboundEffectService::class)->recordAdminOrderPaidOutcomeUpdate($effect);
+            app(TelegramOutboundEffectDispatcher::class)->dispatch($update);
+            $count++;
+        }
+
+        return $count;
     }
 
     public function recoverMissingReviews(int $chunk = 100): int

@@ -911,6 +911,26 @@ class TelegramOutboundEffectService
         );
     }
 
+    public function recordAdminOrderPaidOutcomeUpdate(TelegramOutboundEffect $notice): TelegramOutboundEffect
+    {
+        if ($notice->effect_type !== self::TYPE_ADMIN_PAID || $notice->source_type !== Order::class
+            || ($notice->outcome_metadata['paid_outcome']['resolved'] ?? null) !== false
+            || ! in_array($notice->state, [TelegramOutboundEffectState::Sent, TelegramOutboundEffectState::Unknown, TelegramOutboundEffectState::ManualReview], true)) {
+            throw new InvalidArgumentException('An outcome update requires an unresolved admin Order notice.');
+        }
+        $key = $notice->effect_key.':result';
+
+        return TelegramOutboundEffect::query()->firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1, 'supersedes_effect_id' => $notice->id,
+            'effect_type' => self::TYPE_ADMIN_PAID, 'source_type' => Order::class, 'source_id' => $notice->source_id,
+            'target_type' => 'admin', 'telegram_chat_id' => $notice->telegram_chat_id,
+            'queue' => 'notifications', 'telegram_method' => 'sendMessage', 'locale' => 'id',
+            'template_version' => $notice->template_version,
+            'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
+            'outcome_metadata' => ['delivery_context' => 'order_lifecycle'],
+        ]);
+    }
+
     public function recordAdminOrderReviewNotification(ManualFulfillmentReview $review): ?TelegramOutboundEffect
     {
         $chatId = $this->adminTargetChatId();

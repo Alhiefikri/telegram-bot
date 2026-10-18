@@ -41,7 +41,7 @@ class TelegramAdminPaidOrderNotifier
      *
      * @return array<string, mixed>
      */
-    public function sendEffect(Order $order, string $chatId, bool $reviewNotice = false): array
+    public function sendEffect(Order $order, string $chatId, bool $reviewNotice = false, ?array $outcome = null): array
     {
         if (blank(config('services.telegram.token'))
             || preg_match('/^[1-9][0-9]*$/', $chatId) !== 1) {
@@ -55,23 +55,26 @@ class TelegramAdminPaidOrderNotifier
             'payment_mode' => $this->paymentMode($claimed),
             'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
             'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed, $reviewNotice)), $this->dashboardReplyMarkup($claimed)));
+        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed, $reviewNotice, $outcome)), $this->dashboardReplyMarkup($claimed)));
     }
 
-    private function paidMessage(Order $order, bool $reviewNotice): string
+    private function paidMessage(Order $order, bool $reviewNotice, ?array $outcome): string
     {
         $payment = $this->relevantPayment($order);
+        if ($outcome === null && $reviewNotice && app(AdminPaidOrderOutcome::class)->applies($order)) {
+            $outcome = app(AdminPaidOrderOutcome::class)->read($order);
+        }
 
         $lines = [
             $this->uiIcons->renderLegacyIcons($reviewNotice
                 ? ($order->api_order_claim_id !== null ? '🔔 Review fulfillment API' : '🔔 Review fulfillment')
-                : '🔔 Pembayaran diterima'),
+                : ($outcome !== null ? ($outcome['resolved'] ? '🔔 Hasil order' : '🔔 Order perlu ditinjau') : '🔔 Pembayaran diterima')),
             '━━━━━━━━━━━━━━',
             'Invoice: '.$order->invoice_number,
             'Pembeli: '.$this->buyerLabel($order),
             'Sumber: '.$this->sourceLabel($order),
             'Status pembayaran: '.($order->api_order_claim_id !== null ? $order->payment_status->value : 'Paid'),
-            ...$this->fulfillmentStatusLines($order),
+            ...($outcome['lines'] ?? $this->fulfillmentStatusLines($order)),
             ...($order->api_order_claim_id !== null || $reviewNotice ? [
                 'Status order: '.$order->order_status->value,
                 'Review operator: '.(ManualFulfillmentReview::query()->where('order_id', $order->id)->open()->exists() ? 'diperlukan; buka dashboard' : 'tidak ada review terbuka'),
@@ -87,7 +90,7 @@ class TelegramAdminPaidOrderNotifier
             '',
             'Paid at: '.$this->timeLabel($payment?->paid_at ?? $order->updated_at),
             '',
-            'Cek dashboard untuk proses order ini.',
+            $outcome['action'] ?? 'Cek dashboard untuk proses order ini.',
         ];
 
         return implode("\n", $lines);

@@ -41,6 +41,7 @@ use App\Services\InventoryLedger;
 use App\Services\OrderCredentialMailService;
 use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
+use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Warranty\RefundAllocation;
@@ -193,6 +194,7 @@ final class SupplierFulfillmentService
             $result = new SupplierOrderResult('ambiguous', errorCode: 'transport_unavailable');
         }
         DB::transaction(fn () => $this->finalize($fulfillmentId, $purchase->id, $token, $result, $read), 5);
+        app(AdminOrderNotificationDeliveryPipeline::class)->wakePaidOrder((string) $purchase->fulfillment->order_id);
     }
 
     public function recover(int $max = 100): array
