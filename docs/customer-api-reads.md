@@ -183,7 +183,7 @@ at `intdiv(PHP_INT_MAX, 100)` in stored units: 92233720368547758 whole IDR or
 micro-USDT on the supported 64-bit runtime. Dollar form inputs retain their
 existing three-decimal precision and use exact integer normalization.
 
-Migration `2026_10_17_000001_bound_product_quote_prices.php` adds six PostgreSQL
+Migration `2026_10_17_120001_bound_product_quote_prices.php` adds six PostgreSQL
 `CHECK ... NOT VALID` constraints. It leaves legacy rows untouched and does not
 scan them for validation. New inserts and updated rows must satisfy the bounds;
 an outlier must have its prices repaired before any update to that row can
