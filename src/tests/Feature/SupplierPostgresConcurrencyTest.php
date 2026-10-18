@@ -38,6 +38,7 @@ use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
 use App\Services\Suppliers\SupplierPricing;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -82,6 +83,67 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
         $this->assertSame(0, $product->fresh()->stock);
+    }
+
+    #[Group('postgres-release')]
+    public function test_returned_unknown_recovery_is_claimed_once_by_competing_workers(): void
+    {
+        [, $supplier, , $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        Http::fake(fn () => throw new ConnectionException('Accepted purchase response lost'));
+        app(SupplierFulfillmentService::class)->process($f->id);
+        $reference = SupplierPurchase::sole()->reference;
+        $f->update(['next_attempt_at' => now()->subSecond()]);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        $results = $this->race([
+            fn () => $this->process($f->id),
+            fn () => $this->process($f->id),
+            fn () => $this->process($f->id),
+        ]);
+        $this->assertSame(1, array_sum(array_column($results, 'posts')));
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame($reference, SupplierPurchase::sole()->reference);
+        $this->assertSame(1, SupplierPurchase::sole()->replay_count);
+        $this->assertSame(1, ProductStockItem::whereNotNull('supplier_purchase_id')->count());
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+    }
+
+    #[Group('postgres-release')]
+    public function test_transient_exact_read_recovery_is_claimed_once_without_a_second_debit(): void
+    {
+        [, $supplier, , $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        Http::fakeSequence()
+            ->push(['status' => 'pending', 'orderId' => 'race-order', 'quantity' => 1, 'total_cost' => '1'])
+            ->pushStatus(503);
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $f->refresh()->update(['next_attempt_at' => now()->subSecond()]);
+        $service->process($f->id);
+        $f->refresh()->update(['next_attempt_at' => now()->subSecond()]);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        $read = function () use ($f): array {
+            $result = $this->process($f->id);
+            $result['gets'] = Http::recorded(fn ($request) => $request->method() === 'GET')->count();
+
+            return $result;
+        };
+        $results = $this->race([$read, $read, $read]);
+        $this->assertSame(0, array_sum(array_column($results, 'posts')));
+        $this->assertSame(1, array_sum(array_column($results, 'gets')));
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(1, ProductStockItem::whereNotNull('supplier_purchase_id')->count());
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
     }
 
     #[Group('postgres-release')]

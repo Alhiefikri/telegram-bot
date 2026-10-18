@@ -285,6 +285,34 @@ class SupplierClientTest extends TestCase
         $this->assertSame('ambiguous', app(SupplierClient::class)->purchase($supplier, $this->item($supplier, ['external_id' => '4']), 1, 'checkout-1')->outcome);
     }
 
+    public function test_toolorax_history_accepts_minute_precision_without_inventing_seconds_evidence(): void
+    {
+        $supplier = $this->supplier('toolorax');
+        $this->fake(fn () => Http::response(['ok' => true, 'count' => 1, 'orders' => [[
+            'order_code' => 'minute-order', 'product_id' => 4, 'quantity' => 3, 'total' => '3',
+            'status' => 'fulfilled', 'created_at' => '2026-10-18 10:23',
+        ]]]));
+        $history = app(SupplierClient::class)->orderHistory($supplier, 'Asia/Jakarta');
+        $this->assertSame('minute-order', $history->orders[0]['order_id']);
+        $this->assertSame('2026-10-18 10:23:00', $history->orders[0]['created_at']->format('Y-m-d H:i:s'));
+        $this->assertSame('minute', $history->orders[0]['timestamp_precision']);
+    }
+
+    #[DataProvider('providers')]
+    public function test_post_dispatch_cooldown_failure_never_proves_no_purchase(string $provider): void
+    {
+        $supplier = $this->supplier($provider);
+        $item = $this->item($supplier, $provider === 'toolorax' ? ['external_id' => '4'] : []);
+        $this->fake(function () {
+            Cache::shouldReceive('lock')->once()->andThrow(new \RuntimeException('Disposable cache outage after POST'));
+
+            return Http::response(['error' => 'Rate limited'], 429);
+        });
+        $result = app(SupplierClient::class)->purchase($supplier, $item, 1, 'original-reference');
+        $this->assertSame('ambiguous', $result->outcome);
+        Http::assertSentCount(1);
+    }
+
     public function test_toolorax_create_envelope_without_status_hydrates_the_saved_order(): void
     {
         $supplier = $this->supplier('toolorax');

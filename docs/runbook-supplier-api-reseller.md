@@ -410,6 +410,85 @@ exception; retired warranty/refund units stay unavailable. Use the existing reco
 command/worker below, not another API purchase, for lost Redis work. See
 [API order schemas and worker-loss proof](customer-api-orders.md#owned-history-status-and-delivery-s07).
 
+### Fulfillment recovery corrections (#645, 2026-10-18)
+
+Disposable reproductions identified these application defects:
+
+- `SupplierFulfillmentService::finalize()` moved a known-order GET transport,
+  upstream or rate-limit failure into terminal review. `recover()` then excluded
+  it, even though another exact GET could retrieve the original delivery.
+  Such failures now retain `awaiting_delivery` and a durable one-minute deadline.
+  Previously recorded identity, debit and encrypted delivery evidence stay intact.
+- A returned unknown purchase response skipped the bounded same-reference
+  recovery already available after worker loss. For ProdSeller, AI Vault,
+  NyStore and Canboso, an ambiguous transport/upstream result with no identity,
+  cost or delivery evidence now enters that existing recovery path: at most one
+  replay, on the same Purchase/reference, while the connection is active and the
+  original dispatch is within ten minutes. Expiry or another unknown result
+  requires review and retains the hold. This does not extend any provider's
+  idempotency contract. BuyMail retains its separate reference-history,
+  credential-fingerprint, five-attempt and seven-day recovery rules.
+- `SupplierClient::send()` could classify a cooldown-cache failure after a POST
+  as a pre-purchase rejection for providers other than Canboso/Nastele. All
+  shared-transport POSTs now classify that failure as ambiguous. A cache outage
+  after dispatch cannot authorize fallback or release a financial hold.
+- Canboso exact history returns no credentials. Its adapter's
+  `delivery_unavailable` result now creates a Manual Fulfillment Review rather
+  than polling indefinitely. A completed history row alone never allocates
+  credentials or confirms buyer delivery.
+
+Duplicate queue wakeups respect `next_attempt_at`; an expired transport lease
+still permits crash recovery. Known-order transient recovery is GET-only across
+the shared finalizer, including BuyMail and Nastele. Authentication failures,
+payload/identity/economic conflicts, duplicate units and incomplete terminal
+delivery remain operator-review cases, not reasons to buy again.
+
+ToolOraX history accepts both `YYYY-MM-DD HH:mm:ss` and `YYYY-MM-DD HH:mm`.
+Parsing retains timestamp precision. Same-minute SKU rows remain possible
+candidates even when dispatch occurred later in that minute, but minute-only
+history cannot authorize no-debit (`history_time_precision_unverified`).
+Automatic scans still cannot attest the provider timezone or assign an order
+from similar time/name/quantity. Non-idempotent unknown-ID purchases, including
+ToolOraX, CSxStore, ARRS, Warzone and Nastele, require operator attribution and
+verified exact-order evidence; they never trigger a blind purchase/fallback.
+
+For a remaining review, inspect the Purchase's sanitized error and dispatch
+episodes in the private monitor. Resolve authentication/configuration errors,
+or obtain the original supplier order ID and compare its quantity, actual cost
+and distinct credentials through the existing exact-order recovery action.
+For Canboso, obtain the missing private delivery evidence from the provider and
+use the existing reviewed manual-credential/handoff path. Do not substitute a
+new purchase for an unknown debit.
+
+Verification uses synthetic suppliers and Telegram HTTP fixtures. Standalone
+SQLite-memory smokes for Warzone and ToolOraX ran actual database `queue:work`
+jobs after deleting wakeups before three recovery ticks. Each observed one
+purchase POST, two exact GETs (503 then success),
+one Purchase, three allocated units, one 3,000,000-micro debit and zero remaining
+hold. The real receipt pipeline sent all three units in fixture request payloads,
+recorded Telegram message-ID acknowledgements and the Order receipt marker;
+repeated recovery sent nothing again. Completed alone was checked separately
+and did not imply delivery. This is not live Telegram/provider qualification.
+
+Regression entry points: `SupplierFulfillmentTest`, `SupplierClientTest`,
+`SupplierIndependentRegressionTest`, `SupplierPostgresConcurrencyTest`,
+`CanbosoPostgresConcurrencyTest`, the BuyMail/Nastele contract suites and
+`TelegramReceiptOutboundEffectTest`. PostgreSQL races cover competing workers
+recovering returned unknowns and transient exact reads without another debit or
+allocation. Unknown Telegram effects retain the existing no-blind-resend rule.
+
+The broader supplier/BuyMail/Canboso/Nastele/CSxStore and Telegram receipt run
+passed 502 tests / 4,714 assertions. Final focused verification passed
+20 tests / 142 assertions. The final
+PostgreSQL 16 changed-path run passed three multi-process tests / 45 assertions
+without skips (returned unknown, transient exact GET and concurrent Canboso
+sync preserving unsettled holds). Scoped Pint checks passed. Disposable smoke
+scripts and database containers were removed after verification.
+
+The original transport error for Purchase #635 remains unproven. Its invoice
+was already delivered; this change performs no historical recovery, production
+mutation, real supplier purchase, real Telegram send, deployment or CI action.
+
 ### Supervised purchase transport and crash evidence (#571)
 
 `suppliers:recover` only dispatches `ProcessSupplierFulfillment` to connection

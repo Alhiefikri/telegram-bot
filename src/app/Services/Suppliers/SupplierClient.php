@@ -305,13 +305,14 @@ final class SupplierClient
             $status = $this->text($row['status'] ?? null, 40);
             $createdAtValue = $this->text($row['created_at'] ?? null, 32);
             try {
-                $createdAt = CarbonImmutable::createFromFormat('!Y-m-d H:i:s', $createdAtValue, $timezone);
+                $format = strlen($createdAtValue) === 16 ? 'Y-m-d H:i' : 'Y-m-d H:i:s';
+                $createdAt = CarbonImmutable::createFromFormat('!'.$format, $createdAtValue, $timezone);
             } catch (Throwable) {
                 throw new SupplierUnavailable('invalid_order_history');
             }
             $errors = CarbonImmutable::getLastErrors();
             if ($createdAt === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
-                || $createdAt->format('Y-m-d H:i:s') !== $createdAtValue) {
+                || $createdAt->format($format) !== $createdAtValue) {
                 throw new SupplierUnavailable('invalid_order_history');
             }
             $orders[] = [
@@ -321,6 +322,7 @@ final class SupplierClient
                 'total_micros' => $total,
                 'status' => $status,
                 'created_at' => $createdAt,
+                'timestamp_precision' => $format === 'Y-m-d H:i' ? 'minute' : 'second',
             ];
         }
 
@@ -331,6 +333,7 @@ final class SupplierClient
             'total_micros' => $row['total_micros'],
             'status' => $row['status'],
             'created_at' => $row['created_at']->format('Y-m-d H:i:s'),
+            'timestamp_precision' => $row['timestamp_precision'],
         ], $orders);
 
         return new SupplierOrderHistorySnapshot(
@@ -526,7 +529,7 @@ final class SupplierClient
             $this->observeRateLimit($provider, $response);
         } catch (SupplierUnavailable $exception) {
             // A cache failure after dispatch is not evidence of no purchase.
-            if (in_array($provider, [SupplierProvider::Canboso, SupplierProvider::Nastele], true) && $method === 'POST') {
+            if ($method === 'POST') {
                 throw new SupplierUnavailable('transport');
             }
             throw $exception;

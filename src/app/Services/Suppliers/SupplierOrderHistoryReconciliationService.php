@@ -266,12 +266,17 @@ final class SupplierOrderHistoryReconciliationService
         $candidateIds = [];
         foreach ($snapshot->orders as $row) {
             if ((string) $row['product_id'] === $expectedProductId
-                && $row['created_at']->setTimezone((string) config('app.timezone'))->greaterThanOrEqualTo($dispatchAt)) {
+                && (($row['timestamp_precision'] ?? 'second') === 'minute'
+                    ? $row['created_at']->addMinute()->setTimezone((string) config('app.timezone'))->greaterThan($dispatchAt)
+                    : $row['created_at']->setTimezone((string) config('app.timezone'))->greaterThanOrEqualTo($dispatchAt))) {
                 $candidateIds[] = $row['order_id'];
             }
         }
         if ($candidateIds !== []) {
             return [SupplierOrderHistoryReconciliation::OUTCOME_CANDIDATE_ORDERS, 'possible_purchase_after_dispatch', $coverageStart, $coverageEnd, array_values(array_unique($candidateIds))];
+        }
+        if (collect($snapshot->orders)->contains(fn (array $row) => ($row['timestamp_precision'] ?? 'second') === 'minute')) {
+            return [SupplierOrderHistoryReconciliation::OUTCOME_INCONCLUSIVE, 'history_time_precision_unverified', $coverageStart, $coverageEnd, []];
         }
         if ($coverageStart === null || $coverageStart->greaterThan($dispatchAt)) {
             return [SupplierOrderHistoryReconciliation::OUTCOME_INCONCLUSIVE, 'dispatch_outside_history_window', $coverageStart, $coverageEnd, []];

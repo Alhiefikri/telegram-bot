@@ -43,12 +43,14 @@ use App\Services\Suppliers\SupplierMoney;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\NonTransactionalDatabaseTestCase as TestCase;
 
 class SupplierFulfillmentTest extends TestCase
@@ -464,6 +466,187 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(8_000_000, $supplier->fresh()->balance_micros);
         $this->assertFalse(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
+    }
+
+    public function test_toolorax_known_create_identity_survives_failed_hydration_and_later_read_outage(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(quantity: 3, provider: 'toolorax');
+        $sku->update(['external_id' => '4']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $gets = 0;
+        Http::fake(function ($request) use (&$gets) {
+            if ($request->method() === 'POST') {
+                return Http::response(['ok' => true, 'order_code' => 'original-shopbot']);
+            }
+            $gets++;
+            if ($gets === 1) {
+                return Http::response([], 503);
+            }
+            if ($gets === 2) {
+                throw new ConnectionException('Exact GET response lost');
+            }
+
+            return Http::response(['ok' => true, 'order' => [
+                'order_code' => 'original-shopbot', 'product_id' => 4, 'quantity' => 3,
+                'status' => 'fulfilled', 'total' => '3', 'delivered_keys' => ['shopbot-a', 'shopbot-b', 'shopbot-c'],
+            ]]);
+        });
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $this->assertSame('original-shopbot', SupplierPurchase::sole()->supplier_order_id);
+        $this->assertSame(3_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->travel(2)->minutes();
+        $service->process($f->id);
+        $this->assertSame('awaiting_delivery', $f->fresh()->state);
+        Queue::fake();
+        $this->travel(2)->minutes();
+        $service->recover();
+        Queue::assertPushed(ProcessSupplierFulfillment::class);
+        $service->process($f->id);
+        $service->process($f->id);
+        $this->assertSame(['shopbot-a', 'shopbot-b', 'shopbot-c'], ProductStockItem::orderBy('supplier_unit_index')->pluck('secret')->all());
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(7_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(1, Http::recorded(fn ($request) => $request->method() === 'POST')->count());
+        $this->assertSame(3, $gets);
+    }
+
+    public function test_canboso_history_without_credentials_stops_for_operator_review_not_endless_polling(): void
+    {
+        [, $supplier, , $cart] = $this->fixture(provider: 'canboso');
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fakeSequence()->push([
+            'success' => true,
+            'order' => ['orderCode' => 'original-canboso', 'productId' => 'fixture-sku', 'productType' => 'account',
+                'quantity' => 1, 'bonusQuantity' => 0, 'finalQuantity' => 1, 'status' => 'completed'],
+            'payment' => ['currency' => 'USD', 'amount' => '1'],
+        ])->push(['success' => true, 'orders' => [['orderCode' => 'original-canboso', 'status' => 'completed', 'quantity' => 1]]]);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $this->travel(2)->minutes();
+        $service->process($f->id);
+        $this->assertSame('review', $f->fresh()->state);
+        $this->assertSame('delivery_unavailable', $f->fresh()->last_error);
+        $this->assertSame('pending', ManualFulfillmentReview::sole()->state);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+        Queue::fake();
+        $service->recover();
+        $service->process($f->id);
+        Queue::assertNotPushed(ProcessSupplierFulfillment::class);
+        Http::assertSentCount(2);
+    }
+
+    public static function exactReadProviders(): array
+    {
+        return array_map(fn (string $provider) => [$provider], ['prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'nystore']);
+    }
+
+    #[DataProvider('exactReadProviders')]
+    public function test_known_order_read_failure_remains_due_and_eventually_delivers_all_units(string $provider): void
+    {
+        [, $supplier, , $cart] = $this->fixture(quantity: 3, provider: $provider);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fakeSequence()
+            ->push(['status' => 'pending', 'orderId' => 'original-order', 'service_id' => 'fixture-sku', 'quantity' => 3, 'total_cost' => '3'])
+            ->pushStatus(503)
+            ->push(['status' => 'delivered', 'orderId' => 'original-order', 'service_id' => 'fixture-sku', 'quantity' => 3, 'total_cost' => '3', 'deliveredKeys' => ['unit-a', 'unit-b', 'unit-c']]);
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $this->travel(2)->minutes();
+        $service->process($f->id);
+        Queue::fake();
+        $this->travel(2)->minutes();
+        $service->recover();
+        Queue::assertPushed(ProcessSupplierFulfillment::class, fn ($job) => $job->fulfillmentId === $f->id);
+        $service->process($f->id);
+        $service->process($f->id);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(['unit-a', 'unit-b', 'unit-c'], ProductStockItem::orderBy('supplier_unit_index')->pluck('secret')->all());
+        $this->assertSame(7_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(1, Http::recorded(fn ($request) => $request->method() === 'POST')->count());
+        $this->assertSame(2, Http::recorded(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/original-order'))->count());
+    }
+
+    public function test_returned_transport_unknown_uses_the_same_bounded_idempotent_recovery_as_worker_loss(): void
+    {
+        [, $supplier, , $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $calls = [];
+        Http::fake(function ($request) use (&$calls) {
+            $calls[] = $request->header('Idempotency-Key');
+            if (count($calls) === 1) {
+                throw new ConnectionException('Response lost after supplier accepted purchase');
+            }
+
+            return Http::response(['status' => 'delivered', 'orderId' => 'accepted-once', 'quantity' => 1, 'total_cost' => '1', 'deliveredKeys' => ['original-unit']]);
+        });
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $reference = SupplierPurchase::sole()->reference;
+        $service->process($f->id);
+        $this->assertSame([[$reference]], $calls, 'Duplicate wakeups must respect the durable retry deadline.');
+        $this->travel(2)->minutes();
+        Queue::fake();
+        $service->recover();
+        Queue::assertPushed(ProcessSupplierFulfillment::class);
+        $service->process($f->id);
+        $service->process($f->id);
+        $this->assertSame([[$reference], [$reference]], $calls);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame('original-unit', ProductStockItem::sole()->secret);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+    }
+
+    public static function exhaustedPurchaseRecovery(): array
+    {
+        return ['second unknown' => [2, 2, 1], 'expired idempotency window' => [11, 1, 0]];
+    }
+
+    #[DataProvider('exhaustedPurchaseRecovery')]
+    public function test_unknown_purchase_recovery_is_bounded_and_never_falls_back(int $minutes, int $expectedPosts, int $replays): void
+    {
+        [, $supplier, , $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $references = [];
+        Http::fake(function ($request) use (&$references) {
+            $references[] = $request->header('Idempotency-Key');
+            throw new ConnectionException('No authoritative purchase result');
+        });
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+        $this->travel($minutes)->minutes();
+        $service->process($f->id);
+        $service->recover();
+        $service->process($f->id);
+        $this->assertSame($expectedPosts, count($references));
+        $this->assertSame([SupplierPurchase::sole()->reference], $references[0]);
+        $this->assertSame(1, count(array_unique(array_map('json_encode', $references))));
+        $this->assertSame($replays, SupplierPurchase::sole()->replay_count);
+        $this->assertSame('review', $f->fresh()->state);
+        $this->assertSame('pending', ManualFulfillmentReview::sole()->state);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(10_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
     }
 
     public function test_known_order_recovery_only_reads_and_allocates_complete_matching_delivery_once(): void

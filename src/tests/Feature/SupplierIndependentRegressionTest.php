@@ -34,6 +34,7 @@ use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
 use App\Services\Telegram\TelegramAdminPaidOrderNotifier;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Http;
@@ -134,7 +135,7 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
 
     public function test_locally_blocked_replay_cannot_prove_original_dispatched_purchase_rejected(): void
     {
-        [$order, $fulfillment] = $this->paidSupplierOrder();
+        [$order, $fulfillment] = $this->paidSupplierOrder(provider: 'aivault');
         Http::fake(fn () => throw new ConnectionException('Disposable timeout after possible debit'));
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
         $purchase = SupplierPurchase::sole();
@@ -917,7 +918,44 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         );
     }
 
-    private function paidSupplierOrder(int $quantity = 1, string $provider = 'aivault'): array
+    public function test_minute_history_keeps_same_minute_candidates_but_cannot_prove_no_debit(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-10-18 10:23:45', 'UTC'));
+        [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
+        Http::fake(fn () => throw new ConnectionException('Possible debit.'));
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $owner = User::factory()->create(['role' => 'owner']);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        $productId = 4;
+        Http::fake(fn () => Http::response(['ok' => true, 'count' => 1, 'orders' => [[
+            'order_code' => 'same-minute-candidate', 'product_id' => $productId, 'quantity' => 1,
+            'total' => '1', 'status' => 'fulfilled', 'created_at' => '2026-10-18 10:23',
+        ]]]));
+        $service = app(SupplierOrderHistoryReconciliationService::class);
+        $candidate = $service->reconcile($fulfillment->id, $owner, 'UTC');
+        $this->assertSame(['same-minute-candidate'], $candidate->candidate_order_ids);
+        $this->assertSame('candidate_orders', $candidate->outcome);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'count' => 1, 'orders' => [[
+            'order_code' => 'unrelated-minute-order', 'product_id' => 8, 'quantity' => 1,
+            'total' => '1', 'status' => 'fulfilled', 'created_at' => '2026-10-18 09:23',
+        ]]]));
+        $inconclusive = $service->reconcile($fulfillment->id, $owner, 'UTC');
+        $this->assertSame('inconclusive', $inconclusive->outcome);
+        $this->assertSame('history_time_precision_unverified', $inconclusive->error_code);
+        $this->assertSame(1_000_000, Supplier::sole()->reserved_balance_micros);
+        $this->assertNull(SupplierPurchase::sole()->supplier_order_id);
+        $this->assertSame(0, ProductStockItem::count());
+        $this->expectException(InvalidOrderTransition::class);
+        app(SupplierFulfillmentService::class)->confirmNoDebit(
+            $fulfillment->id, $owner, '', 'Minute precision is not exact coverage.',
+            evidenceSource: 'provider_history', historyReconciliationId: $inconclusive->id,
+        );
+    }
+
+    private function paidSupplierOrder(int $quantity = 1, string $provider = 'warzone'): array
     {
         Queue::fake();
         Http::preventStrayRequests();

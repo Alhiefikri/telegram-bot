@@ -187,8 +187,10 @@ final class SupplierFulfillmentService
             } else {
                 $result = $read ? $this->client->order($supplier, $purchase->supplier_order_id, $sku->external_id, $purchase->reference) : $this->client->purchase($supplier, $sku, $purchase->quantity, $purchase->reference);
             }
+        } catch (SupplierUnavailable $exception) {
+            $result = new SupplierOrderResult('ambiguous', errorCode: $exception->errorCode);
         } catch (Throwable) {
-            $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'transport_unavailable');
+            $result = new SupplierOrderResult('ambiguous', errorCode: 'transport_unavailable');
         }
         DB::transaction(fn () => $this->finalize($fulfillmentId, $purchase->id, $token, $result, $read), 5);
     }
@@ -254,6 +256,9 @@ final class SupplierFulfillmentService
         }
         $purchase = $f->current_purchase_id ? SupplierPurchase::query()->lockForUpdate()->findOrFail($f->current_purchase_id) : null;
         if ($purchase?->lease_expires_at?->isFuture()) {
+            return null;
+        }
+        if ($f->next_attempt_at?->isFuture() && ! $purchase?->lease_expires_at?->isPast()) {
             return null;
         }
         if ($purchase?->state === 'sending' && $purchase->supplier_order_id === null) {
@@ -325,6 +330,27 @@ final class SupplierFulfillmentService
                 ->update(['finished_at' => now(), 'outcome' => $result->outcome, 'error_code' => $result->errorCode]);
         }
         $purchase->forceFill(['claim_token' => null, 'lease_expires_at' => null, 'last_error' => $result->errorCode]);
+        $transient = in_array($result->errorCode, ['transport', 'transport_unavailable', 'upstream', 'rate_limited', 'snapshot_timeout'], true);
+        if ($read && $purchase->supplier_order_id !== null && $transient) {
+            $purchase->forceFill(['state' => 'awaiting_delivery', 'next_attempt_at' => now()->addMinute()])->save();
+            if ($f->state !== 'delivered') {
+                $f->update(['state' => 'awaiting_delivery', 'next_attempt_at' => now()->addMinute()]);
+            }
+
+            return;
+        }
+        $supplier = $suppliers->get($purchase->supplier_id);
+        if (! $read && $result->outcome === 'ambiguous' && $transient && ! $result->identityTrusted && $result->orderId === null
+            && $result->deliveries === [] && $result->costMicros === null
+            && $supplier->provider !== 'buymail' && $supplier->is_active
+            && SupplierProvider::tryFrom($supplier->provider)?->supportsIdempotency()
+            && $purchase->replay_count === 0 && $purchase->dispatched_at?->gte(now()->subMinutes(10))) {
+            // Re-enter the same bounded recovery used for interrupted dispatches.
+            $purchase->forceFill(['state' => 'sending', 'next_attempt_at' => now()->addMinute()])->save();
+            $f->update(['state' => 'purchasing', 'next_attempt_at' => now()->addMinute()]);
+
+            return;
+        }
         if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && ! $result->identityTrusted
             && in_array($result->errorCode, ['transport', 'transport_unavailable', 'invalid_payload', 'idempotency_in_progress', 'order_in_progress', 'reference_already_used'], true)
             && $purchase->replay_count < 5 && $purchase->dispatched_at?->gte(now()->subDays(7)->addMinutes(5))) {
@@ -499,7 +525,7 @@ final class SupplierFulfillmentService
             if ($f->state !== 'delivered') {
                 $f->update(['state' => 'awaiting_delivery', 'next_attempt_at' => now()->addMinute()]);
             }
-        } elseif (($purchase->delivery_payload ?? []) !== [] || ($purchase->observed_quantity !== null && ! $quantityMatches) || ! $result->identityTrusted) {
+        } elseif (($purchase->delivery_payload ?? []) !== [] || ($purchase->observed_quantity !== null && ! $quantityMatches) || ! $result->identityTrusted || $result->errorCode === 'delivery_unavailable') {
             $purchase->state = $purchase->supplier_order_id === null && ($purchase->delivery_payload ?? []) === [] ? 'ambiguous' : 'review';
             $purchase->save();
             $this->review($f, $order, $conflictingDelivery ? 'delivery_evidence_conflict' : ($result->errorCode ?? 'delivery_incomplete'));

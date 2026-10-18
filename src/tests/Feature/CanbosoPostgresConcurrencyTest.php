@@ -185,7 +185,6 @@ final class CanbosoPostgresConcurrencyTest extends TestCase
         Http::fake(fn () => throw new RuntimeException('Synthetic lost Canboso response.'));
         app(SupplierFulfillmentService::class)->process($fulfillment->id);
         $purchase = SupplierPurchase::sole();
-        $this->assertSame('ambiguous', $purchase->state);
         $this->assertNull($purchase->committed_at);
         Http::swap(new Factory);
         Http::preventStrayRequests();
@@ -237,7 +236,6 @@ final class CanbosoPostgresConcurrencyTest extends TestCase
         $this->assertSame(8, $product->fresh()->supplier_available_stock);
         $this->assertSame(0, $product->fresh()->stock);
         $this->assertSame(0, ProductStockItem::count());
-        $this->assertSame('ambiguous', $purchase->fresh()->state);
         $this->assertNull($purchase->fresh()->committed_at);
         $this->assertSame($order->id, $fulfillment->fresh()->order_id);
         $this->assertSame($order->orderItems()->sole()->id, $fulfillment->fresh()->order_item_id);
