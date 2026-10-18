@@ -19,6 +19,7 @@ use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\InventoryMovement;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
@@ -317,7 +318,7 @@ final class UsdtBalanceCheckoutPostgresConcurrencyTest extends TestCase
                 return $this->preferenceCheckout($cart->id, BalancePaymentPreference::UsdFirst);
             }
             if ($index === 1 || $index === 4) {
-                app(OrderLifecycle::class)->applyPaymentRefunded(\App\Models\Payment::findOrFail($paymentId));
+                app(OrderLifecycle::class)->applyPaymentRefunded(Payment::findOrFail($paymentId));
             } elseif ($index === 2) {
                 app(CustomerUsdtBalanceLedger::class)->creditVerifiedTopUp($customer,
                     new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits(2_000_000), 'contended-usd', 'receipt-contended', 'v1'), 'contended-usd');

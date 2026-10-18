@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\BalancePaymentPreference;
 use App\Enums\PaymentStatus;
 use App\Enums\UsdtBalanceEntryKind;
 use App\Enums\UserRole;
@@ -61,7 +62,7 @@ final class UsdtOrderRefundTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(4_000_000, $this->balance($customer));
         $this->assertSame(1, ProductStockItem::where('order_item_id', $unit->order_item_id)->whereNull('retired_at')->count());
-        $customer->forceFill(['balance_payment_preference' => \App\Enums\BalancePaymentPreference::IdrOnly])->save();
+        $customer->forceFill(['balance_payment_preference' => BalancePaymentPreference::IdrOnly])->save();
         $unit->orderItem->product->update(['usdt_price_amount' => 99_000_000, 'price_amount' => 1]);
         app(OrderLifecycle::class)->applyPaymentRefunded($payment);
         app(OrderLifecycle::class)->applyPaymentRefunded($payment);

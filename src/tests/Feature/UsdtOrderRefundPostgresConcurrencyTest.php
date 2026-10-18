@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\BalancePaymentPreference;
 use App\Enums\PaymentStatus;
 use App\Enums\UsdtBalanceEntryKind;
 use App\Exceptions\InvalidOrderTransition;
@@ -10,12 +11,14 @@ use App\Models\CartItem;
 use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\ManualFulfillmentReview;
+use App\Models\Order;
 use App\Models\OrderRefund;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\SupplierAccountUnit;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Checkout\BalanceCheckoutRequest;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
@@ -85,7 +88,7 @@ final class UsdtOrderRefundPostgresConcurrencyTest extends TestCase
                 return 'full';
             }
             $order = app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id), checkoutKey: 'refund-race-checkout',
-                balanceRequest: new \App\Services\Checkout\BalanceCheckoutRequest(\App\Enums\BalancePaymentPreference::UsdFirst, 15_000, 2_000_000));
+                balanceRequest: new BalanceCheckoutRequest(BalancePaymentPreference::UsdFirst, 15_000, 2_000_000));
             Http::assertNothingSent();
 
             return (string) $order->id;
@@ -94,7 +97,7 @@ final class UsdtOrderRefundPostgresConcurrencyTest extends TestCase
         $this->assertSame(3_000_000, $this->balance($customer));
         $this->assertSame(2_000_001, (int) $this->refundEntries()->where('original_entry_id', $debit->entryId)->sum('amount_micro'));
         $this->assertSame(2, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::PurchaseDebit)->count());
-        $accepted = \App\Models\Order::findOrFail($results[2]['value']);
+        $accepted = Order::findOrFail($results[2]['value']);
         $this->assertSame('USDT', $accepted->currency);
         $this->assertSame(2_000_000, $accepted->payments()->sole()->amount);
         $this->assertSame('usd_first', $accepted->balance_checkout_snapshot['preference']);

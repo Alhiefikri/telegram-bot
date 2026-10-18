@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\BalancePaymentPreference;
 use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramNavigationMediaKind;
@@ -15,6 +16,7 @@ use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\CustomerUsdtTopUp;
 use App\Models\ManualPaymentSetting;
+use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -22,8 +24,10 @@ use App\Models\TelegramNavigationRoot;
 use App\Models\User;
 use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
+use App\Services\Checkout\BalanceCheckoutRequest;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
@@ -285,18 +289,18 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
             }
             $order = app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id),
                 checkoutKey: 'binance-credit-spend-race',
-                balanceRequest: new \App\Services\Checkout\BalanceCheckoutRequest(\App\Enums\BalancePaymentPreference::UsdFirst, 10_000, 200_000));
+                balanceRequest: new BalanceCheckoutRequest(BalancePaymentPreference::UsdFirst, 10_000, 200_000));
             Http::assertNothingSent();
 
             return (string) $order->id;
         }, 'binance-credit-spend-race');
         $this->assertWorkersSucceeded($results);
         $this->assertSame(600_000, $ledger->snapshot($customer)->balanceMicro());
-        $accepted = \App\Models\Order::findOrFail($results[1]['value']);
+        $accepted = Order::findOrFail($results[1]['value']);
         $this->assertSame('USDT', $accepted->currency);
         $this->assertSame('usd_first', $accepted->balance_checkout_snapshot['preference']);
         $this->assertSame(1, ProductStockItem::where('order_item_id', $accepted->orderItems()->sole()->id)->count());
-        $this->assertSame(0, app(\App\Services\StoreBalance\StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
         $resolution = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->sole();
         $entry = CustomerUsdtBalanceEntry::findOrFail($resolution->entry_id);
         $this->assertSame(300_000, $entry->amount_micro);
