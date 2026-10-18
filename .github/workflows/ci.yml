@@ -63,6 +63,13 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       APP_ENV: testing
       APP_FORCE_HTTPS: false
@@ -76,6 +83,9 @@ jobs:
       CONCURRENCY_DB_ADMIN_PASSWORD: ci-only-not-production
       CONCURRENCY_DB_APP_USERNAME: telegram_bot_ci
       CONCURRENCY_DB_APP_PASSWORD: ci-only-not-production
+      RUN_CUSTOMER_API_REDIS_TESTS: '1'
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     defaults:
       run:
         shell: bash
@@ -101,7 +111,7 @@ jobs:
           runner: self-hosted
         with:
           php-version: '8.4'
-          extensions: bcmath, gd, intl, pcntl, pdo_pgsql, pdo_sqlite, pgsql, posix, sqlite3, zip
+          extensions: bcmath, gd, intl, pcntl, pdo_pgsql, pdo_sqlite, pgsql, posix, redis, sqlite3, zip
           coverage: none
           tools: composer:v2
 
