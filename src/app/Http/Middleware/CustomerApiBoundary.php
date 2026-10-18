@@ -3,10 +3,12 @@
 namespace App\Http\Middleware;
 
 use App\Services\CustomerApi\CustomerApiAdmission;
+use App\Services\CustomerApi\CustomerApiAvailability;
 use App\Services\CustomerApi\CustomerApiCredentials;
 use App\Services\CustomerApi\CustomerApiFailure;
 use App\Services\CustomerApi\CustomerApiUsage;
 use Closure;
+use Illuminate\Http\Exceptions\MalformedUrlException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
@@ -14,7 +16,12 @@ use Throwable;
 
 final class CustomerApiBoundary
 {
-    public function __construct(private CustomerApiCredentials $credentials, private CustomerApiAdmission $admission, private CustomerApiUsage $usage) {}
+    public function __construct(
+        private CustomerApiCredentials $credentials,
+        private CustomerApiAdmission $admission,
+        private CustomerApiUsage $usage,
+        private CustomerApiAvailability $availability,
+    ) {}
 
     public static function matches(Request $request): bool
     {
@@ -35,6 +42,26 @@ final class CustomerApiBoundary
         $request->attributes->set('customer_api_request_id', $requestId);
         try {
             $this->admission->ip((string) $request->ip());
+            // One uncached singleton read before body/auth/financial work. OFF
+            // must not authenticate a key, create a claim, lock a wallet or
+            // allocate stock; a failed read stays fail-closed as 503.
+            $availability = $this->availability->check();
+            if ($availability->unavailable) {
+                throw CustomerApiFailure::unavailable();
+            }
+            if (! $availability->enabled) {
+                throw new CustomerApiFailure(
+                    503,
+                    'api_maintenance',
+                    'The Customer API is temporarily disabled for maintenance.',
+                    ['Retry-After' => (string) CustomerApiAvailability::MAINTENANCE_RETRY_AFTER],
+                );
+            }
+            // ON keeps the established 400 invalid_path contract before
+            // authentication; OFF above already answered maintenance first.
+            if (! mb_check_encoding(rawurldecode($request->path()), 'UTF-8')) {
+                throw new MalformedUrlException;
+            }
             $stream = $request->getContent(true);
             if ((int) $request->server('CONTENT_LENGTH', 0) > 32768 || strlen(stream_get_contents($stream, 32769)) > 32768) {
                 throw new CustomerApiFailure(413, 'payload_too_large', 'The maximum request body is 32 KiB.');

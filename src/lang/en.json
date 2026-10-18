@@ -54,6 +54,8 @@
   "account.api.stale": "This action is no longer valid. Reopen API management before trying again.",
   "account.api.rate_limited": "Too many key actions. Wait before trying again; emergency Disable API has a separate limit.",
   "account.api.unavailable": "API key management is temporarily unavailable. No key action was applied. Try again later.",
+  "account.api.maintenance": "API under maintenance\n\nEvery /api/v1 call is rejected with 503 api_maintenance. API keys, balances, orders and delivery results stay stored and unchanged. Key management and payment preferences are unavailable until the Owner enables the API again.",
+  "account.api.maintenance_callback": "The API is under maintenance. No key action was applied.",
   "balance.title": "💰 My Balance",
   "balance.available": "Available balance: :balance",
   "balance.add": "➕ Add Balance",

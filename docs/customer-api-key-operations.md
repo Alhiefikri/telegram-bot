@@ -35,6 +35,20 @@ Preference writes update the existing `Customer.balance_payment_preference` enum
 Metadata comes from the bounded S04 summary, with ISO timestamps and real account admission count across rotations. The screen explicitly labels the count as account-scoped, eventually consistent and potentially incomplete; last admission is minute-rounded, not fulfillment. Usage buckets persist UTC minute timestamps, so the raw account timestamp is parsed explicitly as UTC rather than accidentally shifted by the application timezone.
 
 
+## Runtime availability gate (#647)
+
+`CustomerApiAvailability` owns the durable singleton `customer_api_settings` row (`singleton_key = customer_api`). The migration seeds `enabled = false`, `version = 0`, and no `changed_at`; there is no ENV, feature-flag service, queue, or positive cache. A missing row is OFF, and an unreadable row is OFF for the Store Bot.
+
+- The boundary reads the singleton exactly once per matched `/api/v1` request, after IP admission and before body reads, key authentication, claims, wallets, stock or fulfillment.
+- OFF returns `503` with machine code `api_maintenance`, `Retry-After: 60`, `X-Request-ID`, `Cache-Control: no-store, private`, `Referrer-Policy: no-referrer`, and no CORS headers. The answer is identical for authenticated, unauthenticated, malformed, unknown, encoded and oversized requests.
+- A database error while reading the row is reported through the existing `temporarily_unavailable` path, never as ON.
+- The Owner-only Admin control lives at `tab=settings&section=pembayaran#admin-customer-api-availability`. `UserRole::canManageCustomerApiAvailability()` is true only for `Owner`; Admin, Finance and Support are denied by middleware and form authorization.
+- `change()` locks the singleton in one transaction, rejects a stale `version`, writes no audit row for a no-op, and writes one audit row with actor/IP when the state actually changes.
+- Turning OFF never revokes keys, deletes claims, cancels Orders, changes Payments/ledgers/balances, stops fulfillment or suppresses receipt/Sales Proof/owner recovery. Turning ON restores the same keys, claims, Orders, idempotency outcomes, balances and delivery entitlements.
+- The Admin transaction commit is the linearization point. A request admitted before that commit may finish; a request admitted after it cannot perform key or financial work.
+
+Rollout warning: an already-running old container has no gate. The deployment must cut traffic to the new image before relying on the setting, and the release smoke verifies the gate is OFF after cutover. The migration is the durable default-off state, not proof that an old container is gated.
+
 ## HTTP integration and revocation
 
 `CustomerApiBoundary` applies to **all** `/api/v1` paths, including unknown paths, before CORS, request-body normalization and route dispatch, but after the existing trusted-proxy/host initialization. Future routes in `routes/api.php` automatically inherit it. It accepts only the Authorization Bearer header, removes that value from the downstream request, rejects browser Origin requests, and never logs a user into any guard. Query/cookie/session values cannot authenticate. Controllers consume the immutable `customer_api_principal` request attribute and must scope every resource to its Customer ID. A credential is not authority to use Admin or supplier webhook routes.
@@ -195,3 +209,11 @@ suppression. It also corrects the S04 lock-order prose above to match the
 Customer-first S06 mutation fence. Local qualification does not approve
 production exposure or the proposed global admission rates.
 
+
+### Verification exercised for #647
+
+- SQLite full suite: 4,963 tests, 4,690 passed, 273 skipped, 0 failures.
+- Declared PostgreSQL/API lane with `--fail-on-skipped`: `CustomerApiCredentialsPostgresTest`, `CustomerApiAdmissionPostgresTest`, `CustomerApiOrderPostgresConcurrencyTest`, `CustomerApiOrderReadTest`, `CustomerApiOrderNotificationTest` (48 tests, 1,336 assertions) plus `CustomerApiAvailabilityPostgresConcurrencyTest` (2 tests, 14 assertions) proving one winner/one conflict for competing Owner updates and no authenticated claim/order/money after an OFF commit.
+- Disposable runtime smoke on the PHP 8.4.26 application image with PostgreSQL 16 and Redis 7, through the actual HTTP boundary: OFF returned `503 api_maintenance` with `Retry-After: 60`, no-store/no-referrer and an `X-Request-ID`; zero Orders/claims/payments/debits were created. Owner ON then created one USD Order (201) and replayed it (200). OFF again returned maintenance while the Order, claim, Payment, debit and active key stayed intact. ON again replayed the same Order (200, same id) and `GET /api/v1/balance` returned 200; the audit log contained exactly three availability changes.
+- Telegram stale-callback behavior was exercised through the actual webhook ingress with the fake outbound transport: an `/start` update established the home root while OFF, then `api:generate`, `api:preference:usd_only` and `api:disable` callbacks all returned 200, left the root on `api`, created zero credentials and kept the preference at `idr_first`. `TelegramCustomerApiManagementTest` additionally asserts the fresh home omits `api:menu`, the maintenance surface contains only Back/Home, and ID/EN/MS text/answer copy is localized.
+- Not exercised here: a real Telegram network send, the production Nginx/proxy path, GitHub Actions, or any production access.

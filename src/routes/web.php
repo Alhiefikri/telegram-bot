@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\AdminCategoryCreateController;
 use App\Http\Controllers\Admin\AdminCategoryDeleteController;
 use App\Http\Controllers\Admin\AdminCategoryUpdateController;
 use App\Http\Controllers\Admin\AdminCheckoutMaintenanceController;
+use App\Http\Controllers\Admin\AdminCustomerApiAvailabilityController;
 use App\Http\Controllers\Admin\AdminCustomerUsdtFundingPauseController;
 use App\Http\Controllers\Admin\AdminCustomerUsdtFundingPolicyController;
 use App\Http\Controllers\Admin\AdminDashboardController;
@@ -228,6 +229,9 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('receivers/{receiver}/deactivate', [AdminBscReceiverController::class, 'deactivate'])->name('receivers.deactivate');
             });
             Route::post('checkout-maintenance', AdminCheckoutMaintenanceController::class)->name('checkout-maintenance.update');
+            Route::post('customer-api-availability', AdminCustomerApiAvailabilityController::class)
+                ->middleware('admin.customer-api-owner')
+                ->name('customer-api-availability.update');
             Route::prefix('store-balance/adjustments')->name('store-balance.adjustments.')->middleware('admin.store-balance-owner')->group(function (): void {
                 Route::get('/', [AdminBalanceAdjustmentController::class, 'index'])->name('index');
                 Route::post('previews', [AdminBalanceAdjustmentController::class, 'preview'])->name('previews.store');

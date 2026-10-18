@@ -39,6 +39,7 @@ class CustomerApiAdmissionPostgresTest extends TestCase
         if (! Schema::hasTable('customer_api_credentials')) {
             $this->assertSame(0, PostgresTestDatabase::migrateFresh());
         }
+        $this->enableCustomerApi();
         config(['cache.default' => 'redis', 'cache.limiter' => 'redis', 'cache.prefix' => 's04-test-'.bin2hex(random_bytes(8)).':']);
         Route::get('/api/v1/probe/{id?}', fn (Request $request) => response()->json([
             'customer' => $request->attributes->get('customer_api_principal')->customerId,

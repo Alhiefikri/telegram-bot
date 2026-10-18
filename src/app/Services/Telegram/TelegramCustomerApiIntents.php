@@ -40,6 +40,16 @@ final class TelegramCustomerApiIntents
         return $this->surface($customer, $text, $rows);
     }
 
+    public function maintenance(Customer $customer): TelegramNavigationSurface
+    {
+        $rows = [[
+            $this->button($customer, 'menu.back', 'menu:back', 'menu.back'),
+            $this->button($customer, 'menu.home', 'menu:home', 'menu.home'),
+        ]];
+
+        return $this->surface($customer, $this->text($customer, 'account.api.maintenance'), $rows);
+    }
+
     public function preferences(Customer $customer): TelegramNavigationSurface
     {
         $rows = [];

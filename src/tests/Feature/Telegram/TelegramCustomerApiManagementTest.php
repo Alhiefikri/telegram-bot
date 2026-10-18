@@ -14,6 +14,7 @@ use App\Models\TelegramUiIcon;
 use App\Services\CustomerApi\CustomerApiCredentials;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\CustomEmojiCapability;
+use App\Services\Telegram\TelegramLocale;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
@@ -40,6 +41,7 @@ final class TelegramCustomerApiManagementTest extends TelegramBotTestSupport
     protected function setUp(): void
     {
         parent::setUp();
+        $this->enableCustomerApi();
         // Lifecycle/navigation tests isolate shared admission; real Redis budgets have their own PostgreSQL lane.
         $connection = Mockery::mock();
         $connection->shouldReceive('eval')->andReturn([1, 3, 2, 2000000000, 0]);
@@ -216,6 +218,74 @@ final class TelegramCustomerApiManagementTest extends TelegramBotTestSupport
         $this->assertStringContainsString('🔌', $fallback['text']);
     }
 
+    public function test_off_hides_the_fresh_home_and_stale_callbacks_render_only_localized_maintenance(): void
+    {
+        $customer = $this->start();
+        $this->press('api:menu');
+        $this->press('api:generate');
+        $secret = $this->secret();
+        $this->press('api:preferences');
+        $this->press('api:preference:usd_only');
+        $this->assertSame(BalancePaymentPreference::UsdOnly, $customer->fresh()->balance_payment_preference);
+        $credentialCount = CustomerApiCredential::query()->count();
+
+        DB::table('customer_api_settings')->where('singleton_key', 'customer_api')->update(['enabled' => false]);
+
+        $this->postTelegramWebhook($this->messageUpdate(++$this->update, '/start', [], 88770))->assertOk();
+        $this->assertNull(collect($this->homeButtons())->firstWhere('callback_data', 'api:menu'));
+
+        foreach (['en', 'id', 'ms'] as $locale) {
+            $customer->forceFill(['locale' => $locale])->save();
+            $before = count($this->secretMessages());
+            $this->press('api:menu');
+
+            $surface = $this->lastEdit();
+            $this->assertSame(
+                app(TelegramLocale::class)->translate($customer->fresh(), 'account.api.maintenance'),
+                $surface['text'] ?? $surface['caption'],
+            );
+            $this->assertSame(['menu:back', 'menu:home'], $this->callbacks());
+            $this->assertSame(
+                app(TelegramLocale::class)->translate($customer->fresh(), 'account.api.maintenance_callback'),
+                $this->lastCallbackAnswer()['text'] ?? null,
+            );
+
+            $this->press('api:generate');
+            $this->press('api:preference:idr_only');
+            $this->assertCount($before, $this->secretMessages());
+            $this->assertSame(BalancePaymentPreference::UsdOnly, $customer->fresh()->balance_payment_preference);
+            $this->assertSame($credentialCount, CustomerApiCredential::query()->count());
+        }
+
+        $this->assertNotNull(app(CustomerApiCredentials::class)->authenticate('Bearer '.$secret));
+
+        DB::table('customer_api_settings')->where('singleton_key', 'customer_api')->update(['enabled' => true]);
+
+        $this->postTelegramWebhook($this->messageUpdate(++$this->update, '/start', [], 88770))->assertOk();
+        $this->assertNotNull(collect($this->homeButtons())->firstWhere('callback_data', 'api:menu'));
+        $this->press('api:menu');
+        $this->assertContains('api:rotate', $this->callbacks());
+        $this->assertSame($credentialCount, CustomerApiCredential::query()->count());
+    }
+
+    public function test_off_screen_is_rendered_for_stale_callbacks_even_with_a_removed_or_unknown_action(): void
+    {
+        $customer = $this->start();
+        DB::table('customer_api_settings')->where('singleton_key', 'customer_api')->update(['enabled' => false]);
+
+        foreach (['api:disable', 'api:rotate:'.str_repeat('a', 32), 'api:unknown', 'api:preference:idr_only'] as $data) {
+            $this->press($data);
+            $this->assertSame(['menu:back', 'menu:home'], $this->callbacks());
+            $this->assertSame(
+                app(TelegramLocale::class)->translate($customer->fresh(), 'account.api.maintenance'),
+                $this->lastEdit()['text'] ?? $this->lastEdit()['caption'],
+            );
+        }
+
+        $this->assertSame(0, CustomerApiCredential::query()->count());
+        $this->assertSame(BalancePaymentPreference::IdrFirst, $customer->fresh()->balance_payment_preference);
+    }
+
     private function start(): Customer
     {
         $customer = Customer::factory()->create(['telegram_id' => 88770, 'locale' => 'en']);
@@ -243,6 +313,11 @@ final class TelegramCustomerApiManagementTest extends TelegramBotTestSupport
     private function callbacks(): array
     {
         return array_column($this->buttons(), 'callback_data');
+    }
+
+    private function lastCallbackAnswer(): array
+    {
+        return collect($this->sent)->last(fn ($send) => $send['method'] === 'answerCallbackQuery') ?? [];
     }
 
     private function homeButtons(): array

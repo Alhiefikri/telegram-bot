@@ -34,6 +34,8 @@ Yang tidak ada di API ini: pengisian atau penyesuaian saldo, refund, transfer, p
 Setiap respons memuat `X-Request-ID`. Catat nilai itu ketika melaporkan masalah: dukungan dapat menelusuri satu permintaan tanpanya.
 
 Setiap permintaan dibatasi anggaran admission bersama, jadi integrasi yang rapi tetap harus menangani 429 dan 503.
+
+Owner dapat mematikan API dari Admin Dashboard. Saat OFF, setiap panggilan `/api/v1` dijawab `503 api_maintenance` sebelum autentikasi atau pekerjaan finansial; key, saldo, Order, dan hasil pengiriman tetap tersimpan. Halaman dokumentasi ini tetap dapat dibaca.
 MD, <<<'MD'
 This API keeps a deliberately narrow scope: read the catalog and balances, then create orders funded completely from a balance. Every endpoint lives on this website origin under the `/api/v1` path prefix and is server-to-server only.
 
@@ -49,6 +51,8 @@ What is not here: funding or adjusting a balance, refunds, transfers, withdrawal
 Every response carries `X-Request-ID`. Record it when reporting a problem: support can trace one request without it.
 
 Every request shares admission budgets, so a well-behaved integration still handles 429 and 503.
+
+The Owner can switch the API off from the Admin Dashboard. While OFF, every `/api/v1` call is answered with `503 api_maintenance` before authentication or financial work; keys, balances, orders and delivery results stay stored. This documentation page remains readable.
 MD),
 
             $this->section('quickstart', 'Mulai cepat', 'Quickstart', <<<'MD'

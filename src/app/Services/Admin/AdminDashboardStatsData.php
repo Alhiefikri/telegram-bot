@@ -11,6 +11,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
 use App\Models\User;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\CustomerApi\CustomerApiAvailability;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
@@ -35,6 +36,7 @@ final class AdminDashboardStatsData
         private readonly CustomerUsdtFundingGate $usdtFundingGate,
         private readonly AdminBalanceOperationsData $balanceOperations,
         private readonly AdminDashboardOverviewData $overview,
+        private readonly CustomerApiAvailability $customerApiAvailability,
     ) {}
 
     /**
@@ -66,6 +68,7 @@ final class AdminDashboardStatsData
             default => [
                 'paymentControl' => $this->paymentControl($user),
                 'checkoutMaintenance' => $this->checkoutMaintenance($user),
+                'customerApiAvailability' => $this->customerApiAvailability($user),
             ],
         };
     }
@@ -126,6 +129,31 @@ final class AdminDashboardStatsData
             'version' => $state->version,
             'update_url' => route('admin.checkout-maintenance.update'),
             'can_manage' => (bool) $user?->role?->canManageStoreOperations(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function customerApiAvailability(User $user): array
+    {
+        $state = $this->customerApiAvailability->current();
+        $enabled = $state->enabled;
+
+        return [
+            'enabled' => $enabled,
+            'label' => $enabled ? 'Customer API aktif' : 'Customer API maintenance',
+            'hint' => $enabled
+                ? 'Endpoint /api/v1 menerima key yang ada dan dapat membelanjakan saldo IDR/USD. Nonaktifkan bila paparan belum disetujui.'
+                : 'Semua endpoint /api/v1 mengembalikan 503 api_maintenance. Key, saldo, Order, dan hasil pengiriman tetap tersimpan.',
+            'tone' => $enabled ? 'rose' : 'emerald',
+            'status_badge' => [
+                'label' => $enabled ? 'API TERBUKA' : 'API OFF',
+            ],
+            'changed_at' => $state->changedAt?->copy()
+                ->timezone((string) config('app.timezone'))
+                ->format('d M Y H:i'),
+            'version' => $state->version,
+            'update_url' => route('admin.customer-api-availability.update'),
+            'can_manage' => (bool) $user->role?->canManageCustomerApiAvailability(),
         ];
     }
 

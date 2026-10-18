@@ -36,6 +36,7 @@ final class CustomerApiErrorContractTest extends TestCase
         parent::setUp();
         Queue::fake();
         Http::preventStrayRequests();
+        $this->enableCustomerApi();
         $connection = Mockery::mock();
         $connection->shouldReceive('eval')->andReturn([1, 120, 119, 2000000000, 0]);
         $store = Mockery::mock(RedisStore::class)->makePartial();

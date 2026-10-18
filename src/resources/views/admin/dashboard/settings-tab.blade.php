@@ -899,5 +899,124 @@
                         </div>
                     </div>
                 @endif
+
+                <x-admin-dashboard.card
+                    id="admin-customer-api-availability"
+                    data-admin-return-target
+                    tabindex="-1"
+                    padding="compact"
+                    shadow="sm"
+                    aria-label="Customer API availability"
+                >
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="text-xs font-medium text-admin-muted">Customer API</p>
+                            <h2 class="mt-1 text-lg font-semibold text-admin-ink">{{ $customerApiAvailability['label'] }}</h2>
+                        </div>
+                        <x-admin-dashboard.badge :tone="$customerApiAvailability['tone']" dot>
+                            {{ $customerApiAvailability['status_badge']['label'] }}
+                        </x-admin-dashboard.badge>
+                    </div>
+
+                    <p class="mt-2 text-sm leading-6 text-admin-muted">{{ $customerApiAvailability['hint'] }}</p>
+
+                    <div class="mt-3 grid grid-cols-1 gap-2 text-xs font-medium text-admin-muted sm:grid-cols-2">
+                        <p>Versi: <span class="text-admin-ink">{{ $customerApiAvailability['version'] }}</span></p>
+                        <p>
+                            @if ($customerApiAvailability['changed_at'])
+                                Terakhir diubah: <span class="text-admin-ink">{{ $customerApiAvailability['changed_at'] }}</span>
+                            @else
+                                <span class="text-admin-ink">Belum pernah diubah sejak migrasi.</span>
+                            @endif
+                        </p>
+                    </div>
+
+                    @if ($customerApiAvailability['enabled'])
+                        <x-admin-dashboard.notice tone="warning" class="mt-3 text-xs">
+                            API terbuka: backend dengan key aktif dapat membuat Order baru yang dibayar dari saldo IDR/USD. Matikan bila kapasitas, custody/provider, atau persetujuan operator belum selesai.
+                        </x-admin-dashboard.notice>
+                    @else
+                        <x-admin-dashboard.notice tone="warning" class="mt-3 text-xs">
+                            Mengaktifkan API membuka pemesanan berbasis saldo IDR/USD untuk backend dengan key aktif. Saat OFF, setiap panggilan /api/v1 dijawab 503 api_maintenance; key, saldo, Order, idempotensi, dan hasil pengiriman tidak dihapus atau diubah.
+                        </x-admin-dashboard.notice>
+                    @endif
+
+                    @error('enabled', 'customerApiAvailability')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('version', 'customerApiAvailability')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+                    @error('confirmed', 'customerApiAvailability')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
+
+                    @if ($customerApiAvailability['can_manage'])
+                        <form
+                            method="POST"
+                            action="{{ $customerApiAvailability['update_url'] }}"
+                            class="mt-4"
+                            data-customer-api-availability-target="{{ $customerApiAvailability['enabled'] ? 'disable' : 'enable' }}"
+                            x-on:submit.prevent="openCustomerApiAvailabilityConfirmation($event)"
+                        >
+                            @csrf
+                            <input type="hidden" name="enabled" value="{{ $customerApiAvailability['enabled'] ? '0' : '1' }}">
+                            <input type="hidden" name="version" value="{{ $customerApiAvailability['version'] }}">
+                            <input type="hidden" name="confirmed" value="0">
+                            <x-admin-dashboard.button type="submit" :variant="$customerApiAvailability['enabled'] ? 'warning' : 'primary'" size="sm" class="w-full">
+                                {{ $customerApiAvailability['enabled'] ? 'Matikan Customer API' : 'Aktifkan Customer API' }}
+                            </x-admin-dashboard.button>
+                        </form>
+                    @else
+                        <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">
+                            Hanya Owner yang dapat mengaktifkan atau mematikan Customer API.
+                        </x-admin-dashboard.notice>
+                    @endif
+                </x-admin-dashboard.card>
+
+                @if ($customerApiAvailability['can_manage'])
+                    <div
+                        x-cloak
+                        x-show="customerApiAvailabilityOpen"
+                        x-transition.opacity
+                        class="admin-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-neo-ink/60"
+                        x-on:keydown.escape.window="if (customerApiAvailabilityOpen) closeCustomerApiAvailabilityConfirmation()"
+                    >
+                        <div class="absolute inset-0" x-on:click="closeCustomerApiAvailabilityConfirmation()" aria-hidden="true"></div>
+                        <div
+                            id="admin-customer-api-availability-dialog"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="admin-customer-api-availability-title"
+                            aria-describedby="admin-customer-api-availability-description"
+                            tabindex="-1"
+                            x-on:keydown.tab="trapModalFocus($event)"
+                            x-on:focusin.window="if (customerApiAvailabilityOpen) keepModalFocus($event, 'admin-customer-api-availability-dialog')"
+                            class="admin-modal-shell relative w-full max-w-lg rounded-[var(--admin-radius)] border border-admin-line bg-admin-surface p-4 text-admin-ink shadow-admin-lg sm:p-5"
+                        >
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0 pr-8">
+                                    <p class="text-xs font-medium text-admin-muted">Customer API</p>
+                                    <h2 id="admin-customer-api-availability-title" class="mt-1 text-lg font-semibold leading-tight text-admin-ink">Konfirmasi perubahan Customer API</h2>
+                                </div>
+                                <button type="button" class="absolute right-3 top-3 inline-flex h-11 w-11 items-center justify-center rounded-lg border border-admin-line bg-admin-surface text-lg text-admin-ink focus-visible:outline-2 focus-visible:outline-admin-focus" aria-label="Tutup dialog Customer API" x-on:click="closeCustomerApiAvailabilityConfirmation()">×</button>
+                            </div>
+                            <div id="admin-customer-api-availability-description" class="mt-4 space-y-3 text-sm font-normal leading-6 text-admin-ink">
+                                <p x-text="customerApiAvailabilityConfirmationText"></p>
+                                <p class="rounded-lg border border-admin-line bg-admin-surface-muted p-3 text-xs font-medium leading-5 text-admin-muted">
+                                    Perubahan ini hanya membuka atau menutup endpoint /api/v1. Key, saldo, Order, idempotensi, dan hasil pengiriman tidak dihapus.
+                                </p>
+                            </div>
+                            <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeCustomerApiAvailabilityConfirmation()">
+                                    Batal
+                                </x-admin-dashboard.button>
+                                <x-admin-dashboard.button type="button" variant="primary" x-ref="customerApiAvailabilityConfirm" x-on:click="submitCustomerApiAvailabilityConfirmation()">
+                                    Konfirmasi
+                                </x-admin-dashboard.button>
+                            </div>
+                        </div>
+                    </div>
+                @endif
     @endif
             </div>

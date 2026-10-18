@@ -3,6 +3,7 @@
 namespace App\Services\Telegram\Callbacks;
 
 use App\Enums\BalancePaymentPreference;
+use App\Services\CustomerApi\CustomerApiAvailability;
 use App\Services\CustomerApi\CustomerApiFailure;
 use App\Services\CustomerApi\IssuedCustomerApiKey;
 use App\Services\Telegram\TelegramBotClient;
@@ -23,6 +24,7 @@ final class TelegramCustomerApiCallbackHandler implements TelegramCallbackHandle
         private TelegramNavigationPresenter $navigation,
         private TelegramBotClient $bot,
         private TelegramLocale $locale,
+        private CustomerApiAvailability $availability,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -48,6 +50,20 @@ final class TelegramCustomerApiCallbackHandler implements TelegramCallbackHandle
 
             return true;
         }
+
+        // OFF is fail-closed: no key, preference, secret or summary action may
+        // run, including for an api:* callback rendered before the change.
+        if (! $this->availability->isEnabled()) {
+            $surface = $this->intents->maintenance($context->customer);
+            $this->navigation->presentOnRoot($root, $context->chatId, $surface);
+            $this->bot->answerCallbackQuery(
+                $context->callbackQueryId,
+                $this->locale->translate($context->customer, 'account.api.maintenance_callback'),
+            );
+
+            return true;
+        }
+
         $facts = [(string) $context->customer->telegram_id, $context->chatId, $context->chatType, $context->messageId];
         $notice = null;
         try {

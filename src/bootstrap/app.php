@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AuthorizeAdminAccess;
 use App\Http\Middleware\AuthorizeBscReceiverMutation;
+use App\Http\Middleware\AuthorizeCustomerApiAvailability;
 use App\Http\Middleware\AuthorizeStoreBalanceCompensation;
 use App\Http\Middleware\CustomerApiBoundary;
 use App\Http\Middleware\PreventAdminMiniAppCache;
@@ -37,17 +38,20 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin.access' => AuthorizeAdminAccess::class,
             'admin.bsc-owner' => AuthorizeBscReceiverMutation::class,
             'admin.store-balance-owner' => AuthorizeStoreBalanceCompensation::class,
+            'admin.customer-api-owner' => AuthorizeCustomerApiAvailability::class,
             'admin.no-cache' => PreventAdminMiniAppCache::class,
             'storefront.signed' => ValidateStorefrontSignedInvoice::class,
         ]);
         $middleware->append(RedirectToCanonicalHost::class);
 
         $middleware->use([
-            ValidatePathEncoding::class,
             InvokeDeferredCallbacks::class,
             TrustConfiguredHosts::class,
             TrustConfiguredProxies::class,
+            // The v1 gate precedes path/body normalization so OFF also covers
+            // malformed, encoded and oversized requests before any other work.
             CustomerApiBoundary::class,
+            ValidatePathEncoding::class,
             HandleCors::class,
             PreventRequestsDuringMaintenance::class,
             ValidatePostSize::class,

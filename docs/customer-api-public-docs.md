@@ -40,9 +40,14 @@ instead of hand-maintained three times:
 | `OpenApiDocument`, `ReferenceMarkdown`, `LlmsIndex` | The three machine renderers.                                                                                                                                                                                                                                                                                  |
 
 Iterating `operations()` merges the inherited boundary codes (`method_not_allowed`,
-`payload_too_large`) that the shared `/api/v1` admission middleware applies to every
+`payload_too_large`, `api_maintenance`) that the shared `/api/v1` admission middleware applies to every
 operation, so the error tables on the page, in `reference.md` and in the OpenAPI document
 list the same set.
+
+While the Owner-controlled gate is OFF, every `/api/v1` request is answered with
+`503 api_maintenance` before authentication or financial work. The documentation
+page, OpenAPI document and Markdown reference remain readable and describe that
+state; they never contain keys or balances.
 
 ## What the page publishes
 

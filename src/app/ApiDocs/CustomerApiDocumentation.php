@@ -177,6 +177,9 @@ final class CustomerApiDocumentation
             'rate_limited' => ['status' => 429, 'meaning' => [
                 'id' => 'Kuota admission habis. Baca `Retry-After` dan header `X-RateLimit-*`, lalu ulangi setelah jendela anggaran berakhir.',
                 'en' => 'An admission budget is exhausted. Read `Retry-After` and the `X-RateLimit-*` headers, then retry after the budget window resets.']],
+            'api_maintenance' => ['status' => 503, 'meaning' => [
+                'id' => 'Owner mematikan Customer API. Semua path `/api/v1` dijawab sebelum autentikasi, body, klaim, atau pekerjaan finansial. Tidak ada key, saldo, Order, idempotensi, atau hasil pengiriman yang dihapus; coba lagi setelah `Retry-After`.',
+                'en' => 'The Owner turned the Customer API off. Every `/api/v1` path is answered before authentication, body reads, claims or financial work. No key, balance, Order, idempotency outcome or delivery result is erased; retry after `Retry-After`.']],
             'temporarily_unavailable' => ['status' => 503, 'meaning' => [
                 'id' => 'Admission bersama tidak dapat ditegakkan, maintenance checkout, pause saldo, drift, atau hasil pengiriman melewati batas aman. Tidak ada uang yang dipindahkan.',
                 'en' => 'Shared admission cannot be enforced, checkout maintenance, a balance pause, drift, or a delivery result beyond its safe bound. Nothing was charged.']],
@@ -192,7 +195,7 @@ final class CustomerApiDocumentation
     public function operations(): array
     {
         return array_map(static function (array $operation): array {
-            $operation['errors'] = array_values(array_unique([...$operation['errors'], 'invalid_path', 'method_not_allowed', 'payload_too_large']));
+            $operation['errors'] = array_values(array_unique([...$operation['errors'], 'invalid_path', 'method_not_allowed', 'payload_too_large', 'api_maintenance']));
 
             return $operation;
         }, $this->definedOperations());

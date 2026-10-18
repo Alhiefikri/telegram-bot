@@ -337,6 +337,10 @@ export default function adminDashboard(initialState = {}) {
     checkoutMaintenanceForm: null,
     checkoutMaintenanceOpener: null,
     checkoutMaintenanceConfirmationText: "",
+    customerApiAvailabilityOpen: false,
+    customerApiAvailabilityForm: null,
+    customerApiAvailabilityOpener: null,
+    customerApiAvailabilityConfirmationText: "",
     paymentSwitchTargetLabel: "",
 
     init() {
@@ -475,6 +479,49 @@ export default function adminDashboard(initialState = {}) {
       this.checkoutMaintenanceOpen = false;
       this.checkoutMaintenanceForm = null;
       this.checkoutMaintenanceOpener = null;
+      HTMLFormElement.prototype.submit.call(form);
+    },
+
+    openCustomerApiAvailabilityConfirmation(event) {
+      const form = event.currentTarget;
+      const enabled =
+        form.querySelector('input[name="enabled"]')?.value === "1";
+
+      this.customerApiAvailabilityForm = form;
+      this.customerApiAvailabilityOpener = document.activeElement;
+      this.customerApiAvailabilityConfirmationText = enabled
+        ? "Aktifkan Customer API dan buka pemesanan berbasis saldo untuk key yang ada?"
+        : "Matikan Customer API dan tolak semua panggilan /api/v1 dengan 503 api_maintenance?";
+      this.customerApiAvailabilityOpen = true;
+      this.$nextTick(() => this.$refs.customerApiAvailabilityConfirm?.focus());
+    },
+
+    closeCustomerApiAvailabilityConfirmation(restoreFocus = true) {
+      const opener = this.customerApiAvailabilityOpener;
+      this.customerApiAvailabilityOpen = false;
+      this.customerApiAvailabilityForm = null;
+      this.customerApiAvailabilityOpener = null;
+      this.customerApiAvailabilityConfirmationText = "";
+
+      if (restoreFocus) {
+        this.restoreModalFocus(opener);
+      }
+    },
+
+    submitCustomerApiAvailabilityConfirmation() {
+      const form = this.customerApiAvailabilityForm;
+      if (!form) {
+        return;
+      }
+
+      const confirmed = form.querySelector('input[name="confirmed"]');
+      if (confirmed) {
+        confirmed.value = "1";
+      }
+
+      this.customerApiAvailabilityOpen = false;
+      this.customerApiAvailabilityForm = null;
+      this.customerApiAvailabilityOpener = null;
       HTMLFormElement.prototype.submit.call(form);
     },
 

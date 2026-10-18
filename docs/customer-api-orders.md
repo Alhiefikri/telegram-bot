@@ -14,6 +14,10 @@ retries concurrently can recover the same accepted Order without a second debit,
 stock/credential allocation or any effect on the Customer's Telegram/Web Cart. It is a
 server-to-server route on the existing website origin.
 
+## Preconditions and maintenance
+
+Every call requires the Owner-controlled availability gate to be ON. While it is OFF, `POST /api/v1/orders` returns `503 api_maintenance` with `Retry-After: 60` before the body, key, claim or wallet is read. No Order, Payment, debit, allocation or supplier purchase is created. Keys and earlier accepted Orders remain stored; after the Owner enables the API again, a replay with the same `Idempotency-Key` and payload returns the same accepted Order.
+
 ## Request
 
 ```

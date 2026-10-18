@@ -12,6 +12,7 @@ use App\Models\StoreBalanceTopUp;
 use App\Models\StoreChannelSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\CustomerApi\CustomerApiAvailability;
 use App\Services\StoreBalance\StoreBalanceActivityDetail;
 use App\Services\StoreBalance\StoreBalanceActivityItem;
 use App\Services\StoreBalance\StoreBalanceActivityPage;
@@ -48,6 +49,7 @@ class TelegramMenuIntents
         private TelegramUiIcons $uiIcons,
         private CustomerUsdtBalanceLedger $usdtBalances,
         private CustomerUsdtFundingGate $usdtFundingGate,
+        private CustomerApiAvailability $customerApiAvailability,
     ) {}
 
     public function sendLanguagePicker(string $chatId, ?Customer $customer = null, bool $isPrivateChat = true): void
@@ -814,7 +816,7 @@ class TelegramMenuIntents
      */
     private function homeKeyboard(Customer $customer, string $chatId, ?string $channelUrl): array
     {
-        $keyboard = ['inline_keyboard' => [
+        $rows = [
             [
                 $this->navButton($customer, 'menu.products', 'katalog'),
             ],
@@ -822,14 +824,22 @@ class TelegramMenuIntents
                 $this->navButton($customer, 'menu.balance', 'balance'),
                 $this->navButton($customer, 'menu.orders', 'menu:orders'),
             ],
-            [
+        ];
+
+        // The fresh home hides API management while the durable gate is OFF;
+        // stale api:* callbacks render the maintenance surface instead.
+        if ($this->customerApiAvailability->isEnabled()) {
+            $rows[] = [
                 $this->navButton($customer, 'menu.api', 'api:menu'),
-            ],
-            [
-                $this->navButton($customer, 'menu.language', 'menu:language'),
-                $this->navButton($customer, 'menu.support', 'menu:support'),
-            ],
-        ]];
+            ];
+        }
+
+        $rows[] = [
+            $this->navButton($customer, 'menu.language', 'menu:language'),
+            $this->navButton($customer, 'menu.support', 'menu:support'),
+        ];
+
+        $keyboard = ['inline_keyboard' => $rows];
 
         if ($channelUrl !== null) {
             $keyboard['inline_keyboard'][] = [[

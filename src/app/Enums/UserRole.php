@@ -49,6 +49,15 @@ enum UserRole: string
         return in_array($this, [self::Owner, self::Admin], true);
     }
 
+    /**
+     * Exposing the balance-funded Customer API is an Owner-only release
+     * decision. Admin, Finance and Support may never toggle it.
+     */
+    public function canManageCustomerApiAvailability(): bool
+    {
+        return $this === self::Owner;
+    }
+
     public function canSwitchPaymentProvider(): bool
     {
         return $this === self::Owner;

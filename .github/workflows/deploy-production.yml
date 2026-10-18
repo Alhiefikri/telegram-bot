@@ -246,6 +246,7 @@ jobs:
           SMOKE_ADMIN_MARKER: 'LHIE STORE'
           SMOKE_TIMEOUT: '15'
           SMOKE_PUBLIC_ONLY: 'true'
+          SMOKE_EXPECT_CUSTOMER_API_MAINTENANCE: 'true'
         run: |
           set -euo pipefail
           : "${BASE_URL:?Set the non-secret production environment variable PRODUCTION_SMOKE_BASE_URL}"

@@ -54,6 +54,8 @@
   "account.api.stale": "Tindakan ini tidak berlaku lagi. Buka kembali pengelolaan API sebelum mencoba lagi.",
   "account.api.rate_limited": "Terlalu banyak tindakan kunci. Tunggu sebelum mencoba lagi; Nonaktifkan API darurat memiliki batas terpisah.",
   "account.api.unavailable": "Pengelolaan kunci API sementara tidak tersedia. Tidak ada tindakan kunci yang diterapkan. Coba lagi nanti.",
+  "account.api.maintenance": "API sedang maintenance\n\nSemua panggilan /api/v1 ditolak dengan 503 api_maintenance. Kunci API, saldo, pesanan, dan hasil pengiriman tetap tersimpan dan tidak berubah. Pengelolaan kunci serta preferensi pembayaran tidak tersedia sampai Owner mengaktifkan kembali API.",
+  "account.api.maintenance_callback": "API sedang maintenance. Tidak ada tindakan kunci yang diterapkan.",
   "balance.title": "💰 Saldo Saya",
   "balance.available": "Saldo tersedia: :balance",
   "balance.add": "➕ Tambah Saldo",

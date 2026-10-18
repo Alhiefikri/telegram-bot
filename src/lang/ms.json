@@ -54,6 +54,8 @@
   "account.api.stale": "Tindakan ini tidak lagi sah. Buka semula pengurusan API sebelum mencuba lagi.",
   "account.api.rate_limited": "Terlalu banyak tindakan kunci. Tunggu sebelum mencuba lagi; Nyahaktifkan API kecemasan mempunyai had berasingan.",
   "account.api.unavailable": "Pengurusan kunci API tidak tersedia buat sementara waktu. Tiada tindakan kunci diterapkan. Cuba lagi kemudian.",
+  "account.api.maintenance": "API dalam penyelenggaraan\n\nSetiap panggilan /api/v1 ditolak dengan 503 api_maintenance. Kunci API, baki, pesanan dan hasil penghantaran kekal tersimpan dan tidak berubah. Pengurusan kunci serta pilihan pembayaran tidak tersedia sehingga Pemilik mengaktifkan semula API.",
+  "account.api.maintenance_callback": "API dalam penyelenggaraan. Tiada tindakan kunci digunakan.",
   "balance.title": "💰 Baki Saya",
   "balance.available": "Baki tersedia: :balance",
   "balance.add": "➕ Tambah Baki",

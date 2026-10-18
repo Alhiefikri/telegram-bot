@@ -13,6 +13,7 @@ use App\Support\PaymentProvider;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 abstract class TestCase extends BaseTestCase
@@ -39,6 +40,17 @@ abstract class TestCase extends BaseTestCase
                 return trim((string) config('services.telegram.token')) === '' ? null : 'TestStoreBot';
             }
         });
+    }
+
+    /**
+     * The migration seeds the Customer API OFF. Existing API/Telegram suites
+     * assert the ON contract, so opt in explicitly per test class.
+     */
+    protected function enableCustomerApi(): void
+    {
+        DB::table('customer_api_settings')
+            ->where('singleton_key', 'customer_api')
+            ->update(['enabled' => true]);
     }
 
     /**

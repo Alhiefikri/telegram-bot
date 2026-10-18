@@ -433,3 +433,14 @@ Pint passed on all changed PHP files. The disposable containers, network,
 scratch application copy and synthetic credentials were removed. No CI/CD,
 production access, deployment, commit or push was part of this verification.
 Capability and exposure gates remain unchanged and still NO-GO.
+
+## Availability gate (#647)
+
+The S11 evidence above predates the Owner-controlled gate. `customer_api_settings`
+now seeds `enabled = false`; the gate is read once per `/api/v1` request after IP
+admission and before body, key, claim, wallet or inventory work. While OFF every
+matched path returns `503 api_maintenance` with `Retry-After: 60`; the public
+documentation stays readable. The Admin control is Owner-only and versioned, and
+turning it OFF erases no credential, claim, Order, ledger row or delivery result.
+The release smoke asserts OFF after cutover; enabling requires an explicit Owner
+decision after the capacity, custody/provider and operator gates are satisfied.

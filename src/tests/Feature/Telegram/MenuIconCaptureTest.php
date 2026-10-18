@@ -285,6 +285,7 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
 
     public function test_api_menu_slot_uses_existing_admin_capture_and_clear_paths(): void
     {
+        $this->enableCustomerApi();
         $this->verifiedEmojiFakes();
         $customer = $this->adminCustomer(999);
         $this->captureEmoji($customer, 'menu.api');

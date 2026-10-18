@@ -104,6 +104,11 @@ class AdminDashboardRedirector
         return $this->dashboard(self::TAB_SETTINGS, 'admin-checkout-maintenance', ['section' => 'pembayaran']);
     }
 
+    public function customerApiAvailability(): RedirectResponse
+    {
+        return $this->dashboard(self::TAB_SETTINGS, 'admin-customer-api-availability', ['section' => 'pembayaran']);
+    }
+
     public function fundingPolicy(): RedirectResponse
     {
         return $this->dashboard(self::TAB_SETTINGS, 'admin-store-balance-funding-policy', ['section' => 'saldo']);

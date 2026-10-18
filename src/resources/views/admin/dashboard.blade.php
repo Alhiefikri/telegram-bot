@@ -25,6 +25,7 @@
             $usdtFundingPolicy = $settings['usdtFundingPolicy'] ?? [];
             $balanceOperations = $settings['balanceOperations'] ?? [];
             $checkoutMaintenance = $settings['checkoutMaintenance'] ?? $statsTab['checkoutMaintenance'] ?? [];
+            $customerApiAvailability = $settings['customerApiAvailability'] ?? [];
             $canManageProducts = $productsTab['canManage'];
             $productPlaceholder = $productsTab['placeholder'] ?? [];
             $products = $productsTab['products'];

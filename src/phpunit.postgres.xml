@@ -37,6 +37,7 @@
             <file>tests/Feature/CustomerApiCredentialsPostgresTest.php</file>
             <file>tests/Feature/CustomerApiAdmissionPostgresTest.php</file>
             <file>tests/Feature/CustomerApiOrderPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/CustomerApiAvailabilityPostgresConcurrencyTest.php</file>
             <file>tests/Feature/CustomerApiOrderReadTest.php</file>
             <file>tests/Feature/CustomerApiOrderNotificationTest.php</file>
             <file>tests/Feature/UsdtReceiverOwnershipPostgresConcurrencyTest.php</file>
