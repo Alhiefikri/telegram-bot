@@ -11,12 +11,13 @@ enum CustomerUsdtFundingRail: string
 {
     case BinancePay = 'binance_pay';
     case BscUsdt = 'bsc_usdt';
+    case BscShared = 'bsc_shared';
 
     public function label(): string
     {
         return match ($this) {
             self::BinancePay => 'Binance Pay ID',
-            self::BscUsdt => 'USDT BEP20 (BNB Smart Chain)',
+            self::BscUsdt, self::BscShared => 'USDT BEP20 (BNB Smart Chain)',
         };
     }
 
@@ -24,7 +25,18 @@ enum CustomerUsdtFundingRail: string
     {
         return match ($this) {
             self::BinancePay => CustomerUsdtFundingPauseScope::RailBinancePay,
-            self::BscUsdt => CustomerUsdtFundingPauseScope::RailBscUsdt,
+            self::BscUsdt, self::BscShared => CustomerUsdtFundingPauseScope::RailBscUsdt,
         };
+    }
+
+    /**
+     * Rails offered for new funding. The legacy per-Customer BSC receiver rail
+     * remains readable for historical targets but is no longer selectable.
+     *
+     * @return list<self>
+     */
+    public static function selectable(): array
+    {
+        return [self::BinancePay, self::BscShared];
     }
 }

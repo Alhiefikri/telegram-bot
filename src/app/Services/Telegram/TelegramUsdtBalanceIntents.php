@@ -36,7 +36,8 @@ final class TelegramUsdtBalanceIntents
     public function topUpSurface(Customer $customer, ?string $noticeKey = null): TelegramNavigationSurface
     {
         $policy = CustomerUsdtFundingPolicy::current();
-        $availability = $this->gate->availability(CustomerUsdtFundingRail::BscUsdt);
+        $availability = $this->gate->availability(CustomerUsdtFundingRail::BscShared);
+        $binanceAvailable = $this->gate->availability(CustomerUsdtFundingRail::BinancePay)->available;
         $lines = [
             $this->locale->translate($customer, 'balance.usdt.topup.title'),
             '━━━━━━━━━━━━━━',
@@ -53,7 +54,7 @@ final class TelegramUsdtBalanceIntents
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, $noticeKey);
         }
-        if (! $availability->available) {
+        if (! $availability->available && ! $binanceAvailable) {
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'balance.usdt.topup.unavailable');
         }
@@ -71,8 +72,9 @@ final class TelegramUsdtBalanceIntents
         $snapshot = is_array($intent->payment_snapshot) ? $intent->payment_snapshot : [];
         $intentRail = $intent->rail instanceof CustomerUsdtFundingRail ? $intent->rail->value : (string) ($intent->rail ?? '');
         $rail = CustomerUsdtFundingRail::tryFrom($intentRail !== '' ? $intentRail : (string) ($snapshot['rail'] ?? 'bsc_usdt'))
-            ?? CustomerUsdtFundingRail::BscUsdt;
+            ?? CustomerUsdtFundingRail::BscShared;
         $isBinance = $rail === CustomerUsdtFundingRail::BinancePay;
+        $isShared = $rail === CustomerUsdtFundingRail::BscShared;
         $copyable = [];
         $lines = [
             $this->locale->translate($customer, 'balance.usdt.preview.title'),
@@ -91,6 +93,12 @@ final class TelegramUsdtBalanceIntents
             $this->locale->translate($customer, 'balance.usdt.preview.payable', [
                 'amount' => $this->copyableValue($this->usdt((int) $intent->payable_micro), $copyable),
             ]),
+            ...($isShared && (int) ($snapshot['requested_micro'] ?? 0) !== (int) $intent->amount_micro ? [
+                $this->locale->translate($customer, 'balance.usdt.preview.shared_note', [
+                    'requested' => $this->usdt((int) ($snapshot['requested_micro'] ?? 0)),
+                    'amount' => $this->usdt((int) $intent->amount_micro),
+                ]),
+            ] : []),
             $this->locale->translate($customer, 'balance.usdt.preview.rail', [
                 'rail' => $this->locale->translate($customer, $rail === CustomerUsdtFundingRail::BinancePay
                     ? 'balance.usd.binance_pay'
@@ -116,7 +124,7 @@ final class TelegramUsdtBalanceIntents
             ]),
             $this->locale->translate($customer, $rail === CustomerUsdtFundingRail::BinancePay
                 ? 'balance.usdt.preview.binance_warning'
-                : 'balance.usdt.preview.warning'),
+                : ($isShared ? 'balance.usdt.preview.shared_warning' : 'balance.usdt.preview.warning')),
         ];
 
         return new TelegramNavigationSurface(
@@ -151,6 +159,7 @@ final class TelegramUsdtBalanceIntents
         $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
         $targetRail = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
         $isBinance = ($targetRail !== '' ? $targetRail : (string) ($snapshot['rail'] ?? '')) === CustomerUsdtFundingRail::BinancePay->value;
+        $isShared = ($targetRail !== '' ? $targetRail : (string) ($snapshot['rail'] ?? '')) === CustomerUsdtFundingRail::BscShared->value;
         $copyable = [];
         $lines = [
             $this->locale->translate($customer, 'balance.usdt.status.title'),
@@ -215,7 +224,7 @@ final class TelegramUsdtBalanceIntents
             ]);
             $lines[] = $this->locale->translate($customer, $isBinance
                 ? 'balance.usdt.status.binance_warning'
-                : 'balance.usdt.status.warning');
+                : ($isShared ? 'balance.usdt.status.shared_warning' : 'balance.usdt.status.warning'));
         } else {
             $lines[] = $this->locale->translate($customer, 'balance.usdt.status.'.$status->state.'_note');
         }
@@ -240,6 +249,11 @@ final class TelegramUsdtBalanceIntents
                 $keyboard[0][] = [
                     'text' => $this->locale->translate($customer, 'balance.usdt.status.order_id'),
                     'callback_data' => 'usdt:order:'.$target->id,
+                ];
+            } else {
+                $keyboard[0][] = [
+                    'text' => $this->locale->translate($customer, 'balance.usdt.status.hash'),
+                    'callback_data' => 'usdt:hash:'.$target->id,
                 ];
             }
         }

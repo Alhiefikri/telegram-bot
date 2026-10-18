@@ -12,7 +12,7 @@ class CustomerUsdtTopUp extends Model
 
     protected function casts(): array
     {
-        return ['intent_id' => 'integer', 'reservation_id' => 'integer', 'customer_id' => 'integer', 'amount_micro' => 'integer', 'fee_micro' => 'integer', 'payable_micro' => 'integer', 'policy_version' => 'integer', 'terms_version' => 'integer', 'receiver_id' => 'integer', 'payment_snapshot' => 'array', 'expires_at' => 'immutable_datetime', 'created_at' => 'immutable_datetime'];
+        return ['intent_id' => 'integer', 'reservation_id' => 'integer', 'customer_id' => 'integer', 'amount_micro' => 'integer', 'fee_micro' => 'integer', 'payable_micro' => 'integer', 'policy_version' => 'integer', 'terms_version' => 'integer', 'receiver_id' => 'integer', 'shared_receiver_id' => 'integer', 'payment_snapshot' => 'array', 'expires_at' => 'immutable_datetime', 'created_at' => 'immutable_datetime'];
     }
 
     protected static function booted(): void

@@ -186,7 +186,7 @@ final class AdminDashboardStatsData
         $pauseStates = $this->usdtFundingPolicies->pauses();
 
         $rails = [];
-        foreach (CustomerUsdtFundingRail::cases() as $rail) {
+        foreach (CustomerUsdtFundingRail::selectable() as $rail) {
             $availability = $this->usdtFundingGate->availability($rail);
             $rails[] = [
                 'rail' => $rail->value,

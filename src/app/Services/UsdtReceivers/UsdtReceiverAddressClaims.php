@@ -80,6 +80,12 @@ final class UsdtReceiverAddressClaims
             );
         }
 
+        if ($channel === UsdtReceiverChannel::SharedTopUp) {
+            throw new UsdtReceiverAddressConflict(
+                'Address ini sudah pernah diklaim sebagai shared top-up receiver dan tidak dapat dipakai ulang.',
+            );
+        }
+
         if ($claim->checkoutReceiver()->exists()) {
             throw new UsdtReceiverAddressConflict('BSC Receiving Address sudah terdaftar.');
         }

@@ -6,7 +6,7 @@ use App\Enums\CustomerUsdtFundingRail;
 use App\Models\Customer;
 use App\Models\CustomerUsdtTopUp;
 use App\Services\Binance\BinanceOrderId;
-use App\Services\Bsc\BscTransactionHash;
+use App\Services\Bsc\BscTransactionInput;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
@@ -207,6 +207,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             'private',
             (int) $root->message_id,
             $amount,
+            CustomerUsdtFundingRail::BscShared,
         );
         [$surface] = $this->previewOutcomeSurface($customer, $result);
         $this->navigation->presentOnRoot($root, $chatId, $surface);
@@ -292,14 +293,15 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
 
         // Invalid format stays a local retry: it consumes neither the bounded
         // hint budget nor an RPC lookup.
-        if (BscTransactionHash::normalize($text) === null || strlen($text) !== 66) {
+        $hash = BscTransactionInput::normalize($text);
+        if ($hash === null) {
             $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_invalid');
 
             return true;
         }
 
         try {
-            $this->settlement->submit($customer, (string) $target->id, $text);
+            $this->settlement->submit($customer, (string) $target->id, $hash);
         } catch (AuthorizationException) {
             $this->hashSession->forget($customer);
             $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_closed');
@@ -310,6 +312,13 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_limited');
 
             return true;
+        }
+
+        try {
+            $this->settlement->check((string) $target->id);
+        } catch (Throwable) {
+            // The hint is durable. Recovery retries settlement; the webhook
+            // still renders the honest current state for this target.
         }
 
         $this->hashSession->forget($customer);
@@ -383,15 +392,18 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
                 default => null,
             };
             $targetRail = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
-            if ($prefix === self::CHECK_PREFIX
-                && ($targetRail !== '' ? $targetRail : (string) (is_array($target->payment_snapshot) ? ($target->payment_snapshot['rail'] ?? '') : '')) === CustomerUsdtFundingRail::BinancePay->value) {
+            $railValue = $targetRail !== '' ? $targetRail : (string) (is_array($target->payment_snapshot) ? ($target->payment_snapshot['rail'] ?? '') : '');
+            if ($prefix === self::CHECK_PREFIX) {
                 try {
-                    $this->binanceSettlement->check((string) $target->id);
+                    if ($railValue === CustomerUsdtFundingRail::BinancePay->value) {
+                        $this->binanceSettlement->check((string) $target->id);
+                    } else {
+                        $this->settlement->check((string) $target->id);
+                    }
                 } catch (Throwable) {
-                    // A provider/history failure must never fail the webhook
-                    // update. Durable work stays leased and the existing
-                    // recovery keeps retrying, while the surface below still
-                    // renders the honest durable state for this target.
+                    // A provider/RPC failure must never fail the webhook update.
+                    // Durable work stays leased and recovery keeps retrying,
+                    // while the surface below renders the honest durable state.
                 }
             }
             if (in_array($prefix, [self::HASH_PREFIX, self::ORDER_PREFIX], true)

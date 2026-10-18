@@ -9,8 +9,9 @@ use App\Models\CustomerUsdtDepositReceiver;
 use App\Models\CustomerUsdtFundingReservation;
 use App\Models\CustomerUsdtTopUp;
 use App\Models\UsdtBscRailInvoice;
+use App\Models\UsdtSharedTopUpReceiver;
 use App\Services\Bsc\BscFinalReceiptInspection;
-use App\Services\Bsc\BscTransactionHash;
+use App\Services\Bsc\BscTransactionInput;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptClaims;
 use App\Services\MoneyReceipts\MoneyReceiptIdentity;
 use App\Services\MoneyReceipts\MoneyReceiptParentClaim;
@@ -35,6 +36,7 @@ final class UsdtTopUpSettlement
 
     public function __construct(
         private readonly UsdtTopUpRail $rail,
+        private readonly SharedBscReceiptInspector $sharedInspector,
         private readonly CustomerUsdtBalanceLedger $ledger,
         private readonly ExternalMoneyReceiptClaims $receipts,
         private readonly CustomerUsdtFundingReservationService $reservations,
@@ -44,9 +46,9 @@ final class UsdtTopUpSettlement
     /** Trusted channel adapter supplies the authenticated Customer, never a client-selected owner. */
     public function submit(Customer $customer, string $topUpId, string $transactionHash): void
     {
-        $hash = BscTransactionHash::normalize($transactionHash);
-        if ($hash === null || strlen($transactionHash) !== 66) {
-            throw new InvalidArgumentException('Invalid BSC transaction hash.');
+        $hash = BscTransactionInput::normalize($transactionHash);
+        if ($hash === null) {
+            throw new InvalidArgumentException('Invalid BSC transaction hash or BscScan link.');
         }
         DB::transaction(function () use ($customer, $topUpId, $hash): void {
             $target = CustomerUsdtTopUp::query()->whereKey($topUpId)->where('customer_id', $customer->id)->lockForUpdate()->first();
@@ -78,7 +80,7 @@ final class UsdtTopUpSettlement
         }
         $ids = DB::table('customer_usdt_top_up_settlement_work as work')
             ->join('customer_usdt_top_ups as targets', 'targets.id', '=', 'work.top_up_id')
-            ->where('targets.rail', 'bsc_usdt')
+            ->whereIn('targets.rail', ['bsc_usdt', 'bsc_shared'])
             ->where('work.next_check_at', '<=', now())
             ->where(fn ($query) => $query->whereNull('work.lease_until')->orWhere('work.lease_until', '<=', now()))
             ->orderBy('work.next_check_at')->orderBy('work.top_up_id')->limit($limit)->pluck('work.top_up_id');
@@ -113,27 +115,34 @@ final class UsdtTopUpSettlement
                 || ($work->lease_until !== null && CarbonImmutable::parse($work->lease_until)->isFuture())) {
                 return null;
             }
-            if ($target->rail !== 'bsc_usdt' || $target->receiver_id === null) {
+            $isShared = $target->rail === 'bsc_shared';
+            if (! in_array($target->rail, ['bsc_usdt', 'bsc_shared'], true)
+                || ($isShared ? $target->shared_receiver_id === null : $target->receiver_id === null)) {
                 $this->updateWork($work, ['next_check_at' => now()->addMinute(), 'last_error' => 'wrong_rail']);
 
                 return null;
             }
-            $invoice = UsdtBscRailInvoice::query()->where('reference', $target->reference)->first();
-            if ($invoice === null) {
-                $this->updateWork($work, ['next_check_at' => now()->addMinute()]);
+            $invoice = null;
+            $cursor = 0;
+            $checkpoint = null;
+            if (! $isShared) {
+                $invoice = UsdtBscRailInvoice::query()->where('reference', $target->reference)->first();
+                if ($invoice === null) {
+                    $this->updateWork($work, ['next_check_at' => now()->addMinute()]);
 
-                return null;
-            }
-            $observations = DB::table('usdt_bsc_transfer_observations')->where('receiver_id', $target->receiver_id)
-                ->where('id', '>', $work->observation_cursor)->orderBy('id')->limit(25)->get();
-            $cursor = (int) $work->observation_cursor;
-            foreach ($observations as $observation) {
-                $this->insertHint($topUpId, $observation->tx_hash);
-                $cursor = (int) $observation->id;
+                    return null;
+                }
+                $observations = DB::table('usdt_bsc_transfer_observations')->where('receiver_id', $target->receiver_id)
+                    ->where('id', '>', $work->observation_cursor)->orderBy('id')->limit(25)->get();
+                $cursor = (int) $work->observation_cursor;
+                foreach ($observations as $observation) {
+                    $this->insertHint($topUpId, $observation->tx_hash);
+                    $cursor = (int) $observation->id;
+                }
+                $checkpoint = DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $target->receiver_id)->first();
             }
             $inbox = DB::table('customer_usdt_top_up_inbox')->where('top_up_id', $topUpId)
                 ->where('state', 'pending')->where('next_check_at', '<=', now())->orderBy('next_check_at')->orderBy('id')->first();
-            $checkpoint = DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $target->receiver_id)->first();
             $token = bin2hex(random_bytes(16));
             $this->updateWork($work, [
                 'observation_cursor' => $cursor, 'lease_token' => $token, 'lease_until' => now()->addMinutes(2),
@@ -141,14 +150,21 @@ final class UsdtTopUpSettlement
             ]);
 
             return ['target' => $target, 'invoice' => $invoice, 'inbox' => $inbox, 'token' => $token,
-                'version' => (int) $work->version + 1, 'checkpoint_version' => $checkpoint?->version];
+                'is_shared' => $isShared, 'version' => (int) $work->version + 1, 'checkpoint_version' => $checkpoint?->version];
         }, 5);
         if ($claim === null) {
             return false;
         }
         $inspection = $claim['inbox'] === null ? null
-            : $this->rail->inspect(Customer::query()->findOrFail($claim['target']->customer_id),
-                $claim['target']->reference, $claim['inbox']->tx_hash, allowLate: true);
+            : ($claim['is_shared']
+                ? $this->sharedInspector->inspect(
+                    (string) $claim['inbox']->tx_hash,
+                    is_array($claim['target']->payment_snapshot) ? $claim['target']->payment_snapshot : [],
+                    (int) $claim['target']->payable_micro,
+                    allowLate: true,
+                )
+                : $this->rail->inspect(Customer::query()->findOrFail($claim['target']->customer_id),
+                    $claim['target']->reference, $claim['inbox']->tx_hash, allowLate: true));
         $this->apply($claim, $inspection);
 
         return true;
@@ -158,12 +174,18 @@ final class UsdtTopUpSettlement
     {
         DB::transaction(function () use ($claim, $inspection): void {
             $target = $claim['target'];
+            $isShared = (bool) ($claim['is_shared'] ?? false);
+            $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
             // Compatible funding graph: Customer -> currency account -> immutable
             // target/receiver -> work -> reservation/resolution -> receipt.
             $customer = Customer::query()->whereKey($target->customer_id)->lockForUpdate()->firstOrFail();
             $this->ledger->lockForTransaction($customer);
             CustomerUsdtTopUp::query()->whereKey($target->id)->lockForUpdate()->firstOrFail();
-            $receiver = CustomerUsdtDepositReceiver::query()->whereKey($target->receiver_id)->lockForUpdate()->firstOrFail();
+            $receiver = $isShared ? null
+                : CustomerUsdtDepositReceiver::query()->whereKey($target->receiver_id)->lockForUpdate()->firstOrFail();
+            $sharedReceiver = $isShared
+                ? UsdtSharedTopUpReceiver::query()->whereKey($target->shared_receiver_id)->lockForUpdate()->first()
+                : null;
             $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->lockForUpdate()->firstOrFail();
             if ($work->lease_token !== $claim['token'] || (int) $work->version !== $claim['version']
                 || $work->lease_until === null || CarbonImmutable::parse($work->lease_until)->isPast()) {
@@ -171,8 +193,9 @@ final class UsdtTopUpSettlement
             }
             $reservation = CustomerUsdtFundingReservation::query()->whereKey($target->reservation_id)->lockForUpdate()->firstOrFail();
             $resolution = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->first();
-            $checkpoint = DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $target->receiver_id)->lockForUpdate()->first();
-            if (($checkpoint?->version) !== $claim['checkpoint_version']) {
+            $checkpoint = $isShared ? null
+                : DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $target->receiver_id)->lockForUpdate()->first();
+            if (! $isShared && ($checkpoint?->version) !== $claim['checkpoint_version']) {
                 $this->finish($work, ['next_check_at' => now()->addSeconds(5), 'last_error' => 'evidence_version_changed']);
 
                 return;
@@ -197,24 +220,53 @@ final class UsdtTopUpSettlement
                 return;
             }
             $invoice = $claim['invoice'];
-            if ($inspection?->evidence?->blockTimestamp !== null && CustomerUsdtTopUp::query()
+            if (! $isShared && $inspection?->evidence?->blockTimestamp !== null && CustomerUsdtTopUp::query()
                 ->where('receiver_id', $target->receiver_id)->where('id', '<>', $target->id)
                 ->where('intent_id', '>', $target->intent_id)
                 ->where('created_at', '<=', $inspection->evidence->blockTimestamp->copy()->setTimezone(config('app.timezone')))->exists()) {
                 $inspection = new BscFinalReceiptInspection('review', 'later_target_attribution_required');
             }
-            if ((int) $receiver->customer_id !== (int) $customer->id || $receiver->address_normalized !== $invoice->receiver_address
-                || $receiver->verified_at === null || $checkpoint?->review_reason !== null
-                || $invoice->customer_id !== (int) $customer->id || $invoice->receiver_id !== (int) $target->receiver_id
-                || $invoice->payable_micro !== (int) $target->payable_micro
-                || $invoice->receiver_address !== $target->payment_snapshot['receiver_address']
-                || $invoice->token_contract !== $target->payment_snapshot['token_contract']
-                || $invoice->minimum_confirmations !== $target->payment_snapshot['minimum_confirmations']
-                || $invoice->chain_id !== $target->payment_snapshot['chain_id']
-                || $invoice->token_decimals !== $target->payment_snapshot['token_decimals']
-                || $invoice->custody_namespace !== $target->payment_snapshot['custody_namespace']
-                || ! $invoice->requires_finalized_block) {
-                $inspection = new BscFinalReceiptInspection('review', 'snapshot_or_receiver_on_review');
+            if ($isShared) {
+                $sharedValid = $sharedReceiver !== null
+                    && (int) $target->shared_receiver_id === (int) $sharedReceiver->getKey()
+                    && $target->receiver_id === null
+                    && (int) ($snapshot['shared_receiver_id'] ?? 0) === (int) $sharedReceiver->getKey()
+                    && (string) ($snapshot['receiver_address'] ?? '') === (string) $sharedReceiver->address_normalized
+                    && (int) ($snapshot['chain_id'] ?? 0) === (int) $sharedReceiver->chain_id
+                    && (string) ($snapshot['token_contract'] ?? '') === (string) $sharedReceiver->token_contract
+                    && (int) ($snapshot['token_decimals'] ?? 0) === (int) $sharedReceiver->token_decimals
+                    && ($snapshot['requires_finalized_block'] ?? false) === true;
+                if (! $sharedValid) {
+                    $inspection = new BscFinalReceiptInspection('review', 'snapshot_or_receiver_on_review');
+                }
+                $expectedChainId = (int) ($snapshot['chain_id'] ?? 0);
+                $expectedContract = (string) ($snapshot['token_contract'] ?? '');
+                $expectedReceiver = (string) ($snapshot['receiver_address'] ?? '');
+                $expectedDecimals = (int) ($snapshot['token_decimals'] ?? 0);
+                $expectedStarts = (int) ($snapshot['starts_at_epoch'] ?? 0);
+                $expectedExpires = (int) ($snapshot['expires_at_epoch'] ?? 0);
+                $expectedMinConfirmations = (int) ($snapshot['minimum_confirmations'] ?? 0);
+            } else {
+                if ((int) $receiver->customer_id !== (int) $customer->id || $receiver->address_normalized !== $invoice->receiver_address
+                    || $receiver->verified_at === null || $checkpoint?->review_reason !== null
+                    || $invoice->customer_id !== (int) $customer->id || $invoice->receiver_id !== (int) $target->receiver_id
+                    || $invoice->payable_micro !== (int) $target->payable_micro
+                    || $invoice->receiver_address !== $target->payment_snapshot['receiver_address']
+                    || $invoice->token_contract !== $target->payment_snapshot['token_contract']
+                    || $invoice->minimum_confirmations !== $target->payment_snapshot['minimum_confirmations']
+                    || $invoice->chain_id !== $target->payment_snapshot['chain_id']
+                    || $invoice->token_decimals !== $target->payment_snapshot['token_decimals']
+                    || $invoice->custody_namespace !== $target->payment_snapshot['custody_namespace']
+                    || ! $invoice->requires_finalized_block) {
+                    $inspection = new BscFinalReceiptInspection('review', 'snapshot_or_receiver_on_review');
+                }
+                $expectedChainId = (int) $invoice->chain_id;
+                $expectedContract = (string) $invoice->token_contract;
+                $expectedReceiver = (string) $invoice->receiver_address;
+                $expectedDecimals = (int) $invoice->token_decimals;
+                $expectedStarts = (int) $invoice->starts_at_epoch;
+                $expectedExpires = (int) $invoice->expires_at_epoch;
+                $expectedMinConfirmations = (int) $invoice->minimum_confirmations;
             }
             $evidenceVersion = (int) $work->evidence_version + 1;
             $evidenceId = DB::table('customer_usdt_top_up_evidence')->insertGetId([
@@ -226,18 +278,18 @@ final class UsdtTopUpSettlement
             $error = $inspection->reason;
             if (($inspection->verified() || $inspection->reason === 'canonical_final_amount_mismatch') && $inspection->evidence !== null) {
                 $evidence = $inspection->evidence;
-                $amount = UsdtMicroAmount::fromRawTokenUnits($evidence->amountUnits, $invoice->token_decimals);
+                $amount = UsdtMicroAmount::fromRawTokenUnits($evidence->amountUnits, $expectedDecimals);
                 if (($inspection->verified() && $amount->units() !== (int) $target->payable_micro) || $evidence->txHash !== $claim['inbox']->tx_hash
-                    || $evidence->tokenContract !== $invoice->token_contract || $evidence->receiverAddress !== $invoice->receiver_address
-                    || $evidence->blockTimestamp === null || $evidence->blockTimestamp->getTimestamp() < $invoice->starts_at_epoch
-                    || $evidence->blockHash === null || ($evidence->confirmations ?? 0) < $invoice->minimum_confirmations) {
+                    || $evidence->tokenContract !== $expectedContract || $evidence->receiverAddress !== $expectedReceiver
+                    || $evidence->blockTimestamp === null || $evidence->blockTimestamp->getTimestamp() < $expectedStarts
+                    || $evidence->blockHash === null || ($evidence->confirmations ?? 0) < $expectedMinConfirmations) {
                     throw new RuntimeException('Verified USDT evidence does not match its immutable target.');
                 }
                 $receipt = new VerifiedMoneyReceipt(
-                    MoneyReceiptIdentity::bscLog($invoice->chain_id, $evidence->txHash, $evidence->logIndex),
-                    'customer:'.$customer->id, 'USDT', $evidence->amountUnits, $invoice->token_decimals,
+                    MoneyReceiptIdentity::bscLog($expectedChainId, $evidence->txHash, $evidence->logIndex),
+                    'customer:'.$customer->id, 'USDT', $evidence->amountUnits, $expectedDecimals,
                     MoneyReceiptTarget::customerUsdtTopUp($target->id), $evidence->sanitizedPayload(),
-                    parentClaim: MoneyReceiptParentClaim::for($invoice->chain_id, $evidence->txHash),
+                    parentClaim: MoneyReceiptParentClaim::for($expectedChainId, $evidence->txHash),
                 );
                 $outcome = $this->receipts->claim($receipt);
                 if ($outcome->allowsMoneyEffect()) {
@@ -251,7 +303,7 @@ final class UsdtTopUpSettlement
                             new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits($target->amount_micro),
                                 $target->id, (string) $receiptId, (string) $evidenceId), 'usdt-top-up:'.$target->id);
                         $entry = CustomerUsdtBalanceEntry::query()->findOrFail($entry->entryId);
-                        $late = $target->expires_at->isPast() || $evidence->blockTimestamp->getTimestamp() > $invoice->expires_at_epoch;
+                        $late = $target->expires_at->isPast() || $evidence->blockTimestamp->getTimestamp() > $expectedExpires;
                         DB::table('customer_usdt_top_up_resolutions')->insert([
                             'top_up_id' => $target->id, 'kind' => 'settled', 'receipt_id' => $receiptId, 'entry_id' => $entry->id,
                             'evidence_id' => $evidenceId, 'late' => $late, 'created_at' => now(),

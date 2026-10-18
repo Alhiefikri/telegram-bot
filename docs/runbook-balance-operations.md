@@ -120,7 +120,43 @@ php artisan usdt-balance:reconcile --limit=1000 --json
 # continue with the printed cursors: --cursor= --receipt-cursor= --credit-cursor=
 ```
 
-## 6. Limits
+## 6. Shared-address BSC top-up (`bsc_shared`)
+
+New Customer USDT top-ups use one shared BSC address, not one address per
+Customer. The address is public and permanently claimed in the receiver
+registry; the application never stores a private key.
+
+Configure or rotate (Owner only; run inside the application container):
+
+```bash
+php artisan usdt-topup:shared-receiver \
+  --address=0x<public-bsc-address> \
+  --label="Top-up BSC" \
+  --actor=owner@example.com
+
+php artisan usdt-topup:shared-receiver --deactivate --actor=owner@example.com
+```
+
+Rules:
+
+- Use a dedicated BSC address. The checkout receiver address and every
+  Customer-exclusive deposit address are rejected by the permanent claim
+  registry.
+- Rotation deactivates the current row and registers a new address. History
+  is retained; a rotated address is never reused.
+- The invoice amount is exact and may carry a bounded micro-USDT suffix when
+  another open invoice already holds the requested amount. The displayed total
+  is the amount to send and the full amount is credited.
+- The Customer must submit the transaction hash or a BscScan transaction link.
+  The hash/link is a lookup hint only; settlement requires one successful USDT
+  BEP20 Transfer to the snapshot address, the exact amount, the invoice window,
+  canonical block facts and finalized confirmations.
+- A second target submitting an already-claimed transfer is routed to manual
+  review. Never credit the same `(chain, tx hash, log index)` twice.
+- The `rail_bsc_usdt` pause covers both BSC rails (`bsc_usdt` history and
+  `bsc_shared` new funding).
+
+## 7. Limits
 
 - SQLite/synchronous tests prove behavior, not PostgreSQL locking; only the disposable PostgreSQL lane does.
 - The scheduled reconciliation covers one bounded window per facet; it is not a full-history scan on every tick.

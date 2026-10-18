@@ -82,6 +82,7 @@ use App\Services\Telegram\TelegramCheckoutPaymentIntentSelector;
 use App\Services\Telegram\TelegramConfiguredCheckoutPaymentIntentSelector;
 use App\Services\UsdtFunding\BinancePayFundingReadiness;
 use App\Services\UsdtFunding\LocalBscFundingReadiness;
+use App\Services\UsdtFunding\SharedBscFundingReadiness;
 use App\Services\UsdtFunding\UsdtFundingRailReadinessRegistry;
 use App\Services\UsdtReceivers\UsdtDepositReceiverProvisioners;
 use App\Services\UsdtTopUps\BscUsdtTopUpRail;
@@ -149,6 +150,9 @@ class AppServiceProvider extends ServiceProvider
             $keys = collect($providers)->map(fn ($provider): string => $provider->railKey())->all();
             if (! in_array(CustomerUsdtFundingRail::BscUsdt->value, $keys, true)) {
                 $providers[] = $app->make(LocalBscFundingReadiness::class);
+            }
+            if (! in_array(CustomerUsdtFundingRail::BscShared->value, $keys, true)) {
+                $providers[] = $app->make(SharedBscFundingReadiness::class);
             }
             if (! in_array(CustomerUsdtFundingRail::BinancePay->value, $keys, true)) {
                 $providers[] = $app->make(BinancePayFundingReadiness::class);

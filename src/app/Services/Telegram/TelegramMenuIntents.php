@@ -403,7 +403,8 @@ class TelegramMenuIntents
         ]]];
 
         if ($snapshot->isAvailable() && ! $snapshot->isFrozen()) {
-            if ($this->usdtFundingGate->availability(CustomerUsdtFundingRail::BscUsdt)->available) {
+            if ($this->usdtFundingGate->availability(CustomerUsdtFundingRail::BscShared)->available
+                || $this->usdtFundingGate->availability(CustomerUsdtFundingRail::BinancePay)->available) {
                 array_unshift($rows, [[
                     'text' => $this->locale->translate($customer, 'balance.usdt.topup.button'),
                     'callback_data' => 'balance:usdt',

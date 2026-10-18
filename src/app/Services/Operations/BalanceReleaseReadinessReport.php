@@ -34,8 +34,8 @@ final class BalanceReleaseReadinessReport
         $cutover = $this->receiptCutover->summary();
         $reconciliation = $this->latestCompleteFullReconciliation($maxReconciliationAgeMinutes);
         $restore = $this->restoreGate->status();
-        $bscFunding = $this->fundingGate->availability(CustomerUsdtFundingRail::BscUsdt);
-        $bscReadiness = $this->railReadiness->observe(CustomerUsdtFundingRail::BscUsdt);
+        $bscFunding = $this->fundingGate->availability(CustomerUsdtFundingRail::BscShared);
+        $bscReadiness = $this->railReadiness->observe(CustomerUsdtFundingRail::BscShared);
         $policy = CustomerUsdtFundingPolicy::current();
         $releaseEvidence = $this->candidateEvidence->inspect($candidateSha, $evidenceManifest);
 
@@ -96,7 +96,7 @@ final class BalanceReleaseReadinessReport
                     'funding_available' => $bscFunding->available,
                     'funding_reason' => $bscFunding->reason->value,
                     'funding_detail' => $bscFunding->detail,
-                    'readiness_registered' => $this->railReadiness->isRegistered(CustomerUsdtFundingRail::BscUsdt),
+                    'readiness_registered' => $this->railReadiness->isRegistered(CustomerUsdtFundingRail::BscShared),
                     'readiness_ready' => $bscReadiness->ready,
                     'readiness_reason' => $bscReadiness->reason,
                     'funding_enabled' => $policy?->fundingEnabled(),

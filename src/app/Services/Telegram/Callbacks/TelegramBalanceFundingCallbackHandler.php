@@ -300,7 +300,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         if ($context->data === 'balance:usd:bsc' || $context->data === 'balance:usd:binance_pay') {
             $rail = $context->data === 'balance:usd:binance_pay'
                 ? CustomerUsdtFundingRail::BinancePay
-                : CustomerUsdtFundingRail::BscUsdt;
+                : CustomerUsdtFundingRail::BscShared;
             $outcome = $this->presentAmount($context->customer, $context->chatId, $root, $rail);
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
 

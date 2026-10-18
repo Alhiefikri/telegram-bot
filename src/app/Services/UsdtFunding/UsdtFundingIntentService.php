@@ -25,6 +25,8 @@ final class UsdtFundingIntentService
         private readonly CustomerUsdtFundingGate $gate,
         private readonly CustomerUsdtFundingReservationService $reservations,
         private readonly UsdtDepositReceiverRegistry $receivers,
+        private readonly SharedTopUpReceiverRegistry $sharedReceivers,
+        private readonly SharedBscTopUpAmountAllocator $sharedAmounts,
     ) {}
 
     public function open(Customer $customer, string $chatId, int $rootId, int $messageId, UsdtMicroAmount $amount, CustomerUsdtFundingRail $rail = CustomerUsdtFundingRail::BscUsdt): UsdtFundingIntentResult
@@ -52,8 +54,49 @@ final class UsdtFundingIntentService
                 return new UsdtFundingIntentResult('unavailable');
             }
 
+            if ($rail === CustomerUsdtFundingRail::BscShared) {
+                $existing = CustomerUsdtFundingIntent::query()
+                    ->where('customer_id', $customer->id)
+                    ->where('state', 'pending')
+                    ->where('rail', $rail->value)
+                    ->where('telegram_navigation_root_id', $rootId)
+                    ->where('chat_id', $chatId)
+                    ->where('canonical_message_id', $messageId)
+                    ->where('expires_at', '>', now())
+                    ->lockForUpdate()
+                    ->first();
+                $existingSnapshot = is_array($existing?->payment_snapshot) ? $existing->payment_snapshot : [];
+                if ($existing !== null && (int) ($existingSnapshot['requested_micro'] ?? -1) === $amount->units()) {
+                    return new UsdtFundingIntentResult('replayed', $existing);
+                }
+            }
+
             $receiverId = null;
-            if ($rail === CustomerUsdtFundingRail::BscUsdt) {
+            $sharedReceiverId = null;
+            $amountMicro = $amount->units();
+            if ($rail === CustomerUsdtFundingRail::BscShared) {
+                $shared = $this->sharedReceivers->active();
+                if ($shared === null) {
+                    return new UsdtFundingIntentResult('unavailable');
+                }
+                try {
+                    $amountMicro = $this->sharedAmounts->allocate($amountMicro);
+                } catch (\RuntimeException) {
+                    return new UsdtFundingIntentResult('unavailable');
+                }
+                $sharedReceiverId = (int) $shared->getKey();
+                $terms = [
+                    'requested_micro' => $amount->units(),
+                    'shared_receiver_id' => $sharedReceiverId,
+                    'receiver_address' => $shared->address_normalized,
+                    'chain_id' => (int) $shared->chain_id,
+                    'token_contract' => $shared->token_contract,
+                    'token_decimals' => (int) $shared->token_decimals,
+                    'minimum_confirmations' => $settings->bscMinConfirmations(),
+                    'requires_finalized_block' => true,
+                    'payment_ttl_seconds' => $settings->bscPaymentTtlMinutes() * 60,
+                ];
+            } elseif ($rail === CustomerUsdtFundingRail::BscUsdt) {
                 $receiver = CustomerUsdtDepositReceiver::query()->where('customer_id', $customer->id)
                     ->whereNotNull('verified_at')->whereNull('retired_at')->lockForUpdate()->first();
                 if ($receiver === null) {
@@ -84,14 +127,18 @@ final class UsdtFundingIntentService
                     'payment_ttl_seconds' => $settings->binancePaymentTtlMinutes() * 60,
                 ];
             }
+            if ($amountMicro < 1 || $feeMicro > PHP_INT_MAX - $amountMicro) {
+                return new UsdtFundingIntentResult('unavailable');
+            }
             $identity = [
                 'customer_id' => (int) $customer->id, 'telegram_navigation_root_id' => $rootId,
                 'chat_id' => $chatId, 'canonical_message_id' => $messageId,
                 'currency' => 'USDT', 'rail' => $rail->value,
-                'amount_micro' => $amount->units(), 'fee_micro' => $feeMicro,
-                'payable_micro' => $amount->units() + $feeMicro,
+                'amount_micro' => $amountMicro, 'fee_micro' => $feeMicro,
+                'payable_micro' => $amountMicro + $feeMicro,
                 'policy_version' => $policy->policyVersion(), 'terms_version' => $policy->termsVersion(),
-                'receiver_id' => $receiverId, 'payment_snapshot' => $terms,
+                'receiver_id' => $receiverId, 'shared_receiver_id' => $sharedReceiverId,
+                'payment_snapshot' => $terms,
             ];
             $current = CustomerUsdtFundingIntent::query()->where('customer_id', $customer->id)->where('state', 'pending')->lockForUpdate()->first();
             if ($current !== null) {
@@ -165,7 +212,22 @@ final class UsdtFundingIntentService
 
                 return new UsdtFundingIntentResult('stale_terms', $intent);
             }
-            if ($rail === CustomerUsdtFundingRail::BscUsdt) {
+            if ($rail === CustomerUsdtFundingRail::BscShared) {
+                $shared = $this->sharedReceivers->active();
+                $snapshot = is_array($intent->payment_snapshot) ? $intent->payment_snapshot : [];
+                if ($shared === null
+                    || (int) ($snapshot['shared_receiver_id'] ?? 0) !== (int) $shared->getKey()
+                    || (string) ($snapshot['receiver_address'] ?? '') !== (string) $shared->address_normalized
+                    || (int) ($snapshot['chain_id'] ?? 0) !== (int) $shared->chain_id
+                    || (string) ($snapshot['token_contract'] ?? '') !== (string) $shared->token_contract
+                    || (int) ($snapshot['token_decimals'] ?? 0) !== (int) $shared->token_decimals
+                    || (int) ($snapshot['minimum_confirmations'] ?? 0) !== $settings->bscMinConfirmations()
+                    || (int) ($snapshot['payment_ttl_seconds'] ?? 0) !== $settings->bscPaymentTtlMinutes() * 60) {
+                    $this->transition($intent, 'superseded');
+
+                    return new UsdtFundingIntentResult('stale_terms', $intent);
+                }
+            } elseif ($rail === CustomerUsdtFundingRail::BscUsdt) {
                 $receiver = CustomerUsdtDepositReceiver::query()->whereKey($intent->receiver_id)->lockForUpdate()->first();
                 if ($receiver === null || ! $receiver->isReadyForAssignment()
                     || $settings->bscMinConfirmations() !== $intent->payment_snapshot['minimum_confirmations']
@@ -185,6 +247,14 @@ final class UsdtFundingIntentService
                 return new UsdtFundingIntentResult('unavailable', $intent);
             }
             $expiresAt = CarbonImmutable::now()->startOfSecond()->addSeconds((int) $intent->payment_snapshot['payment_ttl_seconds']);
+            $topUpSnapshot = $intent->payment_snapshot;
+            if ($rail === CustomerUsdtFundingRail::BscShared) {
+                $startsAt = CarbonImmutable::now()->startOfSecond();
+                $topUpSnapshot = $intent->payment_snapshot + [
+                    'starts_at_epoch' => $startsAt->getTimestamp(),
+                    'expires_at_epoch' => $expiresAt->getTimestamp(),
+                ];
+            }
             $id = (string) Str::uuid();
             $reserved = $this->reservations->reserve($customer, $rail,
                 UsdtMicroAmount::fromUnits($intent->amount_micro), 'customer_usdt_top_up', $id, $expiresAt);
@@ -198,11 +268,12 @@ final class UsdtFundingIntentService
                 'customer_id' => $customer->id, 'reference' => 'usdt:'.$id, 'currency' => 'USDT', 'rail' => $intent->rail,
                 'amount_micro' => $intent->amount_micro, 'fee_micro' => $intent->fee_micro, 'payable_micro' => $intent->payable_micro,
                 'policy_version' => $intent->policy_version, 'terms_version' => $intent->terms_version,
-                'receiver_id' => $intent->receiver_id, 'payment_snapshot' => $intent->payment_snapshot,
+                'receiver_id' => $intent->receiver_id, 'shared_receiver_id' => $intent->shared_receiver_id,
+                'payment_snapshot' => $topUpSnapshot,
                 'request_fingerprint' => $intent->request_fingerprint, 'expires_at' => $expiresAt, 'created_at' => now(),
             ]);
             DB::table('customer_usdt_top_up_work')->insert([
-                'top_up_id' => $id, 'state' => $rail === CustomerUsdtFundingRail::BinancePay ? 'ready' : 'pending', 'version' => 1, 'attempts' => 0,
+                'top_up_id' => $id, 'state' => in_array($rail, [CustomerUsdtFundingRail::BinancePay, CustomerUsdtFundingRail::BscShared], true) ? 'ready' : 'pending', 'version' => 1, 'attempts' => 0,
                 'next_attempt_at' => now(), 'updated_at' => now(),
             ]);
             DB::table('customer_usdt_top_up_settlement_work')->insert([

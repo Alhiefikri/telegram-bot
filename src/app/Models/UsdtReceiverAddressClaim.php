@@ -57,6 +57,11 @@ class UsdtReceiverAddressClaim extends Model
         return $this->hasOne(CustomerUsdtDepositReceiver::class, 'address_claim_id');
     }
 
+    public function sharedTopUpReceiver(): HasOne
+    {
+        return $this->hasOne(UsdtSharedTopUpReceiver::class, 'address_claim_id');
+    }
+
     /** @return Builder<self> */
     public function scopeForAddress($query, int $chainId, string $addressNormalized)
     {

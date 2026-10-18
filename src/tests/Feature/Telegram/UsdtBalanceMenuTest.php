@@ -19,7 +19,7 @@ use App\Services\UsdtBalance\CustomerUsdtActivityService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
-use App\Services\UsdtReceivers\UsdtDepositReceiverRegistry;
+use App\Services\UsdtFunding\SharedTopUpReceiverRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
@@ -61,12 +61,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
             'bsc_payment_ttl_minutes' => 15,
         ]);
         CustomerUsdtFundingPolicy::current()->update(['funding_enabled' => true, 'version' => 1]);
-        $registry = app(UsdtDepositReceiverRegistry::class);
-        $registry->manualVerify(
-            $registry->register($this->customer, BscUsdtRailRpcFixture::ADDRESS, $this->owner)->receiver,
-            true,
-            $this->owner,
-        );
+        app(SharedTopUpReceiverRegistry::class)->activate($this->owner, BscUsdtRailRpcFixture::ADDRESS, 'Shared top-up');
     }
 
     #[DataProvider('decimalAmounts')]
@@ -445,7 +440,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $edit = $this->lastCanonicalEdit(self::CHAT_ID);
         $copy = $this->editCopy($edit);
         $this->assertStringContainsString('Top-up dikonfirmasi', $copy);
-        $this->assertStringContainsString('Status: Menyiapkan tujuan pembayaran', $copy);
+        $this->assertStringContainsString('Status: Menunggu pembayaran', $copy);
         $this->assertStringContainsString('Kredit: 1.5 USDT', $copy);
 
         $target = CustomerUsdtTopUp::query()->sole();
@@ -467,7 +462,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         // Refresh and status reads are durable-read only: no RPC and no money.
         $this->tap('check-1', 'usdt:check:'.$target->id, $root);
         $this->assertStringContainsString('Status diperbarui dari catatan durabel', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
-        $this->assertStringContainsString('Status: Menyiapkan tujuan pembayaran', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
+        $this->assertStringContainsString('Status: Menunggu pembayaran', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
         $this->tap('status-1', 'usdt:status:'.$target->id, $root);
         $this->assertStringContainsString('Kredit: 1.5 USDT', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
         $this->assertSame([], $this->rpc->calls);
@@ -528,7 +523,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
         $this->sendText('not-a-hash');
         $this->assertStringContainsString(
-            'Format hash tidak valid',
+            'Format tidak valid',
             $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)),
         );
         $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
@@ -560,7 +555,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertStringContainsString('🧾 Riwayat saldo USDT', $copy);
         $this->assertStringContainsString('Kredit top-up · Dikreditkan', $copy);
         $this->assertStringContainsString('+1.5 USDT', $copy);
-        $this->assertStringContainsString('Top-up USDT · Menyiapkan', $copy);
+        $this->assertStringContainsString('Top-up USDT · Menunggu pembayaran', $copy);
         $this->assertStringContainsString('Diminta: 1.5 USDT', $copy);
         $this->assertStringContainsString('usdt:'.$target->id, $copy);
 

@@ -12,12 +12,14 @@ enum UsdtReceiverChannel: string
 {
     case Checkout = 'checkout';
     case CustomerDeposit = 'customer_deposit';
+    case SharedTopUp = 'shared_top_up';
 
     public function label(): string
     {
         return match ($this) {
             self::Checkout => 'Checkout pool',
             self::CustomerDeposit => 'Customer deposit',
+            self::SharedTopUp => 'Shared top-up address',
         };
     }
 }
