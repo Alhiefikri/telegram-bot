@@ -859,6 +859,8 @@ CODE;
     {
         return <<<'CODE'
 # Recovery read. `not_ready` and `partial` are normal 200 answers, not errors.
+# When `pagination.has_more` is true, request the same path with
+# `&cursor=${pagination.next_cursor}` until it is false. Each unit appears once.
 : "${STORE_ORIGIN:?export STORE_ORIGIN first}"
 : "${CUSTOMER_API_KEY:?export CUSTOMER_API_KEY first}"
 : "${ORDER_ID:?export ORDER_ID first}"
@@ -903,8 +905,20 @@ for attempt in range(6):
         break
     time.sleep(5)
 
-print("state:", result["state"], "progress:", result["progress"]["state"])
-for unit in result["units"]:
+# Reuse the first page and follow the continuation cursor. Each unit appears exactly once.
+units = list(result["units"])
+cursor = result["pagination"]["next_cursor"]
+while cursor is not None:
+    status, payload = call(f"/api/v1/orders/{ORDER_ID}/delivery?cursor={cursor}")
+    if status != 200:
+        raise SystemExit(f"delivery failed: {status} {payload}")
+
+    page = payload["data"]
+    units.extend(page["units"])
+    cursor = page["pagination"]["next_cursor"] if page["pagination"]["has_more"] else None
+
+print("state:", result["state"], "progress:", result["progress"]["state"], "units:", len(units))
+for unit in units:
     print(unit["number"], unit["format"], unit["text"])
 for guide in result["usage_guides"]:
     print("guide:", guide["title"], guide["url"])
@@ -918,8 +932,9 @@ const origin = process.env.STORE_ORIGIN.replace(/\/+$/, "");
 const key = process.env.CUSTOMER_API_KEY;
 const orderId = process.env.ORDER_ID;
 
-const read = async () => {
-  const response = await fetch(`${origin}/api/v1/orders/${orderId}/delivery`, {
+const read = async (cursor) => {
+  const suffix = cursor === undefined ? "" : `?cursor=${cursor}`;
+  const response = await fetch(`${origin}/api/v1/orders/${orderId}/delivery${suffix}`, {
     signal: AbortSignal.timeout(15_000),
     headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
   });
@@ -935,8 +950,17 @@ for (let attempt = 1; attempt < 6 && result.state !== "ready"; attempt += 1) {
   result = await read();
 }
 
-console.log("state:", result.state, "progress:", result.progress.state);
-for (const unit of result.units) console.log(unit.number, unit.format, unit.text);
+// Traverse every bounded page. Each unit appears exactly once.
+const units = [];
+let cursor;
+do {
+  const page = cursor === undefined ? result : await read(cursor);
+  units.push(...page.units);
+  cursor = page.pagination.has_more ? page.pagination.next_cursor : undefined;
+} while (cursor !== undefined);
+
+console.log("state:", result.state, "progress:", result.progress.state, "units:", units.length);
+for (const unit of units) console.log(unit.number, unit.format, unit.text);
 for (const guide of result.usage_guides) console.log("guide:", guide.title, guide.url);
 CODE;
     }
@@ -950,8 +974,9 @@ $origin = rtrim((string) getenv('STORE_ORIGIN'), '/');
 $key = (string) getenv('CUSTOMER_API_KEY');
 $orderId = (string) getenv('ORDER_ID');
 
-$read = function () use ($origin, $key, $orderId): array {
-    $curl = curl_init($origin.'/api/v1/orders/'.$orderId.'/delivery');
+$read = function (?string $cursor) use ($origin, $key, $orderId): array {
+    $suffix = $cursor === null ? '' : '?cursor='.$cursor;
+    $curl = curl_init($origin.'/api/v1/orders/'.$orderId.'/delivery'.$suffix);
     curl_setopt_array($curl, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CONNECTTIMEOUT => 5,
@@ -971,7 +996,7 @@ $read = function () use ($origin, $key, $orderId): array {
 
 // Bounded polling: six attempts, 5 seconds apart. An existing result never needs a new purchase.
 for ($attempt = 0; $attempt < 6; $attempt++) {
-    [$status, $payload] = $read();
+    [$status, $payload] = $read(null);
     if ($status !== 200) {
         exit('delivery failed: '.$status.' '.json_encode($payload));
     }
@@ -982,8 +1007,30 @@ for ($attempt = 0; $attempt < 6; $attempt++) {
     sleep(5);
 }
 
-printf("state: %s progress: %s\n", $result['state'], $result['progress']['state']);
-foreach ($result['units'] as $unit) {
+// Traverse every bounded page. Each unit appears exactly once.
+$units = [];
+$cursor = null;
+$first = true;
+while (true) {
+    if ($first) {
+        $page = $result;
+        $first = false;
+    } else {
+        [$status, $payload] = $read($cursor);
+        if ($status !== 200) {
+            exit('delivery failed: '.$status.' '.json_encode($payload));
+        }
+        $page = $payload['data'];
+    }
+    $units = array_merge($units, $page['units']);
+    if (! $page['pagination']['has_more']) {
+        break;
+    }
+    $cursor = $page['pagination']['next_cursor'];
+}
+
+printf("state: %s progress: %s units: %d\n", $result['state'], $result['progress']['state'], count($units));
+foreach ($units as $unit) {
     printf("%d %s %s\n", $unit['number'], $unit['format'], $unit['text']);
 }
 foreach ($result['usage_guides'] as $guide) {

@@ -326,9 +326,12 @@ Customer API order recovery (#624) uses `CustomerApiOrderReadController` and
 of the creating key version. Ascending UUID keysets are bounded to 100 summaries;
 `CredentialDeliveryEligibility::rejectionReasons()` batches the shared paid/lifecycle,
 supplier partial-release and late-review gate without credential hydration. Delivery
-holds the owned Order shared, loads only bounded non-retired allocated units after that
-gate, and reuses `CredentialDeliveryPresentation`; GET never purchases, reallocates,
-debits, refunds or resends. `suppliers:recover` and the existing `suppliers` worker recover
+holds the owned Order shared, rechecks that gate on every request, loads one bounded
+page of non-retired allocated units in ascending identity order after it, and reuses
+`CredentialDeliveryPresentation`. Pages are byte-sized from the exact unit JSON under
+a 1 MiB response bound; an authenticated opaque `pagination.next_cursor` continues the
+same traversal without changing whole-Order progress or logical account numbers. GET
+never purchases, reallocates, debits, refunds or resends. `suppliers:recover` and the existing `suppliers` worker recover
 the committed obligation after volatile Redis loss; unknown dispatched purchases retain
 review/holds. Schemas, partial/refund semantics, query plans and disposable worker-loss
 HTTP evidence: [Customer API orders](../customer-api-orders.md#owned-history-status-and-delivery-s07).

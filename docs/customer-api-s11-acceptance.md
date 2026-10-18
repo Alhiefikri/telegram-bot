@@ -340,3 +340,96 @@ measurements and source hashes were retained in the evidence JSON.
 - Candidate-bound full V1/V2 evidence, receipt backfill/cutover and mixed/old-worker drain, full fresh reconciliation/accounting/treasury coverage, restore replay/close, human canary approval and H2 live evidence are not replaced by this report.
 - Production TLS/trusted proxy/CDN/APM logging, actual Telegram channel permissions and supplier idempotency/recovery contracts require operator/provider evidence. Closed legacy tickets do not supply it.
 - Initial 300 reads/second and 20 create attempts/second are admission proposals. Local diagnostics do not certify those rates. Exposure stays NO-GO rather than treating the quotas or fixture success as measured production capacity. No production setting was lowered, raised or activated here.
+
+## Follow-up #642 addendum: bounded delivery result retrieval (2026-10-18)
+
+The S07 delivery endpoint built the complete JSON response before enforcing its
+1 MiB bound. A valid 100-unit structured purchase with maximum-length fields
+(password 1,024, Auth Token 3,500 and tutorial 2,000 characters per unit) therefore
+became permanently unreadable: payment was `paid`, 100 units were allocated and
+status advertised `delivery.available=true`, but every delivery read returned
+503. Pagination did not exist, so no client could recover the same purchase.
+
+### Contract change
+
+`GET /api/v1/orders/{id}/delivery` now accepts an optional `limit` (default and
+maximum 100) and an opaque `cursor`. The response is still `DeliveryResult`, with
+an additive required `pagination: {next_cursor, has_more}`. Units are traversed by
+ascending immutable allocated-unit identity; one look-ahead row decides whether a
+continuation exists and is never decrypted or projected for the current page.
+The page is byte-sized from the exact JSON each unit will emit, including
+maximum-length fields and escaping, under a 1 MiB response bound. A page that
+would exceed the bound ends early and returns a cursor. `state` and `progress`
+always describe the whole Order, so `has_more` is not partial supplier
+fulfillment. Continuation tokens are authenticated opaque values, not raw
+internal ids, and `units[].number` stays stable across pages while entitlement
+is unchanged. Every request re-evaluates ownership, paid entitlement, retirement,
+review/refund and supplier partial-release authority; a continuation cannot
+outlive a revocation. A foreign or malformed cursor, an out-of-range limit and
+unknown query fields are 422 `invalid_input`. Small Orders still return in one
+response without pagination input. A genuinely oversized single unit still fails
+closed with 503; the guard was retained, not removed. The decision record is
+[ADR-0026](adr/0026-api-delivery-result-pagination.md).
+
+### Disposable HTTP verification
+
+Runtime: application image `telegram-bot:local` (PHP 8.4.26) with disposable
+PostgreSQL 16-alpine and Redis 7-alpine, real `/api/v1` middleware/controllers.
+The fixture was one visible Product with 100 structured Product Stock Items,
+IDR 15,000 / USD 2 per unit, a distinct email and 3,500-character Auth Token per
+unit, 1,024-character passwords, 2,000-character tutorial overrides, and one
+Customer funded with 500,000,000 micro-USDT through the canonical USDT ledger.
+All credentials and funding were synthetic; Telegram, supplier and provider
+traffic were disabled.
+
+Observed:
+
+- `POST /api/v1/orders` with `quantity=100`, `preference=usd_only`,
+  `expected_totals.USD=200` and a stable Idempotency-Key returned **201**, a paid
+  Order for USD `200`, and exactly one purchase intent.
+- Status returned **200** with `fulfillment.state=complete`,
+  `released_units=100` and `delivery.state=ready`.
+- Default delivery returned **200**, **1,041,112 bytes** and 92 units with
+  `has_more=true`. This is the request that previously produced 503.
+- A traversal with `limit=20` returned five **200** pages (20 units each,
+  226,563–226,758 bytes). The 100 unit identities were `1`–`100` and their
+  logical `number` values were also `1`–`100`, in ascending order, with **100
+  unique ids and 100 unique numbers — no loss, duplication or page-local
+  renumbering**. Every unit retained its 1,024/3,500/2,000-character fields, and
+  every page reported whole-Order `state=ready`.
+- The returned cursor was a 200-character authenticated opaque token
+  (`[A-Za-z0-9_-]+`), not a raw internal id.
+- Repeating the same page with its cursor returned byte-identical units. After
+  `FLUSHALL` on the disposable Redis and after restarting the HTTP process, the
+  same page still returned the same unit identities and values.
+- `limit=0`, `limit=101`, `cursor=no`, `cursor=0`, a 19-digit cursor, a
+  nonexistent cursor and an unknown query field all returned **422
+  `invalid_input`**. Direct economic snapshots before and after those requests
+  were equal.
+- A refund between pages (page 1 `limit=1`, then a canonical full refund, then
+  page 2 with the page-1 cursor) returned **200 `not_ready`** with zero units and
+  `pagination={next_cursor:null,has_more:false}`. The response contained no
+  credential value.
+- Before the refund the durable state was one Order, one Payment, one purchase
+  debit, 100 allocated units, zero supplier purchases and zero refund credits.
+  After the refund it was one Order, one Payment, one purchase debit, one refund
+  credit, 100 retired units and still zero supplier purchases. No request
+  purchased, reallocated, debited again or resurfaced a retired unit.
+
+Local regressions: `CustomerApiOrderReadTest` passed 11 tests / 652 assertions
+(including the maximum-field 100-unit traversal with stable numbers,
+cursor/limit rejection, retirement between pages, revocation between pages and
+constant query count at 1/20/100); the delivery consumers (local manual review,
+supplier fulfillment, BuyMail partial/warranty, credential presentation and API
+orders) passed 74 tests / 958 assertions; `StorefrontApiDocsTest` passed 11 tests
+/ 1,025 assertions; `CustomerApiErrorContractTest` passed 5 tests / 76 assertions.
+The complete local suite ran 4,915 tests / 47,209 assertions with 3 failures and
+270 skips. The three failures reproduce unchanged on untouched `HEAD` in a
+separate worktree: `SakurupiahWebhookTest` out-of-order callback observation and
+two `TelegramLifecycleOutboundEffectTest` admin-paid notification assertions.
+They belong to the unrelated lifecycle/webhook follow-up tickets already called
+out in #642; none touches delivery, credentials or API pagination.
+Pint passed on all changed PHP files. The disposable containers, network,
+scratch application copy and synthetic credentials were removed. No CI/CD,
+production access, deployment, commit or push was part of this verification.
+Capability and exposure gates remain unchanged and still NO-GO.

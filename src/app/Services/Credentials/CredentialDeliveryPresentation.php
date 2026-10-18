@@ -26,7 +26,7 @@ final class CredentialDeliveryPresentation
         private readonly CredentialDeliveryEligibility $eligibility,
     ) {}
 
-    public function forOrder(Order $order, ?Payment $payment = null): CredentialDelivery
+    public function forOrder(Order $order, ?Payment $payment = null, int $accountOffset = 0): CredentialDelivery
     {
         $order->loadMissing(['customer', 'payments', 'orderItems.stockItems.supplierAccountUnit', 'orderItems.product']);
 
@@ -34,7 +34,7 @@ final class CredentialDeliveryPresentation
             return CredentialDelivery::empty();
         }
 
-        return $this->project($order);
+        return $this->project($order, $accountOffset);
     }
 
     public function present(Order $order, ?Payment $payment = null): CredentialDelivery
@@ -42,7 +42,7 @@ final class CredentialDeliveryPresentation
         return $this->forOrder($order, $payment);
     }
 
-    public function forCustomer(Customer $customer, Order $order, ?Payment $payment = null): CredentialDelivery
+    public function forCustomer(Customer $customer, Order $order, ?Payment $payment = null, int $accountOffset = 0): CredentialDelivery
     {
         $order->loadMissing(['customer', 'payments', 'orderItems.stockItems.supplierAccountUnit', 'orderItems.product']);
 
@@ -50,7 +50,7 @@ final class CredentialDeliveryPresentation
             return CredentialDelivery::empty();
         }
 
-        return $this->project($order);
+        return $this->project($order, $accountOffset);
     }
 
     /**
@@ -76,7 +76,7 @@ final class CredentialDeliveryPresentation
         }
     }
 
-    private function project(Order $order): CredentialDelivery
+    private function project(Order $order, int $accountOffset = 0): CredentialDelivery
     {
         try {
             $groups = [];
@@ -86,7 +86,7 @@ final class CredentialDeliveryPresentation
                     if ($stockItem->retired_at !== null) {
                         continue;
                     }
-                    $accounts[] = $this->account($stockItem, $stockItem->supplierAccountUnit?->unit_number ?? $index + 1, $this->defaultTutorial($item));
+                    $accounts[] = $this->account($stockItem, $stockItem->supplierAccountUnit?->unit_number ?? $accountOffset + $index + 1, $this->defaultTutorial($item));
                 }
 
                 if ($accounts === []) {

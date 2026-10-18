@@ -37,10 +37,17 @@ final class CustomerApiOrderReadController extends Controller
 
     public function delivery(Request $request, string $id, CustomerApiOrders $orders): JsonResponse
     {
-        $this->allow($request, []);
+        $this->allow($request, ['limit', 'cursor']);
         $this->id($id);
+        $limit = $request->query('limit', (string) CustomerApiOrders::DELIVERY_PAGE_DEFAULT);
+        $cursor = $request->query('cursor');
+        if (! is_string($limit) || preg_match('/\A[1-9][0-9]{0,2}\z/D', $limit) !== 1
+            || (int) $limit > CustomerApiOrders::DELIVERY_PAGE_MAX
+            || ($request->query->has('cursor') && (! is_string($cursor) || preg_match('/\A[A-Za-z0-9_-]{1,512}\z/D', $cursor) !== 1))) {
+            throw $this->invalid();
+        }
 
-        $response = response()->json($orders->delivery($this->principal($request), $id));
+        $response = response()->json($orders->delivery($this->principal($request), $id, (int) $limit, $cursor));
         if (strlen($response->getContent()) > 1_048_576) {
             throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
         }

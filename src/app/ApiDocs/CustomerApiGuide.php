@@ -57,7 +57,7 @@ MD),
 3. `GET /api/v1/products/{id}?quantity=1` dan catat nilai `total` dari kutipan mata uang yang Anda otorisasi.
 4. `POST /api/v1/orders` dengan `Idempotency-Key` yang stabil untuk niat pembelian itu dan `expected_totals` berisi nilai yang baru Anda catat.
 5. Simpan `id` pesanan. Bila respons hilang, ulangi langkah 4 dengan key dan payload yang sama, atau baca `GET /api/v1/orders`.
-6. `GET /api/v1/orders/{id}/delivery` setelah pengiriman siap. Pembacaan berulang mengembalikan unit yang sama.
+6. `GET /api/v1/orders/{id}/delivery` setelah pengiriman siap. Pembacaan berulang mengembalikan unit yang sama; bila `pagination.has_more` true, lanjutkan dengan `pagination.next_cursor`.
 
 Semua contoh kode di halaman ini memakai variabel lingkungan `STORE_ORIGIN`, `CUSTOMER_API_KEY`, `PRODUCT_ID`, dan `IDEMPOTENCY_KEY`, memakai batas waktu yang tegas, memeriksa status HTTP, dan tidak pernah mencoba ulang pembelian dengan key baru.
 MD, <<<'MD'
@@ -66,7 +66,7 @@ MD, <<<'MD'
 3. `GET /api/v1/products/{id}?quantity=1` and note the `total` of each currency quote you authorize.
 4. `POST /api/v1/orders` with a stable `Idempotency-Key` for that purchase intent and `expected_totals` holding the values you just noted.
 5. Keep the order `id`. If the response is lost, repeat step 4 with the same key and payload, or read `GET /api/v1/orders`.
-6. `GET /api/v1/orders/{id}/delivery` once delivery is ready. Repeated reads return the same units.
+6. `GET /api/v1/orders/{id}/delivery` once delivery is ready. Repeated reads return the same units; when `pagination.has_more` is true, continue with `pagination.next_cursor`.
 
 Every code example on this page reads `STORE_ORIGIN`, `CUSTOMER_API_KEY`, `PRODUCT_ID` and `IDEMPOTENCY_KEY` from the environment, uses explicit timeouts, checks the HTTP status, and never retries a purchase with a new key.
 MD),
@@ -273,6 +273,8 @@ Jadi `payment_status: "paid"` berarti uang sudah masuk, bukan bahwa unit sudah b
 
 `GET /api/v1/orders/{id}/delivery` mengembalikan hasil yang sama pada setiap pembacaan, tanpa alokasi ulang, debit tambahan, atau pengiriman ulang. Bila respons checkout hilang, ulangi pembacaan hasil ini, bukan pembelian. Pengiriman supplier yang sebagian, peninjauan manual, dan unit yang dihentikan dilaporkan apa adanya; unit yang sudah dihentikan tidak pernah muncul kembali.
 
+Respons hasil dibatasi ukurannya. Bila semua unit tidak muat dalam satu respons, endpoint membaginya menjadi halaman berurutan berdasarkan identitas unit teralokasi dan memberi `pagination.next_cursor`. Lanjutkan dengan cursor itu sampai `pagination.has_more` false: setiap unit muncul tepat sekali, dan mengulang halaman yang sama mengembalikan unit yang sama selama entitlement tidak berubah. `state` serta `progress` tetap menggambarkan seluruh pesanan, jadi `has_more` bukan tanda pengiriman supplier sebagian. Setiap halaman memeriksa ulang kepemilikan dan otorisasi lifecycle; refund, review, atau peninjauan ulang di antara halaman menghentikan pelepasan. Pesanan kecil tetap terbaca penuh dalam satu respons tanpa parameter paginasi.
+
 Pekerjaan yang tertunda tidak hilang karena Redis, queue, atau worker berhenti: kewajiban fulfillment tersimpan di database dan pemulihan membacanya kembali. Hasil supplier yang belum diketahui masuk ke `review` tanpa pembelian baru dan tanpa refund otomatis.
 MD, <<<'MD'
 An accepted order is already paid, but its results can become ready later:
@@ -292,6 +294,8 @@ So `payment_status: "paid"` means the money is in, not that units are readable. 
 | `refunded` | the order settled through a refund |
 
 `GET /api/v1/orders/{id}/delivery` returns the same results on every read, with no reallocation, extra debit or resend. When a checkout response is lost, repeat this result read instead of buying again. Partial supplier delivery, manual review and retired units are reported as they are; a retired unit never reappears.
+
+Result responses are size-bounded. When every unit does not fit in one response, the endpoint splits them into consecutive pages by allocated-unit identity and returns `pagination.next_cursor`. Follow that cursor until `pagination.has_more` is false: every unit appears exactly once, and repeating the same page returns the same units while entitlement is unchanged. `state` and `progress` still describe the whole Order, so `has_more` is not a sign of partial supplier fulfillment. Every page rechecks ownership and lifecycle authorization; a refund, review or renewed hold between pages stops release. A small Order still returns in full in one response without pagination input.
 
 Pending work is not lost when Redis, the queue or a worker stops: fulfillment obligations are stored in the database and recovery reads them back. An unknown supplier outcome enters `review` with no new purchase and no automatic refund.
 MD),

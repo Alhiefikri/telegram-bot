@@ -91,6 +91,10 @@ _Avoid_: Owner contact, login contact
 The paid-account copy sent to the optional checkout email address of a Web Storefront Order once payment is confirmed and the credentials are releasable. It is a convenience channel, never an ownership claim: the address is snapshotted when the delivery is recorded, cannot be re-pointed afterwards, and the same credentials stay visible on the Order invoice through the Recovery Key. Retrying or resending always targets that snapshot.
 _Avoid_: Recovery Key delivery, login email, requirement for receiving credentials
 
+**Delivery Result Page**:
+One bounded page of an Order's already-authorized credential units returned by the owned API delivery read. It continues the same immutable allocation through an opaque `pagination.next_cursor`; it is not a new allocation, a second fulfillment path, or evidence of partial supplier fulfillment. Whole-Order `state` and `progress` remain separate from page continuation.
+_Avoid_: Partial delivery, partial fulfillment, supplier partial release
+
 **Store Channel**:
 The optional Telegram channel promoted from the Store Bot home, where sales proof, stock updates, promotions, and owner announcements are published. Store Bot access never depends on channel membership.
 _Avoid_: Community, group, access gate

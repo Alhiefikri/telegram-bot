@@ -5,6 +5,7 @@ namespace App\Services\CustomerApi;
 use App\Enums\PaymentStatus;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\OrderRefund;
 use App\Models\ProductStockItem;
 use App\Models\SupplierFulfillment;
@@ -13,10 +14,21 @@ use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 final class CustomerApiOrders
 {
+    public const DELIVERY_PAGE_DEFAULT = 100;
+
+    public const DELIVERY_PAGE_MAX = 100;
+
+    private const MAX_ORDER_UNITS = 100;
+
+    /** Leave headroom below the controller's hard 1 MiB response guard. */
+    private const DELIVERY_RESPONSE_BUDGET_BYTES = 1_047_552;
+
     public function __construct(private CredentialDeliveryEligibility $eligibility, private CredentialDeliveryPresentation $presentation) {}
 
     public function page(CustomerApiPrincipal $principal, int $limit, ?string $cursor, ?string $status): array
@@ -38,48 +50,142 @@ final class CustomerApiOrders
         return ['data' => $this->summaries(new Collection([$this->owned($principal, $id)]))[0]];
     }
 
-    public function delivery(CustomerApiPrincipal $principal, string $id): array
+    public function delivery(CustomerApiPrincipal $principal, string $id, int $limit = self::DELIVERY_PAGE_DEFAULT, ?string $cursor = null): array
     {
         // Refund/warranty/fulfillment writers take the Order exclusively. Keep one
         // release decision and its credential projection together, without network IO.
-        return DB::transaction(function () use ($principal, $id): array {
+        if ($limit < 1 || $limit > self::DELIVERY_PAGE_MAX) {
+            throw new CustomerApiFailure(422, 'invalid_input', 'The request contains unsupported or malformed inputs.');
+        }
+
+        return DB::transaction(function () use ($principal, $id, $limit, $cursor): array {
             $order = $this->owned($principal, $id, true);
             $summary = $this->summaries(new Collection([$order]))[0];
             $result = ['id' => (string) $order->id, 'state' => 'not_ready',
-                'progress' => $summary['fulfillment'], 'units' => [], 'usage_guides' => []];
+                'progress' => $summary['fulfillment'], 'units' => [], 'usage_guides' => [],
+                'pagination' => ['next_cursor' => null, 'has_more' => false]];
+            $item = $order->orderItems->count() === 1 ? $order->orderItems->first() : null;
+            // Continuation input is validated before availability so a foreign or
+            // forged cursor never receives a success-shaped response.
+            $cursorId = null;
+            if ($cursor !== null) {
+                $cursorId = $this->decodeDeliveryCursor($cursor);
+                if ($item === null || ! $this->ownsDeliveryUnit($item, $cursorId)) {
+                    throw new CustomerApiFailure(422, 'invalid_input', 'The request contains unsupported or malformed inputs.');
+                }
+            }
+            // Eligibility is re-evaluated on every request, so a continuation cannot
+            // outlive a refund, review, retirement or supplier release revocation.
             if (! $summary['delivery']['available']) {
                 return ['data' => $result];
             }
-            if ($order->orderItems->count() !== 1 || $summary['quantity'] < 1 || $summary['quantity'] > 100) {
+            if ($item === null || $summary['quantity'] < 1 || $summary['quantity'] > self::MAX_ORDER_UNITS) {
                 throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
             }
-            $item = $order->orderItems->first();
+            $released = (int) $summary['fulfillment']['released_units'];
+            if ($released > $summary['quantity']) {
+                throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
+            }
+            // Traverse the immutable allocated-unit identity in ascending order. One
+            // extra row is a look-ahead only: it decides whether another page exists
+            // and is never decrypted or projected as part of this page.
             $stocks = ProductStockItem::query()->where('order_item_id', $item->id)->whereNull('retired_at')
-                ->orderBy('id')->limit(101)->with('supplierAccountUnit:id,product_stock_item_id,unit_number')->get();
-            if ($stocks->count() > $summary['quantity']) {
-                throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
+                ->when($cursorId !== null, fn ($query) => $query->where('id', '>', $cursorId))
+                ->orderBy('id')->limit($limit + 1)
+                ->with('supplierAccountUnit:id,product_stock_item_id,unit_number')->get();
+            if ($stocks->isEmpty()) {
+                $result['state'] = $released === $summary['quantity'] ? 'ready' : 'partial';
+
+                return ['data' => $result];
             }
-            $item->setRelation('stockItems', $stocks);
-            $delivery = $this->presentation->forOrder($order);
-            if ($delivery->accountCount() !== $stocks->count() || $delivery->isEmpty()) {
+            $pageStocks = $stocks->take($limit)->values();
+            // Keep the logical account number stable across pages.
+            $accountOffset = $cursorId === null ? 0 : ProductStockItem::query()
+                ->where('order_item_id', $item->id)->whereNull('retired_at')->where('id', '<=', $cursorId)->count();
+            $item->setRelation('stockItems', $pageStocks);
+            $delivery = $this->presentation->forOrder($order, null, $accountOffset);
+            if ($delivery->accountCount() !== $pageStocks->count() || $delivery->isEmpty()) {
                 throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
             }
             $accounts = $delivery->groups()[0]->accounts();
-            foreach ($stocks as $index => $stock) {
+            $result['usage_guides'] = $delivery->usageGuides();
+
+            // Size each unit with the exact JSON the response will carry, including
+            // maximum-length fields and escaping, before adding it to the page.
+            $size = $this->encodedSize($result);
+            $lastIncluded = null;
+            foreach ($pageStocks as $index => $stock) {
+                if (count($result['units']) >= $limit) {
+                    break;
+                }
                 $account = $accounts[$index];
-                $result['units'][] = [
+                $unit = [
                     'id' => (string) $stock->id, 'product_id' => (string) $item->product_id,
                     'number' => $account->number(), 'format' => $account->isLegacy() ? 'legacy' : 'structured_account',
                     'text' => $account->text(), 'email' => $account->email(), 'password' => $account->password(),
                     'access_method' => $account->accessMethod()?->value, 'access_value' => $account->accessValue(),
                     'reader_mail_link' => $account->readerMailLink(), 'tutorial' => $account->tutorial(),
                 ];
+                $unitSize = $this->encodedSize($unit) + (count($result['units']) === 0 ? 0 : 1);
+                if ($size + $unitSize > self::DELIVERY_RESPONSE_BUDGET_BYTES) {
+                    if ($result['units'] === []) {
+                        // A single unit cannot be returned within the safe bound.
+                        throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
+                    }
+                    break;
+                }
+                $result['units'][] = $unit;
+                $size += $unitSize;
+                $lastIncluded = (string) $stock->id;
             }
-            $result['state'] = $stocks->count() === $summary['quantity'] ? 'ready' : 'partial';
-            $result['usage_guides'] = $delivery->usageGuides();
+            // Whole-Order progress/state stay independent of page continuation.
+            $result['state'] = $released === $summary['quantity'] ? 'ready' : 'partial';
+            if (count($result['units']) < $stocks->count()) {
+                $result['pagination'] = ['next_cursor' => $this->encodeDeliveryCursor((string) $lastIncluded), 'has_more' => true];
+            }
 
             return ['data' => $result];
         });
+    }
+
+    private function ownsDeliveryUnit(OrderItem $item, string $unitId): bool
+    {
+        return ProductStockItem::query()->where('order_item_id', $item->id)->whereKey($unitId)->exists();
+    }
+
+    private function decodeDeliveryCursor(string $cursor): string
+    {
+        try {
+            $encoded = strtr($cursor, '-_', '+/');
+            $encoded .= str_repeat('=', (4 - strlen($encoded) % 4) % 4);
+            $unitId = Crypt::decryptString($encoded);
+        } catch (Throwable) {
+            throw new CustomerApiFailure(422, 'invalid_input', 'The request contains unsupported or malformed inputs.');
+        }
+        if (preg_match('/\A[1-9][0-9]{0,17}\z/D', $unitId) !== 1) {
+            throw new CustomerApiFailure(422, 'invalid_input', 'The request contains unsupported or malformed inputs.');
+        }
+
+        return $unitId;
+    }
+
+    private function encodeDeliveryCursor(string $unitId): string
+    {
+        try {
+            return rtrim(strtr(Crypt::encryptString($unitId), '+/', '-_'), '=');
+        } catch (Throwable) {
+            throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
+        }
+    }
+
+    /** @param array<string, mixed> $value */
+    private function encodedSize(array $value): int
+    {
+        try {
+            return strlen(json_encode($value, JSON_THROW_ON_ERROR));
+        } catch (\JsonException) {
+            throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
+        }
     }
 
     private function query(CustomerApiPrincipal $principal): Builder

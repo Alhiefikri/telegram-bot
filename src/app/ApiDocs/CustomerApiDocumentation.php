@@ -412,11 +412,18 @@ final class CustomerApiDocumentation
                     'en' => 'Recover the units already purchased exactly as before, with no reallocation and no new debit.',
                 ],
                 'description' => [
-                    'id' => 'Ini jalur pemulihan ketika respons checkout atau pekerjaan fulfillment hilang: unit yang sama dikembalikan pada pembacaan berulang. Hanya unit yang sudah diotorisasi oleh lifecycle kanonik yang dilepas. Pengiriman supplier yang belum selesai, penggantian manual, atau review melaporkan `not_ready` atau `partial` secara jujur, dan pembacaan tidak pernah membeli, mengalokasikan, mengirim ulang, atau memberi refund. Product lokal non-credential-managed dengan stok numerik legacy tetap bisa dibeli. Pembayaran membuat kewajiban fulfillment manual untuk Owner; `delivery.state` tetap `not_ready` sampai Owner memenuhi pesanan secara manual. Tanpa kredensial teralokasi, `allocated_units` dan `released_units` tetap 0, termasuk jika penyerahan dilakukan di luar API. Hubungi support dengan invoice pesanan yang sama; jangan membeli ulang.',
-                    'en' => 'This is the recovery path when a checkout response or fulfillment work is lost: the same units come back on repeated reads. Only units already authorized by the canonical lifecycle are released. Pending supplier delivery, manual replacement or review report `not_ready` or `partial` honestly, and a read never buys, allocates, resends or refunds. Local non-credential-managed Products with legacy numeric stock remain purchasable. Payment creates a manual fulfillment obligation for the Owner; `delivery.state` stays `not_ready` until the Owner fulfills the order manually. Without allocated credentials, `allocated_units` and `released_units` remain 0, including when handoff happens outside the API. Contact support with the same order invoice; do not purchase again.',
+                    'id' => 'Ini jalur pemulihan ketika respons checkout atau pekerjaan fulfillment hilang: unit yang sama dikembalikan pada pembacaan berulang. Hanya unit yang sudah diotorisasi oleh lifecycle kanonik yang dilepas. Pengiriman supplier yang belum selesai, penggantian manual, atau review melaporkan `not_ready` atau `partial` secara jujur, dan pembacaan tidak pernah membeli, mengalokasikan, mengirim ulang, atau memberi refund. Product lokal non-credential-managed dengan stok numerik legacy tetap bisa dibeli. Pembayaran membuat kewajiban fulfillment manual untuk Owner; `delivery.state` tetap `not_ready` sampai Owner memenuhi pesanan secara manual. Tanpa kredensial teralokasi, `allocated_units` dan `released_units` tetap 0, termasuk jika penyerahan dilakukan di luar API. Hubungi support dengan invoice pesanan yang sama; jangan membeli ulang. Respons yang melebihi batas aman dibagi menjadi halaman unit teralokasi dalam urutan identitas yang naik; `pagination.next_cursor` melanjutkan pembacaan yang sama, bukan pembelian baru. `state` dan `progress` selalu menggambarkan seluruh pesanan, bukan halaman: `has_more` hanya berarti masih ada unit yang belum dibaca, bukan pengiriman supplier sebagian. Setiap halaman memeriksa ulang kepemilikan dan otorisasi lifecycle, jadi pencabutan di antara halaman menghentikan pelepasan. Pesanan kecil tetap terbaca dalam satu respons tanpa parameter paginasi.',
+                    'en' => 'This is the recovery path when a checkout response or fulfillment work is lost: the same units come back on repeated reads. Only units already authorized by the canonical lifecycle are released. Pending supplier delivery, manual replacement or review report `not_ready` or `partial` honestly, and a read never buys, allocates, resends or refunds. Local non-credential-managed Products with legacy numeric stock remain purchasable. Payment creates a manual fulfillment obligation for the Owner; `delivery.state` stays `not_ready` until the Owner fulfills the order manually. Without allocated credentials, `allocated_units` and `released_units` remain 0, including when handoff happens outside the API. Contact support with the same order invoice; do not purchase again. A response that exceeds its safe bound is split into pages of allocated units in ascending identity order; `pagination.next_cursor` continues the same read, not a new purchase. `state` and `progress` always describe the whole Order, never a page: `has_more` only means more units remain unread, not partial supplier fulfillment. Every page rechecks ownership and lifecycle authorization, so a revocation between pages stops release. A small Order still returns in one response without pagination input.',
                 ],
                 'parameters' => [
                     self::path('id', 'Id pesanan UUID. Perlakukan sebagai nilai opaque.', 'Order UUID. Treat it as an opaque value.'),
+                    self::query('limit', 'string', 'Jumlah unit per halaman, 1 sampai 100. Default 100. Halaman juga dibatasi agar respons tetap aman; jika `pagination.has_more` true, lanjutkan dengan `cursor`.',
+                        'Units per page, 1 to 100. Default 100. A page is also bounded to keep the response safe; when `pagination.has_more` is true, continue with `cursor`.',
+                        ['pattern' => '^(?:[1-9]|[1-9][0-9]|'.CustomerApiOrders::DELIVERY_PAGE_MAX.')$',
+                            'default' => (string) CustomerApiOrders::DELIVERY_PAGE_DEFAULT]),
+                    self::query('cursor', 'string', 'Cursor opaque `pagination.next_cursor` dari halaman sebelumnya untuk pesanan yang sama. Gunakan nilainya tanpa mengubah.',
+                        'Opaque `pagination.next_cursor` from the previous page of the same Order. Reuse the value unchanged.',
+                        ['pattern' => '^[A-Za-z0-9_-]{1,512}$']),
                 ],
                 'request' => null,
                 'responses' => [
@@ -428,6 +435,8 @@ final class CustomerApiDocumentation
                         'en' => 'This endpoint consumes its own delivery-read budget (10 requests per minute per account) in addition to the general read budget.'],
                     ['id' => 'Semua respons berhasil maupun error memakai `Cache-Control: no-store, private`, `Referrer-Policy: no-referrer`, dan `X-Request-ID`.',
                         'en' => 'Every success and error response uses `Cache-Control: no-store, private`, `Referrer-Policy: no-referrer` and `X-Request-ID`.'],
+                    ['id' => 'Telusuri halaman dengan `pagination.next_cursor` sampai `has_more` false. Setiap unit muncul tepat sekali; mengulang halaman yang sama mengembalikan identitas unit yang sama selama entitlement tidak berubah. Cursor milik pesanan lain, cursor yang salah bentuk, dan limit di luar batas dijawab 422 tanpa efek finansial.',
+                        'en' => 'Follow `pagination.next_cursor` until `has_more` is false. Every unit appears exactly once; repeating the same page returns the same unit identities while entitlement is unchanged. Another Order\'s cursor, a malformed cursor and an out-of-range limit are answered with 422 and no financial effect.'],
                 ],
             ],
         ];
@@ -724,7 +733,7 @@ final class CustomerApiDocumentation
                 'properties' => [
                     'id' => self::stringId('Allocated unit id.'),
                     'product_id' => self::stringId('Product id of the owning Order item.'),
-                    'number' => ['type' => 'integer', 'minimum' => 1, 'description' => 'Logical account number from the shared delivery presentation.'],
+                    'number' => ['type' => 'integer', 'minimum' => 1, 'description' => 'Logical account number from the shared delivery presentation; stable across pages of one traversal while entitlement is unchanged.'],
                     'format' => ['type' => 'string', 'enum' => ['legacy', 'structured_account'], 'description' => 'Credential shape of this unit.'],
                     'text' => ['type' => 'string', 'description' => 'Canonical formatted credential text, including supported legacy MFA fields.'],
                     'email' => ['type' => ['string', 'null'], 'description' => 'Email of a structured credential, when one exists.'],
@@ -738,13 +747,15 @@ final class CustomerApiDocumentation
             'DeliveryResult' => [
                 'type' => 'object',
                 'additionalProperties' => false,
-                'required' => ['id', 'state', 'progress', 'units', 'usage_guides'],
+                'required' => ['id', 'state', 'progress', 'units', 'usage_guides', 'pagination'],
+                'description' => 'One bounded page of released units. `state` and `progress` describe the whole Order; `pagination` only continues the unit traversal.',
                 'properties' => [
                     'id' => self::uuid('Order UUID.'),
-                    'state' => ['type' => 'string', 'enum' => ['not_ready', 'partial', 'ready'], 'description' => '`not_ready` and `partial` are honest states, not errors.'],
+                    'state' => ['type' => 'string', 'enum' => ['not_ready', 'partial', 'ready'], 'description' => 'Whole-Order delivery readiness. `not_ready` and `partial` are honest states, not errors; page continuation never changes this into `partial`.'],
                     'progress' => ['$ref' => '#/components/schemas/Fulfillment'],
-                    'units' => ['type' => 'array', 'description' => 'Released units only. Retired units never appear.', 'items' => ['$ref' => '#/components/schemas/DeliveryUnit']],
+                    'units' => ['type' => 'array', 'description' => 'Released units on this page only, in ascending allocated-unit identity order. Retired units never appear.', 'items' => ['$ref' => '#/components/schemas/DeliveryUnit']],
                     'usage_guides' => ['type' => 'array', 'description' => 'Usage guides attached to the released units, from the canonical Product usage guide.', 'items' => ['$ref' => '#/components/schemas/UsageGuide']],
+                    'pagination' => ['$ref' => '#/components/schemas/Pagination'],
                 ],
             ],
             'DeliveryEnvelope' => self::envelope('DeliveryResult'),

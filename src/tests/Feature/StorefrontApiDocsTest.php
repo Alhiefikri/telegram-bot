@@ -215,6 +215,17 @@ class StorefrontApiDocsTest extends TestCase
         $this->assertSame(CustomerApiDocumentation::IDEMPOTENCY_KEY_MAX_LENGTH, 128);
         $this->assertSame([CustomerApiDocumentation::QUANTITY_MIN, CustomerApiDocumentation::QUANTITY_MAX], [1, 100]);
 
+        $delivery = $document['paths']['/api/v1/orders/{id}/delivery']['get'];
+        $deliveryParameters = collect($delivery['parameters'])->keyBy('name');
+        $this->assertSame('100', $deliveryParameters['limit']['schema']['default']);
+        $this->assertSame('^(?:[1-9]|[1-9][0-9]|100)$', $deliveryParameters['limit']['schema']['pattern']);
+        $this->assertSame('^[A-Za-z0-9_-]{1,512}$', $deliveryParameters['cursor']['schema']['pattern']);
+        $this->assertArrayHasKey('pagination', $schemas['DeliveryResult']['properties']);
+        $this->assertContains('pagination', $schemas['DeliveryResult']['required']);
+        $deliverySample = $delivery['responses']['200']['content']['application/json']['example']['data'];
+        $this->assertSame(['next_cursor', 'has_more'], array_keys($deliverySample['pagination']));
+        $this->assertMatchesRegularExpression('/^[A-Za-z0-9_-]{1,512}$/', $deliverySample['pagination']['next_cursor']);
+
         $reference = (string) $this->get(route('storefront.api-docs.reference'))->getContent();
         $this->assertStringContainsString('## Rate limits', $reference);
         foreach ((new CustomerApiDocumentation)->budgets() as $budget) {

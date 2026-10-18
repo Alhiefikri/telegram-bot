@@ -83,6 +83,7 @@ final class CustomerApiSamples
                         'tutorial' => 'Change the password right after the first login.',
                     ]],
                     'usage_guides' => [['title' => 'Example activation guide', 'url' => 'https://store.example/panduan']],
+                    'pagination' => ['next_cursor' => '9f3a1c7e5b2d4a6f8c0e1d2b3a4c5d6e', 'has_more' => true],
                 ],
             ],
             'ErrorEnvelope' => [

@@ -312,15 +312,16 @@ no API authority. All responses, including errors, use `Cache-Control: no-store,
 | --- | --- |
 | `/api/v1/orders` | `limit` (default 20, 1–100), optional `cursor` and `status`; `data: OrderSummary[]` plus `pagination: {next_cursor: string|null, has_more: boolean}` |
 | `/api/v1/orders/{id}` | No query fields; `data: OrderSummary` |
-| `/api/v1/orders/{id}/delivery` | No query fields; `data: DeliveryResult`; also consumes the shared 10/minute Customer delivery budget |
+| `/api/v1/orders/{id}/delivery` | `limit` (default 100, 1–100), optional `cursor`; `data: DeliveryResult` with `pagination: {next_cursor: string|null, has_more: boolean}`; also consumes the shared 10/minute Customer delivery budget |
 
 Unknown query fields, arrays, invalid filters and nonempty GET bodies are 422
 `invalid_input`. `status` filters the canonical **Order** status, not payment or delivery:
 `draft`, `pending_payment`, `processing`, `completed`, `cancelled`, `expired`.
-IDs/cursors are opaque UUID strings. Omit `cursor` for the first page, then pass
-`pagination.next_cursor` unchanged with the same filters. History traverses ascending
-Order ID with no OFFSET or total count. Concurrent new Orders may appear later and status
-changes can change filter membership; pagination is not a frozen snapshot.
+Order IDs and history cursors are opaque UUID strings; delivery cursors are opaque
+bounded tokens. Omit `cursor` for the first page, then pass `pagination.next_cursor`
+unchanged with the same filters. History traverses ascending Order ID with no OFFSET or
+total count. Concurrent new Orders may appear later and status changes can change filter
+membership; pagination is not a frozen snapshot.
 
 ### OrderSummary schema
 
@@ -373,14 +374,30 @@ Success, including pending/review, is HTTP 200:
       "review_required": true
     },
     "units": [],
-    "usage_guides": []
+    "usage_guides": [],
+    "pagination": {"next_cursor": null, "has_more": false}
   }
 }
 ```
 
-This is a disposable fixture response. `state` is `not_ready`, `partial` or `ready`;
-`progress` has the same schema as `OrderSummary.fulfillment`. A client waits or contacts
-support on review; it must not create a new purchase to recover an existing result.
+This is a disposable fixture response. `state` is `not_ready`, `partial` or `ready`
+for the **whole Order**; `progress` has the same schema as `OrderSummary.fulfillment`.
+A client waits or contacts support on review; it must not create a new purchase to
+recover an existing result.
+
+A response that would exceed the safe 1 MiB bound is split into pages of allocated
+units. `units` is only the current page; `pagination.has_more` means another page of
+the same Order exists, not partial supplier fulfillment. Traverse ascending allocated-unit
+identity by passing `pagination.next_cursor` back as `cursor` with the same `limit`
+until `has_more` is false. Every authorized unit appears exactly once, a repeated page
+returns the same unit identities while entitlement is unchanged, and every page
+rechecks ownership, paid entitlement, retirement, review/refund and supplier
+partial-release authority. A continuation cannot bypass a later revocation: the page
+returns `not_ready` with no units instead of releasing credentials. An Order small
+enough to fit still returns fully without any pagination input. A cursor belonging to
+another Order, a malformed cursor and an out-of-range `limit` are 422 `invalid_input`
+with no financial effect. The continuation decision is recorded in
+[ADR-0026](adr/0026-api-delivery-result-pagination.md).
 
 Local non-credential-managed Products (legacy numeric stock without Product Stock Items)
 remain purchasable. A paid Order with positive ordered units and no allocated local
@@ -410,7 +427,9 @@ Each released `units[]` object has exactly:
 | `reader_mail_link` | Nullable supported mailbox-reader link |
 | `tutorial` | Nullable item override or snapshotted/default delivery instruction |
 
-`usage_guides` is an array of `{title: string, url: string}` from the canonical
+`pagination` is a top-level `DeliveryResult` field, not a unit field:
+`{next_cursor: string|null, has_more: boolean}` for the bounded unit traversal of this
+Order. `usage_guides` is an array of `{title: string, url: string}` from the canonical
 `ProductUsageGuide`. The API does not fetch these URLs. No provider identity, provider
 account ID, raw supplier evidence, recovery secret, acquisition cost or pool metadata
 appears in any response.
@@ -419,12 +438,18 @@ Delivery holds the owned Order shared while deciding entitlement and projecting 
 units. Canonical refund, warranty and fulfillment writers take that Order exclusively;
 the read never takes a wallet lock or reverses the writer lock order. It first checks
 paid-at/Payment/Order/lifecycle and late-payment review, including the existing committed
-BuyMail partial-release exception. Only then does it load at most 101 non-retired
-allocated rows (100 is the valid maximum) and the supported credential fields through
-`CredentialDeliveryPresentation`. Mixed local/non-partial supplier processing releases
+BuyMail partial-release exception, on every request. Only then does it load the next
+bounded page of non-retired allocated rows in ascending ID order: at most the requested
+`limit`, plus one look-ahead row that is used only to decide whether another page exists
+and is never decrypted or projected. Credential fields for the page are read through
+`CredentialDeliveryPresentation`. The page is sized using the exact JSON each unit will
+emit, including maximum-length password/Auth Token/tutorial fields and their escaping,
+before it is added; a page that would exceed the safe response bound ends early and
+returns `pagination.next_cursor`. Mixed local/non-partial supplier processing releases
 nothing until the canonical gate permits it. Retired units never load/decrypt for this
-endpoint. Invalid allocation bounds, malformed ciphertext or a JSON result over 1 MiB
-fail closed with safe 503 `temporarily_unavailable`, without returning a partial payload.
+endpoint. Invalid allocation bounds, malformed ciphertext or a genuinely oversized
+single unit fail closed with safe 503 `temporarily_unavailable`, without returning a
+partial payload; the safety guard is retained rather than bypassed by pagination.
 
 GET never buys, allocates, debits, refunds, resends or creates a new fulfillment attempt.
 Repeated reads return the same unit identities and values until an authorized existing
