@@ -100,7 +100,7 @@ class TelegramAdminPaidOrderNotifier
     private function fulfillmentStatusLines(Order $order): array
     {
         $fulfillments = SupplierFulfillment::query()
-            ->with(['currentPurchase', 'purchases', 'manualHandoffs'])
+            ->with(['currentPurchase', 'purchases.supplier', 'manualHandoffs'])
             ->where('order_id', $order->getKey())
             ->orderBy('id')
             ->get();
@@ -137,14 +137,25 @@ class TelegramAdminPaidOrderNotifier
             $delivery[] = $productName.': '.$deliveryState;
 
             foreach ($fulfillment->purchases as $purchase) {
-                $purchases[] = 'purchase #'.$purchase->id.' '.$purchase->state;
+                $purchases[] = $purchase->supplier->name.' · '.$this->purchaseLabel($purchase->state);
             }
         }
 
         return [
             'Pengiriman pelanggan: '.implode('; ', array_slice($delivery, 0, 3)),
-            'Pembelian supplier: '.($purchases === [] ? 'belum dikirim' : implode('; ', array_slice($purchases, 0, 3))),
+            'Supplier: '.($purchases === [] ? 'belum ada pembelian' : implode('; ', array_slice($purchases, 0, 3))),
         ];
+    }
+
+    private function purchaseLabel(string $state): string
+    {
+        return match ($state) {
+            'delivered', 'settled' => 'pembelian berhasil',
+            'rejected' => 'pembelian ditolak',
+            'cancelled' => 'dibatalkan',
+            'ambiguous', 'review' => 'belum dapat dipastikan; periksa dashboard, jangan beli ulang',
+            default => 'sedang diproses',
+        };
     }
 
     private function deliveryLabel(string $state): string

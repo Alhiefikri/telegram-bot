@@ -21,7 +21,7 @@ final class AdminPaidOrderOutcome
     /** @return array{ready: bool, resolved: bool, lines: list<string>, action: string} */
     public function read(Order $order): array
     {
-        $fulfillments = SupplierFulfillment::query()->with(['purchases', 'manualHandoffs'])->where('order_id', $order->id)->get()->keyBy('order_item_id');
+        $fulfillments = SupplierFulfillment::query()->with(['purchases.supplier', 'manualHandoffs'])->where('order_id', $order->id)->get()->keyBy('order_item_id');
         $effects = TelegramOutboundEffect::query()->where('source_type', Order::class)->where('source_id', (string) $order->id)
             ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)->get();
         $complete = false;
@@ -60,14 +60,15 @@ final class AdminPaidOrderOutcome
                 $rejected = $purchase->state === 'rejected' && $purchase->committed_at === null;
                 $supplierResolved = $supplierResolved && (($acquired && ! in_array($purchase->state, ['ambiguous', 'review'], true)) || $rejected);
                 $intervention = $intervention || in_array($purchase->state, ['ambiguous', 'review'], true) || $f->state === 'review';
-                $purchases[] = 'purchase #'.$purchase->id.(filled($purchase->supplier_order_id) ? ' / supplier ID '.$purchase->supplier_order_id : '')
-                    .': '.($acquired ? 'pembelian berhasil; '.$purchase->observed_quantity.'/'.$purchase->quantity.' unit terbukti' : ($rejected
-                        ? 'pembelian ditolak / tidak terjadi sesuai bukti no-debit'
-                        : 'hasil pembelian supplier belum dapat dipastikan; jangan beli ulang, periksa order supplier asli'));
+                $purchases[] = $purchase->supplier->name.' · '.($acquired
+                    ? 'pembelian berhasil ('.$purchase->observed_quantity.'/'.$purchase->quantity.' unit)'
+                        .(in_array($purchase->state, ['ambiguous', 'review'], true) ? '; perlu diperiksa' : '')
+                    : ($rejected ? 'pembelian ditolak; tidak ada debit'
+                        : 'hasil pembelian belum dapat dipastikan; jangan beli ulang'));
             }
             if ($f !== null && $purchases === []) {
                 $supplierResolved = false;
-                $purchases[] = 'belum ada bukti pembelian supplier; periksa fulfillment, jangan beli ulang';
+                $purchases[] = 'belum terkonfirmasi; jangan beli ulang';
             }
             $handoff = (int) ($f?->manualHandoffs->sum('quantity') ?? 0);
             $allocated = (int) $item->stockItems()->count();
@@ -75,16 +76,16 @@ final class AdminPaidOrderOutcome
             $refunded = (int) ($f?->refunded_quantity ?? 0);
             $buyerResolved = ($complete && $delivered + $refunded === (int) $item->quantity)
                 || $handoff + $refunded >= $item->quantity || $failed || ($allRejected && $allocated === 0);
-            $buyer = $complete ? $delivered.'/'.$item->quantity.' unit terkirim ke buyer (receipt Telegram acknowledged)'
-                : ($handoff > 0 ? $handoff.'/'.$item->quantity.' unit handoff luar bot dicatat; bukan receipt Telegram'
-                : ($unknown ? 'hasil pengiriman Telegram belum dapat dipastikan; periksa Manual Delivery Review, jangan kirim ulang otomatis'
-                : ($failed ? ($acknowledgedChunks > 0 ? 'pengiriman sebagian; jumlah unit diterima belum dapat dipastikan' : 'akun belum terkirim')
-                    .'; '.$failureReason.', periksa Manual Delivery Review'
-                : ($allRejected && $allocated === 0 ? '0/'.$item->quantity.' unit; buyer belum menerima, pembelian ditolak'
-                : 'jumlah unit terkirim belum terkonfirmasi; receipt Telegram '.$acknowledgedChunks.'/'.$credentialEffects->count().' bagian acknowledged; periksa progres pengiriman, jangan kirim ulang otomatis'))));
+            $buyer = $complete ? $delivered.'/'.$item->quantity.' unit terkirim'
+                : ($handoff > 0 ? $handoff.'/'.$item->quantity.' unit diserahkan di luar bot'
+                : ($unknown ? 'hasil pengiriman Telegram belum dapat dipastikan; jangan kirim ulang'
+                : ($failed ? ($acknowledgedChunks > 0 ? 'pengiriman sebagian; jumlah unit belum pasti' : 'akun belum terkirim')
+                    .'; '.$failureReason
+                : ($allRejected && $allocated === 0 ? '0/'.$item->quantity.' unit terkirim; pembelian ditolak'
+                : 'pengiriman belum terkonfirmasi; jangan kirim ulang'))));
             $resolved = $resolved && $supplierResolved && $buyerResolved && (! $unknown || $complete);
             $lines[] = $item->product_name.' x '.$item->quantity.': '.$buyer.($refunded > 0 ? '; '.$refunded.' unit refund tercatat' : '');
-            $lines[] = 'Pembelian supplier: '.($purchases === [] ? 'tidak digunakan' : implode('; ', $purchases));
+            $lines[] = $purchases === [] ? 'Supplier: tidak digunakan (stok lokal)' : 'Supplier: '.implode('; ', $purchases);
         }
         if ($complete && $review) {
             $resolved = false;
@@ -92,12 +93,12 @@ final class AdminPaidOrderOutcome
         $paidAt = $order->payments->filter(fn ($payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)->min('paid_at');
         $deadline = $paidAt !== null && $paidAt->copy()->addSeconds(self::ESCALATION_SECONDS)->lte(now());
         if (! $resolved) {
-            $lines[] = 'Alasan: '.($paidAt === null ? 'waktu Paid authoritative belum tersedia; periksa bukti pembayaran'
-                : ($deadline ? 'batas tunggu hasil otomatis awal 120 detik tercapai' : 'hasil memerlukan pemeriksaan operator'));
+            $lines[] = 'Alasan: '.($paidAt === null ? 'waktu pembayaran belum terkonfirmasi'
+                : ($deadline ? 'belum selesai setelah 120 detik' : 'perlu pemeriksaan'));
         }
 
         return ['ready' => $resolved || $intervention || $deadline || $paidAt === null, 'resolved' => $resolved, 'lines' => $lines,
-            'action' => $resolved && $complete ? 'Order selesai; seluruh receipt buyer acknowledged. Tidak perlu proses ulang.'
-                : 'Periksa dashboard / Manual Delivery Review untuk resolution sesuai bukti. Jangan beli ulang, refund, atau kirim ulang otomatis.'];
+            'action' => $resolved && $complete ? 'Order selesai. Tidak perlu proses ulang.'
+                : 'Periksa dashboard / Manual Delivery Review. Jangan beli ulang, refund, atau kirim ulang sebelum diperiksa.'];
     }
 }

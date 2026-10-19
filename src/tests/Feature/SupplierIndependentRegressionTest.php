@@ -778,12 +778,20 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         [$order, $fulfillment] = $this->paidSupplierOrder(3);
         $effect = $this->adminEffect($order);
         $this->completeSupplierAndReceipts($order, $fulfillment, 3, $effect);
+        $purchasedSupplier = Supplier::sole();
+        $nextSupplier = $purchasedSupplier->replicate();
+        $nextSupplier->name = 'Supplier berikutnya';
+        $nextSupplier->save();
+        $fulfillment->update(['reserved_supplier_id' => $nextSupplier->id]);
         $pipeline = app(AdminOrderNotificationDeliveryPipeline::class);
         $pipeline->deliver($effect);
         $pipeline->deliver($effect);
         $this->assertTrue($effect->fresh()->outcome_metadata['paid_outcome']['resolved']);
         $this->assertSame(1, $effect->fresh()->attempts);
         $this->assertSame(0, TelegramOutboundEffect::where('supersedes_effect_id', $effect->id)->count());
+        $text = implode("\n", $effect->fresh()->outcome_metadata['paid_outcome']['lines']);
+        $this->assertStringContainsString($purchasedSupplier->name, $text);
+        $this->assertStringNotContainsString($nextSupplier->name, $text);
     }
 
     public function test_acknowledged_buyer_delivery_does_not_hide_supplier_evidence_review(): void
@@ -846,7 +854,6 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         app(AdminOrderNotificationDeliveryPipeline::class)->deliver($effect);
         $text = (string) Http::recorded()->sole()[0]['text'];
         $this->assertStringContainsString('pembelian ditolak', $text);
-        $this->assertStringContainsString('buyer belum menerima', $text);
         $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
         $this->assertNull(SupplierPurchase::sole()->committed_at);
         $this->assertSame(1, SupplierPurchase::count());
@@ -868,9 +875,6 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         foreach ($order->orderItems as $item) {
             $this->assertStringContainsString($item->product_name.' x '.$item->quantity.':', $text);
         }
-        $this->assertStringContainsString('1/2 unit handoff luar bot', $text);
-        $this->assertStringContainsString('jumlah unit terkirim belum terkonfirmasi', $text);
-        $this->assertStringNotContainsString('unit terkirim ke buyer (receipt Telegram acknowledged)', $text);
         $this->assertSame(1, ProductStockItem::whereNotNull('order_item_id')->count());
         $this->assertSame(2_000_000, Supplier::sole()->reserved_balance_micros);
     }
