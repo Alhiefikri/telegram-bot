@@ -315,7 +315,7 @@ final class TelegramCredentialDeliveryRenderer
         bool $includeDefaultTutorial = false,
     ): array {
         $prefix = implode("\n", $header)."\n";
-        $credential = $this->copyText($account);
+        $credential = $account->copyValuesIndividually() ? $account->text() : $this->copyText($account);
         $token = $account->accessMethod() === CredentialAccessMethod::AuthToken
             ? $account->accessValue() : null;
         if ($account->accessMethod() === CredentialAccessMethod::AuthToken
@@ -338,7 +338,25 @@ final class TelegramCredentialDeliveryRenderer
             $credential .= ' | '.$token;
         }
         $text = $prefix.$credential.$accessNote;
-        $entities = [$this->copyEntity($prefix, $credential)];
+        if ($account->copyValuesIndividually()) {
+            $entities = [];
+            $fieldPrefix = $prefix;
+            foreach ($account->legacyParts() as $key => $value) {
+                $fieldPrefix .= match ($key) {
+                    'email' => 'email : ',
+                    'password' => 'password : ',
+                    'mfa' => 'MFA : ',
+                };
+                $entities[] = [
+                    'type' => 'code',
+                    'offset' => intdiv(strlen(mb_convert_encoding($fieldPrefix, 'UTF-16LE', 'UTF-8')), 2),
+                    'length' => intdiv(strlen(mb_convert_encoding($value, 'UTF-16LE', 'UTF-8')), 2),
+                ];
+                $fieldPrefix .= $value."\n";
+            }
+        } else {
+            $entities = [$this->copyEntity($prefix, $credential)];
+        }
         if (mb_strlen($text, 'UTF-8') > self::MESSAGE_LIMIT) {
             throw new InvalidArgumentException('Telegram account delivery unit exceeds the configured limit.');
         }

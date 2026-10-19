@@ -22,6 +22,46 @@ use Tests\Support\TelegramBotTestSupport;
 
 class LegacyCredentialDeliveryRenderingTest extends TelegramBotTestSupport
 {
+    public function test_dash_delimited_credentials_are_delivered_as_individually_copyable_values(): void
+    {
+        Queue::fake();
+        $customer = Customer::factory()->create(['telegram_id' => 445570, 'locale' => 'id']);
+        $email = 'buyer@example.test';
+        $password = 'UI,32qv😀##Hk|<&>';
+        $mfa = 'https://2fa.example.test/TESTSECRET';
+        $order = $this->legacyPaidOrder($customer, $email.'----'.$password.'----'.$mfa);
+        $this->fakeTelegramHttp();
+
+        app(TelegramReceiptNotifier::class)->send($order->fresh());
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        app(TelegramOrderIntents::class)->sendOrderDetail(
+            $customer,
+            (string) $customer->telegram_id,
+            $order->invoice_number,
+        );
+
+        $deliveries = Http::recorded(function ($request) use ($email): bool {
+            $photo = str_ends_with($request->url(), '/sendPhoto');
+            $text = (string) $this->telegramRequestField($request, $photo ? 'caption' : 'text');
+
+            return str_contains($text, $email);
+        });
+        $this->assertGreaterThanOrEqual(2, $deliveries->count());
+        foreach ($deliveries as [$request]) {
+            $photo = str_ends_with($request->url(), '/sendPhoto');
+            $text = (string) $this->telegramRequestField($request, $photo ? 'caption' : 'text');
+            $entities = $this->telegramRequestField($request, $photo ? 'caption_entities' : 'entities') ?? [];
+            $entities = is_string($entities) ? json_decode($entities, true, flags: JSON_THROW_ON_ERROR) : $entities;
+            $codes = array_values(array_filter($entities, fn (array $entity): bool => $entity['type'] === 'code'));
+            $this->assertSame(
+                [$email, $password, $mfa],
+                array_map(fn (array $entity): string => $this->telegramEntityText($text, $entity), $codes),
+            );
+            $this->assertStringContainsString("email : {$email}\npassword : {$password}\nMFA : {$mfa}", $text);
+            $this->assertStringNotContainsString('----', $text);
+        }
+    }
+
     #[DataProvider('premiumIconReceiptCases')]
     public function test_paid_legacy_receipt_with_premium_icons_delivers_copyable_credentials(
         string $productName,

@@ -159,6 +159,7 @@ final class CredentialDeliveryPresentation
             accessMethod: null,
             accessValue: null,
             tutorial: $defaultTutorial,
+            copyValuesIndividually: $parts !== null && $this->legacyFormatter->usesDashSeparator($secret),
         );
     }
 

@@ -87,16 +87,19 @@ class CredentialDeliveryFormatter
     }
 
     /**
-     * Accept the legacy email/password shape and its existing
-     * email/password/MFA extension. Values after the first separator remain
-     * copyable exactly as supplied; only the email envelope is normalized for
-     * validation and display.
+     * Accept pipe-separated credentials and email----password----MFA triplets.
+     * Password and MFA values remain copyable exactly as supplied; only the
+     * email envelope is normalized for validation and display.
      *
      * @return array{email: string, password: string, mfa: ?string}|null
      */
     public function parts(string $credential): ?array
     {
-        $parts = explode('|', $credential);
+        $dashSeparated = $this->usesDashSeparator($credential);
+        $parts = explode($dashSeparated ? '----' : '|', $credential);
+        if ($dashSeparated && count($parts) !== 3) {
+            return null;
+        }
         $email = trim((string) ($parts[0] ?? ''));
         $password = (string) ($parts[1] ?? '');
         $mfa = count($parts) === 3 ? (string) ($parts[2] ?? '') : null;
@@ -110,6 +113,13 @@ class CredentialDeliveryFormatter
         }
 
         return ['email' => $email, 'password' => $password, 'mfa' => $mfa];
+    }
+
+    public function usesDashSeparator(string $credential): bool
+    {
+        $email = strstr($credential, '----', true);
+
+        return $email !== false && filter_var(trim($email), FILTER_VALIDATE_EMAIL) !== false;
     }
 
     private function utf16Length(string $value): int

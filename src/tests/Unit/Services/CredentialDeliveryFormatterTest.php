@@ -7,6 +7,42 @@ use PHPUnit\Framework\TestCase;
 
 class CredentialDeliveryFormatterTest extends TestCase
 {
+    public function test_dash_separator_preserves_password_symbols_and_whitespace(): void
+    {
+        $this->assertSame([
+            'email' => 'buyer@example.test',
+            'password' => ' UI,32qv##Hk|😀 ',
+            'mfa' => 'https://2fa.example.test/SECRET',
+        ], (new CredentialDeliveryFormatter)->parts(
+            ' buyer@example.test ---- UI,32qv##Hk|😀 ----https://2fa.example.test/SECRET',
+        ));
+    }
+
+    public function test_dash_separator_does_not_split_a_pipe_delimited_password(): void
+    {
+        $this->assertSame([
+            'email' => 'buyer@example.test',
+            'password' => 'password----suffix',
+            'mfa' => 'MFA',
+        ], (new CredentialDeliveryFormatter)->parts('buyer@example.test|password----suffix|MFA'));
+    }
+
+    public function test_malformed_dash_triplets_are_left_unchanged(): void
+    {
+        $formatter = new CredentialDeliveryFormatter;
+        foreach ([
+            'not-an-email----password----https://2fa.example.test/SECRET',
+            'buyer@example.test--------https://2fa.example.test/SECRET',
+            'buyer@example.test----password----',
+            'buyer@example.test----password',
+            'buyer@example.test----password----MFA----extra',
+            "buyer@example.test----pass\nword----MFA",
+        ] as $credential) {
+            $this->assertNull($formatter->parts($credential));
+            $this->assertSame($credential, $formatter->format($credential));
+        }
+    }
+
     public function test_it_formats_an_email_password_and_mfa_triplet(): void
     {
         $credential = 'premium@example.test|Password-123|ABCD EFGH';

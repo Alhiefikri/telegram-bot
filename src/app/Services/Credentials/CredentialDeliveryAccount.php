@@ -28,6 +28,7 @@ final readonly class CredentialDeliveryAccount
         private ?string $accessValue,
         private ?string $tutorial,
         private ?string $readerMailLink = null,
+        private bool $copyValuesIndividually = false,
     ) {}
 
     public function number(): int
@@ -69,6 +70,11 @@ final readonly class CredentialDeliveryAccount
     public function parts(): ?array
     {
         return $this->legacyParts();
+    }
+
+    public function copyValuesIndividually(): bool
+    {
+        return $this->copyValuesIndividually;
     }
 
     public function email(): ?string
