@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\SendSupplierHealthNotification;
@@ -663,6 +665,23 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $fulfillment->update(['reserved_quantity' => 0, 'reserved_cost_micros' => 0, 'reserved_supplier_id' => null]);
         $this->assertSame(0, $this->health()->materialize());
         $this->assertSame([], json_decode(DB::table('supplier_health_reviews')->value('active_identities'), true));
+    }
+
+    public function test_unpaid_reservation_hold_is_reported_as_a_reservation_not_as_an_unproven_purchase(): void
+    {
+        $supplier = $this->supplier();
+        $fulfillment = $this->fulfillment($supplier);
+        $fulfillment->order->update(['order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
+        $fulfillment->update(['reserved_quantity' => 1, 'reserved_cost_micros' => 1_000_000]);
+        $this->travel(15)->minutes();
+        $supplier->forceFill(['balance_observed_at' => now()])->save();
+
+        $this->assertSame(1, $this->health()->materialize());
+        $message = SupplierHealthEvent::sole()->message;
+
+        $this->assertStringContainsString('Hold itu reservasi kapasitas pesanan yang belum dibayar', $message);
+        $this->assertStringNotContainsString('Hold menua', $message);
+        $this->assertStringContainsString('Fulfillment #'.$fulfillment->id, $message);
     }
 
     public function test_dispatch_unknown_episode_has_operator_context_and_survives_review_transition_without_duplicate(): void

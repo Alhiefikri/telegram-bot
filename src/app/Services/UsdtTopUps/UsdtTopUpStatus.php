@@ -19,6 +19,10 @@ final class UsdtTopUpStatus
 
     public const STATE_EXPIRED_UNRESOLVED = 'expired_unresolved';
 
+    public const STATE_EXPIRED_UNPAID = 'expired_unpaid';
+
+    public const STATE_CANCELLED_BY_CUSTOMER = 'cancelled_by_customer';
+
     public const STATE_REVIEW = 'manual_review';
 
     public const STATE_SETTLED = 'settled';
@@ -35,6 +39,8 @@ final class UsdtTopUpStatus
         self::STATE_COMPENSATED,
         self::STATE_EXTERNALLY_REFUNDED,
         self::STATE_REJECTED,
+        self::STATE_EXPIRED_UNPAID,
+        self::STATE_CANCELLED_BY_CUSTOMER,
     ];
 
     private function __construct(

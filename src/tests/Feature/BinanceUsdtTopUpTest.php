@@ -707,10 +707,12 @@ final class BinanceUsdtTopUpTest extends TestCase
         $customer = Customer::factory()->create(['telegram_id' => $telegramId]);
         TelegramNavigationRoot::query()->create(['customer_id' => $customer->id, 'chat_id' => (string) $telegramId,
             'message_id' => 100, 'media_kind' => 'text', 'screen' => 'home', 'locale' => 'id', 'generation' => 1]);
-        $actions = app(TelegramUsdtFundingActions::class);
-        $preview = $actions->preview((string) $telegramId, (string) $telegramId, 'private', 100, $amount, CustomerUsdtFundingRail::BinancePay);
-        $this->assertSame('opened', $preview->outcome);
+        $result = app(TelegramUsdtFundingActions::class)->openConfirmedIntent(
+            (string) $telegramId, (string) $telegramId, 'private', 100, $amount, CustomerUsdtFundingRail::BinancePay,
+        );
+        $this->assertSame('confirmed', $result->outcome);
+        $this->assertNotNull($result->topUp);
 
-        return $actions->callback((string) $telegramId, (string) $telegramId, 'private', 100, 'usdt:confirm:'.$preview->intent->nonce)->topUp;
+        return $result->topUp;
     }
 }

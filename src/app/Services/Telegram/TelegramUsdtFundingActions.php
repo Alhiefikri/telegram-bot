@@ -3,13 +3,18 @@
 namespace App\Services\Telegram;
 
 use App\Enums\CustomerUsdtFundingRail;
+use App\Enums\CustomerUsdtFundingReservationOutcome;
 use App\Models\Customer;
+use App\Models\CustomerUsdtTopUp;
 use App\Models\TelegramNavigationRoot;
 use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\UsdtFunding\CustomerUsdtFundingRelease;
+use App\Services\UsdtFunding\CustomerUsdtFundingReservationService;
 use App\Services\UsdtFunding\UsdtFundingIntentResult;
 use App\Services\UsdtFunding\UsdtFundingIntentService;
 use App\Services\UsdtTopUps\UsdtTopUpReview;
 use Illuminate\Auth\Access\AuthorizationException;
+use Throwable;
 
 /** U6 boundary for U9 presentation. Caller supplies authenticated update facts. */
 final class TelegramUsdtFundingActions
@@ -19,9 +24,71 @@ final class TelegramUsdtFundingActions
     public function __construct(
         private readonly UsdtFundingIntentService $intents,
         private readonly UsdtTopUpReview $reviews,
+        private readonly CustomerUsdtFundingReservationService $reservations,
     ) {}
 
-    public function preview(
+    /**
+     * Starting over cancels one unpaid USD target. A Customer who picked the
+     * wrong amount must never be locked into it; releasing the slot moves no
+     * money and late transfers still reach manual review.
+     */
+    public function cancelOpenTargets(Customer $customer): int
+    {
+        $active = $this->reservations->activeForCustomer($customer);
+        if ($active === null || $active->reservation->sourceType !== 'customer_usdt_top_up') {
+            return 0;
+        }
+
+        try {
+            $result = $this->reservations->cancelUnpaidTarget(
+                $customer,
+                $active->reservation->reservationId,
+                CustomerUsdtFundingRelease::cancelledByCustomer(
+                    'customer-restart:'.$active->reservation->sourceId,
+                    'customer:'.$customer->getKey(),
+                ),
+            );
+        } catch (Throwable) {
+            return 0;
+        }
+
+        return in_array($result->outcome, [CustomerUsdtFundingReservationOutcome::Released, CustomerUsdtFundingReservationOutcome::Replayed], true) ? 1 : 0;
+    }
+
+    /** Cancel one unpaid target from its own instruction surface. */
+    public function cancelTarget(Customer $customer, string $topUpId): bool
+    {
+        $target = CustomerUsdtTopUp::query()
+            ->whereKey($topUpId)
+            ->where('customer_id', $customer->getKey())
+            ->first();
+        if ($target === null || $target->reservation_id === null) {
+            return false;
+        }
+
+        try {
+            $result = $this->reservations->cancelUnpaidTarget(
+                $customer,
+                (int) $target->reservation_id,
+                CustomerUsdtFundingRelease::cancelledByCustomer(
+                    'customer-cancel:'.$target->id,
+                    'customer:'.$customer->getKey(),
+                ),
+            );
+        } catch (Throwable) {
+            return false;
+        }
+
+        return in_array($result->outcome, [CustomerUsdtFundingReservationOutcome::Released, CustomerUsdtFundingReservationOutcome::Replayed], true);
+    }
+
+    /**
+     * Open one funding target for an explicit Customer choice and confirm it in
+     * the same step. Tapping a preset amount or sending a typed amount is the
+     * confirmation, so no separate confirm screen exists; the instructions are
+     * rendered from the confirmed target the moment it exists.
+     */
+    public function openConfirmedIntent(
         string $actorId,
         string $chatId,
         string $chatType,
@@ -42,7 +109,20 @@ final class TelegramUsdtFundingActions
             return new UsdtFundingIntentResult('invalid_amount');
         }
 
-        return $this->intents->open($context['customer'], $chatId, $context['root']->id, $messageId, $money, $rail);
+        $opened = $this->intents->open($context['customer'], $chatId, $context['root']->id, $messageId, $money, $rail);
+        if (! in_array($opened->outcome, ['opened', 'replayed'], true) || $opened->intent === null) {
+            return $opened;
+        }
+
+        return $this->intents->claim(
+            $context['customer'],
+            $chatId,
+            $context['root']->id,
+            $messageId,
+            (string) $opened->intent->nonce,
+            'confirm',
+            $rail,
+        );
     }
 
     /**
@@ -66,28 +146,6 @@ final class TelegramUsdtFundingActions
         }
 
         return $amount;
-    }
-
-    public function callback(string $actorId, string $chatId, string $chatType, int $messageId, string $data): UsdtFundingIntentResult
-    {
-        $context = $this->context($actorId, $chatId, $chatType, $messageId);
-        if ($context === null) {
-            return new UsdtFundingIntentResult('unauthorized');
-        }
-        if (strlen($data) > 64 || preg_match('/\Ausdt:(confirm|cancel):([a-f0-9]{32})\z/D', $data, $matches) !== 1) {
-            return new UsdtFundingIntentResult('stale');
-        }
-
-        return $this->intents->claim($context['customer'], $chatId, $context['root']->id, $messageId, $matches[2], $matches[1]);
-    }
-
-    public static function callbackData(string $action, string $nonce): string
-    {
-        if (! in_array($action, ['confirm', 'cancel'], true) || preg_match('/\A[a-f0-9]{32}\z/D', $nonce) !== 1) {
-            throw new \InvalidArgumentException('Invalid USDT confirmation callback.');
-        }
-
-        return 'usdt:'.$action.':'.$nonce;
     }
 
     /** U8 authorization seam; update actor/chat/root facts come from the trusted channel adapter. */

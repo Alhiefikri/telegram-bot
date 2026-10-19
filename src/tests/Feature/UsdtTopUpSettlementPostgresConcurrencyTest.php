@@ -83,8 +83,7 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
         $this->rpc = new BscUsdtRailRpcFixture;
         $this->app->instance(BscVerificationRpcClientInterface::class, $this->rpc);
         $actions = app(TelegramUsdtFundingActions::class);
-        $nonce = $actions->preview('951001', '951001', 'private', 100, '1')->intent->nonce;
-        $this->target = $actions->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$nonce)->topUp;
+        $this->target = $actions->openConfirmedIntent('951001', '951001', 'private', 100, '1')->topUp;
         app(UsdtTopUpPreparation::class)->prepare($this->target->id);
         $this->rpc->timestamp = now()->timestamp + 5;
         app(UsdtTopUpSettlement::class)->submit($this->customer, $this->target->id, BscUsdtRailRpcFixture::TX);
@@ -336,10 +335,10 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
         TelegramNavigationRoot::create(['customer_id' => $customer->id, 'chat_id' => (string) $telegramId,
             'message_id' => 100, 'media_kind' => 'text', 'screen' => 'home', 'locale' => 'en', 'generation' => 1]);
         $actions = app(TelegramUsdtFundingActions::class);
-        $preview = $actions->preview((string) $telegramId, (string) $telegramId, 'private', 100, '0.30', CustomerUsdtFundingRail::BinancePay);
-        $this->assertSame('opened', $preview->outcome);
+        $result = $actions->openConfirmedIntent((string) $telegramId, (string) $telegramId, 'private', 100, '0.30', CustomerUsdtFundingRail::BinancePay);
+        $this->assertSame('confirmed', $result->outcome);
 
-        return $actions->callback((string) $telegramId, (string) $telegramId, 'private', 100, 'usdt:confirm:'.$preview->intent->nonce)->topUp;
+        return $result->topUp;
     }
 
     private function fundingRaceCart(Customer $customer, int $priceMicro): Cart

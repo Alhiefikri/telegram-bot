@@ -210,6 +210,7 @@ final class AdminDashboardStatsData
         }
 
         $feeMicro = $state?->applicationFeeMicro ?? 0;
+        $presetAmountsMicro = $state?->presetAmountsMicro ?? CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO;
 
         return [
             'configured' => $state !== null,
@@ -218,6 +219,10 @@ final class AdminDashboardStatsData
                 ?? CustomerUsdtFundingPolicy::DEFAULT_CONFIRMATION_TTL_SECONDS,
             'application_fee_input' => $feeMicro === 0 ? '0' : UsdtMicroAmount::fromUnits($feeMicro)->decimal(),
             'application_fee_display' => $feeMicro === 0 ? '0 USDT' : UsdtMicroAmount::fromUnits($feeMicro)->decimal().' USDT',
+            'preset_amounts_input' => $state?->presetAmountsInput() ?? implode(', ', array_map(
+                static fn (int $amount): string => UsdtMicroAmount::formatUnits($amount),
+                $presetAmountsMicro,
+            )),
             'terms_version' => $state?->termsVersion,
             'terms_body' => $state === null ? '' : $this->usdtFundingPolicies->termsBody($state->termsVersion),
             'version' => $state?->version ?? 0,

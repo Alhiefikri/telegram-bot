@@ -16,9 +16,11 @@ use InvalidArgumentException;
  * Owner of the versioned Customer USDT funding policy and its pause controls.
  * Every mutation is optimistic-versioned, audited and money-free: changing the
  * policy, publishing new terms or pausing/resuming never creates a ledger
- * entry, a reservation or a provider target. The policy row lock is the
- * serialization point shared with the reservation service, so an activation,
- * pause or resume can never interleave with a new funding target.
+ * entry, a reservation or a provider target. The presentation-only USD preset
+ * list is stored here too, but it only seeds the top-up amount buttons. The
+ * policy row lock is the serialization point shared with the reservation
+ * service, so an activation, pause or resume can never interleave with a new
+ * funding target.
  */
 final class CustomerUsdtFundingPolicyManager
 {
@@ -46,6 +48,11 @@ final class CustomerUsdtFundingPolicyManager
         return (string) $terms->body;
     }
 
+    /**
+     * Applies one validated policy edit. An omitted $presetAmounts keeps the
+     * presets already stored, so callers that only change the money-neutral
+     * fields never rewrite the presentation list.
+     */
     public function change(
         mixed $fundingEnabled,
         mixed $confirmationTtlSeconds,
@@ -54,12 +61,14 @@ final class CustomerUsdtFundingPolicyManager
         int $expectedVersion,
         User $actor,
         ?string $ip,
+        mixed $presetAmounts = null,
     ): CustomerUsdtFundingPolicyChange {
         $definition = CustomerUsdtFundingPolicyDefinition::from(
             $fundingEnabled,
             $confirmationTtlSeconds,
             $applicationFeeMicro,
             $termsBody,
+            $presetAmounts ?? $this->storedPresetAmounts(),
         );
 
         return DB::transaction(function () use ($definition, $expectedVersion, $actor, $ip): CustomerUsdtFundingPolicyChange {
@@ -76,7 +85,8 @@ final class CustomerUsdtFundingPolicyManager
             $unchanged = ! $termsChanged
                 && $oldState->fundingEnabled === $definition->fundingEnabled
                 && $oldState->confirmationTtlSeconds === $definition->confirmationTtlSeconds
-                && $oldState->applicationFeeMicro === $definition->applicationFeeMicro;
+                && $oldState->applicationFeeMicro === $definition->applicationFeeMicro
+                && $oldState->presetAmountsMicro === $definition->presetAmountsMicro;
 
             if ($unchanged) {
                 return new CustomerUsdtFundingPolicyChange($oldState, $oldState, false);
@@ -97,6 +107,7 @@ final class CustomerUsdtFundingPolicyManager
                 'funding_enabled' => $definition->fundingEnabled,
                 'confirmation_ttl_seconds' => $definition->confirmationTtlSeconds,
                 'application_fee_micro' => $definition->applicationFeeMicro,
+                'preset_amounts_micro' => $definition->presetAmountsMicro,
                 'terms_version' => $termsVersion,
                 'version' => $oldState->version + 1,
             ])->save();
@@ -216,12 +227,25 @@ final class CustomerUsdtFundingPolicyManager
             ->firstOrFail();
     }
 
+    /**
+     * The presets a change request keeps when it omits them: the stored list,
+     * or the seeded default list before the singleton exists.
+     *
+     * @return list<int>
+     */
+    private function storedPresetAmounts(): array
+    {
+        return CustomerUsdtFundingPolicy::current()?->presetAmountsMicro()
+            ?? CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO;
+    }
+
     private function state(CustomerUsdtFundingPolicy $policy): CustomerUsdtFundingPolicyState
     {
         return new CustomerUsdtFundingPolicyState(
             fundingEnabled: $policy->fundingEnabled(),
             confirmationTtlSeconds: $policy->confirmationTtlSeconds(),
             applicationFeeMicro: $policy->applicationFeeMicro(),
+            presetAmountsMicro: $policy->presetAmountsMicro(),
             termsVersion: $policy->termsVersion(),
             version: $policy->policyVersion(),
         );

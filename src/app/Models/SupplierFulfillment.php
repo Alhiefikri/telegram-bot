@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OrderStatus;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Model;
@@ -59,5 +60,17 @@ class SupplierFulfillment extends Model
     public function reservedSupplier(): BelongsTo
     {
         return $this->belongsTo(Supplier::class, 'reserved_supplier_id');
+    }
+
+    /**
+     * Capacity reserved at checkout for an order that was never paid. Nothing was
+     * purchased from the supplier, so the hold is not an unproven debit: it clears
+     * by itself when the order expires or is cancelled.
+     */
+    public function isUnpaidReservation(): bool
+    {
+        return (int) $this->reserved_cost_micros > 0
+            && $this->current_purchase_id === null
+            && $this->order?->order_status === OrderStatus::PendingPayment;
     }
 }

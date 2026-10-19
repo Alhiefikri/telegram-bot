@@ -3,6 +3,8 @@
 namespace Tests\Feature\Telegram;
 
 use App\Models\Customer;
+use App\Models\CustomerUsdtFundingPolicy;
+use App\Models\ManualPaymentSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramUiIcon;
 use App\Services\Telegram\TelegramHtmlCaption;
@@ -369,6 +371,44 @@ class MenuIconCaptureTest extends TelegramBotTestSupport
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && str_contains((string) ($request['text'] ?? ''), 'Akses ditolak'));
         Http::assertNotSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'));
+    }
+
+    public function test_funding_method_buttons_own_distinct_editable_icons(): void
+    {
+        foreach (['menu.balance.qris' => '🇮🇩', 'menu.balance.binance_pay' => '💎', 'menu.balance.usdt_bep20' => '⛓️'] as $key => $fallback) {
+            $icon = TelegramUiIcon::query()->where('key', $key)->sole();
+            $this->assertSame($fallback, $icon->fallback_emoji);
+            $this->assertNull($icon->source_emoji, 'Glyph milik daftar teks tidak boleh diduplikasi.');
+        }
+
+        ManualPaymentSetting::create([
+            'is_active' => true,
+            'payment_mode' => 'manual',
+            'bsc_min_confirmations' => 3,
+            'bsc_payment_ttl_minutes' => 15,
+            'binance_pay_enabled' => true,
+        ]);
+        CustomerUsdtFundingPolicy::query()->sole()->forceFill(['funding_enabled' => true, 'version' => 1])->save();
+        config(['services.binance.api_key' => 'test', 'services.binance.api_secret' => 'test',
+            'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '']);
+
+        $this->verifiedEmojiFakes();
+        $customer = $this->adminCustomer(999);
+        $this->captureEmoji($customer, 'menu.balance.qris');
+
+        $this->postTelegramWebhook($this->messageUpdate(50290, '/start', ['id' => 999], 999))->assertOk();
+        $root = TelegramNavigationRoot::query()->sole();
+        $this->postTelegramWebhook($this->callbackUpdate(50291, 'add', 'balance:add', ['id' => 999], 999, 'private', $root->message_id))->assertOk();
+
+        $qris = $this->keyboardButton('balance:currency:idr');
+        $this->assertNotNull($qris, 'The QRIS rail must stay offered on the funding chooser.');
+        $this->assertSame('QRIS (Rupiah)', $qris['text']);
+        $this->assertSame(self::EMOJI_ID, $qris['icon_custom_emoji_id'] ?? null);
+
+        $binance = $this->keyboardButton('balance:usd:binance_pay');
+        $this->assertNotNull($binance, 'The Binance Pay rail must be offered when it is ready.');
+        $this->assertSame('💎 Binance Pay (USD)', $binance['text']);
+        $this->assertArrayNotHasKey('icon_custom_emoji_id', $binance);
     }
 
     private function adminCustomer(int $telegramId): Customer

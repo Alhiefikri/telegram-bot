@@ -2,12 +2,15 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\OrderStatus;
 use App\Enums\SupplierProvider;
 use App\Models\Product;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierFulfillment;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierMoney;
+use Carbon\CarbonImmutable;
 
 final class AdminSupplierDashboardData
 {
@@ -22,9 +25,24 @@ final class AdminSupplierDashboardData
             ->groupBy('supplier_id')
             ->selectRaw('supplier_id, MAX(unit_price_micros) AS unit_price_micros')
             ->pluck('unit_price_micros', 'supplier_id');
-        $connections->setCollection($connections->getCollection()->map(function (Supplier $supplier) use ($sampleUnits): array {
+        // Hold on an unpaid order is capacity reserved at checkout: nothing was
+        // purchased yet and the hold clears on its own at expiry. Only the
+        // remainder belongs to an unproven purchase, so the two are reported apart.
+        // Mirrors SupplierFulfillment::isUnpaidReservation() for the whole page.
+        $pendingPaymentHolds = SupplierFulfillment::query()
+            ->join('orders', 'orders.id', '=', 'supplier_fulfillments.order_id')
+            ->whereIn('supplier_fulfillments.reserved_supplier_id', $connections->getCollection()->pluck('id'))
+            ->where('supplier_fulfillments.reserved_quantity', '>', 0)
+            ->whereNull('supplier_fulfillments.current_purchase_id')
+            ->where('orders.order_status', OrderStatus::PendingPayment->value)
+            ->get(['supplier_fulfillments.reserved_supplier_id', 'supplier_fulfillments.reserved_cost_micros', 'orders.expires_at'])
+            ->groupBy('reserved_supplier_id');
+        $connections->setCollection($connections->getCollection()->map(function (Supplier $supplier) use ($sampleUnits, $pendingPaymentHolds): array {
             $available = $supplier->balance_micros === null ? null : max(0, (int) $supplier->balance_micros - (int) $supplier->reserved_balance_micros);
             $sampleUnit = $sampleUnits->get($supplier->id);
+            $pendingPayment = $pendingPaymentHolds->get($supplier->id) ?? collect();
+            $pendingPaymentHold = (int) $pendingPayment->sum('reserved_cost_micros');
+            $pendingPaymentReleaseAt = $pendingPayment->max('expires_at');
 
             return [
                 ...$supplier->only(['id', 'name', 'provider', 'currency', 'currency_confirmed', 'exchange_rate_idr', 'is_active', 'version', 'low_balance_threshold_micros']),
@@ -38,7 +56,13 @@ final class AdminSupplierDashboardData
                 'balance_observed_at' => $supplier->balance_observed_at?->toIso8601String(),
                 'balance_uncertain' => $supplier->balance_micros === null
                     || $supplier->balance_observed_at?->lte(now()->subSeconds(SupplierCatalogSync::FRESHNESS_SECONDS)) !== false,
-                'has_unresolved_hold' => (int) $supplier->reserved_balance_micros > 0,
+                'has_unresolved_hold' => max(0, (int) $supplier->reserved_balance_micros - $pendingPaymentHold) > 0,
+                'has_pending_payment_hold' => $pendingPayment->isNotEmpty(),
+                'pending_payment_hold' => SupplierMoney::decimal($pendingPaymentHold),
+                'pending_payment_hold_count' => $pendingPayment->count(),
+                'pending_payment_hold_release_at' => $pendingPaymentReleaseAt === null
+                    ? null
+                    : CarbonImmutable::parse($pendingPaymentReleaseAt)->timezone(config('app.timezone'))->toIso8601String(),
                 'sync_error' => $supplier->last_error !== null ? $this->syncFailureMessage($supplier) : null,
             ];
         }));

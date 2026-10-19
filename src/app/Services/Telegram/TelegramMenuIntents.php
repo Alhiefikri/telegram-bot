@@ -7,6 +7,7 @@ use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\TelegramNavigationRenderOutcome;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
+use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\StoreChannelSetting;
@@ -16,6 +17,7 @@ use App\Services\CustomerApi\CustomerApiAvailability;
 use App\Services\StoreBalance\StoreBalanceActivityDetail;
 use App\Services\StoreBalance\StoreBalanceActivityItem;
 use App\Services\StoreBalance\StoreBalanceActivityPage;
+use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\StoreBalance\StoreBalanceLedger;
@@ -23,14 +25,21 @@ use App\Services\StoreBalance\StoreBalanceSnapshot;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPresentation;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
+use App\Services\UsdtBalance\CustomerUsdtActivityService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtBalanceSnapshot;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtFunding\CustomerUsdtFundingGate;
+use App\Services\UsdtFunding\UsdtFundingAmountPreset;
 use App\Support\Money;
+use Carbon\CarbonImmutable;
 
 class TelegramMenuIntents
 {
     use HasAdminWebAppButton;
+
+    /** Recent rows shown on the wallet overview before the paged screens. */
+    private const WALLET_ACTIVITY_ROWS = 4;
 
     public function __construct(
         private TelegramBotClient $bot,
@@ -50,6 +59,8 @@ class TelegramMenuIntents
         private CustomerUsdtBalanceLedger $usdtBalances,
         private CustomerUsdtFundingGate $usdtFundingGate,
         private CustomerApiAvailability $customerApiAvailability,
+        private StoreBalanceActivityService $storeActivities,
+        private CustomerUsdtActivityService $usdtActivities,
     ) {}
 
     public function sendLanguagePicker(string $chatId, ?Customer $customer = null, bool $isPrivateChat = true): void
@@ -283,15 +294,31 @@ class TelegramMenuIntents
         if ($page === null) {
             $usdt = $this->usdtBalanceSection($customer);
             $lines = array_merge($lines, $usdt['lines']);
+            if ($balance->isAvailable()) {
+                // A drifted projection hides activity amounts entirely; the
+                // notice above already explains why nothing is shown.
+                $lines[] = '';
+                $lines[] = $this->locale->translate($customer, 'balance.activity.title');
+                $recent = $this->recentWalletActivity($customer, $usdt['available']);
+                if ($recent === []) {
+                    $lines[] = $this->locale->translate($customer, 'balance.activity.empty');
+                }
+                foreach ($recent as $index => $row) {
+                    $lines[] = $this->locale->translate($customer, 'balance.recent.row', [
+                        'number' => $index + 1,
+                        'kind' => $row['kind'],
+                        'amount' => $row['amount'],
+                        'state' => $row['state'],
+                        'date' => $row['date'],
+                    ]);
+                }
+            }
+
             $keyboard = [];
             if ($balance->isAvailable()) {
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'balance.add'),
                     'callback_data' => 'balance:add',
-                ]];
-                $keyboard[] = [[
-                    'text' => $this->locale->translate($customer, 'balance.activity.view'),
-                    'callback_data' => 'balance:activity',
                 ]];
             }
 
@@ -301,7 +328,6 @@ class TelegramMenuIntents
                 $this->captions->html(implode("\n", $lines)),
                 ['inline_keyboard' => [
                     ...$keyboard,
-                    ...$usdt['rows'],
                     $this->navigationRow($customer),
                 ]],
             );
@@ -377,44 +403,61 @@ class TelegramMenuIntents
     }
 
     /**
-     * USDT section of the private Saldo screen. A drifted projection or a
+     * USD balance line of the private Saldo screen. A drifted projection or a
      * frozen account is shown as a localized unavailable/recovery state, never
-     * as a fabricated zero, and never offers a funding action.
+     * as a fabricated zero; funding actions live on the Add-Balance chooser.
      *
-     * @return array{lines: list<string>, rows: list<list<array<string, string>>>}
+     * @return array{lines: list<string>, available: bool}
      */
     private function usdtBalanceSection(Customer $customer): array
     {
         $snapshot = $this->usdtBalances->snapshot($customer);
-        $lines = [''];
-        if (! $snapshot->isAvailable()) {
-            $lines[] = $this->locale->translate($customer, 'balance.usdt.unavailable');
-        } elseif ($snapshot->isFrozen()) {
-            $lines[] = $this->locale->translate($customer, 'balance.usdt.frozen');
-        } else {
-            $lines[] = $this->locale->translate($customer, 'balance.usdt.available', [
-                'amount' => UsdtMicroAmount::formatUnits($snapshot->balanceMicro()),
-            ]);
+
+        return [
+            'lines' => ['', ...$this->usdBalanceLines($customer, $snapshot)],
+            'available' => $snapshot->isAvailable(),
+        ];
+    }
+
+    /**
+     * Newest rows of both Customer ledgers, merged by time for the wallet
+     * overview. Read-only presentation: the paged screens own navigation, so
+     * this never becomes a second history source of truth.
+     *
+     * @return list<array{occurredAt: CarbonImmutable, kind: string, amount: string, state: string, date: string}>
+     */
+    private function recentWalletActivity(Customer $customer, bool $includeUsd): array
+    {
+        $rows = [];
+        foreach ($this->storeActivities->firstPage($customer)->items as $item) {
+            $rows[] = [
+                'occurredAt' => $item->occurredAt,
+                'kind' => $this->locale->translate($customer, 'balance.activity.kind.'.$item->kind),
+                'amount' => $this->activityAmount($item),
+                'state' => $this->locale->translate($customer, 'balance.activity.state.'.$item->state),
+                'date' => $this->locale->formatShortDate($customer, $item->occurredAt),
+            ];
         }
-
-        $rows = [[[
-            'text' => $this->locale->translate($customer, 'balance.usdt.history.button'),
-            'callback_data' => 'usdt:history',
-        ]]];
-
-        if ($snapshot->isAvailable() && ! $snapshot->isFrozen()) {
-            if ($this->usdtFundingGate->availability(CustomerUsdtFundingRail::BscShared)->available
-                || $this->usdtFundingGate->availability(CustomerUsdtFundingRail::BinancePay)->available) {
-                array_unshift($rows, [[
-                    'text' => $this->locale->translate($customer, 'balance.usdt.topup.button'),
-                    'callback_data' => 'balance:usdt',
-                ]]);
-            } else {
-                $lines[] = $this->locale->translate($customer, 'balance.usdt.topup.unavailable');
+        if ($includeUsd) {
+            foreach ($this->usdtActivities->firstPage($customer)->items as $item) {
+                $rows[] = [
+                    'occurredAt' => $item->occurredAt,
+                    'kind' => $this->locale->translate($customer, 'balance.usdt.history.kind.'.$item->kind),
+                    'amount' => $this->locale->translate($customer, 'balance.usdt.history.amount', [
+                        'amount' => $item->isTarget()
+                            ? UsdtMicroAmount::formatUnits(max(0, $item->amountMicro))
+                            : (($item->signedMicro ?? 0) < 0
+                                ? '-'.UsdtMicroAmount::formatUnits(abs($item->signedMicro ?? 0))
+                                : '+'.UsdtMicroAmount::formatUnits($item->signedMicro ?? 0)),
+                    ]),
+                    'state' => $this->locale->translate($customer, 'balance.usdt.history.state.'.$item->state),
+                    'date' => $this->locale->formatShortDate($customer, $item->occurredAt),
+                ];
             }
         }
+        usort($rows, static fn (array $left, array $right): int => $right['occurredAt']->getTimestamp() <=> $left['occurredAt']->getTimestamp());
 
-        return ['lines' => $lines, 'rows' => $rows];
+        return array_slice($rows, 0, self::WALLET_ACTIVITY_ROWS);
     }
 
     private function activityAmount(StoreBalanceActivityItem $item): string
@@ -428,71 +471,83 @@ class TelegramMenuIntents
             : '+'.$this->locale->idr($item->signedAmount);
     }
 
-    public function balanceCurrencySurface(Customer $customer): TelegramNavigationSurface
-    {
+    /**
+     * Add-Balance chooser: one entry per funding rail the store can accept.
+     * The currency is a property of the rail, so the customer never picks a
+     * currency first and a method second.
+     */
+    public function addBalanceMethodsSurface(
+        Customer $customer,
+        ?string $noticeKey = null,
+        array $noticeReplacements = [],
+    ): TelegramNavigationSurface {
+        $balance = $this->balances->snapshot($customer);
+        $usdt = $this->usdtBalances->snapshot($customer);
+        $lines = [
+            $this->locale->translate($customer, 'balance.add.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'balance.available', [
+                'balance' => $balance->isAvailable()
+                    ? $this->locale->idr($balance->balance())
+                    : $this->locale->translate($customer, 'welcome.balance_unavailable'),
+            ]),
+        ];
+        $lines = array_merge($lines, $this->usdBalanceLines($customer, $usdt));
+
+        $keyboard = [];
+        if ($balance->isAvailable()) {
+            $keyboard[] = [$this->fundingButton($customer, 'balance.method.qris', 'balance:currency:idr', 'menu.balance.qris')];
+        }
+        $usdFundable = $usdt->isAvailable() && ! $usdt->isFrozen();
+        $rails = 0;
+        foreach (CustomerUsdtFundingRail::selectable() as $rail) {
+            if (! $usdFundable || ! $this->usdtFundingGate->availability($rail)->available) {
+                continue;
+            }
+            $keyboard[] = [$this->fundingRailButton($customer, $rail)];
+            $rails++;
+        }
+        $keyboard[] = $this->navigationRow($customer);
+
+        $lines[] = '';
+        $lines[] = $this->locale->translate($customer, 'balance.add.prompt_methods');
+        if ($rails === 0) {
+            $lines[] = $this->locale->translate($customer, 'balance.usdt.topup.unavailable');
+        }
+        if ($noticeKey !== null) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, $noticeKey, $noticeReplacements);
+        }
+
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::AddBalance,
             $this->locale->code($customer),
-            $this->captions->html(implode("\n", [
-                $this->locale->translate($customer, 'balance.currency.title'),
-                '━━━━━━━━━━━━━━',
-                $this->locale->translate($customer, 'balance.currency.prompt'),
-            ])),
-            ['inline_keyboard' => [
-                [[
-                    'text' => $this->locale->translate($customer, 'balance.currency.idr'),
-                    'callback_data' => 'balance:currency:idr',
-                ]],
-                [[
-                    'text' => $this->locale->translate($customer, 'balance.currency.usd'),
-                    'callback_data' => 'balance:currency:usd',
-                ]],
-                $this->navigationRow($customer),
-            ]],
+            $this->captions->html(implode("\n", $lines)),
+            ['inline_keyboard' => $keyboard],
         );
     }
 
-    public function usdRailSurface(Customer $customer): TelegramNavigationSurface
-    {
-        return new TelegramNavigationSurface(
-            TelegramNavigationScreen::AddBalance,
-            $this->locale->code($customer),
-            $this->captions->html(implode("\n", [
-                $this->locale->translate($customer, 'balance.usd.title'),
-                '━━━━━━━━━━━━━━',
-                $this->locale->translate($customer, 'balance.usd.prompt'),
-            ])),
-            ['inline_keyboard' => [
-                [[
-                    'text' => $this->locale->translate($customer, 'balance.usd.binance_pay'),
-                    'callback_data' => 'balance:usd:binance_pay',
-                ]],
-                [[
-                    'text' => $this->locale->translate($customer, 'balance.usd.bsc'),
-                    'callback_data' => 'balance:usd:bsc',
-                ]],
-                $this->navigationRow($customer),
-            ]],
-        );
-    }
-
+    /**
+     * USD amount chooser. The preset list comes from the Owner-managed funding
+     * policy, and every button carries a signed, versioned identity, so a stale
+     * list re-renders instead of funding an amount the Owner already changed.
+     */
     public function usdAmountSurface(
         Customer $customer,
         CustomerUsdtFundingRail $rail,
         ?string $noticeKey = null,
     ): TelegramNavigationSurface {
-        $railKey = $rail === CustomerUsdtFundingRail::BinancePay
-            ? 'balance.usd.binance_pay'
-            : 'balance.usd.bsc';
         $lines = [
             $this->locale->translate($customer, 'balance.usd.amount.title'),
             '━━━━━━━━━━━━━━',
             $this->locale->translate($customer, 'balance.usd.amount.rail', [
-                'rail' => $this->locale->translate($customer, $railKey),
+                'rail' => $this->locale->translate($customer, $this->railLocaleKey($rail)),
             ]),
         ];
         $copyable = [];
-        $available = $this->usdtFundingGate->availability($rail)->available;
+        $keyboard = [];
+        $policy = CustomerUsdtFundingPolicy::current();
+        $available = $policy !== null && $this->usdtFundingGate->availability($rail)->available;
         if ($available) {
             if ($rail === CustomerUsdtFundingRail::BinancePay) {
                 $payId = trim((string) config('services.binance.pay_id'));
@@ -505,8 +560,75 @@ class TelegramMenuIntents
                         'pay_id' => $marker,
                         'uid' => $marker,
                     ]);
-                $lines[] = $this->locale->translate($customer, 'balance.usd.amount.parity');
+            } else {
+                $lines[] = $this->locale->translate($customer, 'balance.usdt.preview.network');
+                $lines[] = $this->locale->translate($customer, 'balance.usdt.preview.token');
             }
+            $lines[] = $this->locale->translate($customer, 'balance.usd.amount.parity');
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, 'balance.usd.amount.choose');
+
+            $presets = $policy->presetAmountsMicro();
+            $row = [];
+            foreach ($presets as $index => $amountMicro) {
+                $row[] = [
+                    'text' => $this->locale->translate($customer, 'balance.usd.amount.preset', [
+                        'amount' => UsdtMicroAmount::formatUnits($amountMicro),
+                    ]),
+                    'callback_data' => UsdtFundingAmountPreset::presetCallback(
+                        $policy->policyVersion(),
+                        $rail,
+                        $index,
+                        $presets,
+                    ),
+                ];
+                if (count($row) === 3) {
+                    $keyboard[] = $row;
+                    $row = [];
+                }
+            }
+            if ($row !== []) {
+                $keyboard[] = $row;
+            }
+            $keyboard[] = [$this->fundingButton(
+                $customer,
+                'balance.usd.amount.custom',
+                UsdtFundingAmountPreset::customCallback($rail),
+            )];
+        } else {
+            $lines[] = $this->locale->translate($customer, 'balance.usd.amount.unavailable');
+        }
+        if ($noticeKey !== null) {
+            $lines[] = '';
+            $lines[] = $this->locale->translate($customer, $noticeKey);
+        }
+        $keyboard[] = $this->fundingRow($customer, 'balance:add');
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            strtr($this->captions->html(implode("\n", $lines)), $copyable),
+            ['inline_keyboard' => $keyboard],
+        );
+    }
+
+    /**
+     * Typed-amount prompt for one USD rail. It owns the amount session, so any
+     * navigation away from this screen retires the prompt.
+     */
+    public function usdCustomAmountSurface(
+        Customer $customer,
+        CustomerUsdtFundingRail $rail,
+        ?string $noticeKey = null,
+    ): TelegramNavigationSurface {
+        $lines = [
+            $this->locale->translate($customer, 'balance.usd.amount.title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, 'balance.usd.amount.rail', [
+                'rail' => $this->locale->translate($customer, $this->railLocaleKey($rail)),
+            ]),
+        ];
+        if ($this->usdtFundingGate->availability($rail)->available) {
             $lines[] = $this->locale->translate($customer, 'balance.usd.amount.prompt');
             $lines[] = $this->locale->translate($customer, 'balance.usd.amount.precision');
         } else {
@@ -518,15 +640,11 @@ class TelegramMenuIntents
         }
 
         return new TelegramNavigationSurface(
-            $available ? TelegramNavigationScreen::UsdtFundingAmount : TelegramNavigationScreen::AddBalance,
+            TelegramNavigationScreen::UsdtFundingAmount,
             $this->locale->code($customer),
-            strtr($this->captions->html(implode("\n", $lines)), $copyable),
+            $this->captions->html(implode("\n", $lines)),
             ['inline_keyboard' => [
-                [[
-                    'text' => $this->locale->translate($customer, 'balance.confirmation.cancel'),
-                    'callback_data' => 'balance:currency:usd',
-                ]],
-                $this->navigationRow($customer),
+                $this->fundingRow($customer, UsdtFundingAmountPreset::listCallback($rail)),
             ]],
         );
     }
@@ -553,14 +671,22 @@ class TelegramMenuIntents
         }
         $keyboard = [];
 
+        $row = [];
         foreach ($policy->presetAmounts as $index => $amount) {
-            $keyboard[] = [[
+            $row[] = [
                 'text' => $this->locale->idr($amount),
                 'callback_data' => $this->fundingPolicies->presetCallback($policy, $index),
-            ]];
+            ];
+            if (count($row) === 2) {
+                $keyboard[] = $row;
+                $row = [];
+            }
+        }
+        if ($row !== []) {
+            $keyboard[] = $row;
         }
 
-        $keyboard[] = $this->navigationRow($customer);
+        $keyboard[] = $this->fundingRow($customer, 'balance:add');
 
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::AddBalance,
@@ -810,6 +936,85 @@ class TelegramMenuIntents
     private function navLabel(?Customer $customer, string $localeKey): array
     {
         return $this->uiIcons->apply($localeKey, $this->locale->translate($customer, $localeKey));
+    }
+
+    /**
+     * One funding-step button. The locale key doubles as the editable icon slot
+     * unless the caller names a dedicated slot.
+     *
+     * @return array<string, string>
+     */
+    private function fundingButton(
+        Customer $customer,
+        string $localeKey,
+        string $callbackData,
+        ?string $iconKey = null,
+    ): array {
+        $label = $this->locale->translate($customer, $localeKey);
+        if ($iconKey === null) {
+            return [...$this->navLabel($customer, $localeKey), 'callback_data' => $callbackData];
+        }
+
+        return [...$this->uiIcons->apply($iconKey, $label), 'callback_data' => $callbackData];
+    }
+
+    /**
+     * Back plus Home for funding sub-screens, where Back returns to the
+     * Add-Balance chooser instead of leaving the flow.
+     *
+     * @return list<array<string, string>>
+     */
+    private function fundingRow(Customer $customer, string $backCallback): array
+    {
+        return [
+            $this->fundingButton($customer, 'menu.back', $backCallback),
+            $this->navButton($customer, 'menu.home', 'menu:home'),
+        ];
+    }
+
+    private function railLocaleKey(CustomerUsdtFundingRail $rail): string
+    {
+        return $rail === CustomerUsdtFundingRail::BinancePay
+            ? 'balance.usd.binance_pay'
+            : 'balance.usd.bsc';
+    }
+
+    /**
+     * One USD rail entry with its editable icon slot. Shared with the USDT
+     * chooser so a captured icon lands on every surface that offers the rail.
+     *
+     * @return array<string, string>
+     */
+    public function fundingRailButton(Customer $customer, CustomerUsdtFundingRail $rail): array
+    {
+        return $this->fundingButton(
+            $customer,
+            $this->railLocaleKey($rail),
+            UsdtFundingAmountPreset::listCallback($rail),
+            $rail === CustomerUsdtFundingRail::BinancePay
+                ? 'menu.balance.binance_pay'
+                : 'menu.balance.usdt_bep20',
+        );
+    }
+
+    /**
+     * USD balance line of a funding screen: a drifted projection or a frozen
+     * account is never rendered as a fabricated zero.
+     *
+     * @return list<string>
+     */
+    private function usdBalanceLines(Customer $customer, UsdtBalanceSnapshot $snapshot): array
+    {
+        if (! $snapshot->isAvailable()) {
+            return [$this->locale->translate($customer, 'balance.usdt.unavailable')];
+        }
+        if ($snapshot->isFrozen()) {
+            return [$this->locale->translate($customer, 'balance.usdt.frozen')];
+        }
+
+        return [$this->locale->translate($customer, 'balance.usdt.available', [
+            'amount' => UsdtMicroAmount::formatUnits($snapshot->balanceMicro()),
+        ])];
     }
 
     /**

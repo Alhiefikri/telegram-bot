@@ -19,7 +19,7 @@ use Tests\Support\UsdtTopUpTestCase;
  */
 final class UsdtBalanceSettledPresentationTest extends UsdtTopUpTestCase
 {
-    public function test_settled_target_renders_credited_status_and_history_without_new_outbound_effects(): void
+    public function test_settled_target_renders_nominal_receipt_and_history_without_new_outbound_effects(): void
     {
         $this->customer->update(['locale' => 'id']);
         $this->settle();
@@ -37,15 +37,16 @@ final class UsdtBalanceSettledPresentationTest extends UsdtTopUpTestCase
         $statusSurface = $intents->statusSurface($this->customer, $target, $status);
         $this->assertStringContainsString('Status: Saldo bertambah', $statusSurface->caption);
         $this->assertStringContainsString('Saldo USDT sudah dikreditkan sesuai ledger', $statusSurface->caption);
-        $this->assertStringContainsString('Kredit: 1 USDT', $statusSurface->caption);
-        $this->assertStringContainsString('Nominal diajukan: 1 USDT', $statusSurface->caption);
+        $this->assertStringContainsString('Masuk saldo: 1 USDT', $statusSurface->caption);
+        $this->assertStringContainsString('Nominal: 1 USDT', $statusSurface->caption);
         $this->assertStringContainsString('USDT diterima terverifikasi: 1 USDT', $statusSurface->caption);
         $this->assertStringContainsString('Saldo sebelum kredit: 0 USDT', $statusSurface->caption);
         $this->assertStringContainsString('Saldo setelah kredit: 1 USDT', $statusSurface->caption);
         $markup = json_encode($statusSurface->keyboard, JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsString('usdt:check:', $markup);
         $this->assertStringNotContainsString('usdt:hash:', $markup);
-        $this->assertStringContainsString('usdt:history', $markup);
+        $this->assertStringNotContainsString('usdt:history', $markup);
+        $this->assertStringContainsString('menu:home', $markup);
 
         $page = app(CustomerUsdtActivityService::class)->firstPage($this->customer);
         $historySurface = $intents->historySurface($this->customer, $page);
@@ -67,8 +68,10 @@ final class UsdtBalanceSettledPresentationTest extends UsdtTopUpTestCase
         $this->travel(20)->minutes();
         CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 100_000, 'version' => 2]);
         $actions = app(TelegramUsdtFundingActions::class);
-        $intent = $actions->preview('951001', '951001', 'private', 100, '1')->intent;
-        $this->target = $actions->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$intent->nonce)->topUp;
+        $result = $actions->openConfirmedIntent('951001', '951001', 'private', 100, '1');
+        $this->assertSame('confirmed', $result->outcome);
+        $this->assertNotNull($result->topUp);
+        $this->target = $result->topUp;
         app(UsdtTopUpPreparation::class)->prepare($this->target->id);
         $this->rpc->timestamp = now()->timestamp + 5;
         $hash = '0x'.str_repeat('c', 64);
@@ -86,14 +89,25 @@ final class UsdtBalanceSettledPresentationTest extends UsdtTopUpTestCase
         $this->assertSame(2_000_000, $status->balanceAfterMicro);
         $surface = app(TelegramUsdtBalanceIntents::class)->statusSurface($this->customer, $this->target, $status);
         $receipt = TelegramOutboundEffect::query()->where('source_id', $this->target->id)->sole()->outcome_metadata['message'];
-        foreach ([$surface->caption, $receipt] as $copy) {
-            $this->assertStringContainsString('Submitted amount: 1 USDT', $copy);
-            $this->assertStringContainsString('Verified received: 1.1 USDT', $copy);
-            $this->assertStringContainsString('Application fee: 0.1 USDT', $copy);
-            $this->assertStringContainsString('Balance before credit: 1 USDT', $copy);
-            $this->assertStringContainsString('Balance after credit: 2 USDT', $copy);
-            $this->assertStringContainsString($this->target->reference, $copy);
-            $this->assertDoesNotMatchRegularExpression('/\bUSD\b/', $copy);
+
+        foreach ([
+            'status' => [
+                $surface->caption,
+                ['Nominal: 1 USDT', 'Verified received: 1.1 USDT'],
+            ],
+            'receipt' => [
+                $receipt,
+                ['Submitted amount: 1 USDT', 'Verified received: 1.1 USDT'],
+            ],
+        ] as $kind => [$copy, $amountLines]) {
+            foreach ($amountLines as $needle) {
+                $this->assertStringContainsString($needle, $copy, $kind);
+            }
+            $this->assertStringContainsString('Application fee: 0.1 USDT', $copy, $kind);
+            $this->assertStringContainsString('Balance before credit: 1 USDT', $copy, $kind);
+            $this->assertStringContainsString('Balance after credit: 2 USDT', $copy, $kind);
+            $this->assertStringContainsString($this->target->reference, $copy, $kind);
+            $this->assertDoesNotMatchRegularExpression('/\bUSD\b/', $copy, $kind);
         }
         $this->assertSame(2, DB::table('customer_usdt_balance_entries')->count());
     }

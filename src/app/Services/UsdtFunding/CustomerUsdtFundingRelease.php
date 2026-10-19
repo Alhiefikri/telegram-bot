@@ -47,6 +47,18 @@ final readonly class CustomerUsdtFundingRelease
         return self::of(CustomerUsdtFundingReleaseKind::Compensated, $reference, $actor);
     }
 
+    /** The payment window and grace passed without settling any payment. */
+    public static function expiredUnpaid(string $reference, string $actor): self
+    {
+        return self::of(CustomerUsdtFundingReleaseKind::ExpiredUnpaid, $reference, $actor);
+    }
+
+    /** The Customer deliberately started over before any payment settled. */
+    public static function cancelledByCustomer(string $reference, string $actor): self
+    {
+        return self::of(CustomerUsdtFundingReleaseKind::CancelledByCustomer, $reference, $actor);
+    }
+
     public static function of(CustomerUsdtFundingReleaseKind $kind, string $reference, string $actor): self
     {
         if (preg_match(self::TOKEN_PATTERN, $reference) !== 1) {

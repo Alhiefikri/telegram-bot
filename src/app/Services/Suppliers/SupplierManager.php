@@ -151,7 +151,7 @@ final class SupplierManager
         if ((int) $connection->reserved_balance_micros > 0
             || SupplierFulfillment::query()->where('reserved_supplier_id', $connection->id)->where('reserved_quantity', '>', 0)->exists()
             || SupplierPurchase::query()->where('supplier_id', $connection->id)->whereIn('state', ['reserved', 'sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists()) {
-            throw ValidationException::withMessages(['connection' => 'Komitmen supplier masih aktif. Selesaikan pembelian sebelum mengubah kredensial atau mata uang.']);
+            throw ValidationException::withMessages(['connection' => 'Komitmen supplier masih aktif (pembelian atau reservasi pesanan berjalan). Selesaikan pembelian, atau tunggu pesanan kedaluwarsa/dibatalkan, sebelum mengubah kredensial atau mata uang.']);
         }
     }
 

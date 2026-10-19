@@ -15,6 +15,13 @@ use Illuminate\Support\Facades\Schedule;
 Schedule::command('suppliers:sync --limit=5')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('suppliers:recover --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('usdt-funding:recover --limit=25 --json')->everyMinute()->withoutOverlapping(2)->runInBackground();
+// Timed release of unpaid USD targets: the single active-funding slot is freed
+// after the payment window plus grace, without moving money. Late transfers
+// stay reviewable because the released reservation already carries a resolution.
+Schedule::command('usdt-funding:release-expired --limit=25 --grace-minutes=60 --json')
+    ->everyTenMinutes()
+    ->withoutOverlapping(2)
+    ->runInBackground();
 // Drift and coverage authority for the Customer USDT subledger (#558). The run
 // is bounded per facet and records sanitized evidence that alerting consumes;
 // a full sweep across cursors stays an explicit operator action (runbook).

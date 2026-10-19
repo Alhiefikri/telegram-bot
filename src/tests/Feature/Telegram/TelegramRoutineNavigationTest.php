@@ -164,13 +164,13 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $edit = $this->lastCanonicalEdit(45411);
         $this->assertSame($root->message_id, (int) $edit['message_id']);
         $this->assertStringContainsString('💰 Saldo Saya', $this->editCopy($edit));
-        $this->assertStringContainsString('Saldo tersedia: Rp 25.000', $this->editCopy($edit));
-        $this->assertStringNotContainsString('Aktivitas terbaru', $this->editCopy($edit));
+        $this->assertStringContainsString('🇮🇩 Saldo Rupiah: Rp 25.000', $this->editCopy($edit));
+        $this->assertStringContainsString('Aktivitas terbaru', $this->editCopy($edit));
+        $this->assertStringContainsString('1. Top-up · +Rp 25.000 · Dikreditkan', $this->editCopy($edit));
         $keyboard = $edit['reply_markup']['inline_keyboard'];
-        $this->assertSame('balance:add', $keyboard[0][0]['callback_data']);
-        $this->assertSame('balance:activity', $keyboard[1][0]['callback_data']);
-        $this->assertSame('usdt:history', $keyboard[2][0]['callback_data']);
-        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[3], 'callback_data'));
+        $this->assertSame(['balance:add'], array_column($keyboard[0], 'callback_data'));
+        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[1], 'callback_data'));
+        $this->assertCount(2, $keyboard, 'Activity history is inline; no extra history buttons.');
         $this->assertStringContainsString('💎 Saldo USDT: 0 USDT', $this->editCopy($edit));
 
         $this->postTelegramWebhook($this->callbackUpdate(45413, 'balance-activity', 'balance:activity', [], 45411, 'private', $root->message_id))->assertOk();
@@ -184,28 +184,33 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
 
         $addEdit = $this->lastCanonicalEdit(45411);
         $this->assertSame($root->message_id, (int) $addEdit['message_id']);
-        $this->assertStringContainsString('Pilih mata uang saldo:', $this->editCopy($addEdit));
+        $this->assertStringContainsString('➕ Tambah Saldo', $this->editCopy($addEdit));
+        $this->assertStringContainsString('Pilih metode top-up:', $this->editCopy($addEdit));
+        $this->assertStringContainsString('Top-up USDT sementara tidak tersedia.', $this->editCopy($addEdit));
 
         $currencyKeyboard = $addEdit['reply_markup']['inline_keyboard'];
         $this->assertSame(['balance:currency:idr'], array_column($currencyKeyboard[0], 'callback_data'));
-        $this->assertSame(['balance:currency:usd'], array_column($currencyKeyboard[1], 'callback_data'));
+        $this->assertSame('🇮🇩 QRIS (Rupiah)', $currencyKeyboard[0][0]['text']);
+        $this->assertSame(['menu:back', 'menu:home'], array_column($currencyKeyboard[1], 'callback_data'));
 
         $this->postTelegramWebhook($this->callbackUpdate(45418, 'balance-idr', 'balance:currency:idr', [], 45411, 'private', $root->message_id))->assertOk();
 
         $idrEdit = $this->lastCanonicalEdit(45411);
         $this->assertStringContainsString('Minimum tambah saldo: Rp 5.000', $this->editCopy($idrEdit));
         $presetRows = array_slice($idrEdit['reply_markup']['inline_keyboard'], 0, -1);
+        $presetButtons = array_merge(...$presetRows);
         $this->assertSame(
             ['Rp 5.000', 'Rp 10.000', 'Rp 25.000', 'Rp 50.000', 'Rp 100.000', 'Rp 250.000'],
-            array_map(static fn (array $row): string => $row[0]['text'], $presetRows),
+            array_column($presetButtons, 'text'),
         );
-        foreach ($presetRows as $row) {
-            $callbackData = $row[0]['callback_data'];
+        $this->assertSame(['Rp 5.000', 'Rp 10.000'], array_column($presetRows[0], 'text'));
+        foreach ($presetButtons as $button) {
+            $callbackData = $button['callback_data'];
             $this->assertMatchesRegularExpression('/\Abalance:p:0:[A-Za-z0-9_-]{11}\z/', $callbackData);
             $this->assertStringNotContainsString('5000', $callbackData);
             $this->assertStringNotContainsString('250000', $callbackData);
         }
-        $this->assertSame(['menu:back', 'menu:home'], array_column($idrEdit['reply_markup']['inline_keyboard'][array_key_last($idrEdit['reply_markup']['inline_keyboard'])], 'callback_data'));
+        $this->assertSame(['balance:add', 'menu:home'], array_column($idrEdit['reply_markup']['inline_keyboard'][array_key_last($idrEdit['reply_markup']['inline_keyboard'])], 'callback_data'));
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && ($request['callback_query_id'] ?? null) === 'balance-idr');
 
@@ -263,9 +268,9 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertSame($root->message_id, (int) $edit['message_id']);
         $this->assertStringContainsString('Choose a top-up amount:', $this->editCopy($edit));
         $keyboard = $edit['reply_markup']['inline_keyboard'];
-        $this->assertSame(['Rp 5.000', 'Rp 15.000'], array_map(
-            static fn (array $row): string => $row[0]['text'],
-            array_slice($keyboard, 0, -1),
+        $this->assertSame(['Rp 5.000', 'Rp 15.000'], array_column(
+            array_merge(...array_slice($keyboard, 0, -1)),
+            'text',
         ));
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
             && ($request['callback_query_id'] ?? null) === 'funding-stale'
@@ -724,7 +729,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         return [
             'indonesian' => ['id', [
                 '💰 Saldo Saya',
-                'Saldo tersedia: Rp 0',
+                '🇮🇩 Saldo Rupiah: Rp 0',
                 '📦 Pesanan Berhasil',
                 'Ada kendala order, pembayaran, atau login akun?',
                 '⬅️ Kembali',
@@ -736,7 +741,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             ]],
             'english' => ['en', [
                 '💰 My Balance',
-                'Available balance: Rp 0',
+                '🇮🇩 IDR balance: Rp 0',
                 '📦 Successful Orders',
                 'Need help with an order, payment, or account login?',
                 '⬅️ Back',
@@ -748,7 +753,7 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
             ]],
             'malay' => ['ms', [
                 '💰 Baki Saya',
-                'Baki tersedia: Rp 0',
+                '🇮🇩 Baki Rupiah: Rp 0',
                 '📦 Pesanan Berjaya',
                 'Ada masalah dengan pesanan, bayaran atau log masuk akaun?',
                 '⬅️ Kembali',

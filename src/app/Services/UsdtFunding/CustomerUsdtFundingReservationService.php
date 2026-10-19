@@ -5,6 +5,7 @@ namespace App\Services\UsdtFunding;
 use App\Enums\BalanceOperationMetric;
 use App\Enums\CustomerUsdtFundingAvailabilityReason;
 use App\Enums\CustomerUsdtFundingRail;
+use App\Enums\CustomerUsdtFundingReleaseKind;
 use App\Enums\CustomerUsdtFundingReservationOutcome;
 use App\Enums\CustomerUsdtFundingReservationState;
 use App\Enums\UsdtBalanceEntryKind;
@@ -365,6 +366,125 @@ final class CustomerUsdtFundingReservationService
                 throw new CustomerUsdtFundingReservationConflict('Reservasi sudah diselesaikan oleh efek ekonomi lain.');
             }
 
+            $reservation->forceFill([
+                'state' => CustomerUsdtFundingReservationState::Released,
+                'resolved_at' => now(),
+                'resolution_kind' => $release->kind->value,
+                'resolution_reference' => $release->reference,
+                'resolution_actor' => $release->actor,
+                'settled_entry_id' => null,
+            ])->save();
+
+            return new CustomerUsdtFundingReservationResult(
+                CustomerUsdtFundingReservationOutcome::Released,
+                $this->snapshot($reservation),
+            );
+        }, 5);
+    }
+
+    /**
+     * Free the exposure slot of a confirmed target whose payment window and
+     * grace elapsed without settlement. The caller owns the rail check that
+     * decides "nothing settled"; this transaction re-verifies the durable state
+     * and records the immutable `expired_unpaid` resolution together with the
+     * slot release.
+     */
+    public function releaseExpiredUnpaid(
+        Customer $customer,
+        int $reservationId,
+        CustomerUsdtFundingRelease $release,
+    ): CustomerUsdtFundingReservationResult {
+        return $this->closeUnpaidTarget($customer, $reservationId, $release, true);
+    }
+
+    /**
+     * Close one unpaid target because the Customer chose to start over. The
+     * target may still be inside its payment window; releasing the slot never
+     * moves money, and a transfer that arrives later follows the existing
+     * manual-review path instead of crediting the released reservation.
+     */
+    public function cancelUnpaidTarget(
+        Customer $customer,
+        int $reservationId,
+        CustomerUsdtFundingRelease $release,
+    ): CustomerUsdtFundingReservationResult {
+        return $this->closeUnpaidTarget($customer, $reservationId, $release, false);
+    }
+
+    private function closeUnpaidTarget(
+        Customer $customer,
+        int $reservationId,
+        CustomerUsdtFundingRelease $release,
+        bool $requireExpired,
+    ): CustomerUsdtFundingReservationResult {
+        $expectedKind = $requireExpired
+            ? CustomerUsdtFundingReleaseKind::ExpiredUnpaid
+            : CustomerUsdtFundingReleaseKind::CancelledByCustomer;
+        if ($release->kind !== $expectedKind) {
+            throw new InvalidArgumentException('Unpaid target release requires the matching typed release kind.');
+        }
+
+        return DB::transaction(function () use ($customer, $reservationId, $release, $requireExpired): CustomerUsdtFundingReservationResult {
+            Customer::query()->whereKey($customer->id)->lockForUpdate()->firstOrFail();
+            DB::table('customer_usdt_balance_accounts')->where('customer_id', $customer->id)->lockForUpdate()->first();
+            $reservation = $this->lockOwned($customer, $reservationId);
+            if ($reservation->state->isResolved()) {
+                if ($reservation->state === CustomerUsdtFundingReservationState::Released
+                    && $reservation->resolution_kind === $release->kind->value
+                    && $reservation->resolution_reference === $release->reference
+                    && $reservation->resolution_actor === $release->actor) {
+                    return new CustomerUsdtFundingReservationResult(
+                        CustomerUsdtFundingReservationOutcome::Replayed,
+                        $this->snapshot($reservation),
+                    );
+                }
+
+                throw new CustomerUsdtFundingReservationConflict('Reservasi sudah diselesaikan oleh efek ekonomi lain.');
+            }
+            $allowedStates = $requireExpired
+                ? [CustomerUsdtFundingReservationState::ExpiredUnresolved]
+                : [CustomerUsdtFundingReservationState::Reserved, CustomerUsdtFundingReservationState::ExpiredUnresolved];
+            if (! in_array($reservation->state, $allowedStates, true)) {
+                throw new CustomerUsdtFundingReservationConflict($requireExpired
+                    ? 'Reservasi belum berstatus kedaluwarsa.'
+                    : 'Reservasi tidak dapat dibatalkan pada status ini.');
+            }
+
+            $target = CustomerUsdtTopUp::query()
+                ->where('reservation_id', $reservationId)
+                ->where('customer_id', $customer->id)
+                ->lockForUpdate()
+                ->first();
+            if ($target === null) {
+                throw new CustomerUsdtFundingReservationConflict('Target confirmed tidak ditemukan untuk reservasi ini.');
+            }
+            if (DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->exists()) {
+                throw new CustomerUsdtFundingReservationConflict('Target sudah memiliki resolusi ekonomi.');
+            }
+            foreach (['customer_usdt_top_up_work', 'customer_usdt_top_up_settlement_work'] as $table) {
+                $work = DB::table($table)->where('top_up_id', $target->id)->lockForUpdate()->first();
+                if ($work === null) {
+                    continue;
+                }
+                if (in_array($work->state, ['settled', 'manual_review', 'externally_refunded', 'resolved_by_compensation', 'rejected'], true)) {
+                    throw new CustomerUsdtFundingReservationConflict('Target masih memiliki pekerjaan penyelesaian aktif.');
+                }
+                if ($work->lease_until !== null && CarbonImmutable::parse($work->lease_until)->isFuture()) {
+                    // A settlement/preparation worker owns this target right now;
+                    // a concurrent money effect always wins over a cancel.
+                    throw new CustomerUsdtFundingReservationConflict('Target sedang diproses; tidak dapat ditutup sekarang.');
+                }
+            }
+
+            DB::table('customer_usdt_top_up_resolutions')->insert([
+                'top_up_id' => (string) $target->id,
+                'kind' => $release->kind->value,
+                'receipt_id' => null,
+                'entry_id' => null,
+                'evidence_id' => null,
+                'late' => false,
+                'created_at' => now(),
+            ]);
             $reservation->forceFill([
                 'state' => CustomerUsdtFundingReservationState::Released,
                 'resolved_at' => now(),

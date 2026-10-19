@@ -160,6 +160,22 @@ _Avoid_: Binance payment proof (that means screenshot evidence)
 A customer-selected payment path under Binance checkout: Binance Pay ID or USDT BEP20 on BNB Smart Chain. The selected rail determines the payment instructions and the authoritative verification source for that Payment.
 _Avoid_: Binance method when the specific rail is unknown, Binance Pay for a BSC transfer
 
+**Wallet Funding Chooser**:
+The single Telegram Add-Balance screen that offers one entry per funding rail: QRIS for IDR, Binance Pay and USDT BEP20 for USD. The currency belongs to the rail, so the Customer never picks a currency first and a method second.
+_Avoid_: currency picker, payment-method list
+
+**USD Top-Up Preset**:
+An Owner-managed amount button on the Wallet Funding Chooser's USD screen. Choosing one opens and confirms exactly that micro-USDT funding target; the preset list is presentation only and never caps, reserves, or changes money, and the current funding policy resolves the amount at tap time.
+_Avoid_: fixed top-up price, funding limit, quota
+
+**Expired Unpaid Target**:
+A confirmed USD funding target whose payment deadline and grace window passed without any settled payment. Its immutable `expired_unpaid` resolution releases the single active-funding slot without moving money; a transfer that arrives later is routed to manual review instead of being credited against the released target.
+_Avoid_: cancelled top-up, refunded target
+
+**Cancelled Funding Target**:
+A confirmed USD funding target that the Customer closed before any payment settled, because a wrongly chosen amount must never be forced. Its immutable `cancelled_by_customer` resolution releases the active-funding slot without moving money, and a transfer that arrives later follows the same manual-review path as an expired unpaid target.
+_Avoid_: refund, expired target
+
 **BSC Payment Verification**:
 The process of checking a USDT BEP20 transfer on BNB Smart Chain against the immutable receiver, token contract, expected amount, payment window, and confirmation policy of a pending Payment. A transaction hash is evidence to look up, not proof accepted without on-chain validation.
 _Avoid_: BSC screenshot verification, explorer-page verification, Binance Pay verification

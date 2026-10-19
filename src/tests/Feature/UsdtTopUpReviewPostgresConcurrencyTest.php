@@ -67,8 +67,7 @@ final class UsdtTopUpReviewPostgresConcurrencyTest extends TestCase
         $rpc = new BscUsdtRailRpcFixture;
         $this->app->instance(BscVerificationRpcClientInterface::class, $rpc);
         $actions = app(TelegramUsdtFundingActions::class);
-        $nonce = $actions->preview('951001', '951001', 'private', 100, '1')->intent->nonce;
-        $this->target = $actions->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$nonce)->topUp;
+        $this->target = $actions->openConfirmedIntent('951001', '951001', 'private', 100, '1')->topUp;
         app(UsdtTopUpPreparation::class)->prepare($this->target->id);
         $rpc->timestamp = now()->timestamp + 5;
         app(UsdtTopUpSettlement::class)->submit($this->customer, $this->target->id, BscUsdtRailRpcFixture::TX);

@@ -586,6 +586,9 @@
                     @error('application_fee_micro', 'usdtFundingPolicy')
                         <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
                     @enderror
+                    @error('preset_amounts', 'usdtFundingPolicy')
+                        <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
+                    @enderror
                     @error('terms_body', 'usdtFundingPolicy')
                         <x-admin-dashboard.field-error class="mt-3">{{ $message }}</x-admin-dashboard.field-error>
                     @enderror
@@ -616,10 +619,15 @@
                                 <x-admin-dashboard.input class="mt-1" name="application_fee_micro" inputmode="decimal" autocomplete="off" :value="old('application_fee_micro', $usdtFundingPolicy['application_fee_input'] ?? '0')" required />
                             </label>
                             <label class="block text-xs font-medium text-admin-ink">
+                                Preset top-up USDT (USDT, satu nominal per baris atau dipisah koma)
+                                <textarea name="preset_amounts" rows="6" inputmode="decimal" class="mt-1 min-h-28 w-full rounded-lg border border-admin-line bg-admin-surface px-3 py-3 text-sm font-normal text-admin-ink transition-colors placeholder:text-admin-muted focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper" autocomplete="off" required>{{ is_array(old('preset_amounts')) ? implode("\n", old('preset_amounts')) : old('preset_amounts', $usdtFundingPolicy['preset_amounts_input'] ?? '') }}</textarea>
+                            </label>
+                            <p class="text-xs font-medium leading-5 text-admin-muted">Gunakan nominal USDT tanpa simbol, maksimal enam desimal. Maksimal {{ \App\Models\CustomerUsdtFundingPolicy::MAX_PRESETS }} preset; preset ganda digabung dengan urutan dipertahankan.</p>
+                            <label class="block text-xs font-medium text-admin-ink">
                                 Syarat yang ditampilkan kepada pelanggan
                                 <x-admin-dashboard.textarea class="mt-1" name="terms_body" :rows="6" :value="old('terms_body', $usdtFundingPolicy['terms_body'] ?? '')" required />
                             </label>
-                            <p class="text-xs font-medium leading-5 text-admin-muted">Tidak ada minimum, maksimum, atau pilihan nominal tetap untuk USDT. Syarat yang disetujui pelanggan tetap tersimpan pada transaksi lama.</p>
+                            <p class="text-xs font-medium leading-5 text-admin-muted">Preset hanya mengisi tombol nominal; tidak ada minimum, maksimum, atau batas saldo pelanggan. Syarat yang disetujui pelanggan tetap tersimpan pada transaksi lama.</p>
                             <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full">
                                 Simpan kebijakan top-up USDT
                             </x-admin-dashboard.button>

@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
+use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductQuantityPriceTier;
@@ -68,6 +71,107 @@ final class SupplierAdminTest extends TestCase
         $this->assertSame('Alpha mapped product', $filtered['products']->sole()->name);
         $this->assertSame('Mapped Supplier', $filtered['products']->sole()->supplierSources->sole()->catalogItem->supplier->name);
         $this->assertSame(12, app(AdminSupplierDashboardData::class)->forTab()['products']->perPage());
+    }
+
+    public function test_supplier_dashboard_attributes_an_unpaid_order_hold_to_its_reservation_not_to_a_purchase(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['name' => 'Nastele', 'currency' => 'VND', 'balance_micros' => 138_000_000_000, 'reserved_balance_micros' => 69_000_000_000]);
+        $sku = $this->item($supplier);
+        $product = Product::factory()->create();
+        $this->source($product, $sku, ['is_active' => true]);
+        $order = Order::factory()->create(['expires_at' => now()->addHours(2)]);
+        $orderItem = OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id]);
+        SupplierFulfillment::create([
+            'order_id' => $order->id, 'order_item_id' => $orderItem->id, 'quantity' => 1,
+            'state' => 'reserved', 'maximum_cost_idr' => 5000, 'sources_snapshot' => [],
+            'reserved_supplier_id' => $supplier->id, 'reserved_catalog_item_id' => $sku->id,
+            'reserved_cost_micros' => 69_000_000_000, 'reserved_quantity' => 1,
+        ]);
+
+        $connection = app(AdminSupplierDashboardData::class)->forTab()['connections']->sole();
+
+        $this->assertSame('69000.000000', $connection['held_balance']);
+        $this->assertSame('69000.000000', $connection['available_balance']);
+        $this->assertFalse($connection['has_unresolved_hold']);
+        $this->assertTrue($connection['has_pending_payment_hold']);
+        $this->assertSame('69000.000000', $connection['pending_payment_hold']);
+        $this->assertSame(1, $connection['pending_payment_hold_count']);
+        $this->assertSame($order->expires_at->toIso8601String(), $connection['pending_payment_hold_release_at']);
+
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()
+            ->assertSee('hold reservasi 1 pesanan yang belum dibayar sebesar 69000.000000 VND')
+            ->assertDontSee('Dana ditahan oleh purchase yang belum terbukti.');
+    }
+
+    public function test_supplier_dashboard_keeps_the_unproven_purchase_warning_for_a_hold_that_is_not_an_unpaid_reservation(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['currency' => 'VND', 'balance_micros' => 138_000_000_000, 'reserved_balance_micros' => 69_001_000_000]);
+        $sku = $this->item($supplier);
+        $product = Product::factory()->create();
+        $this->source($product, $sku, ['is_active' => true]);
+        $unpaid = Order::factory()->create(['expires_at' => now()->addHours(2)]);
+        $unpaidItem = OrderItem::factory()->create(['order_id' => $unpaid->id, 'product_id' => $product->id]);
+        SupplierFulfillment::create([
+            'order_id' => $unpaid->id, 'order_item_id' => $unpaidItem->id, 'quantity' => 1,
+            'state' => 'reserved', 'maximum_cost_idr' => 5000, 'sources_snapshot' => [],
+            'reserved_supplier_id' => $supplier->id, 'reserved_catalog_item_id' => $sku->id,
+            'reserved_cost_micros' => 69_000_000_000, 'reserved_quantity' => 1,
+        ]);
+        $paid = Order::factory()->create(['order_status' => OrderStatus::Processing, 'payment_status' => PaymentStatus::Paid]);
+        $paidItem = OrderItem::factory()->create(['order_id' => $paid->id, 'product_id' => $product->id]);
+        $fulfillment = SupplierFulfillment::create([
+            'order_id' => $paid->id, 'order_item_id' => $paidItem->id, 'quantity' => 1,
+            'state' => 'review', 'maximum_cost_idr' => 5000, 'sources_snapshot' => [],
+            'reserved_supplier_id' => $supplier->id, 'reserved_catalog_item_id' => $sku->id,
+            'reserved_cost_micros' => 1_000_000, 'reserved_quantity' => 1,
+        ]);
+        $purchase = SupplierPurchase::create([
+            'supplier_fulfillment_id' => $fulfillment->id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $sku->id,
+            'reference' => (string) Str::uuid(), 'quantity' => 1, 'expected_cost_micros' => 1_000_000,
+            'exchange_rate_idr' => 1000, 'state' => 'review',
+        ]);
+        $fulfillment->forceFill(['current_purchase_id' => $purchase->id])->save();
+
+        $connection = app(AdminSupplierDashboardData::class)->forTab()['connections']->sole();
+
+        $this->assertTrue($connection['has_unresolved_hold']);
+        $this->assertTrue($connection['has_pending_payment_hold']);
+        $this->assertSame('69000.000000', $connection['pending_payment_hold']);
+        $this->assertSame(1, $connection['pending_payment_hold_count']);
+
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()
+            ->assertSee('Dana ditahan oleh purchase yang belum terbukti.')
+            ->assertSee('hold reservasi 1 pesanan yang belum dibayar sebesar 69000.000000 VND');
+    }
+
+    public function test_monitor_reports_an_unpaid_reservation_as_capacity_instead_of_a_supplier_debit(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['name' => 'Nastele', 'currency' => 'VND', 'balance_micros' => 138_000_000_000, 'reserved_balance_micros' => 69_000_000_000]);
+        $sku = $this->item($supplier);
+        $product = Product::factory()->create();
+        $this->source($product, $sku, ['is_active' => true]);
+        $order = Order::factory()->create(['expires_at' => now()->addHours(2)]);
+        $orderItem = OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id]);
+        SupplierFulfillment::create([
+            'order_id' => $order->id, 'order_item_id' => $orderItem->id, 'quantity' => 1,
+            'state' => 'reserved', 'maximum_cost_idr' => 5000, 'sources_snapshot' => [],
+            'reserved_supplier_id' => $supplier->id, 'reserved_catalog_item_id' => $sku->id,
+            'reserved_cost_micros' => 69_000_000_000, 'reserved_quantity' => 1,
+        ]);
+
+        $this->get(route('admin.suppliers.purchases'))->assertOk()
+            ->assertSee('Kapasitas supplier direservasi untuk pesanan yang belum dibayar; belum ada pembelian')
+            ->assertDontSee('Masih ada dana supplier ditahan');
+
+        $this->get(route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]))->assertOk()
+            ->assertSee('Status hold supplier')
+            ->assertSee('Kapasitas direservasi')
+            ->assertSee('Belum ada pembelian ke supplier untuk hold ini.')
+            ->assertSee('Tidak ada dana supplier yang terdebit.')
+            ->assertDontSee('Ada transaksi supplier yang masih berjalan atau bukti yang perlu dicocokkan.');
     }
 
     public function test_inline_password_confirmation_allows_supplier_save_without_flashing_secrets(): void

@@ -29,7 +29,10 @@
             @if($invoice !== '')
                 @include('admin.suppliers.invoice-recovery')
             @else
-                <p class="mt-1 text-sm text-admin-ink">{{ $fulfillment->state === 'delivered' ? 'Akun pelanggan sudah dipenuhi' : $fulfillment->remaining_quantity.' akun belum dipenuhi' }} · {{ $fulfillment->reserved_cost_micros > 0 ? 'Masih ada dana supplier ditahan' : 'Tanpa hold supplier' }}</p>
+                @php($holdLabel = $fulfillment->unpaid_reservation
+                    ? 'Kapasitas supplier direservasi untuk pesanan yang belum dibayar; belum ada pembelian'.($fulfillment->order->expires_at === null ? '' : ' (lepas otomatis paling lambat '.$fulfillment->order->expires_at->timezone(config('app.timezone'))->format('d M Y H:i:s T').')')
+                    : ($fulfillment->reserved_cost_micros > 0 ? 'Masih ada dana supplier ditahan' : 'Tanpa hold supplier'))
+                <p class="mt-1 text-sm text-admin-ink">{{ $fulfillment->state === 'delivered' ? 'Akun pelanggan sudah dipenuhi' : $fulfillment->remaining_quantity.' akun belum dipenuhi' }} · {{ $holdLabel }}</p>
                 <x-admin-dashboard.button :href="route('admin.suppliers.purchases', ['invoice' => $fulfillment->order->invoice_number])" variant="primary" class="mt-3">Tangani invoice</x-admin-dashboard.button>
             @endif
             <details class="mt-4 border-t border-admin-line pt-3">

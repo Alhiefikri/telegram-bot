@@ -153,7 +153,7 @@ final class AdminSupplierController extends Controller
         $fulfillments = SupplierFulfillment::query()->with([
             'currentPurchase.supplier', 'currentPurchase.latestHistoryReconciliation',
             'reservedSupplier', 'manualHandoffs:id,supplier_fulfillment_id,quantity',
-            'order:id,customer_id,invoice_number,order_status,payment_status,telegram_receipt_sent_at',
+            'order:id,customer_id,invoice_number,order_status,payment_status,telegram_receipt_sent_at,expires_at',
             'order.customer:id,telegram_id',
             'orderItem:id,product_name',
         ])
@@ -171,6 +171,7 @@ final class AdminSupplierController extends Controller
         foreach ($fulfillments as $fulfillment) {
             $fulfillment->remaining_quantity = max(0, $fulfillment->quantity - $fulfillment->refunded_quantity
                 - (int) $fulfillment->manualHandoffs->sum('quantity') - (int) ($allocated[$fulfillment->order_item_id] ?? 0));
+            $fulfillment->unpaid_reservation = $fulfillment->isUnpaidReservation();
         }
 
         return view('admin.suppliers.purchases', compact('purchases', 'fulfillments', 'invoice'));

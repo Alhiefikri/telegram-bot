@@ -63,39 +63,37 @@ final class UsdtFundingIntentPostgresConcurrencyTest extends TestCase
         }
     }
 
-    public function test_three_confirmations_commit_one_target_reservation_and_durable_obligation(): void
+    public function test_three_amount_choices_commit_one_target_reservation_and_durable_obligation(): void
     {
-        $nonce = app(TelegramUsdtFundingActions::class)->preview('951001', '951001', 'private', 100, '1')->intent->nonce;
-        $results = $this->runConcurrentWorkers(3, fn (): string => app(TelegramUsdtFundingActions::class)->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$nonce)->topUp->id);
+        $results = $this->runConcurrentWorkers(3, fn (): string => app(TelegramUsdtFundingActions::class)
+            ->openConfirmedIntent('951001', '951001', 'private', 100, '1')->topUp->id);
         $this->assertWorkersSucceeded($results);
         $id = CustomerUsdtTopUp::query()->sole()->id;
         $this->assertSame([$id, $id, $id], array_column($results, 'value'));
         $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->count());
         $this->assertSame(1, DB::table('customer_usdt_top_up_work')->count());
-        $this->assertSame('confirmed', DB::table('customer_usdt_funding_intents')->value('state'));
-        $this->assertSame(2, (int) DB::table('customer_usdt_funding_intents')->value('version'));
+        $this->assertSame(0, DB::table('customer_usdt_funding_intents')->where('state', 'pending')->count());
         $this->assertSame(0, DB::table('usdt_bsc_rail_invoices')->count());
         $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
     }
 
-    public function test_competing_preview_amounts_leave_only_current_nonce_confirmable(): void
+    public function test_competing_amount_choices_leave_one_confirmed_target(): void
     {
-        $results = $this->runConcurrentWorkers(2, fn (int $index): string => app(TelegramUsdtFundingActions::class)->preview('951001', '951001', 'private', 100, (string) ($index + 1))->intent->nonce);
+        $results = $this->runConcurrentWorkers(2, fn (int $index): string => app(TelegramUsdtFundingActions::class)
+            ->openConfirmedIntent('951001', '951001', 'private', 100, (string) ($index + 1))->outcome);
         $this->assertWorkersSucceeded($results);
-        $this->assertSame(1, DB::table('customer_usdt_funding_intents')->where('state', 'pending')->count());
-        $current = DB::table('customer_usdt_funding_intents')->where('state', 'pending')->sole();
-        foreach (array_column($results, 'value') as $nonce) {
-            $result = app(TelegramUsdtFundingActions::class)->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$nonce);
-            $this->assertSame($nonce === $current->nonce ? 'confirmed' : 'superseded', $result->outcome);
-        }
-        $this->assertSame((int) $current->amount_micro, CustomerUsdtTopUp::query()->sole()->amount_micro);
+        $this->assertContains('confirmed', array_column($results, 'value'));
+        $this->assertSame(1, CustomerUsdtTopUp::query()->count());
+        $target = CustomerUsdtTopUp::query()->sole();
+        $this->assertContains($target->amount_micro, [1_000_000, 2_000_000]);
         $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->whereNull('resolved_at')->count());
+        $this->assertSame(0, DB::table('customer_usdt_funding_intents')->where('state', 'pending')->count());
     }
 
     public function test_parallel_recovery_prepares_one_invoice_and_immutable_database_snapshot_rejects_mutation(): void
     {
         $adapter = app(TelegramUsdtFundingActions::class);
-        $target = $adapter->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$adapter->preview('951001', '951001', 'private', 100, '1')->intent->nonce)->topUp;
+        $target = $adapter->openConfirmedIntent('951001', '951001', 'private', 100, '1')->topUp;
         $results = $this->runConcurrentWorkers(3, fn (): string => app(UsdtTopUpPreparation::class)->prepare($target->id) ? 'prepared' : 'owned');
         $this->assertWorkersSucceeded($results);
         $this->assertSame(1, count(array_filter(array_column($results, 'value'), fn ($value): bool => $value === 'prepared')));

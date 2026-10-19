@@ -14,14 +14,15 @@ use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramCatalogQuerySession;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
+use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramNavigationSurface;
 use App\Services\Telegram\TelegramUsdtActivityToken;
 use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramUsdtFundingActions;
+use App\Services\Telegram\TelegramUsdtFundingPresenter;
 use App\Services\Telegram\TelegramUsdtFundingSession;
-use App\Services\UsdtFunding\UsdtFundingIntentResult;
 use App\Services\UsdtTopUps\BinanceUsdtTopUpSettlement;
 use App\Services\UsdtTopUps\UsdtTopUpSettlement;
 use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
@@ -53,12 +54,16 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
 
     private const ORDER_PREFIX = 'usdt:order:';
 
+    private const CLOSE_PREFIX = 'usdt:close:';
+
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly TelegramUsdtBalanceIntents $usdt,
         private readonly TelegramUsdtFundingActions $funding,
+        private readonly TelegramUsdtFundingPresenter $presenter,
         private readonly TelegramUsdtActivityToken $tokens,
         private readonly TelegramUsdtFundingSession $hashSession,
+        private readonly TelegramMenuIntents $menu,
         private readonly UsdtTopUpStatusReader $statuses,
         private readonly UsdtTopUpSettlement $settlement,
         private readonly BinanceUsdtTopUpSettlement $binanceSettlement,
@@ -137,14 +142,11 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         if ($data === self::OPEN || $data === self::HISTORY) {
             return true;
         }
-        if (preg_match('/\Ausdt:(?:confirm|cancel):[a-f0-9]{32}\z/D', $data) === 1) {
-            return true;
-        }
         if ($this->tokenFor($data, self::OLDER_PREFIX) !== null
             || $this->tokenFor($data, self::NEWER_PREFIX) !== null) {
             return true;
         }
-        foreach ([self::STATUS_PREFIX, self::CHECK_PREFIX, self::HASH_PREFIX, self::ORDER_PREFIX] as $prefix) {
+        foreach ([self::STATUS_PREFIX, self::CHECK_PREFIX, self::HASH_PREFIX, self::ORDER_PREFIX, self::CLOSE_PREFIX] as $prefix) {
             if ($this->uuidFor($data, $prefix) !== null) {
                 return true;
             }
@@ -201,7 +203,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             return;
         }
 
-        $result = $this->funding->preview(
+        $result = $this->funding->openConfirmedIntent(
             (string) $customer->telegram_id,
             $chatId,
             'private',
@@ -209,15 +211,18 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             $amount,
             CustomerUsdtFundingRail::BscShared,
         );
-        [$surface] = $this->previewOutcomeSurface($customer, $result);
-        $this->navigation->presentOnRoot($root, $chatId, $surface);
+        $this->navigation->presentOnRoot(
+            $root,
+            $chatId,
+            $this->presenter->surfaceFor($customer, CustomerUsdtFundingRail::BscShared, $result),
+        );
     }
 
     /**
-     * Consume one prompted transaction-hash message as a bounded lookup hint.
-     * The hint is never evidence and never credits the balance by itself.
+     * Consume one prompted Binance Order ID as a bounded lookup hint: show that
+     * the system is checking, run the authoritative provider lookup, then render
+     * the durable result. The hint never credits the balance by itself.
      */
-    /** Consume one prompted Binance Order ID as a bounded lookup hint. */
     public function handleOrderIdInput(Customer $customer, string $chatId, string $text): bool
     {
         $topUpId = $this->hashSession->promptedTopUpId($customer);
@@ -250,21 +255,15 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
 
             return true;
         }
-        try {
-            $this->binanceSettlement->submit($customer, (string) $target->id, $orderId);
-        } catch (AuthorizationException) {
-            $this->hashSession->forget($customer);
-            $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_closed');
 
-            return true;
-        } catch (InvalidArgumentException) {
-            $this->hashSession->forget($customer);
-            $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_limited');
-
-            return true;
-        }
-        $this->hashSession->forget($customer);
-        $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.order_recorded');
+        $this->verifyAndPresent(
+            $customer,
+            $chatId,
+            $target,
+            'balance.usdt.checking.order',
+            fn () => $this->binanceSettlement->submit($customer, (string) $target->id, $orderId),
+            'balance.usdt.notice.order_recorded',
+        );
 
         return true;
     }
@@ -300,31 +299,79 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             return true;
         }
 
+        $this->verifyAndPresent(
+            $customer,
+            $chatId,
+            $target,
+            'balance.usdt.checking.hash',
+            fn () => $this->settlement->submit($customer, (string) $target->id, $hash),
+            'balance.usdt.notice.hash_recorded',
+        );
+
+        return true;
+    }
+
+    /**
+     * One verification interaction: the transient checking surface occupies the
+     * message the Customer is looking at, the authoritative rail lookup runs,
+     * and the durable result replaces the placeholder in the same message.
+     */
+    private function verifyAndPresent(
+        Customer $customer,
+        string $chatId,
+        CustomerUsdtTopUp $target,
+        string $checkingKey,
+        callable $submit,
+        string $recordedKey,
+    ): void {
+        $this->navigation->presentOrSend($customer, $chatId, $this->usdt->checkingSurface($customer, $checkingKey));
+
         try {
-            $this->settlement->submit($customer, (string) $target->id, $hash);
+            $submit();
         } catch (AuthorizationException) {
             $this->hashSession->forget($customer);
             $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_closed');
 
-            return true;
+            return;
         } catch (InvalidArgumentException) {
             $this->hashSession->forget($customer);
             $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_limited');
 
-            return true;
+            return;
         }
 
         try {
-            $this->settlement->check((string) $target->id);
+            if ($this->railOf($target) === CustomerUsdtFundingRail::BinancePay) {
+                $this->binanceSettlement->check((string) $target->id);
+            } else {
+                $this->settlement->check((string) $target->id);
+            }
         } catch (Throwable) {
             // The hint is durable. Recovery retries settlement; the webhook
             // still renders the honest current state for this target.
         }
 
         $this->hashSession->forget($customer);
-        $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_recorded');
+        $fresh = $target->refresh();
+        // A rail check only means an inspection ran; the paid notice requires
+        // durable settlement evidence, never the boolean return value.
+        $status = $this->statuses->for($fresh);
+        $this->presentStatus(
+            $customer,
+            $chatId,
+            $fresh,
+            $status->isSettled() || $status->balanceAfterMicro !== null
+                ? 'balance.usdt.notice.paid'
+                : $recordedKey,
+        );
+    }
 
-        return true;
+    private function railOf(CustomerUsdtTopUp $target): ?CustomerUsdtFundingRail
+    {
+        $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
+        $value = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
+
+        return CustomerUsdtFundingRail::tryFrom($value !== '' ? $value : (string) ($snapshot['rail'] ?? ''));
     }
 
     /**
@@ -361,16 +408,35 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             return [$this->usdt->historySurface($customer, $page), null];
         }
 
-        if (preg_match('/\Ausdt:(?:confirm|cancel):[a-f0-9]{32}\z/D', $data) === 1) {
-            $result = $this->funding->callback(
-                (string) $customer->telegram_id,
-                $context->chatId,
-                $context->chatType,
-                (int) $context->messageId,
-                $data,
-            );
+        $closeId = $this->uuidFor($data, self::CLOSE_PREFIX);
+        if ($closeId !== null) {
+            $target = CustomerUsdtTopUp::query()
+                ->whereKey($closeId)
+                ->where('customer_id', $customer->id)
+                ->first();
+            if ($target === null) {
+                return [$this->staleSurface($customer), 'balance.usdt.stale'];
+            }
+            if ($this->funding->cancelTarget($customer, (string) $target->id)) {
+                return [
+                    $this->menu->usdAmountSurface(
+                        $customer,
+                        $this->railOf($target) ?? CustomerUsdtFundingRail::BscShared,
+                        'balance.usdt.notice.cancelled_target',
+                    ),
+                    'balance.usdt.notice.cancelled_target',
+                ];
+            }
 
-            return $this->previewOutcomeSurface($customer, $result);
+            return [
+                $this->usdt->statusSurface(
+                    $customer,
+                    $target->fresh(),
+                    $this->statuses->for($target),
+                    'balance.usdt.notice.cancel_unavailable',
+                ),
+                'balance.usdt.notice.cancel_unavailable',
+            ];
         }
 
         foreach ([self::STATUS_PREFIX, self::CHECK_PREFIX, self::HASH_PREFIX, self::ORDER_PREFIX] as $prefix) {
@@ -418,55 +484,6 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         }
 
         return [$this->staleSurface($customer), 'balance.usdt.stale'];
-    }
-
-    /**
-     * @return array{0: TelegramNavigationSurface, 1: ?string}
-     */
-    private function previewOutcomeSurface(Customer $customer, UsdtFundingIntentResult $result): array
-    {
-        if (in_array($result->outcome, ['opened', 'replayed'], true) && $result->intent !== null) {
-            return [$this->usdt->previewSurface($customer, $result->intent), null];
-        }
-        if ($result->outcome === 'confirmed' && $result->topUp !== null) {
-            if ($result->topUp->rail === CustomerUsdtFundingRail::BinancePay->value) {
-                $this->hashSession->promptHash($customer, (string) $result->topUp->id);
-            }
-
-            return [
-                $this->usdt->statusSurface(
-                    $customer,
-                    $result->topUp,
-                    $this->statuses->for($result->topUp),
-                    'balance.usdt.notice.confirmed',
-                ),
-                'balance.usdt.notice.confirmed',
-            ];
-        }
-        if ($result->outcome === 'active_target') {
-            $notice = 'balance.usdt.notice.active_target';
-            if ($result->topUp !== null) {
-                return [
-                    $this->usdt->statusSurface(
-                        $customer,
-                        $result->topUp,
-                        $this->statuses->for($result->topUp),
-                        $notice,
-                    ),
-                    $notice,
-                ];
-            }
-
-            return [$this->usdt->topUpSurface($customer, $notice), $notice];
-        }
-
-        return match ($result->outcome) {
-            'cancelled' => [$this->usdt->topUpSurface($customer, 'balance.usdt.notice.cancelled'), 'balance.usdt.notice.cancelled'],
-            'expired' => [$this->usdt->topUpSurface($customer, 'balance.usdt.notice.expired'), 'balance.usdt.notice.expired'],
-            'invalid_amount' => [$this->usdt->topUpSurface($customer, 'balance.usdt.input.invalid'), 'balance.usdt.input.invalid'],
-            'unavailable' => [$this->usdt->topUpSurface($customer, 'balance.usdt.topup.unavailable'), 'balance.usdt.topup.unavailable'],
-            default => [$this->usdt->topUpSurface($customer, 'balance.usdt.stale'), 'balance.usdt.stale'],
-        };
     }
 
     private function presentStale(TelegramCallbackContext $context): void

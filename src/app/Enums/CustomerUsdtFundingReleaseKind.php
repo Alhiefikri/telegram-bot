@@ -23,6 +23,12 @@ enum CustomerUsdtFundingReleaseKind: string
     /** An owner-approved compensation resolved the ambiguous money. */
     case Compensated = 'compensated';
 
+    /** The payment window and grace passed without settling any payment. */
+    case ExpiredUnpaid = 'expired_unpaid';
+
+    /** The Customer deliberately started over before any payment settled. */
+    case CancelledByCustomer = 'cancelled_by_customer';
+
     public function label(): string
     {
         return match ($this) {
@@ -30,6 +36,8 @@ enum CustomerUsdtFundingReleaseKind: string
             self::ProviderDeclined => 'Provider menolak sebelum pembayaran',
             self::ExternallyReturned => 'Dana dikembalikan ke pengirim',
             self::Compensated => 'Diselesaikan lewat kompensasi',
+            self::ExpiredUnpaid => 'Kedaluwarsa tanpa pembayaran',
+            self::CancelledByCustomer => 'Dibatalkan oleh Customer',
         };
     }
 }

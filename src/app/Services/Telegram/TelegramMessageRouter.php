@@ -43,6 +43,7 @@ class TelegramMessageRouter
         private TelegramUsdtFundingCallbackHandler $usdtFunding,
         private TelegramUsdtFundingSession $usdtFundingSession,
         private TelegramContentIntents $content,
+        private TelegramUsdtFundingActions $usdtTargets,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
@@ -92,6 +93,11 @@ class TelegramMessageRouter
             $this->session->forgetWithLock($customer);
             $this->catalogQueries->forget($customer);
             $this->startIntents->forget($customer);
+            if ($isPrivateChat) {
+                // Starting over is the Customer's cancel: an unpaid USD target
+                // must never force the amount that was chosen before.
+                $this->usdtTargets->cancelOpenTargets($customer);
+            }
             $startIntent = $this->startIntent($text);
             if ($startIntent !== null) {
                 $this->startIntents->put($customer, $startIntent);

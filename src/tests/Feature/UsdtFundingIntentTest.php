@@ -85,14 +85,13 @@ class UsdtFundingIntentTest extends TestCase
 
     public function test_unknown_guest_group_and_cross_actor_are_rejected_without_registering_customer(): void
     {
-        $nonce = $this->preview()->intent->nonce;
         $adapter = app(TelegramUsdtFundingActions::class);
         foreach ([['951002', '951002', 'private'], ['951002', '951001', 'private'], ['951001', '-951001', 'group'], ['guest', 'guest', 'private'], ['9999999999999999999', '9999999999999999999', 'private']] as [$actor, $chat, $type]) {
-            $this->assertSame('unauthorized', $adapter->preview($actor, $chat, $type, 100, '1')->outcome);
-            $this->assertSame('unauthorized', $adapter->callback($actor, $chat, $type, 100, 'usdt:confirm:'.$nonce)->outcome);
+            $this->assertSame('unauthorized', $adapter->openConfirmedIntent($actor, $chat, $type, 100, '1', CustomerUsdtFundingRail::BscUsdt)->outcome);
         }
         $this->assertSame(1, Customer::query()->count());
         $this->assertSame(0, CustomerUsdtTopUp::query()->count());
+        $this->assertSame(0, CustomerUsdtFundingIntent::query()->count());
         $this->assertNoMoneyOrOutbound();
     }
 
@@ -100,7 +99,7 @@ class UsdtFundingIntentTest extends TestCase
     {
         $intent = $this->preview()->intent;
         $this->assertSame('stale', $this->action(str_repeat('f', 32))->outcome);
-        $this->assertSame('unauthorized', app(TelegramUsdtFundingActions::class)->callback('951001', '951001', 'private', 101, 'usdt:confirm:'.$intent->nonce)->outcome);
+        $this->assertSame('unauthorized', app(TelegramUsdtFundingActions::class)->openConfirmedIntent('951001', '951001', 'private', 101, '1', CustomerUsdtFundingRail::BscUsdt)->outcome);
 
         // Rendering the canonical message advances its render generation; the
         // Customer's own confirmation on the same message stays valid.
@@ -148,7 +147,7 @@ class UsdtFundingIntentTest extends TestCase
         ManualPaymentSetting::current()->update(['bsc_min_confirmations' => 9]);
         $this->assertSame('stale_terms', $this->action($second->nonce)->outcome);
         $third = $this->preview()->intent;
-        $new = app(TelegramUsdtFundingActions::class)->preview('951001', '951001', 'private', 100, '2');
+        $new = $this->preview('2');
         $this->assertNotSame($third->nonce, $new->intent->nonce);
         $this->assertSame('superseded', $this->action($third->nonce)->outcome);
         $this->assertSame(0, CustomerUsdtTopUp::query()->count());
@@ -226,7 +225,7 @@ class UsdtFundingIntentTest extends TestCase
         $opened = $this->preview();
         $this->assertSame(1_000_003, $opened->intent->payable_micro);
         $this->assertSame('unavailable', app(UsdtFundingIntentService::class)->open($this->customer, '951001', $this->root->id, 100, UsdtMicroAmount::fromUnits(PHP_INT_MAX))->outcome);
-        $this->assertSame('invalid_amount', app(TelegramUsdtFundingActions::class)->preview('951001', '951001', 'private', 100, '0.0000001')->outcome);
+        $this->assertSame('invalid_amount', app(TelegramUsdtFundingActions::class)->openConfirmedIntent('951001', '951001', 'private', 100, '0.0000001', CustomerUsdtFundingRail::BscUsdt)->outcome);
     }
 
     public function test_binance_fee_is_zero_in_preview_target_and_reservation_without_changing_bsc_fee(): void
@@ -235,8 +234,7 @@ class UsdtFundingIntentTest extends TestCase
         config(['services.binance.api_key' => 'fixture-key', 'services.binance.api_secret' => 'fixture-secret',
             'services.binance.pay_id' => '12345678', 'services.binance.pay_uid' => '']);
         ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
-        $actions = app(TelegramUsdtFundingActions::class);
-        $opened = $actions->preview('951001', '951001', 'private', 100, '0.30', CustomerUsdtFundingRail::BinancePay);
+        $opened = $this->preview('0.30', CustomerUsdtFundingRail::BinancePay);
         $this->assertSame('opened', $opened->outcome);
         $this->assertSame(300_000, $opened->intent->amount_micro);
         $this->assertSame(0, $opened->intent->fee_micro);
@@ -276,8 +274,7 @@ class UsdtFundingIntentTest extends TestCase
         $this->assertSame('superseded', $legacy->fresh()->state);
         $this->assertSame(0, CustomerUsdtTopUp::query()->count());
         $this->assertSame(0, DB::table('customer_usdt_funding_reservations')->count());
-        $fresh = app(TelegramUsdtFundingActions::class)->preview('951001', '951001', 'private', 100,
-            '0.30', CustomerUsdtFundingRail::BinancePay);
+        $fresh = $this->preview('0.30', CustomerUsdtFundingRail::BinancePay);
         $this->assertSame(0, $fresh->intent->fee_micro);
         $this->assertNoMoneyOrOutbound();
     }
@@ -341,14 +338,28 @@ class UsdtFundingIntentTest extends TestCase
         $this->assertSame(1, DB::table('usdt_bsc_rail_invoices')->count());
     }
 
-    protected function preview(): UsdtFundingIntentResult
+    protected function preview(string $amount = '1.000001', CustomerUsdtFundingRail $rail = CustomerUsdtFundingRail::BscUsdt): UsdtFundingIntentResult
     {
-        return app(TelegramUsdtFundingActions::class)->preview('951001', '951001', 'private', 100, '1.000001');
+        return app(UsdtFundingIntentService::class)->open(
+            $this->customer,
+            '951001',
+            (int) $this->root->id,
+            100,
+            UsdtMicroAmount::fromDecimalString($amount),
+            $rail,
+        );
     }
 
     protected function action(string $nonce, string $action = 'confirm'): UsdtFundingIntentResult
     {
-        return app(TelegramUsdtFundingActions::class)->callback('951001', '951001', 'private', 100, 'usdt:'.$action.':'.$nonce);
+        return app(UsdtFundingIntentService::class)->claim(
+            $this->customer,
+            '951001',
+            (int) $this->root->id,
+            100,
+            $nonce,
+            $action,
+        );
     }
 
     protected function assertNoMoneyOrOutbound(): void

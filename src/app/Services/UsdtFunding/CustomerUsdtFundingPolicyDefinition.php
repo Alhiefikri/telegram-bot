@@ -8,17 +8,21 @@ use InvalidArgumentException;
 
 /**
  * Validated Admin input for the Customer USDT funding policy. There is no
- * business minimum/maximum/preset/cap field: only the Owner activation flag,
- * a bounded confirmation TTL, a nonnegative exact application fee and the
- * customer-facing terms body. The fee input is either integer micro-USDT or a
- * canonical USDT decimal string; zero is the H0-v1 default.
+ * business minimum/maximum/aggregate cap field: only the Owner activation
+ * flag, a bounded confirmation TTL, a nonnegative exact application fee, the
+ * presentation-only USD preset list and the customer-facing terms body. Fees
+ * and presets are either integer micro-USDT or a canonical USDT decimal
+ * string; zero is the H0-v1 fee default, an omitted preset list falls back to
+ * the seeded default list, and neither input ever caps a top-up.
  */
 final readonly class CustomerUsdtFundingPolicyDefinition
 {
+    /** @param list<int> $presetAmountsMicro */
     private function __construct(
         public bool $fundingEnabled,
         public int $confirmationTtlSeconds,
         public int $applicationFeeMicro,
+        public array $presetAmountsMicro,
         public string $termsBody,
     ) {}
 
@@ -27,8 +31,9 @@ final readonly class CustomerUsdtFundingPolicyDefinition
         mixed $confirmationTtlSeconds,
         mixed $applicationFeeMicro,
         mixed $termsBody,
+        mixed $presetAmounts = null,
     ): self {
-        $errors = self::validationErrors($fundingEnabled, $confirmationTtlSeconds, $applicationFeeMicro, $termsBody);
+        $errors = self::validationErrors($fundingEnabled, $confirmationTtlSeconds, $applicationFeeMicro, $termsBody, $presetAmounts);
         if ($errors !== []) {
             throw new InvalidArgumentException(implode(' ', array_values($errors)));
         }
@@ -37,6 +42,7 @@ final readonly class CustomerUsdtFundingPolicyDefinition
             fundingEnabled: filter_var($fundingEnabled, FILTER_VALIDATE_BOOLEAN),
             confirmationTtlSeconds: (int) self::parseTtlSeconds($confirmationTtlSeconds),
             applicationFeeMicro: (int) self::parseFeeMicro($applicationFeeMicro),
+            presetAmountsMicro: self::parsePresetAmounts($presetAmounts),
             termsBody: (string) self::normalizeTermsBody($termsBody),
         );
     }
@@ -47,6 +53,7 @@ final readonly class CustomerUsdtFundingPolicyDefinition
         mixed $confirmationTtlSeconds,
         mixed $applicationFeeMicro,
         mixed $termsBody,
+        mixed $presetAmounts = null,
     ): array {
         $errors = [];
 
@@ -68,6 +75,27 @@ final readonly class CustomerUsdtFundingPolicyDefinition
         if (self::normalizeTermsBody($termsBody) === null) {
             $errors['terms_body'] = 'Syarat top-up USDT wajib diisi dan maksimal '
                 .CustomerUsdtFundingPolicy::MAX_TERMS_BODY_LENGTH.' karakter tanpa karakter kontrol.';
+        }
+
+        if ($presetAmounts !== null && ! is_array($presetAmounts)) {
+            $errors['preset_amounts'] = 'Daftar preset top-up USDT harus berupa daftar nominal.';
+        } elseif (is_array($presetAmounts)) {
+            if (! array_is_list($presetAmounts)) {
+                $errors['preset_amounts'] = 'Daftar preset top-up USDT harus berupa daftar nominal.';
+            } elseif (count($presetAmounts) < 1) {
+                $errors['preset_amounts'] = 'Daftar preset top-up USDT harus memiliki sedikitnya satu nominal.';
+            } elseif (count($presetAmounts) > CustomerUsdtFundingPolicy::MAX_PRESETS) {
+                $errors['preset_amounts'] = 'Daftar preset top-up USDT maksimal '
+                    .CustomerUsdtFundingPolicy::MAX_PRESETS.' nominal.';
+            } else {
+                foreach ($presetAmounts as $index => $amount) {
+                    if (self::parsePresetMicro($amount) === null) {
+                        $message = 'Setiap preset top-up USDT harus nominal USDT positif maksimal enam desimal tanpa pembulatan.';
+                        $errors['preset_amounts.'.$index] = $message;
+                        $errors['preset_amounts'] = $message;
+                    }
+                }
+            }
         }
 
         return $errors;
@@ -119,6 +147,63 @@ final readonly class CustomerUsdtFundingPolicyDefinition
         } catch (InvalidArgumentException) {
             return null;
         }
+    }
+
+    /**
+     * Canonical preset list: integer micro-USDT input, or USD decimal strings
+     * exactly like the fee input, from one up to MAX_PRESETS entries and each
+     * amount between 1 micro-USDT and the representational ceiling.
+     * Duplicates are allowed and de-duplicated in list order. A null list
+     * means "not provided" and yields the seeded default list.
+     *
+     * @return list<int>
+     */
+    public static function parsePresetAmounts(mixed $value): array
+    {
+        $candidates = $value ?? CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO;
+
+        if (! is_array($candidates) || ! array_is_list($candidates)
+            || count($candidates) < 1 || count($candidates) > CustomerUsdtFundingPolicy::MAX_PRESETS) {
+            return [];
+        }
+
+        $presets = [];
+        foreach ($candidates as $amount) {
+            $micro = self::parsePresetMicro($amount);
+            if ($micro === null) {
+                return [];
+            }
+
+            if (! in_array($micro, $presets, true)) {
+                $presets[] = $micro;
+            }
+        }
+
+        return $presets;
+    }
+
+    /**
+     * A single preset: a positive integer micro-USDT amount (>= 1), or a
+     * canonical USDT decimal string. Integer input is micro-USDT, string
+     * input is USD. Never floats or rounded values.
+     */
+    public static function parsePresetMicro(mixed $value): ?int
+    {
+        if (is_int($value)) {
+            return $value >= 1 && $value <= CustomerUsdtFundingPolicy::MAX_PRESET_AMOUNT_MICRO ? $value : null;
+        }
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        try {
+            $micro = UsdtMicroAmount::fromDecimalString(trim($value))->units();
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+
+        return $micro <= CustomerUsdtFundingPolicy::MAX_PRESET_AMOUNT_MICRO ? $micro : null;
     }
 
     public static function normalizeTermsBody(mixed $value): ?string

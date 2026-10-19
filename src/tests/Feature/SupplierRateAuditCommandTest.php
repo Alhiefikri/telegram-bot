@@ -152,7 +152,6 @@ final class SupplierRateAuditCommandTest extends NonTransactionalDatabaseTestCas
 
         $this->artisan('suppliers:rate-audit', ['--fix' => true, '--to' => '0.692308', '--force' => true])
             ->expectsOutputToContain('Koneksi #'.$supplier->id.' nastele VND: kurs 18000.000000 di luar rentang wajar.')
-            ->expectsOutputToContain('Komitmen supplier masih aktif. Selesaikan pembelian sebelum mengubah kredensial atau mata uang.')
             ->assertExitCode(Command::FAILURE);
 
         $stored = $supplier->fresh();

@@ -7,6 +7,7 @@ use App\Enums\StoreBalanceFundingIntentClaimOutcome;
 use App\Enums\TelegramNavigationRenderOutcome;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
+use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramNavigationRoot;
@@ -31,9 +32,11 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramNavigationSurface;
-use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramUsdtFundingActions;
+use App\Services\Telegram\TelegramUsdtFundingPresenter;
 use App\Services\Telegram\TelegramUsdtFundingSession;
+use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\UsdtFunding\UsdtFundingAmountPreset;
 use Throwable;
 
 final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHandler
@@ -50,8 +53,8 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         private readonly StoreBalanceFundingIntentService $intents,
         private readonly StoreBalanceTopUpService $topUps,
         private readonly StoreBalanceTopUpOutbound $topUpOutbound,
-        private readonly TelegramUsdtBalanceIntents $usdtBalance,
         private readonly TelegramUsdtFundingActions $usdtFunding,
+        private readonly TelegramUsdtFundingPresenter $usdtPresenter,
         private readonly TelegramUsdtFundingSession $usdtFundingSession,
         private readonly TelegramLocale $locale,
         private readonly TelegramIntentSession $session,
@@ -103,7 +106,9 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             return $this->restartAmount($customer, $chatId);
         }
 
-        $result = $this->usdtFunding->preview(
+        // A typed amount is an explicit choice, so it opens and confirms the
+        // target in one step and the instructions replace the prompt.
+        $result = $this->usdtFunding->openConfirmedIntent(
             (string) $customer->telegram_id,
             $chatId,
             'private',
@@ -111,27 +116,20 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             trim($text),
             $rail,
         );
-        if ($result->outcome !== 'invalid_amount') {
-            $this->usdtFundingSession->forget($customer);
-        }
         if ($result->outcome === 'invalid_amount') {
-            $this->presentAmount($customer, $chatId, $root, $rail, 'balance.usd.amount.invalid');
+            $this->presentAmountPrompt($customer, $chatId, $root, $rail, 'balance.usd.amount.invalid');
 
             return true;
         }
+        $this->usdtFundingSession->forget($customer);
         if ($result->outcome === 'unauthorized' || $result->outcome === 'stale') {
             return $this->restartAmount($customer, $chatId);
-        }
-        if (in_array($result->outcome, ['opened', 'replayed'], true) && $result->intent !== null) {
-            $this->navigation->presentOnRoot($root, $chatId, $this->usdtBalance->previewSurface($customer, $result->intent));
-
-            return true;
         }
 
         $this->navigation->presentOnRoot(
             $root,
             $chatId,
-            $this->menu->usdAmountSurface($customer, $rail, 'balance.usd.amount.unavailable'),
+            $this->usdtPresenter->surfaceFor($customer, $rail, $result),
         );
 
         return true;
@@ -141,19 +139,23 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
     {
         $this->usdtFundingSession->forget($customer);
         $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.usd.amount.restart'));
-        $this->navigation->presentOrEstablish($customer, $chatId, $this->menu->usdRailSurface($customer));
+        $this->navigation->presentOrEstablish($customer, $chatId, $this->menu->addBalanceMethodsSurface($customer));
 
         return true;
     }
 
-    private function presentAmount(
+    private function presentAmountPrompt(
         Customer $customer,
         string $chatId,
         TelegramNavigationRoot $root,
         CustomerUsdtFundingRail $rail,
         ?string $noticeKey = null,
     ): TelegramNavigationRenderOutcome {
-        $outcome = $this->navigation->presentOnRoot($root, $chatId, $this->menu->usdAmountSurface($customer, $rail, $noticeKey));
+        $outcome = $this->navigation->presentOnRoot(
+            $root,
+            $chatId,
+            $this->menu->usdCustomAmountSurface($customer, $rail, $noticeKey),
+        );
         $this->usdtFundingSession->forget($customer);
         if (in_array($outcome, [TelegramNavigationRenderOutcome::Applied, TelegramNavigationRenderOutcome::Unchanged, TelegramNavigationRenderOutcome::Replaced], true)) {
             $rendered = $this->roots->currentForChat($customer, $chatId);
@@ -168,12 +170,10 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
     public function supports(TelegramCallbackContext $context): bool
     {
         return $context->data === self::ADD_BALANCE
-            || in_array($context->data, [
-                self::CURRENCY_PREFIX.'idr',
-                self::CURRENCY_PREFIX.'usd',
-                'balance:usd:binance_pay',
-                'balance:usd:bsc',
-            ], true)
+            || in_array($context->data, [self::CURRENCY_PREFIX.'idr', self::CURRENCY_PREFIX.'usd'], true)
+            || UsdtFundingAmountPreset::railFromCallback($context->data) !== null
+            || UsdtFundingAmountPreset::customRail($context->data) !== null
+            || UsdtFundingAmountPreset::isPresetCallbackFormat($context->data)
             || StoreBalanceFundingPolicyManager::isPresetCallbackFormat($context->data)
             || StoreBalanceFundingIntentService::isActionCallbackFormat($context->data)
             || StoreBalanceTopUpService::isActionCallbackFormat($context->data);
@@ -244,7 +244,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
                 $outcome = $this->navigation->presentOnRoot(
                     $currentRoot,
                     $context->chatId,
-                    $this->menu->addBalanceSurface($context->customer, $notice),
+                    $this->menu->addBalanceMethodsSurface($context->customer, $notice),
                 );
                 $feedback = $this->navigation->feedback($context->customer, $outcome)
                     ?? $this->locale->translate(
@@ -272,7 +272,7 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             $outcome = $this->navigation->presentOnRoot(
                 $root,
                 $context->chatId,
-                $this->menu->balanceCurrencySurface($context->customer),
+                $this->menu->addBalanceMethodsSurface($context->customer),
             );
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
 
@@ -287,25 +287,72 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
         }
 
         if ($context->data === self::CURRENCY_PREFIX.'usd') {
+            // Legacy currency callback: both USD rails now live on the chooser.
             $outcome = $this->navigation->presentOnRoot(
                 $root,
                 $context->chatId,
-                $this->menu->usdRailSurface($context->customer),
+                $this->menu->addBalanceMethodsSurface($context->customer),
             );
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
 
             return true;
         }
 
-        if ($context->data === 'balance:usd:bsc' || $context->data === 'balance:usd:binance_pay') {
-            $rail = $context->data === 'balance:usd:binance_pay'
-                ? CustomerUsdtFundingRail::BinancePay
-                : CustomerUsdtFundingRail::BscShared;
-            $outcome = $this->presentAmount($context->customer, $context->chatId, $root, $rail);
+        $rail = UsdtFundingAmountPreset::railFromCallback($context->data);
+        if ($rail !== null) {
+            $outcome = $this->navigation->presentOnRoot(
+                $root,
+                $context->chatId,
+                $this->menu->usdAmountSurface($context->customer, $rail),
+            );
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
 
             return true;
         }
+
+        $customRail = UsdtFundingAmountPreset::customRail($context->data);
+        if ($customRail !== null) {
+            $outcome = $this->presentAmountPrompt($context->customer, $context->chatId, $root, $customRail);
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+
+            return true;
+        }
+
+        // A USD preset button carries only a signed, versioned identity: the
+        // current policy resolves the amount, so a stale button re-renders the
+        // list instead of funding an amount the Owner already changed.
+        $preset = UsdtFundingAmountPreset::resolve($context->data, CustomerUsdtFundingPolicy::current());
+        if ($preset !== null) {
+            $result = $this->usdtFunding->openConfirmedIntent(
+                (string) $context->customer->telegram_id,
+                $context->chatId,
+                $context->chatType,
+                (int) $root->message_id,
+                UsdtMicroAmount::fromUnits($preset->amountMicro)->decimal(),
+                $preset->rail,
+            );
+            $outcome = $this->navigation->presentOnRoot(
+                $root,
+                $context->chatId,
+                $this->usdtPresenter->surfaceFor($context->customer, $preset->rail, $result),
+            );
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+
+            return true;
+        }
+        if (UsdtFundingAmountPreset::isPresetCallbackFormat($context->data)) {
+            $outcome = $this->navigation->presentOnRoot(
+                $root,
+                $context->chatId,
+                $this->menu->addBalanceMethodsSurface($context->customer, 'balance.add.preset_stale'),
+            );
+            $feedback = $this->navigation->feedback($context->customer, $outcome)
+                ?? $this->locale->translate($context->customer, 'balance.add.preset_stale');
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $feedback);
+
+            return true;
+        }
+
         $action = StoreBalanceFundingIntentService::actionFromCallback($context->data);
         if ($action !== null) {
             $this->handleAction($root, $context, $action['action'], $action['nonce']);

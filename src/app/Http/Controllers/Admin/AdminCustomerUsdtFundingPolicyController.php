@@ -37,6 +37,7 @@ class AdminCustomerUsdtFundingPolicyController extends Controller
                 expectedVersion: (int) $validated['version'],
                 actor: $actor,
                 ip: $request->ip(),
+                presetAmounts: $validated['preset_amounts'],
             );
         } catch (CustomerUsdtFundingPolicyConflict $exception) {
             return $redirector->usdtFundingPolicy()

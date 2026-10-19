@@ -304,8 +304,7 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
         $this->travel(20)->minutes();
         CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 100_000, 'version' => 2]);
         $actions = app(TelegramUsdtFundingActions::class);
-        $nonce = $actions->preview('951001', '951001', 'private', 100, '1')->intent->nonce;
-        $this->target = $actions->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$nonce)->topUp;
+        $this->target = $actions->openConfirmedIntent('951001', '951001', 'private', 100, '1')->topUp;
         app(UsdtTopUpPreparation::class)->prepare($this->target->id);
         $this->rpc->timestamp = now()->timestamp + 5;
         $hash = '0x'.str_repeat('c', 64);
@@ -370,8 +369,7 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
         $this->settle();
         $original = $this->target;
         $actions = app(TelegramUsdtFundingActions::class);
-        $nonce = $actions->preview('951001', '951001', 'private', 100, '1')->intent->nonce;
-        $this->target = $actions->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$nonce)->topUp;
+        $this->target = $actions->openConfirmedIntent('951001', '951001', 'private', 100, '1')->topUp;
         app(UsdtTopUpPreparation::class)->prepare($this->target->id);
         $this->assertSame(2, DB::table('usdt_bsc_rail_invoices')->count());
         $hash = '0x'.str_repeat('d', 64);

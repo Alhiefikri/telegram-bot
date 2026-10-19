@@ -90,7 +90,7 @@ final class SupplierHealthService
             $reviewUpdates = [];
             $lockSupplierIds = $supplierIds;
             foreach (SupplierFulfillment::with([
-                'order:id,invoice_number',
+                'order:id,invoice_number,order_status',
                 'reservedSupplier:id,currency',
                 'purchases.supplier:id,currency',
                 'purchases' => fn ($query) => $query
@@ -117,7 +117,11 @@ final class SupplierHealthService
                 }, ARRAY_FILTER_USE_KEY);
                 foreach (array_diff_key($current, $known) as $identity => $supplierId) {
                     $key = $supplierId ?? 0;
-                    $kind = str_starts_with($identity, 'hold:') ? 'holds' : 'reviews';
+                    $kind = str_starts_with($identity, 'hold:')
+                        // Capacity reserved for an order that never got paid is
+                        // not an unproven purchase, so it is reported separately.
+                        ? ($fulfillment->isUnpaidReservation() ? 'reservations' : 'holds')
+                        : 'reviews';
                     $groups[$key][$kind][$fulfillment->id] = $this->reviewContext($fulfillment, $supplierId);
                 }
                 if ($previous !== null || $current !== []) {
@@ -401,6 +405,9 @@ final class SupplierHealthService
         if (($conditions['holds'] ?? []) !== []) {
             $text .= "Hold menua >= 15 menit; jangan lepaskan tanpa bukti.\n";
         }
+        if (($conditions['reservations'] ?? []) !== []) {
+            $text .= "Hold itu reservasi kapasitas pesanan yang belum dibayar; lepas otomatis saat pesanan kedaluwarsa atau dibatalkan. Belum ada pembelian ke supplier.\n";
+        }
         if ($conditions['low'] ?? false) {
             $text .= "Saldo tersedia <= ambang. Tinjau hold dan lakukan top-up sebelum menerima pesanan baru.\n";
         }
@@ -412,7 +419,7 @@ final class SupplierHealthService
         if ($count > 0) {
             $text .= "Cek exact order dan bukti debit/delivery; jangan beli ulang atau fallback. Daftar lengkap ada di monitor privat.\n";
         }
-        foreach (array_merge($conditions['reviews'] ?? [], $conditions['holds'] ?? []) as $context) {
+        foreach (array_merge($conditions['reviews'] ?? [], $conditions['holds'] ?? [], $conditions['reservations'] ?? []) as $context) {
             // Keep whole context records and reserve room for the monitor link.
             if (mb_strlen($text) + mb_strlen($context) > 3500) {
                 $text .= "Detail lainnya ada di monitor privat.\n";

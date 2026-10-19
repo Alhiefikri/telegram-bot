@@ -66,8 +66,7 @@ class UsdtReorgIncidentTest extends TestCase
         $registry = app(UsdtDepositReceiverRegistry::class);
         $registry->manualVerify($registry->register($this->customer, BscUsdtRailRpcFixture::ADDRESS, $owner)->receiver, true, $owner);
         $actions = app(TelegramUsdtFundingActions::class);
-        $nonce = $actions->preview('951001', '951001', 'private', 100, '1')->intent->nonce;
-        $this->target = $actions->callback('951001', '951001', 'private', 100, 'usdt:confirm:'.$nonce)->topUp;
+        $this->target = $actions->openConfirmedIntent('951001', '951001', 'private', 100, '1')->topUp;
         app(UsdtTopUpPreparation::class)->prepare($this->target->id);
         $this->rpc->timestamp = now()->timestamp + 5;
     }

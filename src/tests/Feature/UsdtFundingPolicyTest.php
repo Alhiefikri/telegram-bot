@@ -33,17 +33,153 @@ final class UsdtFundingPolicyTest extends TestCase
         $this->assertStringContainsString('tidak dapat ditarik', app(CustomerUsdtFundingPolicyManager::class)->termsBody(1));
         $this->assertStringContainsString('fee aplikasi', app(CustomerUsdtFundingPolicyManager::class)->termsBody(1));
 
-        // H0-v1: no business cap/preset/minimum column exists at all.
+        // H0-v1: no business cap/minimum column exists at all, and the only
+        // nominal column is the presentation-only preset list.
         $columns = Schema::getColumnListing('customer_usdt_funding_policies');
         foreach (['minimum_amount', 'maximum_amount', 'preset_amounts', 'exposure_cap', 'daily_quota', 'allowlist'] as $forbidden) {
             $this->assertNotContains($forbidden, $columns);
         }
+        $this->assertContains('preset_amounts_micro', $columns);
+
+        $this->assertSame(CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO, $state->presetAmountsMicro);
+        $this->assertSame('1, 5, 10, 25, 50, 100', $state->presetAmountsInput());
+        $this->assertSame(
+            CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO,
+            CustomerUsdtFundingPolicy::current()?->preset_amounts_micro,
+        );
 
         $this->assertDatabaseHas('customer_usdt_funding_policies', [
             'singleton_key' => CustomerUsdtFundingPolicy::SINGLETON_KEY,
             'funding_enabled' => false,
             'version' => 0,
         ]);
+    }
+
+    public function test_stored_presets_that_are_not_a_usable_list_fall_back_to_the_defaults(): void
+    {
+        $policy = CustomerUsdtFundingPolicy::current();
+        $this->assertNotNull($policy);
+
+        $unusable = [
+            [],
+            ['1', '5'],
+            [0],
+            [-1],
+            [1.5],
+            [CustomerUsdtFundingPolicy::MAX_PRESET_AMOUNT_MICRO + 1],
+            'bukan daftar preset',
+            array_fill(0, CustomerUsdtFundingPolicy::MAX_PRESETS + 1, 1_000_000),
+        ];
+
+        foreach ($unusable as $stored) {
+            $policy->forceFill(['preset_amounts_micro' => $stored])->save();
+
+            $this->assertSame(
+                CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO,
+                $policy->refresh()->presetAmountsMicro(),
+            );
+        }
+    }
+
+    public function test_preset_only_edit_persists_bumps_version_and_is_audited_without_new_terms(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $manager = app(CustomerUsdtFundingPolicyManager::class);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.46'])
+            ->actingAs($owner)
+            ->post(route('admin.store-balance.usdt-policy.update'), [
+                'funding_enabled' => '0',
+                'confirmation_ttl_seconds' => '600',
+                'application_fee_micro' => '0',
+                'terms_body' => $manager->termsBody(1),
+                'preset_amounts' => "1, 2.5\n10\n0.000001",
+                'version' => 0,
+            ]);
+
+        $response->assertRedirect()->assertSessionHas('status', 'Kebijakan top-up USDT diperbarui.');
+
+        $state = $manager->current();
+        $this->assertSame([1_000_000, 2_500_000, 10_000_000, 1], $state->presetAmountsMicro);
+        $this->assertSame('1, 2.5, 10, 0.000001', $state->presetAmountsInput());
+        $this->assertSame(1, $state->version);
+        $this->assertSame(1, $state->termsVersion);
+        $this->assertSame(1, (int) CustomerUsdtFundingTerms::query()->max('version'));
+
+        $audit = AuditLog::query()->where('action', 'customer_usdt.funding_policy.updated')->sole();
+        $this->assertSame($owner->id, $audit->user_id);
+        $this->assertSame('203.0.113.46', $audit->ip_address);
+        $this->assertSame(CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO, $audit->old_values['preset_amounts_micro']);
+        $this->assertSame([1_000_000, 2_500_000, 10_000_000, 1], $audit->new_values['preset_amounts_micro']);
+        $this->assertSame(0, (int) $audit->old_values['version']);
+        $this->assertSame(1, (int) $audit->new_values['version']);
+    }
+
+    public function test_duplicate_presets_are_deduplicated_in_list_order(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)->post(route('admin.store-balance.usdt-policy.update'), [
+            'funding_enabled' => '0',
+            'confirmation_ttl_seconds' => '600',
+            'application_fee_micro' => '0',
+            'terms_body' => app(CustomerUsdtFundingPolicyManager::class)->termsBody(1),
+            'preset_amounts' => "5\n1\n5\n10\n1",
+            'version' => 0,
+        ])->assertRedirect()->assertSessionHas('status', 'Kebijakan top-up USDT diperbarui.');
+
+        $this->assertSame(
+            [5_000_000, 1_000_000, 10_000_000],
+            CustomerUsdtFundingPolicy::current()?->presetAmountsMicro(),
+        );
+    }
+
+    public function test_identical_presets_are_a_no_op_and_omitted_presets_keep_the_stored_list(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $manager = app(CustomerUsdtFundingPolicyManager::class);
+        $before = $manager->current();
+
+        $identical = $manager->change(
+            $before->fundingEnabled,
+            $before->confirmationTtlSeconds,
+            $before->applicationFeeMicro,
+            $manager->termsBody($before->termsVersion),
+            $before->version,
+            $owner,
+            null,
+            CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO,
+        );
+
+        $this->assertFalse($identical->changed);
+        $this->assertSame(0, $manager->current()->version);
+        $this->assertSame(0, AuditLog::query()->where('action', 'customer_usdt.funding_policy.updated')->count());
+
+        // A preset-only edit, then an edit that omits presets entirely.
+        $manager->change(
+            true,
+            900,
+            0,
+            $manager->termsBody(1),
+            0,
+            $owner,
+            null,
+            [3_000_000, 7_000_000],
+        );
+
+        $omitted = $manager->change(
+            true,
+            1200,
+            0,
+            $manager->termsBody(1),
+            1,
+            $owner,
+            null,
+        );
+
+        $this->assertTrue($omitted->changed);
+        $this->assertSame([3_000_000, 7_000_000], $omitted->newState->presetAmountsMicro);
+        $this->assertSame([3_000_000, 7_000_000], $manager->current()->presetAmountsMicro);
     }
 
     public function test_owner_update_bumps_version_appends_terms_and_never_mutates_money(): void
@@ -60,6 +196,7 @@ final class UsdtFundingPolicyTest extends TestCase
                 'confirmation_ttl_seconds' => '900',
                 'application_fee_micro' => '1.5',
                 'terms_body' => 'Syarat top-up USDT versi dua untuk pengujian.',
+                'preset_amounts' => "1\n5\n10\n25\n50\n100",
                 'version' => 0,
             ]);
 
@@ -72,6 +209,7 @@ final class UsdtFundingPolicyTest extends TestCase
         $this->assertSame(1_500_000, $state->applicationFeeMicro);
         $this->assertSame(2, $state->termsVersion);
         $this->assertSame(1, $state->version);
+        $this->assertSame(CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO, $state->presetAmountsMicro);
 
         $this->assertSame('Syarat top-up USDT versi dua untuk pengujian.', app(CustomerUsdtFundingPolicyManager::class)->termsBody(2));
         $this->assertSame($termsBefore, (string) CustomerUsdtFundingTerms::query()->where('version', 1)->value('body'));
@@ -112,6 +250,7 @@ final class UsdtFundingPolicyTest extends TestCase
             'confirmation_ttl_seconds' => '600',
             'application_fee_micro' => '0',
             'terms_body' => 'Syarat A untuk pengujian kebijakan.',
+            'preset_amounts' => "1\n5\n10\n25\n50\n100",
             'version' => 0,
         ]);
 
@@ -131,6 +270,7 @@ final class UsdtFundingPolicyTest extends TestCase
             'confirmation_ttl_seconds' => '600',
             'application_fee_micro' => '0',
             'terms_body' => app(CustomerUsdtFundingPolicyManager::class)->termsBody(1),
+            'preset_amounts' => "1\n5\n10\n25\n50\n100",
             'version' => 0,
         ]);
 
@@ -154,11 +294,16 @@ final class UsdtFundingPolicyTest extends TestCase
             'confirmation_ttl_seconds' => '600',
             'application_fee_micro' => '0',
             'terms_body' => 'Syarat valid untuk pengujian kebijakan.',
+            'preset_amounts' => "1\n5\n10\n25\n50\n100",
             'version' => 0,
         ]);
 
         $response->assertRedirect()->assertSessionHasErrors([$expectedError], null, 'usdtFundingPolicy');
         $this->assertSame(0, (int) CustomerUsdtFundingPolicy::current()?->policyVersion());
+        $this->assertSame(
+            CustomerUsdtFundingPolicy::DEFAULT_PRESET_AMOUNTS_MICRO,
+            CustomerUsdtFundingPolicy::current()?->presetAmountsMicro(),
+        );
         $this->assertSame(0, AuditLog::query()->where('action', 'customer_usdt.funding_policy.updated')->count());
     }
 
@@ -175,6 +320,17 @@ final class UsdtFundingPolicyTest extends TestCase
             'empty terms' => [['terms_body' => '   '], 'terms_body'],
             'oversized terms' => [['terms_body' => str_repeat('x', 20_001)], 'terms_body'],
             'control characters in terms' => [['terms_body' => "Syarat\x00terlarang"], 'terms_body'],
+            'empty presets' => [['preset_amounts' => ''], 'preset_amounts'],
+            'presets without list keys' => [['preset_amounts' => ['pertama' => '1', 'kedua' => '5']], 'preset_amounts'],
+            'zero preset' => [['preset_amounts' => '0'], 'preset_amounts'],
+            'negative preset' => [['preset_amounts' => '-1'], 'preset_amounts'],
+            'non numeric preset' => [['preset_amounts' => 'satu usdt'], 'preset_amounts'],
+            'float preset' => [['preset_amounts' => '1e3'], 'preset_amounts'],
+            'excess precision preset' => [['preset_amounts' => '0.0000005'], 'preset_amounts'],
+            'overflow preset' => [['preset_amounts' => '1000000.000001'], 'preset_amounts'],
+            'too many presets' => [[
+                'preset_amounts' => implode("\n", array_fill(0, CustomerUsdtFundingPolicy::MAX_PRESETS + 1, '5')),
+            ], 'preset_amounts'],
         ];
     }
 
