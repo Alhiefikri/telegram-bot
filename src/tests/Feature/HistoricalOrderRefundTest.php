@@ -252,7 +252,7 @@ final class HistoricalOrderRefundTest extends NonTransactionalDatabaseTestCase
             'supplier_order_id' => null,
             'state' => 'ambiguous', 'quantity' => 1, 'observed_quantity' => 0,
             'expected_cost_micros' => 300_000, 'actual_cost_micros' => null,
-            'committed_at' => null, 'warranty_hold_active' => true,
+            'committed_at' => null, 'warranty_hold_active' => true, 'warranty_reserved_cost_micros' => 300_000,
         ])->save();
         foreach ([
             fn () => app(WarrantySettlementService::class)->choose($customer, $claim->public_id, 'refund'),
