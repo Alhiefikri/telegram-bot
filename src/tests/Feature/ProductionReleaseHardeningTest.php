@@ -661,18 +661,26 @@ class ProductionReleaseHardeningTest extends TestCase
 #!/usr/bin/env bash
 set -euo pipefail
 output=''
+headers=''
 url=''
-for argument in "$@"; do
-    case "$argument" in
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         --output)
-            shift
-            output="$1"
+            output="${2:-}"
+            shift 2 || shift
+            ;;
+        --dump-header)
+            headers="${2:-}"
+            shift 2 || shift
             ;;
         http://*|https://*)
-            url="$argument"
+            url="$1"
+            shift
+            ;;
+        *)
+            shift
             ;;
     esac
-    shift || true
 done
 printf '%s\n' "$url" >> "$FAKE_CURL_LOG"
 case "$url" in
@@ -683,6 +691,11 @@ case "$url" in
     */release-sha.txt)
         body='2222222222222222222222222222222222222222'
         meta='200'
+        ;;
+    */api/v1/*)
+        body='{"error":{"code":"unauthenticated","message":"A valid API key is required."}}'
+        meta='401'
+        [ -z "$headers" ] || printf 'HTTP/2 401\r\ncache-control: no-store, private\r\nreferrer-policy: no-referrer\r\nx-request-id: 1\r\nwww-authenticate: Bearer\r\n' > "$headers"
         ;;
     */telegram-mini-app)
         exit 22
@@ -712,7 +725,7 @@ SH);
             $this->assertStringContainsString('Release identity check passed', $result['stdout']);
             $this->assertStringNotContainsString('Admin smoke check passed', $result['stdout']);
             $this->assertStringContainsString(
-                "https://store.example/up\nhttps://store.example/release-sha.txt\nhttps://store.example/telegram-mini-app\n",
+                "https://store.example/up\nhttps://store.example/release-sha.txt\nhttps://store.example/api/v1/__release_availability_probe__\nhttps://store.example/telegram-mini-app\n",
                 file_get_contents($curlLog),
             );
         } finally {
@@ -729,18 +742,26 @@ SH);
 #!/usr/bin/env bash
 set -euo pipefail
 output=''
+headers=''
 url=''
-for argument in "$@"; do
-    case "$argument" in
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         --output)
-            shift
-            output="$1"
+            output="${2:-}"
+            shift 2 || shift
+            ;;
+        --dump-header)
+            headers="${2:-}"
+            shift 2 || shift
             ;;
         http://*|https://*)
-            url="$argument"
+            url="$1"
+            shift
+            ;;
+        *)
+            shift
             ;;
     esac
-    shift || true
 done
 case "$url" in
     */up)
@@ -750,6 +771,11 @@ case "$url" in
     */release-sha.txt)
         body='2222222222222222222222222222222222222222'
         meta='200'
+        ;;
+    */api/v1/*)
+        body='{"error":{"code":"unauthenticated","message":"A valid API key is required."}}'
+        meta='401'
+        [ -z "$headers" ] || printf 'HTTP/2 401\r\ncache-control: no-store, private\r\nreferrer-policy: no-referrer\r\nx-request-id: 1\r\nwww-authenticate: Bearer\r\n' > "$headers"
         ;;
     *)
         body='LHIE STORE'
@@ -776,6 +802,132 @@ SH);
 
             $this->assertSame(0, $result['exitCode'], $result['stderr']);
             $this->assertStringNotContainsString('docker must not run', $result['stderr']);
+        } finally {
+            File::deleteDirectory($workspace);
+        }
+    }
+
+    public function test_smoke_production_script_accepts_the_customer_api_maintenance_contract(): void
+    {
+        $result = $this->runCustomerApiProbeSmoke(
+            'smoke-customer-api-maintenance',
+            '503',
+            '{"error":{"code":"api_maintenance","message":"The Customer API is temporarily disabled for maintenance."}}',
+            "HTTP/2 503\r\ncache-control: no-store, private\r\nreferrer-policy: no-referrer\r\nx-request-id: 1\r\nretry-after: 60\r\n",
+        );
+
+        $this->assertSame(0, $result['exitCode'], $result['stderr']);
+        $this->assertStringContainsString('Customer API refusal contract check passed (HTTP 503)', $result['stdout']);
+    }
+
+    public function test_smoke_production_script_accepts_the_customer_api_key_rejection_contract(): void
+    {
+        $result = $this->runCustomerApiProbeSmoke(
+            'smoke-customer-api-rejection',
+            '401',
+            '{"error":{"code":"unauthenticated","message":"A valid API key is required."}}',
+            "HTTP/2 401\r\ncache-control: no-store, private\r\nreferrer-policy: no-referrer\r\nx-request-id: 1\r\nwww-authenticate: Bearer\r\n",
+        );
+
+        $this->assertSame(0, $result['exitCode'], $result['stderr']);
+        $this->assertStringContainsString('Customer API refusal contract check passed (HTTP 401)', $result['stdout']);
+    }
+
+    public function test_smoke_production_script_rejects_an_unexpected_customer_api_status(): void
+    {
+        $result = $this->runCustomerApiProbeSmoke(
+            'smoke-customer-api-unexpected',
+            '200',
+            '{"error":{"code":"unauthenticated","message":"A valid API key is required."}}',
+            "HTTP/2 200\r\ncache-control: no-store, private\r\nreferrer-policy: no-referrer\r\nx-request-id: 1\r\n",
+        );
+
+        $this->assertNotSame(0, $result['exitCode']);
+        $this->assertStringContainsString('Customer API availability probe returned HTTP 200', $result['stderr']);
+    }
+
+    public function test_smoke_production_script_rejects_a_key_rejection_without_the_bearer_challenge(): void
+    {
+        $result = $this->runCustomerApiProbeSmoke(
+            'smoke-customer-api-missing-challenge',
+            '401',
+            '{"error":{"code":"unauthenticated","message":"A valid API key is required."}}',
+            "HTTP/2 401\r\ncache-control: no-store, private\r\nreferrer-policy: no-referrer\r\nx-request-id: 1\r\n",
+        );
+
+        $this->assertNotSame(0, $result['exitCode']);
+        $this->assertStringContainsString('missing WWW-Authenticate: Bearer', $result['stderr']);
+    }
+
+    /**
+     * Runs the public smoke against a stubbed curl that serves a healthy release
+     * plus one Customer API refusal response.
+     *
+     * @return array{exitCode: int, stdout: string, stderr: string}
+     */
+    private function runCustomerApiProbeSmoke(string $workspacePrefix, string $status, string $body, string $headers): array
+    {
+        $workspace = $this->makeShellWorkspace($workspacePrefix);
+
+        try {
+            $this->writeExecutable($workspace.'/curl', <<<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+output=''
+headers=''
+url=''
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output)
+            output="${2:-}"
+            shift 2 || shift
+            ;;
+        --dump-header)
+            headers="${2:-}"
+            shift 2 || shift
+            ;;
+        http://*|https://*)
+            url="$1"
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+case "$url" in
+    */up)
+        body='Application up'
+        meta='200'
+        ;;
+    */release-sha.txt)
+        body='2222222222222222222222222222222222222222'
+        meta='200'
+        ;;
+    */api/v1/*)
+        body="$STUB_API_BODY"
+        meta="$STUB_API_STATUS"
+        [ -z "$headers" ] || printf '%s' "$STUB_API_HEADERS" > "$headers"
+        ;;
+    *)
+        body='LHIE STORE'
+        meta='200|https://store.example/admin/login'
+        ;;
+esac
+[ -z "$output" ] || printf '%s' "$body" > "$output"
+printf '%s' "$meta"
+SH);
+
+            return $this->runShellScript(['bash', base_path('../scripts/smoke-production.sh')], [
+                'BASE_URL' => 'https://store.example',
+                'EXPECTED_APP_URL' => 'https://store.example',
+                'EXPECTED_RELEASE_SHA' => '2222222222222222222222222222222222222222',
+                'PATH' => $workspace.':'.(getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin'),
+                'SMOKE_PUBLIC_ONLY' => 'true',
+                'STUB_API_STATUS' => $status,
+                'STUB_API_BODY' => $body,
+                'STUB_API_HEADERS' => $headers,
+            ]);
         } finally {
             File::deleteDirectory($workspace);
         }

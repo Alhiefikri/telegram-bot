@@ -64,28 +64,44 @@ release_sha="$(tr -d '\r\n' < "$release_body")"
   || fail "$SMOKE_RELEASE_PATH returned an unexpected release identity"
 printf 'Release identity check passed: %s%s\n' "$BASE_URL" "$SMOKE_RELEASE_PATH"
 
-if [ "${SMOKE_EXPECT_CUSTOMER_API_MAINTENANCE:-false}" = "true" ]; then
-  api_body="$temporary_dir/customer-api.body"
-  api_headers="$temporary_dir/customer-api.headers"
-  api_status="$(curl --silent --show-error --max-time "$SMOKE_TIMEOUT" \
-    --header 'Accept: application/json' \
-    --header 'Authorization: Bearer release-smoke-invalid-key' \
-    --dump-header "$api_headers" \
-    --output "$api_body" --write-out '%{http_code}' "$BASE_URL/api/v1/__release_availability_probe__")"
-  [ "$api_status" = 503 ] || fail "Customer API availability probe returned HTTP $api_status"
-  case "$(tr -d '\r\n' < "$api_body")" in
-    *'"code":"api_maintenance"'*) ;;
-    *) fail "Customer API availability probe did not return api_maintenance" ;;
-  esac
-  grep -qi '^Retry-After: 60' "$api_headers" || fail "Customer API maintenance response is missing Retry-After: 60"
-  grep -qi '^Cache-Control: .*no-store' "$api_headers" || fail "Customer API maintenance response is missing no-store"
-  grep -qi '^Referrer-Policy: no-referrer' "$api_headers" || fail "Customer API maintenance response is missing no-referrer"
-  grep -qi '^X-Request-ID:' "$api_headers" || fail "Customer API maintenance response is missing X-Request-ID"
-  if grep -qi '^Access-Control-Allow-Origin:' "$api_headers"; then
-    fail "Customer API maintenance response unexpectedly contains CORS headers"
-  fi
-  printf 'Customer API maintenance gate check passed: %s/api/v1\n' "$BASE_URL"
+# The Owner switches the Customer API on and off from the Admin Dashboard, so
+# this probe asserts the refusal contract of whichever mode production serves
+# instead of pinning the Owner-editable setting at deploy time. Either an
+# invalid-key rejection or a maintenance gate must refuse without CORS,
+# caching, or a referrer leak, and both keep the X-Request-ID correlation.
+api_body="$temporary_dir/customer-api.body"
+api_headers="$temporary_dir/customer-api.headers"
+api_status="$(curl --silent --show-error --max-time "$SMOKE_TIMEOUT" \
+  --header 'Accept: application/json' \
+  --header 'Authorization: Bearer release-smoke-invalid-key' \
+  --dump-header "$api_headers" \
+  --output "$api_body" --write-out '%{http_code}' "$BASE_URL/api/v1/__release_availability_probe__")"
+case "$api_status" in
+  503)
+    case "$(tr -d '\r\n' < "$api_body")" in
+      *'"code":"api_maintenance"'*) ;;
+      *) fail "Customer API availability probe did not return api_maintenance" ;;
+    esac
+    grep -qi '^Retry-After: 60' "$api_headers" || fail "Customer API maintenance response is missing Retry-After: 60"
+    ;;
+  401)
+    case "$(tr -d '\r\n' < "$api_body")" in
+      *'"code":"unauthenticated"'*) ;;
+      *) fail "Customer API key rejection did not return unauthenticated" ;;
+    esac
+    grep -qi '^WWW-Authenticate: Bearer' "$api_headers" || fail "Customer API key rejection response is missing WWW-Authenticate: Bearer"
+    ;;
+  *)
+    fail "Customer API availability probe returned HTTP $api_status"
+    ;;
+esac
+grep -qi '^Cache-Control: .*no-store' "$api_headers" || fail "Customer API probe response is missing no-store"
+grep -qi '^Referrer-Policy: no-referrer' "$api_headers" || fail "Customer API probe response is missing no-referrer"
+grep -qi '^X-Request-ID:' "$api_headers" || fail "Customer API probe response is missing X-Request-ID"
+if grep -qi '^Access-Control-Allow-Origin:' "$api_headers"; then
+  fail "Customer API probe response unexpectedly contains CORS headers"
 fi
+printf 'Customer API refusal contract check passed (HTTP %s): %s/api/v1\n' "$api_status" "$BASE_URL"
 
 MINI_APP_DASHBOARD_URL=${TELEGRAM_MINI_APP_URL:-}
 if [ -z "$MINI_APP_DASHBOARD_URL" ]; then
