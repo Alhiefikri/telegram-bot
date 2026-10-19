@@ -61,6 +61,78 @@ final class SupplierAvailabilityTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->method() === 'POST');
     }
 
+    public function test_retirement_disables_only_unsupported_sources_and_keeps_money_and_local_stock(): void
+    {
+        [$retiredProduct, $retired, $retiredItem] = $this->mapped(stock: 3);
+        [$activeProduct, $active] = $this->mapped(stock: 2);
+        $retired->forceFill([
+            'provider' => 'retired-provider', 'balance_micros' => 9000000,
+            'reserved_balance_micros' => 2000000, 'sync_expires_at' => now()->addMinutes(5),
+        ])->save();
+        $retiredItem->forceFill(['reserved_quantity' => 2])->save();
+        foreach ([$retiredProduct, $activeProduct] as $product) {
+            $product->forceFill(['supplier_available_stock' => 7, 'supplier_available_until' => now()->addMinutes(5)])->save();
+        }
+        $activeBefore = $active->fresh()->getRawOriginal();
+
+        $migration = require database_path('migrations/2026_10_19_000001_retire_unsupported_supplier_connections.php');
+        $migration->up();
+        $migration->up();
+
+        $this->assertFalse($retired->fresh()->is_active);
+        $this->assertNull($retired->fresh()->sync_expires_at);
+        $this->assertSame(9000000, $retired->fresh()->balance_micros);
+        $this->assertSame(2000000, $retired->fresh()->reserved_balance_micros);
+        $this->assertSame(2, $retiredItem->fresh()->reserved_quantity);
+        $this->assertFalse($retiredProduct->supplierSources()->sole()->is_active);
+        $this->assertSame(3, $retiredProduct->fresh()->localAvailableStock());
+        $this->assertSame(0, $retiredProduct->fresh()->supplierAvailableStock());
+        $this->assertSame($activeBefore, $active->fresh()->getRawOriginal());
+        $this->assertTrue($activeProduct->supplierSources()->sole()->is_active);
+        $this->assertSame(9, $activeProduct->fresh()->availableStock());
+        Http::assertNothingSent();
+    }
+
+    public function test_retirement_stops_obsolete_notifications_without_changing_sent_or_active_families(): void
+    {
+        $obsolete = TelegramOutboundEffect::factory()->create([
+            'effect_type' => 'order.warranty_notification', 'state' => 'sending',
+            'claim_token' => 'retired-claim', 'lease_until' => now()->addMinute(),
+        ]);
+        $reminder = TelegramOutboundEffect::factory()->create(['effect_type' => 'order.warranty_deadline_reminder']);
+        $sent = TelegramOutboundEffect::factory()->create(['effect_type' => 'order.warranty_notification', 'state' => 'sent']);
+        $active = TelegramOutboundEffect::factory()->create(['effect_type' => 'receipt.credentials']);
+        $sentBefore = $sent->fresh()->getRawOriginal();
+        $activeBefore = $active->fresh()->getRawOriginal();
+
+        (require database_path('migrations/2026_10_19_000001_retire_unsupported_supplier_connections.php'))->up();
+
+        foreach ([$obsolete, $reminder] as $effect) {
+            $effect->refresh();
+            $this->assertSame(TelegramOutboundEffectState::ManualReview, $effect->state);
+            $this->assertNull($effect->claim_token);
+            $this->assertNull($effect->lease_until);
+            $this->assertNull($effect->next_attempt_at);
+        }
+        $this->assertSame($sentBefore, $sent->fresh()->getRawOriginal());
+        $this->assertSame($activeBefore, $active->fresh()->getRawOriginal());
+    }
+
+    public function test_existing_metadata_schema_upgrades_without_reapplying_columns_or_changing_its_batch(): void
+    {
+        $metadata = '2026_10_03_000001_add_supplier_account_metadata';
+        $batch = DB::table('migrations')->where('migration', $metadata)->value('batch');
+        DB::table('migrations')->where('migration', $metadata)->update(['migration' => '2026_10_03_000001_previous_supplier_contract']);
+        DB::table('migrations')->where('migration', '2026_10_19_000001_retire_unsupported_supplier_connections')->delete();
+
+        $this->artisan('migrate', ['--force' => true])->assertSuccessful();
+
+        $this->assertSame(1, DB::table('migrations')->where('migration', $metadata)->count());
+        $this->assertSame($batch, DB::table('migrations')->where('migration', $metadata)->value('batch'));
+        $this->assertFalse(DB::table('migrations')->where('migration', '2026_10_03_000001_previous_supplier_contract')->exists());
+        $this->artisan('migrate', ['--force' => true])->assertSuccessful();
+    }
+
     public function test_admin_stock_modal_explains_zero_safe_capacity_when_supplier_stock_is_positive_but_wallet_is_empty(): void
     {
         [$product, $supplier] = $this->mapped();

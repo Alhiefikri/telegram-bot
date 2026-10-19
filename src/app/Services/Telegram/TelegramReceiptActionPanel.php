@@ -3,8 +3,6 @@
 namespace App\Services\Telegram;
 
 use App\Models\Order;
-use App\Models\SupplierAccountUnit;
-use App\Services\Warranty\WarrantyOrderAccess;
 use InvalidArgumentException;
 
 /**
@@ -44,13 +42,6 @@ final class TelegramReceiptActionPanel
             $rows[] = [[
                 'text' => $this->locale->translateLocale($locale, 'receipt.actions.support_button'),
                 'url' => $supportUrl,
-            ]];
-        }
-        if ($order->exists && $order->customer?->telegram_id !== null
-            && SupplierAccountUnit::query()->where('order_id', $order->id)->exists()) {
-            $rows[] = [[
-                'text' => $this->locale->translateLocale($locale, 'order.warranty.title'),
-                'url' => app(WarrantyOrderAccess::class)->telegramUrl($order, $locale),
             ]];
         }
 

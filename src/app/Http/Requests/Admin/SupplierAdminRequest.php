@@ -29,9 +29,6 @@ final class SupplierAdminRequest extends FormRequest
                 if (! $this->has('currency_confirmed')) {
                     $this->merge(['currency_confirmed' => true]);
                 }
-                if ($selected === SupplierProvider::BuyMail && ! $this->has('exchange_rate_idr')) {
-                    $this->merge(['exchange_rate_idr' => 1]);
-                }
             }
         }
     }
@@ -50,7 +47,6 @@ final class SupplierAdminRequest extends FormRequest
                 'name' => ['required', 'string', 'max:120', 'not_regex:/[\x00-\x1F\x7F]/'],
                 'provider' => ['required', Rule::enum(SupplierProvider::class)],
                 'api_key' => [$action === 'store' ? 'required' : 'nullable', 'string', 'max:2048', 'not_regex:/[\x00-\x20\x7F]/'],
-                'webhook_secret' => ['nullable', 'string', 'max:256', 'regex:/\Awhsec_[A-Za-z0-9_-]{8,240}\z/D'],
                 'currency' => ['required', Rule::in(['USD', 'USDT', 'IDR', 'VND'])],
                 'currency_confirmed' => ['required', 'boolean'],
                 'exchange_rate_idr' => ['required', 'numeric', 'regex:/\A(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?\z/D', 'min:0.000001', 'max:1000000'],
@@ -120,9 +116,6 @@ final class SupplierAdminRequest extends FormRequest
             if ($selected !== null && ! $selected->requiresCurrencyConfirmation() && $this->input('currency') !== $selected->defaultCurrency()) {
                 $validator->errors()->add('currency', 'Mata uang harus sesuai provider.');
             }
-            if ($this->input('provider') === 'buymail' && ($this->input('currency') !== 'IDR' || ! preg_match('/\A1(?:\.0{1,6})?\z/D', (string) $this->input('exchange_rate_idr')))) {
-                $validator->errors()->add('currency', 'BuyMail menggunakan IDR dengan kurs 1.');
-            }
             if (in_array($this->input('provider'), ['arrs', 'warzone'], true) && ! $this->boolean('currency_confirmed')) {
                 $validator->errors()->add('currency_confirmed', 'Konfirmasi mata uang supplier diperlukan.');
             }
@@ -141,7 +134,7 @@ final class SupplierAdminRequest extends FormRequest
     private function safeMessages(string $field): array
     {
         return match ($field) {
-            'currency' => ['Mata uang harus sesuai provider.', 'BuyMail menggunakan IDR dengan kurs 1.'],
+            'currency' => ['Mata uang harus sesuai provider.'],
             'currency_confirmed' => ['Konfirmasi mata uang supplier diperlukan.'],
             'exchange_rate_idr' => array_values(array_filter(array_map(
                 fn (SupplierProvider $provider): ?string => SupplierExchangeRate::requirement($provider->label(), $provider->defaultCurrency()),

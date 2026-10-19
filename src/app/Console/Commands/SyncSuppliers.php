@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\SupplierProvider;
 use App\Models\Supplier;
 use App\Services\Suppliers\SupplierCatalogSync;
 use Illuminate\Console\Command;
@@ -23,6 +24,7 @@ final class SyncSuppliers extends Command
             return self::INVALID;
         }
         $connections = Supplier::query()->where('is_active', true)
+            ->whereIn('provider', SupplierProvider::cases())
             ->when($supplierId !== null,
                 fn ($query) => $query->whereKey((int) $supplierId),
                 fn ($query) => $query->where(fn ($due) => $due

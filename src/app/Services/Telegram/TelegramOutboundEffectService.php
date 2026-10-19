@@ -24,13 +24,11 @@ use App\Models\StockNotificationRecipient;
 use App\Models\StoreBalanceCompensation;
 use App\Models\StoreBalanceTopUp;
 use App\Models\StoreChannelSetting;
-use App\Models\SupplierAccountUnit;
 use App\Models\SupplierHealthEvent;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramBroadcastRecipient;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
-use App\Models\WarrantyClaim;
 use App\Services\AuditLogger;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\Suppliers\SupplierFulfillmentService;
@@ -532,44 +530,6 @@ class TelegramOutboundEffectService
                 ],
             ],
         );
-    }
-
-    public function recordWarrantyNotification(WarrantyClaim $claim): ?TelegramOutboundEffect
-    {
-        $customer = Order::with('customer')->find($claim->order_id)?->customer;
-        if ($customer?->telegram_id === null) {
-            return null;
-        }
-        $key = 'warranty:'.$claim->id.':'.$claim->state.':'.$claim->settlement_state.':customer:'.$customer->id;
-
-        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
-            'effect_group_key' => $key, 'sequence' => 1,
-            'effect_type' => TelegramOutboundEffectType::WarrantyNotification->value,
-            'source_type' => WarrantyClaim::class, 'source_id' => (string) $claim->id,
-            'target_type' => 'customer', 'telegram_chat_id' => (string) $customer->telegram_id,
-            'queue' => 'notifications', 'telegram_method' => 'sendMessage', 'locale' => $customer->locale,
-            'template_version' => 'warranty-notification-v1', 'state' => TelegramOutboundEffectState::Pending->value,
-            'attempts' => 0, 'next_attempt_at' => now(), 'outcome_metadata' => ['delivery_context' => 'warranty_notification'],
-        ]);
-    }
-
-    public function recordWarrantyDeadlineReminder(SupplierAccountUnit $unit): ?TelegramOutboundEffect
-    {
-        $customer = Order::with('customer')->find($unit->order_id)?->customer;
-        if ($customer?->telegram_id === null) {
-            return null;
-        }
-        $key = 'warranty-reminder:'.$unit->id.':customer:'.$customer->id;
-
-        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
-            'effect_group_key' => $key, 'sequence' => 1,
-            'effect_type' => TelegramOutboundEffectType::WarrantyDeadlineReminder->value,
-            'source_type' => SupplierAccountUnit::class, 'source_id' => (string) $unit->id,
-            'target_type' => 'customer', 'telegram_chat_id' => (string) $customer->telegram_id,
-            'queue' => 'notifications', 'telegram_method' => 'sendMessage', 'locale' => $customer->locale,
-            'template_version' => 'warranty-deadline-reminder-v1', 'state' => TelegramOutboundEffectState::Pending->value,
-            'attempts' => 0, 'next_attempt_at' => now(), 'outcome_metadata' => ['delivery_context' => 'warranty_deadline_reminder'],
-        ]);
     }
 
     /** Materialize the obligation inside the money/auth transaction. Recovery dispatches it. */

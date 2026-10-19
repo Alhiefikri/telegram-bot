@@ -15,7 +15,6 @@ use App\Services\OrderLifecycle;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Warranty\MissingFulfillmentRefundService;
 use App\Services\Warranty\WarrantyClaimService;
-use App\Services\Warranty\WarrantyNotificationPipeline;
 
 /** Uses the original registered entitlement, never an independent adjustment source. */
 final class BalanceAdjustmentRefundRecovery
@@ -77,7 +76,6 @@ final class BalanceAdjustmentRefundRecovery
             if ((int) OrderRefund::query()->where('payment_id', $payment->id)->where('state', 'confirmed')->sum('amount') === $payment->amount) {
                 app(OrderLifecycle::class)->applyPaymentRefunded($payment);
             }
-            app(WarrantyNotificationPipeline::class)->record($claim);
         } else {
             app(SupplierFulfillmentService::class)->completeMissingRefund($fulfillment, $refund);
         }

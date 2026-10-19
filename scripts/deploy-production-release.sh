@@ -573,8 +573,6 @@ verify_release_gates() {
     --queue=telegram-broadcast \
     --queue=telegram-stock \
     --queue=suppliers \
-    --queue=supplier-claims \
-    --queue=supplier-refunds \
     --queue=binance-verification </dev/null; then
     echo "Release gate failed: an operational queue exceeded its threshold." >&2
     return 1

@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
-use App\Jobs\ProcessSupplierDeposit;
 use App\Models\AuditLog;
 use App\Models\OrderItem;
 use App\Models\Product;
@@ -11,7 +10,6 @@ use App\Models\ProductQuantityPriceTier;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
-use App\Models\SupplierDeposit;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
@@ -103,12 +101,9 @@ final class SupplierAdminTest extends TestCase
     {
         $this->owner();
         Http::fake();
-        foreach (['prodseller' => ['ProdSeller', 'USDT'], 'csxstore' => ['CSxStore', 'USD'], 'aivault' => ['AI Vault Hub', 'USD'], 'nystore' => ['NyStore Official', 'USD'], 'toolorax' => ['ToolOraX (ShopBot)', 'USD'], 'buymail' => ['BuyMail', 'IDR']] as $provider => [$name, $currency]) {
+        foreach (['prodseller' => ['ProdSeller', 'USDT'], 'csxstore' => ['CSxStore', 'USD'], 'aivault' => ['AI Vault Hub', 'USD'], 'nystore' => ['NyStore Official', 'USD'], 'toolorax' => ['ToolOraX (ShopBot)', 'USD']] as $provider => [$name, $currency]) {
             $input = $this->connectionInput(['provider' => $provider]);
             unset($input['name'], $input['currency'], $input['currency_confirmed']);
-            if ($provider === 'buymail') {
-                unset($input['exchange_rate_idr']);
-            }
             $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $input)->assertRedirect();
             $supplier = Supplier::query()->where('provider', $provider)->sole();
             $this->assertSame($name, $supplier->name);
@@ -184,10 +179,7 @@ final class SupplierAdminTest extends TestCase
             $this->assertSame($currency, $saved->currency);
             $this->assertSame((string) $rate, rtrim(rtrim((string) $saved->exchange_rate_idr, '0'), '.'));
         }
-        $this->withSession(['auth.password_confirmed_at' => time()])
-            ->post(route('admin.suppliers.store'), $this->connectionInput(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1]))->assertRedirect();
-        $this->assertSame('1.000000', Supplier::query()->where('provider', 'buymail')->sole()->exchange_rate_idr);
-        $this->assertSame(3, Supplier::query()->count());
+        $this->assertSame(2, Supplier::query()->count());
         Http::assertNothingSent();
     }
 
@@ -250,80 +242,6 @@ final class SupplierAdminTest extends TestCase
         $this->assertSame(0, Supplier::query()->count());
     }
 
-    public function test_buymail_key_is_managed_in_dashboard_with_idr_and_no_conversion_markup(): void
-    {
-        $this->owner();
-        $input = $this->connectionInput(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1]);
-        $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $input)->assertRedirect();
-        $supplier = Supplier::query()->sole();
-        $this->assertSame('IDR', $supplier->currency);
-        $this->assertSame(self::KEY, $supplier->api_key);
-        $this->assertStringNotContainsString(self::KEY, DB::table('suppliers')->value('api_key'));
-        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertSee('BuyMail')->assertDontSee(self::KEY);
-        $this->patch(route('admin.suppliers.update', $supplier), array_replace($input, ['api_key' => '', 'version' => 1, 'exchange_rate_idr' => 16000]))->assertStatus(422);
-    }
-
-    public function test_buymail_deposit_refresh_requires_recent_confirmation_before_recovery_or_http(): void
-    {
-        $this->owner();
-        Queue::fake();
-        Http::fake();
-        $supplier = $this->supplier(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1, 'external_account_id' => '123']);
-        $deposit = SupplierDeposit::create([
-            'supplier_id' => $supplier->id, 'idempotency_key' => (string) Str::uuid(),
-            'account_id_snapshot' => '123', 'amount' => 100000, 'state' => 'pending', 'operation' => 'create',
-        ]);
-        foreach ([null, 'TOPUP1'] as $externalId) {
-            $deposit->update(['external_id' => $externalId]);
-            foreach ([null, time() - 901, time() + 60] as $confirmedAt) {
-                $this->withSession(['auth.password_confirmed_at' => $confirmedAt])
-                    ->post(route('admin.suppliers.buymail.deposit.refresh', $deposit))->assertStatus(428);
-                $this->assertSame('pending', $deposit->fresh()->state);
-            }
-        }
-        Queue::assertNothingPushed();
-        Http::assertNothingSent();
-    }
-
-    public function test_buymail_deposit_refresh_with_recent_confirmation_preserves_recovery_identity(): void
-    {
-        $this->owner();
-        Queue::fake();
-        Http::fake(fn () => Http::response(['deposit' => [
-            'id' => 'TOPUP1', 'amount' => 100000, 'currency' => 'IDR', 'status' => 'paid',
-            'payment_url' => 'https://payments.example.test/topup1', 'expires_at' => now()->addHour()->utc()->toIso8601String(),
-        ]]));
-        $supplier = $this->supplier(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1, 'external_account_id' => '123']);
-        $deposit = SupplierDeposit::create([
-            'supplier_id' => $supplier->id, 'idempotency_key' => 'original-intent',
-            'account_id_snapshot' => '123', 'amount' => 100000, 'state' => 'requested', 'operation' => 'create',
-        ]);
-        $this->withSession(['auth.password_confirmed_at' => time()])
-            ->post(route('admin.suppliers.buymail.deposit.refresh', $deposit))->assertRedirect();
-        Queue::assertPushed(ProcessSupplierDeposit::class, fn ($job) => $job->depositId === $deposit->id);
-        Http::assertNothingSent();
-        $deposit->update(['external_id' => 'TOPUP1', 'state' => 'pending']);
-        $this->post(route('admin.suppliers.buymail.deposit.refresh', $deposit))->assertRedirect();
-        $this->assertSame('paid', $deposit->fresh()->state);
-        $this->assertSame('original-intent', $deposit->idempotency_key);
-        $this->assertSame(1, SupplierDeposit::count());
-        Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/deposits/TOPUP1'));
-    }
-
-    public function test_buymail_webhook_secret_is_saved_privately_and_blank_updates_preserve_it(): void
-    {
-        $this->owner();
-        $secret = 'whsec_synthetic-fixture-secret';
-        $input = $this->connectionInput(['provider' => 'buymail', 'currency' => 'IDR', 'exchange_rate_idr' => 1, 'webhook_secret' => $secret]);
-        $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $input)->assertRedirect();
-        $supplier = Supplier::query()->sole();
-        $this->assertSame($secret, $supplier->webhook_secret);
-        $this->assertStringNotContainsString($secret, DB::table('suppliers')->value('webhook_secret'));
-        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertDontSee($secret)->assertSee(route('buymail.webhook', $supplier));
-        $this->patch(route('admin.suppliers.update', $supplier), array_replace($input, ['api_key' => '', 'webhook_secret' => '', 'version' => 1]))->assertRedirect();
-        $this->assertSame($secret, $supplier->fresh()->webhook_secret);
-        $this->assertStringNotContainsString($secret, json_encode(AuditLog::query()->get()->toArray()));
-    }
 
     public function test_only_owner_and_admin_can_manage_connections_catalog_and_monitor(): void
     {

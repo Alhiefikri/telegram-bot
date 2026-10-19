@@ -8,8 +8,7 @@
     "test:js": "node --test tests/JavaScript/*.test.js",
     "test:browser:admin": "npm run build && playwright test tests/Browser/admin-dashboard-responsive.spec.js",
     "test:browser:customer": "npm run build && playwright test tests/Browser/admin-dashboard-responsive.spec.js -g \"customer checkout\"",
-    "test:browser:buymail": "npm run build && playwright test tests/Browser/buymail-warranty.spec.js",
-    "test:browser:buymail:ci": "playwright test tests/Browser/buymail-warranty.spec.js",
+    "test:browser:suppliers": "npm run build && playwright test tests/Browser/supplier-connection.spec.js",
     "test:browser:docker": "playwright test tests/Browser/docker-production-smoke.spec.js",
     "prepare": "cd .. && husky src/.husky"
   },

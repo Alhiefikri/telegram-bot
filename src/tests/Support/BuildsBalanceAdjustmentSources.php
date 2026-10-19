@@ -16,7 +16,7 @@ use Illuminate\Support\Str;
 
 trait BuildsBalanceAdjustmentSources
 {
-    use BuildsBuyMailWarrantyFixture { fixture as warrantyFixture; }
+    use BuildsHistoricalRefundFixture { fixture as warrantyFixture; }
 
     protected function adjustmentTopUp(Customer $customer): StoreBalanceTopUp
     {

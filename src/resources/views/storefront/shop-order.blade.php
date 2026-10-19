@@ -115,12 +115,6 @@
                         </div>
                         <div class="invoice-paid-sidebar">
                             @include('storefront.partials.shop.order-summary')
-                            @if($warrantyUrl ?? null)
-                                <section class="invoice-warranty-section rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] p-3">
-                                    <a class="inline-flex min-h-11 items-center font-bold text-[var(--sf-accent)] underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" href="{{ $warrantyUrl }}">{{ __('order.warranty.title', [], $storefrontLocale) }}</a>
-                                    <p class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ __('order.warranty.support', [], $storefrontLocale) }}</p>
-                                </section>
-                            @endif
                             @if ($accessKey)
                                 <div class="invoice-recovery-section">
                                     @include('storefront.partials.shop.recovery-key')

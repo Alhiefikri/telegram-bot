@@ -30,8 +30,6 @@ use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Jobs\SendTelegramReceiptTxt;
 use App\Jobs\SendUsdtTopUpReceipt;
-use App\Jobs\SendWarrantyDeadlineReminder;
-use App\Jobs\SendWarrantyNotification;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\StockNotificationRecipient;
 use App\Models\TelegramBroadcastRecipient;
@@ -59,8 +57,6 @@ final class TelegramOutboundEffectDispatcher
 
         $jobEnqueuedAt ??= now()->toISOString();
         $pending = match ($effect->effect_type) {
-            TelegramOutboundEffectType::WarrantyNotification->value => SendWarrantyNotification::dispatch((string) $effect->id),
-            TelegramOutboundEffectType::WarrantyDeadlineReminder->value => SendWarrantyDeadlineReminder::dispatch((string) $effect->id),
             TelegramOutboundEffectType::BalanceAdjustmentNotice->value => SendBalanceAdjustmentNotice::dispatch((string) $effect->id),
             TelegramOutboundEffectType::SupplierHealth->value => SendSupplierHealthNotification::dispatch((string) $effect->id),
             TelegramOutboundEffectType::AdminOrderReviewNotification->value => SendAdminOrderPaidNotification::dispatch(

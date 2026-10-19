@@ -38,7 +38,7 @@ final class AdminSupplierController extends Controller
 
     public function update(SupplierAdminRequest $request, Supplier $supplier, SupplierManager $manager)
     {
-        if ($request->filled('api_key') || $request->filled('webhook_secret') || $request->input('provider') !== $supplier->provider) {
+        if ($request->filled('api_key') || $request->input('provider') !== $supplier->provider) {
             app(SupplierOperationConfirmation::class)->requireRecent($request);
         }
 

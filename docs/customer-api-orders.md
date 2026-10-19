@@ -346,7 +346,7 @@ membership; pagination is not a frozen snapshot.
 | `created_at` | ISO 8601 timestamp with timezone |
 
 `review` takes precedence over partial progress; counts and delivery availability remain
-separate so an authorized BuyMail partial result can coexist with manual review.
+separate. Manual review does not authorize credential release.
 `complete` means all ordered units are currently releasable, not simply that payment or
 Order processing finished. A missing-unit refund can settle the Order while delivery
 remains `partial`. A full refund reports the original Payment amount as confirmed,
@@ -441,8 +441,8 @@ appears in any response.
 Delivery holds the owned Order shared while deciding entitlement and projecting existing
 units. Canonical refund, warranty and fulfillment writers take that Order exclusively;
 the read never takes a wallet lock or reverses the writer lock order. It first checks
-paid-at/Payment/Order/lifecycle and late-payment review, including the existing committed
-BuyMail partial-release exception, on every request. Only then does it load the next
+paid-at/Payment/Order/lifecycle and late-payment review on every request.
+Only then does it load the next
 bounded page of non-retired allocated rows in ascending ID order: at most the requested
 `limit`, plus one look-ahead row that is used only to decide whether another page exists
 and is never decrypted or projected. Credential fields for the page are read through
@@ -605,25 +605,15 @@ not owned by this continuation.
 
 ## S07 verification (2026-10-16)
 
-The local PostgreSQL regression batch ran `CustomerApiOrderReadTest`,
-`SupplierFulfillmentTest`, `BuyMailFulfillmentTest`,
-`CredentialDeliveryPresentationTest` and `UsdtOrderRefundPostgresConcurrencyTest`:
-55 tests, 863 assertions passed. The initial SQLite batch of the first four files passed
-49 tests, 799 assertions. The API tests exercise canonical checkout and current rotated-key
-ownership; supplier/warranty fixtures cover blocked mixed local results, ambiguous purchase
-holds, manual replacement, authorized partial BuyMail units, missing-unit refunds and
-per-account warranty retirement. Invalid ciphertext is tolerated by metadata history but
-delivery fails closed. These are fixture provider contracts, not live supplier qualification.
-
-After the final code/formatting changes, the focused PostgreSQL rerun passed 14 tests,
-410 assertions: all order-read cases (including the 1 MiB response bound), mixed unknown
-supplier recovery, BuyMail partial/warranty retirement and the six existing original-currency
-refund concurrency cases. Pint completed on the changed PHP files; LSP diagnostics for
-the new controller/service reported no issues.
-The final SQLite compatibility batch passed 125 tests, 1,552 assertions across
-`CustomerApiOrderReadTest`, `CustomerApiOrderTest`, `CredentialDeliveryPresentationTest`,
-`OrderCredentialMailTest`, `WarrantyClaimTest`, `SupplierFulfillmentTest` and
-`BuyMailFulfillmentTest`.
+Historical S07 verification used synthetic supplier and historical-refund fixtures,
+including provider-specific suites that have since been retired. It is not current
+verification of the maintained suite. Current regression entry points are
+`CustomerApiOrderReadTest`, `SupplierFulfillmentTest`, `HistoricalOrderRefundTest`,
+`CredentialDeliveryPresentationTest` and `UsdtOrderRefundPostgresConcurrencyTest`.
+They cover ownership, blocked mixed local results, ambiguous purchase holds,
+missing-unit refunds and retired credential safety. Invalid ciphertext is tolerated
+by metadata history but delivery fails closed. These are fixture contracts, not
+live supplier qualification.
 
 ### Disposable HTTP and worker-loss recovery
 

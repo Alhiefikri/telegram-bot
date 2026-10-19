@@ -1932,7 +1932,6 @@
       .invoice-order-summary,
       .invoice-support-chooser,
       .invoice-delivery-panel,
-      .invoice-warranty-section,
       .invoice-recovery-section .neo-panel
     ) {
     min-width: 0;

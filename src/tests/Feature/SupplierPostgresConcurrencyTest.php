@@ -154,7 +154,7 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         Http::fake(fn () => throw new ConnectionException('Accepted purchase response lost'));
         app(SupplierFulfillmentService::class)->process($f->id);
         $reference = SupplierPurchase::sole()->reference;
-        $f->update(['next_attempt_at' => now()->subSecond()]);
+        $f->refresh()->update(['next_attempt_at' => now()->subSecond()]);
         Http::swap(new Factory);
         Http::preventStrayRequests();
         $results = $this->race([

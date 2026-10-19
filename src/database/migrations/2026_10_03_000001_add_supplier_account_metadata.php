@@ -7,8 +7,16 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    public function shouldRun(): bool
+    {
+        return ! Schema::hasColumn('suppliers', 'external_account_id');
+    }
+
     public function up(): void
     {
+        if (Schema::hasColumn('suppliers', 'external_account_id')) {
+            return;
+        }
         Schema::table('suppliers', function (Blueprint $table): void {
             $table->string('external_account_id', 128)->nullable();
             $table->json('account_metadata')->nullable();
@@ -19,7 +27,7 @@ return new class extends Migration
         });
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE suppliers DROP CONSTRAINT supplier_money_guard');
-            DB::statement("ALTER TABLE suppliers ADD CONSTRAINT supplier_money_guard CHECK ((balance_micros IS NULL OR balance_micros >= 0) AND reserved_balance_micros >= 0 AND exchange_rate_idr > 0 AND version > 0 AND currency IN ('USD', 'USDT', 'IDR') AND (provider <> 'buymail' OR (currency = 'IDR' AND exchange_rate_idr = 1)))");
+            DB::statement("ALTER TABLE suppliers ADD CONSTRAINT supplier_money_guard CHECK ((balance_micros IS NULL OR balance_micros >= 0) AND reserved_balance_micros >= 0 AND exchange_rate_idr > 0 AND version > 0 AND currency IN ('USD', 'USDT', 'IDR'))");
         }
     }
 

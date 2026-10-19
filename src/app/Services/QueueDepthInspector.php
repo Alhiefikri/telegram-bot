@@ -17,8 +17,6 @@ class QueueDepthInspector
             'telegram-broadcast',
             'telegram-stock',
             'suppliers',
-            'supplier-claims',
-            'supplier-refunds',
             (string) config('services.binance.verification_queue', 'binance-verification'),
         ];
     }

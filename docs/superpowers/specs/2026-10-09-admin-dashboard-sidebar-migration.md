@@ -329,7 +329,7 @@ The following tickets are intentionally small and ordered. Each ticket must keep
 - Shell to replace: `src/resources/views/admin/dashboard/header.blade.php`, `compact-header.blade.php`, `desktop-navigation.blade.php`, `mobile-navigation.blade.php`. Tab partials remain in that same directory.
 - Browser ownership: `src/resources/js/app.js`, `src/resources/js/admin-dashboard.js`, and the existing `admin-dashboard/account-input-workflow.js` composition pattern. One Admin entrypoint and one `Alpine.start()`; keep Storefront entry separate.
 - Presentation: `src/resources/views/components/admin-dashboard/`, `src/resources/css/app.css`, existing theme initialization/toggle.
-- Test map: `src/tests/Feature/AdminDashboardAccessTest.php`, `AdminDashboardOverviewTest.php`, `AdminDashboardBladeComponentsTest.php`, `AdminDashboardReturnTargetsTest.php`, `AdminDashboardPaymentModeTest.php`, `AdminDashboardProductFormsTest.php`, `AdminDashboardStockFlowsTest.php`, `AdminDashboardSalesRenderingTest.php`, `AdminDashboardReportingTest.php`, `AdminOrderPaymentOperationsTest.php`, `AdminStoreChannelTest.php`, `AdminBalanceAdjustmentDashboardTest.php`; `src/tests/JavaScript/`; `src/tests/Browser/admin-dashboard-responsive.spec.js`, `buymail-warranty.spec.js`.
+- Test map: `src/tests/Feature/AdminDashboardAccessTest.php`, `AdminDashboardOverviewTest.php`, `AdminDashboardBladeComponentsTest.php`, `AdminDashboardReturnTargetsTest.php`, `AdminDashboardPaymentModeTest.php`, `AdminDashboardProductFormsTest.php`, `AdminDashboardStockFlowsTest.php`, `AdminDashboardSalesRenderingTest.php`, `AdminDashboardReportingTest.php`, `AdminOrderPaymentOperationsTest.php`, `AdminStoreChannelTest.php`, `AdminBalanceAdjustmentDashboardTest.php`; `src/tests/JavaScript/`; `src/tests/Browser/admin-dashboard-responsive.spec.js`, `supplier-connection.spec.js`.
 
 The existing `navigation.tabs` also serves tab normalization. Extend/replace its presentation without accidentally changing unknown-tab fallback to `stats`, special controller gates, or `AdminProductDashboardState` inputs. Do not replace `forActiveTab()` with the eager `forAdmin()` builder to populate the sidebar.
 
@@ -347,7 +347,7 @@ Keep the four real existing summary values, existing day/earnings boundaries, an
 
 Feature parity includes existing linked workflow pages, not only ten tab bodies. Use the reusable shell on these authenticated pages while preserving route/middleware/forms/data scopes:
 
-- Operational ownership (#597): `admin.orders.show`; Manual Fulfillment Review index/detail; Manual Delivery Review (`admin.telegram-outbound-effects`) index/detail; supplier catalog/import, product mapping/pricing, purchases/recovery, warranty/refund/replacement, and BuyMail deposit/history. Existing routes and controllers remain canonical; child pages activate Pesanan or Supplier context without claiming they are new tabs.
+- Operational ownership (#597): `admin.orders.show`; Manual Fulfillment Review index/detail; Manual Delivery Review (`admin.telegram-outbound-effects`) index/detail; supplier catalog/import, product mapping/pricing and purchases/recovery. Existing routes and controllers remain canonical; child pages activate Pesanan or Supplier context without claiming they are new tabs.
 - Financial ownership (#598): balance reports (`admin.balance-reports.index` view), IDR adjustment/reversal (`admin.store-balance.adjustments` view), USDT review/incident (`admin.store-balance.usdt-review` view). Existing Owner/readiness/report gates remain separate and password-bound financial confirmations remain unchanged.
 - Products (#597): storefront banners, Telegram welcome/banner upload and clear controls, default catalog image, localized product/family content and icons/custom-emoji metadata, quantity price tiers, grouping, stock secrets redaction, bulk stock delete, and structured/legacy intake are preserved. The prototype's simple product tiles do not replace these real controls.
 - Auth login and password-confirm surfaces are not converted into an authenticated sidebar. Their forms, intended redirects, theme and shared primitive styling are checked for regression.
@@ -385,7 +385,7 @@ Run from `src/` after reading the existing browser fixture/environment setup:
 - `php artisan test --filter=AdminDashboard` for dashboard behavior; include impacted order/payment, balance, supplier, warranty, channel, and auth feature classes rather than assuming this filter covers linked workflows.
 - `npm run test:js` (Node built-in runner, existing Alpine module conventions).
 - `npm run test:browser:admin` (already builds Vite and runs the responsive browser file).
-- `npm run test:browser:buymail` for affected supplier/deposit/warranty browser workflows.
+- `npm run test:browser:suppliers` for supplier connection, password-confirmation and saved-key privacy workflows.
 - `npm run build` when build evidence is needed independently; do not repeat the build immediately if the browser script already ran it.
 
 Feature tests protect actual permission/validation/redirect/money-unit/secret boundaries. Permanent JS tests protect drawer state transitions/races/focus/cleanup. Browser tests protect consumer-visible navigation and feature operations, not exact border classes or changed copy. Remove old incidental/source-text tests instead of rewriting them around new implementation details.

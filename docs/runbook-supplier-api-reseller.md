@@ -6,16 +6,24 @@ Supplier management is private to Owner/Admin. Customer catalog, invoices, produ
 
 Supplier Balance is the operator's money at the external shop, not Customer Store Balance. A supplier's stock count is not owned inventory: availability is bounded by balance, existing commitments, freshness, equivalent-product mapping and minimum-profit policy. Customer payment can be Paid while Supplier Fulfillment is still pending or in Manual Fulfillment Review.
 
+### Retired supplier connections (2026-10-19)
+
+Only providers in `SupplierProvider` can be selected, synchronized or used for new fulfillment. The retirement migration disables unsupported connections and source mappings, clears affected external stock projections, and parks pending, sending or failed retired warranty notifications in Manual Delivery Review. It preserves Orders, purchases, financial holds, refund entitlements, sent notifications and local stock; rollback does not reactivate unsupported connections. Supported suppliers remain available, with affected mixed-source Product projections refreshed through the existing sync path.
+
+The account-metadata migration skips existing schema through `shouldRun` when `external_account_id` already exists. The retirement migration reconciles the historical migration-ledger entry to the neutral filename while preserving its original batch, avoiding duplicate DDL and a permanently pending renamed migration. Historical account units, claims and encrypted credentials remain available to the shared refund and credential-safety logic. New provider-specific claims, account confirmation, deposits, webhook processing and reminder delivery are removed. Historical partial refunds and definitively missing-unit refunds retain their original payment-currency, debit-cap and external-transfer evidence checks.
+
+Local verification exercised fresh SQLite/PostgreSQL migrations, an existing-schema upgrade with original migration-batch preservation, supplier/refund/pricing regressions, IDR/USDT refund races and competing supplier recovery. The supplier browser regression passed creation, password rejection/cancellation, encrypted key storage, key rotation and catalog navigation. Direct Admin smoke checked all nine remaining providers, supplier monitor/catalog navigation and 390px/1280px layouts; the production asset build and all 180 JavaScript tests passed. The full SQLite run was not green: four snapshot-array ordering assertions failed in `UsdtTopUpReviewTest` and `UsdtTopUpSettlementTest`; those unrelated files remain unchanged. No production mutation, real supplier purchase, CI run or deployment was performed.
+
 ## Setup through Admin
 
-Dashboard koneksi supplier tetap mengelola API key, saldo, sinkronisasi, deposit, dan pemulihan. Dari Produk pilih **Kelola produk**, lalu buka accordion **Supplier** untuk mencari item katalog, menghubungkan sumber, mengatur urutan utama/cadangan, atau menonaktifkan mapping. Detail, stok lokal, harga, dan gambar berada di accordion terpisah pada workspace yang sama. Isian tetap berada di memori halaman saat accordion ditutup; simpan per bagian sebelum meninggalkan halaman. Impor katalog membuka draft langsung di workspace. Persentase keuntungan memakai satuan biasa, misalnya 12,5 untuk 12,5%, dengan konversi tepat ke basis points.
+Dashboard koneksi supplier tetap mengelola API key, saldo, sinkronisasi, dan pemulihan. Dari Produk pilih **Kelola produk**, lalu buka accordion **Supplier** untuk mencari item katalog, menghubungkan sumber, mengatur urutan utama/cadangan, atau menonaktifkan mapping. Detail, stok lokal, harga, dan gambar berada di accordion terpisah pada workspace yang sama. Isian tetap berada di memori halaman saat accordion ditutup; simpan per bagian sebelum meninggalkan halaman. Impor katalog membuka draft langsung di workspace. Persentase keuntungan memakai satuan biasa, misalnya 12,5 untuk 12,5%, dengan konversi tepat ke basis points.
 
 Daftar Produk menyediakan pencarian nama produk, pilihan, dan family lintas halaman. Urutan awal adalah Nama A–Z; pilihan jumlah produk, terbaru, harga, dan urutan katalog diterapkan sebelum pagination. Filter tersimpan di URL dan ikut tautan halaman; Reset mengembalikan urutan awal. Family tetap utuh saat salah satu produknya cocok. Thumbnail 56px dan label gambar khusus/default membedakan gambar family dari gambar produk; status Web, Bot, dan Channel pada produk tidak disamakan. Header workspace menampilkan gambar Web tersimpan dan tombol Atur gambar. Shortcut Langsung ke pengaturan produk membuka Detail bila semua bagian tertutup dan memindahkan fokus ke bagian aktif.
 
 Form Detail produk tidak lagi menampilkan Spesifikasi tambahan & dukungan (jenis produk, durasi akses, region, jenis akun, batas perangkat, yang termasuk, batasan penggunaan, estimasi pemenuhan, dan kebijakan dukungan). Penyimpanan detail tidak mengirim ulang field tersebut; nilai lama tetap tersimpan, tanpa penghapusan data atau perubahan tampilan Web Storefront yang memakai metadata lama.
 
 1. Open **Admin → Supplier Reseller** and fill the connection form. Clicking **Buat/Simpan supplier** opens an inline password dialog if recent confirmation is missing; successful confirmation resumes saving automatically. Incorrect passwords or cancelling retain the API key and other inputs in the current browser form. No secret is flashed to server session or persisted to browser storage. Operational recovery still requires recent confirmation.
-2. Add a connection: supported provider, API key, IDR conversion rate (up to six decimal places), active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; BuyMail uses IDR with rate 1; Nastele uses VND. The rate is the IDR value of **one** unit of that currency and is validated against the plausible band recorded for it (Nastele VND: `0.1`–`0.999999`); an implausible value is rejected server-side with an Indonesian explanation however the request arrived and must be corrected explicitly, see `suppliers:rate-audit`. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
+2. Add a connection: supported provider, API key, IDR conversion rate (up to six decimal places), active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; Nastele uses VND. The rate is the IDR value of **one** unit of that currency and is validated against the plausible band recorded for it (Nastele VND: `0.1`–`0.999999`); an implausible value is rejected server-side with an Indonesian explanation however the request arrived and must be corrected explicitly, see `suppliers:rate-audit`. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
 4. For ARRS/Warzone, confirm the actual account currency with the supplier. Also obtain authoritative currency evidence for the actual NyStore/ToolOraX accounts before activation or spend. Dollar-like presentation and USDT funding are not wallet-currency evidence. A mismatch must block activation and receive contract review, not a forced dropdown/ENV override.
 5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
@@ -57,7 +65,7 @@ A rate is only accepted inside the plausible band for its currency:
 both `store` and `update`, so a rupiah-per-USDT figure is rejected with an
 Indonesian explanation even when the request is sent outside the browser form,
 and nothing is written. Other providers keep their existing contract (ProdSeller
-16000, BuyMail exactly 1); `SupplierPricing::isEligible()`,
+16000); `SupplierPricing::isEligible()`,
 `SupplierAvailability::refreshLocked()` and `ProductSupplierManager` also refuse
 an out-of-band stored rate, so it can never authorize a purchase, a capacity
 projection or an automatic retail price. New connections no longer prefill a
@@ -181,7 +189,7 @@ overflow at 390 px in light/dark checks. PostgreSQL race cases live beside the
 existing supplier release group; run the commands below with
 `--filter=SupplierPostgresConcurrencyTest` to include the Nastele races.
 
-Final local checks: 364 non-race supplier/BuyMail/pricing tests passed with 2449
+Historical local checks: 364 non-race supplier/pricing tests passed with 2449
 assertions; all 13 `SupplierPostgresConcurrencyTest` scenarios passed with 185
 assertions on disposable PostgreSQL 16, including the two Nastele races. These
 are local results, not a production deployment, CI run, or exactly-once guarantee
@@ -260,7 +268,7 @@ Bukti lokal 14 Oktober 2026:
 - Top-up langsung di supplier dideteksi pada tick sync yang sudah jatuh tempo. Koneksi sehat biasanya dibaca paling cepat tiap menit; ProdSeller memakai interval konservatif `max(60, ceil((jumlah SKU + 2) × 900 / 180))` detik karena setiap SKU bisa membutuhkan detail GET. Ini mengurangi full-catalog polling dan menyisakan budget untuk recovery/purchase. Freshness checkout tetap lima menit; katalog besar yang tidak dapat diperbarui dalam budget akan kedaluwarsa, **bukan** mendapat freshness palsu.
 - Angka public adalah kapasitas pembelian aman, bukan raw stock supplier. Jika tetap 4 setelah sync berhasil, bandingkan saldo tersedia (total dikurangi dana ditahan), biaya/unit, unit ditahan, batas quantity provider, dan harga tier retail mulai quantity 5 terhadap minimum profit. Saldo dan raw stock besar tidak boleh melewati tier yang membuat pembelian rugi. Purchase dengan debit belum terselesaikan tetap menjaga wallet observation sebelumnya; selesaikan recovery, jangan menghapus hold.
 - Kegagalan sync menyimpan `sync_failures` dan `sync_next_attempt_at` di DB: jeda 2, 4, 8, 16, lalu maksimal 30 menit. HTTP 429 dan local budget exhaustion menunggu setidaknya cooldown yang diketahui; sukses mereset failure count. Scheduler, `--supplier`, dan tombol Admin tidak dapat melewati backoff kegagalan, termasuk setelah Redis/cache hilang. Manual sync koneksi sehat tetap dapat meminta refresh sebelum interval otomatis.
-- Client supplier umum menyimpan cooldown bersama per provider setelah HTTP 429, termasuk response pooled detail; `Retry-After` menerima seconds atau HTTP-date (maksimal satu jam, atau enam jam untuk Canboso), dengan fallback 15 menit untuk ProdSeller dan satu menit untuk provider lain. Selama cooldown, GET/POST berhenti sebelum HTTP. Local limiter tetap memisahkan read budget dari kapasitas purchase; tidak ada retry POST otomatis atau perubahan aturan ambiguity. BuyMail mempertahankan limiter/cooldown adapter existing.
+- Client supplier umum menyimpan cooldown bersama per provider setelah HTTP 429, termasuk response pooled detail; `Retry-After` menerima seconds atau HTTP-date (maksimal satu jam, atau enam jam untuk Canboso), dengan fallback 15 menit untuk ProdSeller dan satu menit untuk provider lain. Selama cooldown, GET/POST berhenti sebelum HTTP. Local limiter tetap memisahkan read budget dari kapasitas purchase; tidak ada retry POST otomatis atau perubahan aturan ambiguity.
 
 ### Automated pricing regression
 
@@ -405,10 +413,20 @@ recover their own API-origin Order through `GET /api/v1/orders/{id}` and
 `GET /api/v1/orders/{id}/delivery`; current same-account keys can read Orders accepted
 under an older key. These reads never wake a worker, buy again or resend Telegram.
 `paid` with processing/review and zero released units is a valid result, including mixed
-local/supplier Orders. Committed BuyMail partial units retain their existing release
-exception; retired warranty/refund units stay unavailable. Use the existing recovery
+local/supplier Orders. Manual review does not authorize credential release;
+retired warranty/refund units stay unavailable. Use the existing recovery
 command/worker below, not another API purchase, for lost Redis work. See
 [API order schemas and worker-loss proof](customer-api-orders.md#owned-history-status-and-delivery-s07).
+
+### Bulk purchase waiting (2026-10-19)
+
+- Supplier purchase POSTs wait up to 90 seconds. GETs remain bounded to 12 seconds and connections to four seconds. ToolOraX's optional create-to-detail hydration fits within 102 seconds of HTTP time, below the existing 120-second supplier job and 180-second queue visibility timeout.
+- A correlated supplier result normalized as `pending` keeps `awaiting_delivery`, including an intermediate partial credential list. Partial processing data is not released to the buyer. `suppliers:recover` rediscovers the durable work and the worker reads the same order after its one-minute due time; pending results and transient lookup failures do not impose a whole-order age cutoff.
+- Complete recognized delivery follows the existing allocation and Telegram receipt ledger. Large receipts may use the existing automatic TXT document; this is still delivery of the original allocated units, not another purchase.
+- Conflicting intermediate credentials, changed quantity/cost, untrusted previous acquisition evidence, terminal incomplete delivery and Canboso history without credentials still require review. A pending status does not repair an unknown identity. These changes do not add undocumented supplier pending envelopes, idempotency or credential endpoints.
+- If a create response is lost before the order ID is saved, only the provider's existing documented same-reference recovery is allowed; non-idempotent unknown-ID purchases still need operator evidence. Do not substitute an unbounded HTTP request or a new purchase to avoid review.
+
+Development verification uses synthetic ten-unit provider responses, lifecycle/receipt regressions and actual local HTTP. A real-socket smoke waits 13 seconds for each of all ten adapters and receives ten units with one purchase POST each. A separate isolated SQLite runtime advances 140 minutes through processing, a transient exact-GET outage, completed allocation and a successful receipt, with one purchase and one debit. These are local integration proofs, not live supplier qualification or a production deployment.
 
 ### Fulfillment recovery corrections (#645, 2026-10-18)
 
@@ -426,8 +444,7 @@ Disposable reproductions identified these application defects:
   replay, on the same Purchase/reference, while the connection is active and the
   original dispatch is within ten minutes. Expiry or another unknown result
   requires review and retains the hold. This does not extend any provider's
-  idempotency contract. BuyMail retains its separate reference-history,
-  credential-fingerprint, five-attempt and seven-day recovery rules.
+  idempotency contract.
 - `SupplierClient::send()` could classify a cooldown-cache failure after a POST
   as a pre-purchase rejection for providers other than Canboso/Nastele. All
   shared-transport POSTs now classify that failure as ambiguous. A cache outage
@@ -439,7 +456,7 @@ Disposable reproductions identified these application defects:
 
 Duplicate queue wakeups respect `next_attempt_at`; an expired transport lease
 still permits crash recovery. Known-order transient recovery is GET-only across
-the shared finalizer, including BuyMail and Nastele. Authentication failures,
+the shared finalizer, including Nastele. Authentication failures,
 payload/identity/economic conflicts, duplicate units and incomplete terminal
 delivery remain operator-review cases, not reasons to buy again.
 
@@ -472,12 +489,12 @@ and did not imply delivery. This is not live Telegram/provider qualification.
 
 Regression entry points: `SupplierFulfillmentTest`, `SupplierClientTest`,
 `SupplierIndependentRegressionTest`, `SupplierPostgresConcurrencyTest`,
-`CanbosoPostgresConcurrencyTest`, the BuyMail/Nastele contract suites and
+`CanbosoPostgresConcurrencyTest`, the Nastele contract suite and
 `TelegramReceiptOutboundEffectTest`. PostgreSQL races cover competing workers
 recovering returned unknowns and transient exact reads without another debit or
 allocation. Unknown Telegram effects retain the existing no-blind-resend rule.
 
-The broader supplier/BuyMail/Canboso/Nastele/CSxStore and Telegram receipt run
+The historical broader supplier/Canboso/Nastele/CSxStore and Telegram receipt run
 passed 502 tests / 4,714 assertions. Final focused verification passed
 20 tests / 142 assertions. The final
 PostgreSQL 16 changed-path run passed three multi-process tests / 45 assertions
@@ -597,7 +614,7 @@ Only correlated exact identity and a recognized supplier outcome establish econo
 | Known supplier order ID, delivery pending | Re-fetch that exact order; do not buy another order. |
 | Complete delivery payload, actual cost absent | Retain encrypted payload and wallet hold; recover metadata from the same known order. Expected catalog cost is not proof of actual debit. |
 | Unknown result, no ID | Inspect supplier records privately. Associate only a reliably verified order, not a guess based on name/time/quantity. |
-| Partial/invalid delivery or identity/cost mismatch | Keep stored evidence and resolve through review. Do not repurchase the whole quantity. |
+| Terminal partial/invalid delivery or identity/cost mismatch | Keep stored evidence and resolve through review. An intermediate partial list on a correlated `pending` order remains scheduled for exact-order reads. Do not repurchase the whole quantity. |
 | Duplicate credential units | Retain encrypted evidence in review. Repeated single-use credentials cannot fulfill multiple units, even when the original debit is proven. |
 | Stored complete delivery but Telegram failed | Recover/resend the stored customer delivery through the existing outbound ledger, never buy again. |
 | No eligible source after customer paid | Fulfill manually or confirm a refund through existing review policy. Payment stays Paid until a real refund is applied. |
@@ -714,7 +731,7 @@ The final gate used isolated PostgreSQL 16 with a 1 GiB temporary data filesyste
 
 ### Incident attribution for #565
 
-The recorded read-only production evidence in [#570](https://github.com/Alhiefikri/telegram-bot/issues/570) and [#571](https://github.com/Alhiefikri/telegram-bot/issues/571) establishes the observed sequence for Purchase #93: the non-BuyMail scheduler path claimed the purchase at 20:55:19 WIB; the supervised job lost the same claim race; the claim holder disappeared without a recorded transport outcome; and the next expired-lease recovery produced `dispatch_outcome_unknown` at 20:57:20. Scheduler OOM kills were recorded around that interval. This is evidence for the lost execution/unknown-debit incident; runtime OOM remediation and moving supplier transport to the supervised worker remain owned by those separate issues. #565 adds the audited path that can resolve the resulting domain obligation with provider evidence.
+The recorded read-only production evidence in [#570](https://github.com/Alhiefikri/telegram-bot/issues/570) and [#571](https://github.com/Alhiefikri/telegram-bot/issues/571) establishes the observed sequence for Purchase #93: the scheduler path claimed the purchase at 20:55:19 WIB; the supervised job lost the same claim race; the claim holder disappeared without a recorded transport outcome; and the next expired-lease recovery produced `dispatch_outcome_unknown` at 20:57:20. Scheduler OOM kills were recorded around that interval. This is evidence for the lost execution/unknown-debit incident; runtime OOM remediation and moving supplier transport to the supervised worker remain owned by those separate issues. #565 adds the audited path that can resolve the resulting domain obligation with provider evidence.
 
 The Purchase #46 snapshot in #565 shows 1,853 raw SKU units, a 0.98 USDT hold for two units, and 10.68 USDT as the last wallet observation. Those values alone do not explain a capacity of zero: freshness, mapping, quantity-tier/profit policy and held units are also required. Likewise, a restock event must be joined to its recipient and outbound-effect outcomes to attribute a missing notification. The root cause for those historical reports remains unproven from the published snapshots; an OOM finding does not establish the cause of every missing restock or receipt. The Admin diagnostics and existing durable event/recipient recovery provide the concrete evidence to collect on recurrence.
 
@@ -859,7 +876,7 @@ snapshots (see **Correcting a stored rate**).
 
 The scheduler launches bounded sync/recovery first each minute in the background with a two-minute overlap mutex, before synchronous payment/notification sweeps. Sync skips accounts observed less than one minute ago, keeps the five-minute freshness gate, uses attempted-at ordering for fairness and a durable per-account read lease. Stock-notification reconciliation also runs in the background, using family-scoped ledger queries and PostgreSQL recovery cursor indexes; historical terminal Telegram HTTP 400/403 failures no longer occupy its dispatch index. Recovery discovers durable PostgreSQL work even if Redis lost a wakeup job. Provider request budgets, bounded snapshots/bodies/catalog counts and freshness gates are safety boundaries; increasing only a row limit does not remove them.
 
-Recovery selects due fulfillment IDs in one bounded query and queues every provider without inline HTTP. Warranty recovery classifies claim upload priority in batch queries: new, undispatched proofs retain the urgent `supplier-refunds` queue; polling and already-dispatched claims use `supplier-claims`. Customer catalog reads use Product availability projections without querying each supplier.
+Recovery selects due fulfillment IDs in one bounded query and queues every supported provider without inline HTTP. Customer catalog reads use Product availability projections without querying each supplier.
 
 ProdSeller's list omits stock counts, so sync reads each missing product detail
 in groups of at most five concurrent GET requests within the same 40-second

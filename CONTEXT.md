@@ -35,6 +35,10 @@ _Avoid_: ordinary Paid Order, late checkout
 A digital-account credential that has been delivered or otherwise exposed and must never be returned to the Available Product pool, including after a refund.
 _Avoid_: reusable refunded credential, restocked account
 
+**Historical Supplier Entitlement**:
+A retained account-unit or definitively missing-fulfillment obligation tied to the original Order, Payment, Customer, currency and retail snapshot. Retiring a supplier disables new purchases and provider-specific workflows without deleting history, releasing unresolved financial holds, increasing refund caps, or making retired credentials available again.
+_Avoid_: active warranty API, recreated purchase, erased supplier history
+
 **Product Stock Item**:
 One sellable credential unit for a Product that is either available, reserved to an Order, permanently allocated, or retired. A Product Stock Item is distinct from the Product's numeric stock projection.
 _Avoid_: stock row, quantity line

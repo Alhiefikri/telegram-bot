@@ -56,20 +56,12 @@
             <file>tests/Feature/SupplierFulfillmentTest.php</file>
             <file>tests/Feature/SupplierPostgresConcurrencyTest.php</file>
             <file>tests/Feature/CanbosoPostgresConcurrencyTest.php</file>
-            <file>tests/Feature/BuyMailAccountIdentityTest.php</file>
-            <file>tests/Feature/BuyMailClientTest.php</file>
-            <file>tests/Feature/BuyMailFulfillmentTest.php</file>
-            <file>tests/Feature/BuyMailWarrantyPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/HistoricalOrderRefundTest.php</file>
+            <file>tests/Feature/HistoricalOrderRefundPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtOrderRefundTest.php</file>
             <file>tests/Feature/UsdtOrderRefundPostgresConcurrencyTest.php</file>
             <file>tests/Feature/PakasirWebhookTest.php</file>
             <file>tests/Feature/Telegram/TelegramNavigationRootPostgresConcurrencyTest.php</file>
-            <file>tests/Feature/BuyMailWebhookTest.php</file>
-            <file>tests/Feature/WarrantyAdminTest.php</file>
-            <file>tests/Feature/WarrantyClaimTest.php</file>
-            <file>tests/Feature/WarrantyDeadlineReminderTest.php</file>
-            <file>tests/Feature/WarrantyNotificationTest.php</file>
-            <file>tests/Feature/WarrantyWebTest.php</file>
             <file>tests/Feature/CustomerAuthContractPostgresTest.php</file>
             <file>tests/Feature/CustomerPasswordAuthenticationPostgresTest.php</file>
             <file>tests/Feature/CustomerEmailOtpPostgresTest.php</file>

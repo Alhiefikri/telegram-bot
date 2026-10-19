@@ -14,7 +14,7 @@ return new class extends Migration
         }
         Schema::table('suppliers', fn (Blueprint $table) => $table->bigInteger('balance_micros')->nullable()->change());
         if (DB::getDriverName() === 'pgsql') {
-            DB::statement("ALTER TABLE suppliers ADD CONSTRAINT supplier_money_guard CHECK (reserved_balance_micros >= 0 AND exchange_rate_idr > 0 AND version > 0 AND currency IN ('USD', 'USDT', 'IDR') AND (provider <> 'buymail' OR (currency = 'IDR' AND exchange_rate_idr = 1)))");
+            DB::statement("ALTER TABLE suppliers ADD CONSTRAINT supplier_money_guard CHECK (reserved_balance_micros >= 0 AND exchange_rate_idr > 0 AND version > 0 AND currency IN ('USD', 'USDT', 'IDR'))");
         }
     }
 
@@ -27,7 +27,7 @@ return new class extends Migration
         Schema::table('suppliers', fn (Blueprint $table) => $table->unsignedBigInteger('balance_micros')->nullable()->change());
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE suppliers DROP CONSTRAINT supplier_money_guard');
-            DB::statement("ALTER TABLE suppliers ADD CONSTRAINT supplier_money_guard CHECK ((balance_micros IS NULL OR balance_micros >= 0) AND reserved_balance_micros >= 0 AND exchange_rate_idr > 0 AND version > 0 AND currency IN ('USD', 'USDT', 'IDR') AND (provider <> 'buymail' OR (currency = 'IDR' AND exchange_rate_idr = 1)))");
+            DB::statement("ALTER TABLE suppliers ADD CONSTRAINT supplier_money_guard CHECK ((balance_micros IS NULL OR balance_micros >= 0) AND reserved_balance_micros >= 0 AND exchange_rate_idr > 0 AND version > 0 AND currency IN ('USD', 'USDT', 'IDR'))");
         }
     }
 };

@@ -420,7 +420,7 @@ Local regressions: `CustomerApiOrderReadTest` passed 11 tests / 652 assertions
 (including the maximum-field 100-unit traversal with stable numbers,
 cursor/limit rejection, retirement between pages, revocation between pages and
 constant query count at 1/20/100); the delivery consumers (local manual review,
-supplier fulfillment, BuyMail partial/warranty, credential presentation and API
+supplier fulfillment, historical unit refunds, credential presentation and API
 orders) passed 74 tests / 958 assertions; `StorefrontApiDocsTest` passed 11 tests
 / 1,025 assertions; `CustomerApiErrorContractTest` passed 5 tests / 76 assertions.
 The complete local suite ran 4,915 tests / 47,209 assertions with 3 failures and

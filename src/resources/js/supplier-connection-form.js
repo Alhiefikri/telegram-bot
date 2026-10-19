@@ -96,10 +96,7 @@ export default function supplierConnectionForm(
     init() {
       this.$watch("provider", (next, previous) => {
         if (next === previous) return;
-        if (next === "buymail") {
-          this.$refs.exchangeRate.value = "1";
-          this.refreshRateDerivation();
-        } else if (
+        if (
           this.providers[next].currency !== this.providers[previous].currency ||
           this.providers[next].confirm ||
           this.providers[previous].confirm

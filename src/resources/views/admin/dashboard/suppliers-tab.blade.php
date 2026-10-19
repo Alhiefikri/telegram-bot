@@ -8,7 +8,6 @@
         <div class="grid gap-4 p-5 sm:p-6">
             <nav class="flex flex-wrap gap-3" aria-label="Operasional supplier">
                 <x-admin-dashboard.button :href="route('admin.suppliers.purchases')" variant="primary" size="sm">Monitor pembelian / pemulihan <span aria-hidden="true">↗</span></x-admin-dashboard.button>
-                <x-admin-dashboard.button :href="route('admin.suppliers.warranty')" variant="neutral" size="sm">Klaim Gmail / refund / penggantian <span aria-hidden="true">↗</span></x-admin-dashboard.button>
                 <x-admin-dashboard.button :href="route('password.confirm')" variant="neutral" size="sm">Konfirmasi password</x-admin-dashboard.button>
             </nav>
             <p class="text-sm leading-6 text-admin-muted">API key disimpan privat dan tidak ditampilkan kembali. Konfirmasi password muncul otomatis saat diperlukan, berlaku 15 menit, dan tidak menghapus isian form. Selesaikan pembelian berjalan sebelum mengganti akun atau mata uang.</p>
@@ -41,26 +40,14 @@
                     @if($connection['has_unresolved_hold'])<x-admin-dashboard.notice tone="warning" role="status">Dana ditahan oleh purchase yang belum terbukti. Saldo tersedia sudah dikurangi hold; jangan menganggap debit supplier sudah pasti terjadi atau melepasnya tanpa bukti.</x-admin-dashboard.notice>@endif
                     @if($connection['balance_uncertain'])<x-admin-dashboard.notice tone="warning" role="status">Observasi saldo belum segar atau belum tersedia. Kapasitas pembelian aman dapat nol sampai observasi wallet baru diterima.</x-admin-dashboard.notice>@endif
                     @if($connection['sync_error'])<x-admin-dashboard.notice tone="danger" role="status">{{ $connection['sync_error'] }}</x-admin-dashboard.notice>@endif
-                    @if($connection['refunds_disabled'])<x-admin-dashboard.notice tone="warning" role="status">Refund supplier dinonaktifkan. Sumber Gmail ini tidak menerima pembelian baru sampai dukungan refund aktif kembali.</x-admin-dashboard.notice>@endif
-                    @if($connection['purchase_paused_until'])<x-admin-dashboard.notice tone="warning" role="status">Batas harian supplier tercapai. Pembelian baru ditunda sampai {{ $connection['purchase_paused_until'] }}.</x-admin-dashboard.notice>@endif
                     <dl class="grid gap-3 sm:grid-cols-2">
                         <div><dt class="text-xs font-medium text-admin-muted">Sinkron terakhir</dt><dd class="mt-0.5 break-words text-sm font-medium text-admin-ink">{{ $connection['synced_at'] ?? 'Belum sinkron' }}</dd></div>
                         <div><dt class="text-xs font-medium text-admin-muted">Saldo terakhir diamati</dt><dd class="mt-0.5 break-words text-sm font-medium text-admin-ink">{{ $connection['balance_observed_at'] ?? 'Belum pernah diamati' }}</dd></div>
                         <div><dt class="text-xs font-medium text-admin-muted">Berlaku sampai</dt><dd class="mt-0.5 break-words text-sm font-medium text-admin-ink">{{ $connection['expires_at'] ?? 'Tidak segar' }} · Versi {{ $connection['version'] }}</dd></div>
                     </dl>
-                    @if($connection['webhook_url'])
-                        <x-admin-dashboard.card as="details" padding="none" shadow="none">
-                            <summary class="min-h-11 cursor-pointer px-3 py-2 text-sm font-medium text-admin-ink">Pengaturan webhook BuyMail</summary>
-                            <div class="mx-3 mb-3 grid gap-2 rounded-lg border border-admin-line bg-admin-surface-muted p-3 text-sm">
-                                <p class="break-all text-admin-muted">URL webhook untuk portal BuyMail: <span class="font-mono text-xs break-all text-admin-ink">{{ $connection['webhook_url'] }}</span></p>
-                                <p class="text-admin-muted">Secret {{ $connection['webhook_configured'] ? 'tersimpan' : 'belum diatur' }}. Aktifkan API dan IP allowlist dari portal reseller.</p>
-                            </div>
-                        </x-admin-dashboard.card>
-                    @endif
                     <div class="mt-auto flex flex-wrap gap-3">
                         <x-admin-dashboard.button :href="route('admin.suppliers.catalog', $connection['id'])" variant="primary" size="sm">Katalog privat / impor / pemetaan <span aria-hidden="true">→</span></x-admin-dashboard.button>
                         <form method="POST" action="{{ route('admin.suppliers.sync', $connection['id']) }}" x-data="{ syncing: false }" x-on:submit="if (syncing) { $event.preventDefault() } else { syncing = true }">@csrf<x-admin-dashboard.button type="submit" variant="neutral" size="sm" x-bind:disabled="syncing" x-text="syncing ? 'Sedang memperbarui katalog...' : 'Sinkron katalog dan saldo'">Sinkron katalog dan saldo</x-admin-dashboard.button></form>
-                        @if($connection['provider'] === 'buymail')<x-admin-dashboard.button :href="route('admin.suppliers.buymail', $connection['id'])" variant="neutral" size="sm">Deposit BuyMail &amp; histori privat <span aria-hidden="true">↗</span></x-admin-dashboard.button>@endif
                     </div>
                 </div>
                 <details class="border-t border-admin-line"><summary class="min-h-11 cursor-pointer px-5 py-3 text-sm font-medium text-admin-ink">Edit koneksi</summary><div class="px-5 pb-5"><div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">@include('admin.suppliers.connection-form')</div></div></details>

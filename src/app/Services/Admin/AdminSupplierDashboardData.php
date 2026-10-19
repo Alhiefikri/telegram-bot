@@ -2,6 +2,7 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\SupplierProvider;
 use App\Models\Product;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
@@ -12,7 +13,7 @@ final class AdminSupplierDashboardData
 {
     public function forTab(array $filters = []): array
     {
-        $connections = Supplier::query()->orderBy('id')->paginate(15, ['*'], 'suppliers_page');
+        $connections = Supplier::query()->whereIn('provider', SupplierProvider::cases())->orderBy('id')->paginate(15, ['*'], 'suppliers_page');
         // One aggregate row per connection so the connection form can show a real
         // derived SKU cost instead of an illustrative number.
         $sampleUnits = SupplierCatalogItem::query()
@@ -39,10 +40,6 @@ final class AdminSupplierDashboardData
                     || $supplier->balance_observed_at?->lte(now()->subSeconds(SupplierCatalogSync::FRESHNESS_SECONDS)) !== false,
                 'has_unresolved_hold' => (int) $supplier->reserved_balance_micros > 0,
                 'sync_error' => $supplier->last_error !== null ? $this->syncFailureMessage($supplier) : null,
-                'webhook_url' => $supplier->provider === 'buymail' ? route('buymail.webhook', $supplier->id) : null,
-                'webhook_configured' => $supplier->getRawOriginal('webhook_secret') !== null,
-                'refunds_disabled' => $supplier->provider === 'buymail' && ($supplier->account_metadata['refunds_enabled'] ?? true) === false,
-                'purchase_paused_until' => $supplier->purchase_paused_until?->isFuture() ? $supplier->purchase_paused_until->timezone(config('app.timezone'))->format('Y-m-d H:i T') : null,
             ];
         }));
 
@@ -85,6 +82,7 @@ final class AdminSupplierDashboardData
             ->appends($productFilters)
             ->fragment('admin-supplier-products');
         $sourceOptions = Supplier::query()
+            ->whereIn('provider', SupplierProvider::cases())
             ->whereHas('catalogItems.sources')
             ->orderBy('name')
             ->get(['id', 'name']);

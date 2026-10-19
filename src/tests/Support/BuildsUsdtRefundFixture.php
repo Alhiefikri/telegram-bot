@@ -4,17 +4,16 @@ namespace Tests\Support;
 
 use App\Enums\OrderStatus;
 use App\Models\SupplierAccountUnit;
+use App\Models\WarrantyClaim;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\UsdtPurchase;
 use App\Services\UsdtBalance\VerifiedUsdtFunding;
-use App\Services\Warranty\RefundProof;
-use App\Services\Warranty\WarrantyClaimService;
 use Illuminate\Support\Str;
 
 trait BuildsUsdtRefundFixture
 {
-    use BuildsBuyMailWarrantyFixture;
+    use BuildsHistoricalRefundFixture;
 
     protected function usdtRefundFixture(bool $missing = false): array
     {
@@ -36,7 +35,7 @@ trait BuildsUsdtRefundFixture
         if ($missing) {
             $order->update(['order_status' => OrderStatus::Processing]);
             $purchase = $unit->purchase;
-            $purchase->update(['state' => 'settled', 'observed_quantity' => 1, 'actual_cost_micros' => 4_800_000_000]);
+            $purchase->update(['state' => 'settled', 'observed_quantity' => 1, 'actual_cost_micros' => 300_000]);
             $purchase->fulfillment->update(['state' => 'review']);
 
             return [$customer, $unit->fresh(), $payment, $debit, null];
@@ -56,9 +55,13 @@ trait BuildsUsdtRefundFixture
 
     protected function approvedUsdtClaim($customer, SupplierAccountUnit $unit)
     {
-        $proof = RefundProof::fromBytes(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAC0lEQVQImWNgQAYAAA4AAbGa6gYAAAAASUVORK5CYII='));
-        $claim = app(WarrantyClaimService::class)->submit($customer, $unit->public_id, $proof, 'Wrong password');
-        $claim->update(['state' => 'approved', 'verified_at' => now(), 'settlement_state' => 'awaiting_choice']);
+        $claim = WarrantyClaim::create([
+            'public_id' => (string) Str::uuid(), 'supplier_account_unit_id' => $unit->id,
+            'customer_id' => $customer->id, 'order_id' => $unit->order_id,
+            'proof_path' => 'historical-proof.enc', 'proof_digest' => str_repeat('a', 64),
+            'note' => 'Historical approved claim', 'state' => 'approved', 'verified_at' => now(),
+            'refund_deadline' => $unit->refund_deadline, 'settlement_state' => 'awaiting_choice',
+        ]);
 
         return $claim;
     }

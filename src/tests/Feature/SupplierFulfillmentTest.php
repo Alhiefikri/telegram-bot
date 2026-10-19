@@ -468,6 +468,288 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertFalse(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
     }
 
+    public function test_slow_toolorax_bulk_purchase_allocates_all_units_without_buying_twice(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(quantity: 5, provider: 'toolorax');
+        $sku->update(['external_id' => '4']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $credentials = ['gemini-one', 'gemini-two', 'gemini-three', 'gemini-four', 'gemini-five'];
+        $posts = 0;
+        Http::fake(function ($request, $options) use (&$posts, $credentials) {
+            if ($request->method() === 'POST') {
+                $posts++;
+                // Model a supplier that commits first and answers after 20 seconds.
+                if ($options['timeout'] < 20) {
+                    throw new ConnectionException('Supplier response exceeded the client deadline after debit.');
+                }
+
+                return Http::response(['ok' => true, 'order_code' => 'slow-bulk-order']);
+            }
+
+            return Http::response(['ok' => true, 'order' => [
+                'order_code' => 'slow-bulk-order', 'product_id' => 4, 'quantity' => 5,
+                'status' => 'fulfilled', 'total' => '5', 'delivered_keys' => $credentials,
+            ]]);
+        });
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($fulfillment->id);
+
+        $this->assertSame($credentials, ProductStockItem::orderBy('supplier_unit_index')->pluck('secret')->all());
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertTrue(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
+        $service->process($fulfillment->id);
+        $this->assertSame(1, $posts);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(5_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame($credentials, ProductStockItem::orderBy('supplier_unit_index')->pluck('secret')->all());
+        config()->set('services.telegram.token', 'test-token');
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 912345]]));
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $pipeline = app(ReceiptDeliveryPipeline::class);
+        $group = TelegramOutboundEffectService::receiptEffectGroupKey($order->id);
+        while ($effect = $ledger->nextReceiptEffect($group)) {
+            $pipeline->deliver($effect, dispatchNext: false);
+        }
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        foreach ($credentials as $credential) {
+            Http::assertSent(fn ($request) => str_contains($request->body(), $credential));
+        }
+        $sentCount = Http::recorded()->count();
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $this->assertSame($sentCount, Http::recorded()->count());
+    }
+
+    public static function bulkSuppliers(): array
+    {
+        return array_map(static fn (string $provider): array => [$provider], [
+            'prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'nystore', 'toolorax', 'canboso', 'nastele',
+        ]);
+    }
+
+    #[DataProvider('bulkSuppliers')]
+    public function test_slow_ten_unit_purchase_completes_once_for_each_supplier(string $provider): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture(quantity: 10, provider: $provider);
+        $sku->update(['external_id' => $provider === 'toolorax' ? '4' : ($provider === 'nastele' ? '43' : 'fixture-sku')]);
+        $cost = 10_000_000;
+        $initialBalance = 10_000_000;
+        if ($provider === 'nastele') {
+            $cost = 300_000_000_000;
+            $initialBalance = 1_000_000_000_000;
+            $product->update(['price_amount' => 50000]);
+            $supplier->forceFill(['currency' => 'VND', 'exchange_rate_idr' => '0.650001', 'balance_micros' => $initialBalance])->save();
+            $sku->update(['currency' => 'VND', 'unit_price_micros' => 30_000_000_000]);
+            app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        }
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $credentials = array_map(static fn (int $i): string => $provider === 'canboso'
+            ? "bulk-{$i}@example.test\nsynthetic-password-{$i}"
+            : "https://delivery.example.test/bulk-{$i}", range(1, 10));
+        $posts = 0;
+        Http::fake(function ($request, $options) use ($provider, $credentials, &$posts) {
+            if ($request->method() === 'POST') {
+                $posts++;
+                if ($options['timeout'] < 20) {
+                    throw new ConnectionException('Ten-unit acquisition completed after the client deadline.');
+                }
+            }
+
+            return Http::response($this->tenUnitPayload($provider, $credentials, $request['external_order_id'] ?? null));
+        });
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($fulfillment->id);
+        $this->assertSame($credentials, ProductStockItem::orderBy('supplier_unit_index')->pluck('secret')->all());
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertTrue(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
+        $service->process($fulfillment->id);
+        $this->assertSame(1, $posts);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame($initialBalance - $cost, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->deliverBulkReceipt($order, $credentials);
+    }
+
+    public static function pollingSuppliers(): array
+    {
+        return array_map(static fn (string $provider): array => [$provider], [
+            'prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'nystore', 'toolorax',
+        ]);
+    }
+
+    #[DataProvider('pollingSuppliers')]
+    public function test_ten_unit_processing_order_keeps_polling_until_all_units_are_ready(string $provider): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(quantity: 10, provider: $provider);
+        $sku->update(['external_id' => $provider === 'toolorax' ? '4' : 'fixture-sku']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $credentials = array_map(static fn (int $i): string => "https://delivery.example.test/bulk-{$i}", range(1, 10));
+        $posts = $gets = 0;
+        Http::fake(function ($request) use ($provider, $credentials, &$posts, &$gets) {
+            if ($request->method() === 'POST') {
+                $posts++;
+            } else {
+                $gets++;
+                if ($gets === 2) {
+                    throw new ConnectionException('Temporary exact-order lookup outage.');
+                }
+            }
+            $payload = $this->tenUnitPayload($provider, $credentials, $request['external_order_id'] ?? null);
+            if ($gets < 3) {
+                if ($provider === 'toolorax') {
+                    $payload['order']['status'] = 'processing';
+                    $payload['order']['delivered_keys'] = array_slice($credentials, 0, 2);
+                } elseif ($provider === 'prodseller') {
+                    $payload['status'] = 'processing';
+                    $payload['deliveredKeys'] = array_slice($credentials, 0, 2);
+                } else {
+                    $payload[$provider === 'nystore' ? 'order_status' : 'status'] = 'processing';
+                    $payload['products'] = array_slice($credentials, 0, 2);
+                }
+            }
+
+            return Http::response($payload);
+        });
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($fulfillment->id);
+        $this->assertSame('awaiting_delivery', $fulfillment->fresh()->state);
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertFalse(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
+        foreach ([10, 60, 60] as $minutes) {
+            $this->travel($minutes)->minutes();
+            Queue::fake();
+            $service->recover();
+            Queue::assertPushed(ProcessSupplierFulfillment::class, fn ($job) => $job->fulfillmentId === $fulfillment->id);
+            $service->process($fulfillment->id);
+            if ($gets < 3) {
+                $this->assertSame('awaiting_delivery', $fulfillment->fresh()->state);
+                $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+                $this->assertSame(0, ProductStockItem::count());
+            }
+        }
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame($credentials, ProductStockItem::orderBy('supplier_unit_index')->pluck('secret')->all());
+        $this->assertSame(1, $posts);
+        $this->assertSame(3, $gets);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(0, $supplier->fresh()->balance_micros);
+        $this->deliverBulkReceipt($order, $credentials);
+    }
+
+    public function test_conflicting_processing_credentials_require_review_instead_of_polling_forever(): void
+    {
+        [, , $sku, $cart] = $this->fixture(quantity: 10, provider: 'toolorax');
+        $sku->update(['external_id' => '4']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(fn ($request) => Http::response(['ok' => true, 'order' => [
+            'order_code' => 'bulk-order', 'product_id' => 4, 'quantity' => 10, 'status' => 'processing',
+            'total' => '10', 'delivered_keys' => $request->method() === 'POST' ? ['first-unit', 'second-unit'] : ['unrelated-unit'],
+        ]]));
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($fulfillment->id);
+        $this->assertSame('awaiting_delivery', $fulfillment->fresh()->state);
+        $this->travel(2)->minutes();
+        $service->process($fulfillment->id);
+
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertSame('delivery_evidence_conflict', $fulfillment->fresh()->last_error);
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertFalse(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
+    }
+
+    private function tenUnitPayload(string $provider, array $credentials, ?string $reference = null): array
+    {
+        return match ($provider) {
+            'prodseller' => ['orderId' => 'bulk-order', 'status' => 'delivered', 'product' => ['id' => 'fixture-sku'], 'quantity' => 10, 'amount' => '10', 'deliveredKeys' => $credentials],
+            'toolorax' => ['ok' => true, 'order' => ['order_code' => 'bulk-order', 'product_id' => 4, 'quantity' => 10, 'status' => 'fulfilled', 'total' => '10', 'delivered_keys' => $credentials]],
+            'nystore' => ['success' => true, 'order_id' => 'bulk-order', 'order_status' => 'success', 'requested_quantity' => 10, 'charged_amount' => '10', 'products' => $credentials],
+            'canboso' => [
+                'success' => true,
+                'order' => ['orderCode' => 'bulk-order', 'status' => 'completed', 'productId' => 'fixture-sku', 'productType' => 'account', 'quantity' => 10, 'bonusQuantity' => 0, 'finalQuantity' => 10],
+                'payment' => ['amount' => '10', 'currency' => 'USD'],
+                'delivery' => ['accounts' => array_map(static fn (int $i): array => ['user' => "bulk-{$i}@example.test", 'password' => "synthetic-password-{$i}"], range(1, 10))],
+            ],
+            'nastele' => ['success' => true, 'data' => ['orderId' => 2244, 'status' => 'completed', 'totalAmount' => 300000, 'items' => [['quantity' => 10, 'unitPrice' => 30000, 'accounts' => $credentials]]]],
+            default => ['success' => true, 'status' => 'delivered', 'order_id' => 'bulk-order', 'service_id' => 'fixture-sku', 'quantity' => 10, 'total_cost' => '10', 'products' => $credentials]
+                + ($provider === 'aivault' && $reference !== null ? ['external_order_id' => $reference] : []),
+        };
+    }
+
+    private function deliverBulkReceipt(Order $order, array $credentials): void
+    {
+        config()->set('services.telegram.token', 'test-token');
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 912345]]));
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $ledger = app(TelegramOutboundEffectLedgerProtocol::class);
+        $pipeline = app(ReceiptDeliveryPipeline::class);
+        while ($effect = $ledger->nextReceiptEffect(TelegramOutboundEffectService::receiptEffectGroupKey($order->id))) {
+            $pipeline->deliver($effect, dispatchNext: false);
+        }
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $receiptContents = Http::recorded()->map(static function ($pair): string {
+            $request = $pair[0];
+            if ($request->isMultipart()) {
+                return collect($request->data())->whereIn('name', ['caption', 'document'])
+                    ->pluck('contents')->filter(static fn ($value): bool => is_string($value))->implode("\n");
+            }
+
+            return (string) ($request['text'] ?? '');
+        })->implode("\n");
+        foreach ($credentials as $credential) {
+            // A structured account's line break is rendered as message formatting.
+            foreach (explode("\n", $credential) as $part) {
+                $this->assertStringContainsString($part, $receiptContents);
+            }
+        }
+        $sentCount = Http::recorded()->count();
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $this->assertSame($sentCount, Http::recorded()->count());
+    }
+
+    public function test_toolorax_bulk_transport_loss_keeps_the_hold_without_another_purchase(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(quantity: 5, provider: 'toolorax');
+        $sku->update(['external_id' => '4']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $posts = 0;
+        Http::fake(function ($request) use (&$posts) {
+            if ($request->method() === 'POST') {
+                $posts++;
+                throw new ConnectionException('Response lost after possible supplier debit.');
+            }
+
+            return Http::response(['ok' => true, 'count' => 0, 'orders' => []]);
+        });
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($fulfillment->id);
+        $this->travel(3)->minutes();
+        $service->process($fulfillment->id);
+
+        $this->assertSame(1, $posts);
+        $this->assertSame('ambiguous', SupplierPurchase::sole()->state);
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertSame(5_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(10_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, ProductStockItem::count());
+        $this->assertFalse(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
+    }
+
     public function test_toolorax_known_create_identity_survives_failed_hydration_and_later_read_outage(): void
     {
         [, $supplier, $sku, $cart] = $this->fixture(quantity: 3, provider: 'toolorax');

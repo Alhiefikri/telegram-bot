@@ -8,14 +8,14 @@ import { fileURLToPath } from "node:url";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(directory, "../..");
-let tempDir, environment, server, fixture;
 test.describe.configure({ mode: "serial" });
+let tempDir, environment, server;
 test.setTimeout(120_000);
 
 test.beforeAll(async () => {
   // Fresh migrations and fixture preparation need their own CI setup budget.
   test.setTimeout(120000);
-  tempDir = mkdtempSync(path.join(tmpdir(), "buymail-browser-"));
+  tempDir = mkdtempSync(path.join(tmpdir(), "supplier-connection-browser-"));
   const database = path.join(tempDir, "database.sqlite");
   writeFileSync(database, "");
   const port = await new Promise((resolve) => {
@@ -48,8 +48,8 @@ test.beforeAll(async () => {
     ADMIN_ALLOWED_LOGINS: "",
     BCRYPT_ROUNDS: "4",
   };
-  run([path.join(directory, "fixtures/warranty.php"), "prepare"]);
-  fixture = JSON.parse(run([path.join(directory, "fixtures/warranty.php")]));
+  run([path.join(directory, "fixtures/supplier-connection.php"), "prepare"]);
+  run([path.join(directory, "fixtures/supplier-connection.php")]);
   server = spawn(
     "php",
     [
@@ -68,7 +68,7 @@ test.beforeAll(async () => {
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error("Disposable warranty server did not start.");
+  throw new Error("Disposable supplier connection server did not start.");
 });
 
 test.afterAll(async () => {
@@ -78,107 +78,7 @@ test.afterAll(async () => {
       server.kill();
     });
   }
-  if (fixture) run([path.join(directory, "fixtures/warranty.php"), "cleanup"]);
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-});
-
-test("verified claim offers English and Indonesian refund/replacement without overflow", async ({
-  page,
-}, testInfo) => {
-  await page.setViewportSize({ width: 320, height: 720 });
-  await page.goto(fixture.url);
-  await expect(
-    page.getByRole("heading", { name: "Account support and refunds" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Refund this account" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Replace this account" })
-  ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth
-    )
-  ).toBe(true);
-  await page
-    .getByRole("link", { name: "Bahasa Indonesia", exact: true })
-    .click();
-  await expect(
-    page.getByRole("heading", { name: "Bantuan akun dan pengembalian dana" })
-  ).toBeVisible();
-  await page.getByRole("link", { name: "English", exact: true }).click();
-  await page.getByRole("button", { name: "Refund this account" }).click();
-  await expect(
-    page.getByText("The refund for this account has been completed.", {
-      exact: true,
-    })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Replace this account" })
-  ).toHaveCount(0);
-  expect(await page.locator("body").innerText()).not.toContain(
-    "synthetic-password"
-  );
-  await page.screenshot({
-    path: testInfo.outputPath("warranty-refunded-mobile.png"),
-    fullPage: true,
-  });
-});
-
-test("owner can inspect private warranty and deposit panels without exposing the saved key", async ({
-  page,
-}, testInfo) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(environment.APP_URL + "/admin/login");
-  await page.locator('[name="email"]').fill("warranty-browser@example.test");
-  await page.locator('[name="password"]').fill("synthetic-browser-password");
-  await page.getByRole("button", { name: "Masuk Dashboard" }).click();
-  await page.goto(environment.APP_URL + "/admin?tab=suppliers");
-  await expect(
-    page.getByText("Private source", { exact: false }).first()
-  ).toBeVisible();
-  expect(await page.locator("body").innerText()).not.toContain(
-    "synthetic-test-key"
-  );
-  await page
-    .getByRole("link", { name: "Klaim Gmail / refund / penggantian" })
-    .click();
-  await expect(
-    page.getByRole("banner", { name: "Konteks halaman" }).getByRole("heading", {
-      name: "Klaim Gmail · Refund & penggantian",
-      exact: true,
-    })
-  ).toBeVisible();
-  await expect(
-    page.getByText("Klaim harus sampai ke supplier sebelum deadline.", {
-      exact: false,
-    })
-  ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth
-    )
-  ).toBe(true);
-  await page.screenshot({
-    path: testInfo.outputPath("warranty-admin-mobile.png"),
-    fullPage: true,
-  });
-  await page.goto(environment.APP_URL + "/admin?tab=suppliers");
-  await page
-    .getByRole("link", { name: "Deposit BuyMail & histori privat" })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Buat satu instruksi top-up supplier" })
-  ).toBeVisible();
-  expect(await page.locator("body").innerText()).not.toContain(
-    "synthetic-test-key"
-  );
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth
-    )
-  ).toBe(true);
 });
 
 test("supplier creation confirms password without losing the unsaved API key", async ({
@@ -205,7 +105,7 @@ test("supplier creation confirms password without losing the unsaved API key", a
   });
   const initial = supplierState(keys);
   await page.goto(environment.APP_URL + "/admin/login");
-  await page.locator('[name="email"]').fill("warranty-browser@example.test");
+  await page.locator('[name="email"]').fill("supplier-browser@example.test");
   await page.locator('[name="password"]').fill("synthetic-browser-password");
   await page
     .getByRole("button", { name: "Masuk Dashboard", exact: true })
@@ -276,7 +176,7 @@ test("supplier creation confirms password without losing the unsaved API key", a
   // A fresh session must also preserve an edited key when confirmation is needed.
   await page.context().clearCookies();
   await page.goto(environment.APP_URL + "/admin/login");
-  await page.locator('[name="email"]').fill("warranty-browser@example.test");
+  await page.locator('[name="email"]').fill("supplier-browser@example.test");
   await page.locator('[name="password"]').fill("synthetic-browser-password");
   await page
     .getByRole("button", { name: "Masuk Dashboard", exact: true })
@@ -360,7 +260,7 @@ test("supplier creation confirms password without losing the unsaved API key", a
 function supplierState(keys) {
   return JSON.parse(
     run(
-      [path.join(directory, "fixtures/warranty.php"), "state"],
+      [path.join(directory, "fixtures/supplier-connection.php"), "state"],
       JSON.stringify({ keys })
     )
   );

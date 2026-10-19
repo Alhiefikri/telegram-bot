@@ -26,7 +26,7 @@ Verification lives at `AdminBalanceAdjustmentTest` and `AdminBalanceAdjustmentPo
 
 ## Verification evidence (2026-10-05)
 
-Implemented against base `4899afebeabbddf6c948a6da8ffae93518a821b7`, with no production I/O. Full `composer test -- --parallel`: 3,402 tests, 25,366 assertions, no failures; 115 PostgreSQL-only tests skipped in the SQLite lane. The first full run exposed an existing BuyMail real-clock assertion; that test now freezes time, and its file and the final full suite pass.
+Implemented against base `4899afebeabbddf6c948a6da8ffae93518a821b7`, with no production I/O. Historical full `composer test -- --parallel`: 3,402 tests, 25,366 assertions, no failures; 115 PostgreSQL-only tests skipped in the SQLite lane. These counts predate supplier retirement and are not verification of the current suite.
 
 Disposable PostgreSQL 16 `scripts/concurrency-deploy-gate-local.sh`: 162 tests, 1,438 assertions, no failures/errors/skips. Separate I1 process suite: 7 tests, 84 assertions, including original-source and cross-target receipt races. PostgreSQL feature qualification passed 11 cases plus the corrected Top-up recovery case (17 assertions); its initial mismatch fixture used a four-character currency on the existing three-character IDR column and now uses `USD`. Both compensation and refund recovery entries are checked against raw SQL mutation, and compensation notification recovery is verified after losing the queue wake-up.
 

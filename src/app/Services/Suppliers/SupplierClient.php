@@ -31,13 +31,6 @@ final class SupplierClient
 
     public function snapshot(Supplier $supplier): SupplierCatalogSnapshot
     {
-        if ($supplier->provider === 'buymail') {
-            if (! $supplier->is_active) {
-                throw new SupplierUnavailable('inactive');
-            }
-
-            return app(BuyMailClient::class)->snapshot($supplier);
-        }
         $provider = $this->ready($supplier);
         $deadline = hrtime(true) + 40_000_000_000;
         $account = $this->read($supplier, in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::Canboso, SupplierProvider::Nastele], true) ? '/balance' : '/me', $deadline);
@@ -107,14 +100,6 @@ final class SupplierClient
 
     public function purchase(Supplier $supplier, SupplierCatalogItem $item, int $quantity, string $reference): SupplierOrderResult
     {
-        if ($supplier->provider === 'buymail') {
-            if (! $supplier->is_active || $supplier->purchase_paused_until?->isFuture() || $quantity > min(50, max(1, (int) ($supplier->account_metadata['max_quantity_per_order'] ?? 50)))
-                || (int) $item->supplier_id !== (int) $supplier->id || $item->external_id !== BuyMailClient::CATALOG_ID || ! $item->orderable || $item->requires_input) {
-                return new SupplierOrderResult('rejected', errorCode: 'unsupported_product');
-            }
-
-            return app(BuyMailClient::class)->purchase($supplier, $quantity, $reference);
-        }
         try {
             $provider = $this->ready($supplier);
             if ((int) $item->supplier_id !== (int) $supplier->id || ! $item->orderable || $item->requires_input || $quantity < 1 || $quantity > self::MAX_QUANTITY) {
@@ -225,9 +210,6 @@ final class SupplierClient
 
     public function order(Supplier $supplier, string $orderId, ?string $productId = null, ?string $reference = null): SupplierOrderResult
     {
-        if ($supplier->provider === 'buymail') {
-            return app(BuyMailClient::class)->order($supplier, $orderId, $reference);
-        }
         $provider = $this->ready($supplier, allowInactive: true);
         $orderId = $this->identifier($orderId);
         if ($provider === SupplierProvider::Canboso) {
@@ -508,7 +490,9 @@ final class SupplierClient
     {
         $provider = $this->ready($supplier, $allowInactive);
         $this->budget($supplier, $provider, $method === 'GET');
-        $timeout = $deadline === null ? 12 : min(12, ($deadline - hrtime(true)) / 1_000_000_000);
+        // Synchronous bulk purchases need longer than reads, with room for exact-order hydration in the 120s worker.
+        $requestTimeout = $method === 'POST' ? 90 : 12;
+        $timeout = $deadline === null ? $requestTimeout : min($requestTimeout, ($deadline - hrtime(true)) / 1_000_000_000);
         if ($timeout <= 0) {
             throw new SupplierUnavailable('snapshot_timeout');
         }

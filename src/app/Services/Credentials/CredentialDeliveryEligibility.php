@@ -8,7 +8,6 @@ use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\ProductStockItem;
-use App\Models\SupplierPurchase;
 use App\Services\OrderLifecycleProjection;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use Illuminate\Database\Eloquent\Collection;
@@ -42,12 +41,6 @@ final class CredentialDeliveryEligibility
         $orders->loadMissing('payments');
         $ids = $orders->modelKeys();
         $pending = collect(app(SupplierFulfillmentService::class)->pendingOrderIds($ids))->flip();
-        $partial = SupplierPurchase::query()
-            ->whereHas('fulfillment', fn ($q) => $q->whereIn('order_id', $ids))
-            ->whereHas('supplier', fn ($q) => $q->where('provider', 'buymail'))
-            ->whereNotNull('committed_at')->where('observed_quantity', '>', 0)->whereColumn('observed_quantity', '<', 'supplier_purchases.quantity')
-            ->join('supplier_fulfillments', 'supplier_fulfillments.id', '=', 'supplier_purchases.supplier_fulfillment_id')
-            ->pluck('supplier_fulfillments.order_id')->flip();
         $review = ManualFulfillmentReview::query()->whereIn('order_id', $ids)->openLatePayment()->pluck('order_id')->flip();
 
         $reasons = [];
@@ -60,7 +53,7 @@ final class CredentialDeliveryEligibility
                 $payment->status !== PaymentStatus::Paid,
                 $payment->paid_at === null => 'payment_not_confirmed',
                 $order->payment_status !== PaymentStatus::Paid => 'payment_not_paid',
-                $pending->has($order->id) && ! $partial->has($order->id) => 'fulfillment_processing',
+                $pending->has($order->id) => 'fulfillment_processing',
                 $review->has($order->id) => 'late_payment_review',
                 ! OrderLifecycleProjection::from($order, $payment)->isPaid => 'lifecycle_ineligible',
                 default => null,

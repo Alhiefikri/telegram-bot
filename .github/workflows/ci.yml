@@ -171,11 +171,8 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run customer browser smoke without rebuilding assets
-        run: npx playwright test tests/Browser/admin-dashboard-responsive.spec.js -g "customer checkout"
-
-      - name: Run BuyMail warranty browser tests without rebuilding assets
-        run: npm run test:browser:buymail:ci
+      - name: Run customer and supplier browser smoke without rebuilding assets
+        run: npx playwright test tests/Browser/admin-dashboard-responsive.spec.js tests/Browser/supplier-connection.spec.js -g "customer checkout|supplier creation"
 
       - name: Migrate empty PostgreSQL database
         env:

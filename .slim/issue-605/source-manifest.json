@@ -4,7 +4,6 @@
   "sources": {
     "admin-qualified.source.js": "b9fac2cd0740f61b709306dcae4afbfcc2fb47428e80a1aeb1b7205a9e385735",
     "src/tests/Browser/admin-dashboard-responsive.spec.js": "7f4c73c492b49b53987a3db1736358a891bf1478ca771131ea85e89a4fbf62bc",
-    "src/tests/Browser/buymail-warranty.spec.js": "3cbe4bf2a4153cc30f27ed17546ce333395d570e06a3e4a06f09436ff24d9026",
     "src/tests/Feature/KlikQrisAdminObservabilityTest.php": "7ca3cdd215646b7ff82dc41e422d4c78255374001a4fc96630baa1bf02da96b3",
     "src/public/build/manifest.json": "cf9e6260bcca0587c41028188444381388a84596f56ac0da568ff5ebbb7d86e0",
     "admin-complete.source.js": "7f4c73c492b49b53987a3db1736358a891bf1478ca771131ea85e89a4fbf62bc",
@@ -39,13 +38,6 @@
       "skipped": 0,
       "assertions": 2033,
       "junit": "linked-php-qualified.xml"
-    },
-    "B2": {
-      "expected": 3,
-      "unexpected": 0,
-      "skipped": 0,
-      "flaky": 0,
-      "report": "buymail-final-report.json"
     },
     "B3": {
       "expected": 6,

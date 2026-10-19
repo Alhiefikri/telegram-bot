@@ -14,7 +14,5 @@ final readonly class SupplierOrderResult
         public ?string $errorCode = null,
         public bool $identityTrusted = false,
         public bool $deliveryTrusted = false,
-        public array $accountUnits = [],
-        public ?int $requestedQuantity = null,
     ) {}
 }

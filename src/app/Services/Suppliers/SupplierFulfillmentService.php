@@ -2,8 +2,6 @@
 
 namespace App\Services\Suppliers;
 
-use App\Enums\CredentialAccessMethod;
-use App\Enums\CredentialFormat;
 use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
@@ -35,7 +33,6 @@ use App\Models\SupplierPurchaseEvidence;
 use App\Models\User;
 use App\Models\WarrantyClaim;
 use App\Services\AuditLogger;
-use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
 use App\Services\OrderCredentialMailService;
@@ -44,8 +41,6 @@ use App\Services\ProductCredentialAllocator;
 use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
-use App\Services\Warranty\RefundAllocation;
-use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -182,12 +177,7 @@ final class SupplierFulfillmentService
             return;
         }
         try {
-            if ($supplier->provider === 'buymail' && ! $read && $purchase->replay_count > 0) {
-                $result = app(BuyMailClient::class)->recoverPurchase($supplier, $purchase->quantity, $purchase->reference, $purchase->dispatched_at,
-                    allowReplay: $purchase->credential_fingerprint !== null && hash_equals($purchase->credential_fingerprint, hash('sha256', $supplier->api_key)));
-            } else {
-                $result = $read ? $this->client->order($supplier, $purchase->supplier_order_id, $sku->external_id, $purchase->reference) : $this->client->purchase($supplier, $sku, $purchase->quantity, $purchase->reference);
-            }
+            $result = $read ? $this->client->order($supplier, $purchase->supplier_order_id, $sku->external_id, $purchase->reference) : $this->client->purchase($supplier, $sku, $purchase->quantity, $purchase->reference);
         } catch (SupplierUnavailable $exception) {
             $result = new SupplierOrderResult('ambiguous', errorCode: $exception->errorCode);
         } catch (Throwable) {
@@ -270,8 +260,6 @@ final class SupplierFulfillmentService
             if ($purchase->dispatched_at === null) {
                 // No transport intent was committed. No financial HTTP was authorized.
                 $purchase->update(['state' => 'reserved']);
-            } elseif ($provider === SupplierProvider::BuyMail) {
-                $purchase->update(['state' => 'reserved', 'replay_count' => $purchase->replay_count + 1]);
             } elseif ($suppliers->get($purchase->supplier_id)->is_active && $provider?->supportsIdempotency() && $purchase->replay_count === 0 && $purchase->dispatched_at?->gte(now()->subMinutes(10))) {
                 $purchase->update(['state' => 'reserved', 'replay_count' => 1]);
             } else {
@@ -300,16 +288,13 @@ final class SupplierFulfillmentService
                 return null;
             }
             $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $sku->id, 'reference' => (string) Str::uuid(), 'quantity' => $quantity, 'expected_cost_micros' => $f->reserved_cost_micros, 'exchange_rate_idr' => $candidate['exchange_rate_idr'], 'state' => 'reserved']);
-            if ($supplier->provider === 'buymail') {
-                $purchase->forceFill(['credential_fingerprint' => hash('sha256', $supplier->api_key)])->save();
-            }
             $f->update(['current_purchase_id' => $purchase->id]);
         }
         if (! $read && ! in_array($purchase->state, ['reserved'], true)) {
             return null;
         }
         $token = (string) Str::uuid();
-        $lease = $suppliers->get($purchase->supplier_id)->provider === 'buymail' ? now()->addMinutes(5) : now()->addMinutes(2);
+        $lease = now()->addMinutes(2);
         $purchase->update(['state' => $read ? 'awaiting_delivery' : 'sending', 'claim_token' => $token, 'lease_expires_at' => $lease]);
         $f->update(['state' => $read ? 'awaiting_delivery' : 'purchasing', 'next_attempt_at' => $lease]);
 
@@ -344,7 +329,7 @@ final class SupplierFulfillmentService
         $supplier = $suppliers->get($purchase->supplier_id);
         if (! $read && $result->outcome === 'ambiguous' && $transient && ! $result->identityTrusted && $result->orderId === null
             && $result->deliveries === [] && $result->costMicros === null
-            && $supplier->provider !== 'buymail' && $supplier->is_active
+            && $supplier->is_active
             && SupplierProvider::tryFrom($supplier->provider)?->supportsIdempotency()
             && $purchase->replay_count === 0 && $purchase->dispatched_at?->gte(now()->subMinutes(10))) {
             // Re-enter the same bounded recovery used for interrupted dispatches.
@@ -353,38 +338,7 @@ final class SupplierFulfillmentService
 
             return;
         }
-        if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && ! $result->identityTrusted
-            && in_array($result->errorCode, ['transport', 'transport_unavailable', 'invalid_payload', 'idempotency_in_progress', 'order_in_progress', 'reference_already_used'], true)
-            && $purchase->replay_count < 5 && $purchase->dispatched_at?->gte(now()->subDays(7)->addMinutes(5))) {
-            $purchase->forceFill(['state' => 'sending', 'next_attempt_at' => now()->addMinute()])->save();
-            $f->update(['state' => 'purchasing', 'next_attempt_at' => now()->addMinute()]);
-
-            return;
-        }
-        if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && $result->identityTrusted && $result->deliveryTrusted) {
-            if ($debitEvidence !== null && ($result->orderId !== $debitEvidence['order_id']
-                || $result->requestedQuantity !== $debitEvidence['quantity']
-                || $result->quantity !== $purchase->quantity || $result->costMicros !== $debitEvidence['cost_micros'])) {
-                $purchase->forceFill(['state' => 'review', 'last_error' => 'operator_evidence_mismatch'])->save();
-                $this->review($f, $order, 'operator_evidence_mismatch');
-
-                return;
-            }
-            $this->finalizeBuyMail($f, $order, $purchase, $result, $suppliers, $catalog);
-            if ($debitEvidence !== null && $purchase->committed_at !== null) {
-                SupplierPurchaseEvidence::query()->firstOrCreate(
-                    ['supplier_purchase_id' => $purchase->id, 'kind' => SupplierPurchaseEvidence::KIND_DEBIT_CONFIRMED],
-                    ['actor_user_id' => $debitEvidence['actor']->id, 'evidence_source' => 'provider_exact_order',
-                        'provider_reference' => $debitEvidence['order_id'], 'note' => $debitEvidence['note'], 'observed_at' => now()],
-                );
-                $this->audit->log('supplier_purchase.debit_confirmed', $purchase, null, [
-                    'supplier_order_id' => $result->orderId, 'quantity' => $result->requestedQuantity,
-                    'cost_micros' => $result->costMicros, 'currency' => 'IDR',
-                ], $debitEvidence['actor'], $debitEvidence['ip']);
-            }
-
-            return;
-        }
+        $previousOrderId = $purchase->supplier_order_id;
         if ($result->identityTrusted && $result->orderId !== null) {
             $collision = SupplierPurchase::query()->where('supplier_id', $purchase->supplier_id)->where('supplier_order_id', $result->orderId)->where('id', '!=', $purchase->id)->exists();
             if ($collision || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $result->orderId)) {
@@ -430,9 +384,6 @@ final class SupplierFulfillmentService
             // Complete acquired-unit evidence establishes delivered quantity
             // when the provider omits its redundant numeric field.
             $purchase->observed_quantity = count($result->deliveries);
-        }
-        if ($result->identityTrusted && $result->deliveryTrusted && $result->accountUnits !== []) {
-            $purchase->account_units = $result->accountUnits;
         }
         $deliveries = $purchase->trusted_delivery_payload ?? [];
         $quantityMatches = $purchase->observed_quantity === $purchase->quantity;
@@ -492,12 +443,10 @@ final class SupplierFulfillmentService
 
             return;
         }
+        // Only a known order's intermediate delivery can remain a polling baseline.
+        $pendingWithCorrelatedHistory = $result->outcome === 'pending' && ($previous === [] || $previousOrderId !== null);
         // A GET cannot erase evidence of a POST or prove that an existing order was never debited.
         if ($result->outcome === 'rejected' && ! $read && $purchase->replay_count === 0 && $result->deliveries === [] && $result->orderId === null && ($result->costMicros === null || $result->costMicros === 0) && $purchase->committed_at === null) {
-            if ($suppliers->get($purchase->supplier_id)->provider === 'buymail' && $result->errorCode === 'daily_limit_reached') {
-                $limited = $suppliers->get($purchase->supplier_id);
-                $limited->forceFill(['purchase_paused_until' => now('Asia/Jakarta')->addDay()->startOfDay()->timezone(config('app.timezone')), 'version' => $limited->version + 1])->save();
-            }
             $purchase->state = 'rejected';
             $purchase->save();
             $this->unhold($f, $suppliers, $catalog);
@@ -527,7 +476,7 @@ final class SupplierFulfillmentService
             if ($f->state !== 'delivered') {
                 $f->update(['state' => 'awaiting_delivery', 'next_attempt_at' => now()->addMinute()]);
             }
-        } elseif (($purchase->delivery_payload ?? []) !== [] || ($purchase->observed_quantity !== null && ! $quantityMatches) || ! $result->identityTrusted || $result->errorCode === 'delivery_unavailable') {
+        } elseif ($conflictingDelivery || (($purchase->delivery_payload ?? []) !== [] && ! $pendingWithCorrelatedHistory) || ($purchase->observed_quantity !== null && ! $quantityMatches) || ! $result->identityTrusted || $result->errorCode === 'delivery_unavailable') {
             $purchase->state = $purchase->supplier_order_id === null && ($purchase->delivery_payload ?? []) === [] ? 'ambiguous' : 'review';
             $purchase->save();
             $this->review($f, $order, $conflictingDelivery ? 'delivery_evidence_conflict' : ($result->errorCode ?? 'delivery_incomplete'));
@@ -657,42 +606,16 @@ final class SupplierFulfillmentService
         }
     }
 
-    private function materialize(SupplierFulfillment $f, SupplierPurchase $purchase, array $deliveries, bool $complete = true): void
+    private function materialize(SupplierFulfillment $f, SupplierPurchase $purchase, array $deliveries): void
     {
         $item = OrderItem::findOrFail($f->order_item_id);
-        $accountUnits = $purchase->account_units ?? [];
-        $number = $accountUnits === [] ? null : SupplierAccountUnit::query()->where('order_item_id', $item->id)->whereNull('replaces_unit_id')->count() + $item->localQuantity() + 1;
         foreach (array_values($deliveries) as $index => $secret) {
-            $unit = $accountUnits[$index] ?? null;
-            $structured = $unit !== null && $secret === $unit['email'].' | '.$unit['password'];
-            $attributes = ['product_id' => $item->product_id, 'order_item_id' => $item->id];
-            if ($structured) {
-                $attributes += [
-                    'credential_format' => CredentialFormat::StructuredAccount,
-                    'credential_payload' => StructuredCredentialPayload::fromValues($unit['email'], $unit['password'], CredentialAccessMethod::None)->toArray(),
-                ];
-            } else {
-                $attributes['secret'] = $secret;
-            }
-            $stockItem = ProductStockItem::firstOrCreate(['supplier_purchase_id' => $purchase->id, 'supplier_unit_index' => $index + 1], $attributes);
-            if ($structured) {
-                $subtotal = $item->order->currency === 'USDT' ? $item->usdt_subtotal : $item->subtotal;
-                $accountUnit = SupplierAccountUnit::firstOrCreate(['supplier_id' => $purchase->supplier_id, 'external_id' => $unit['id']], [
-                    'public_id' => (string) Str::uuid(), 'supplier_purchase_id' => $purchase->id,
-                    'product_stock_item_id' => $stockItem->id, 'order_id' => $item->order_id,
-                    'order_item_id' => $item->id, 'provider_state' => $unit['status'],
-                    'refund_deadline' => CarbonImmutable::parse($unit['refund_deadline'])->timezone(config('app.timezone')), 'cost_idr' => $unit['price'],
-                    'retail_amount' => RefundAllocation::unit($subtotal, $item->quantity, $number),
-                    'retail_currency' => $item->order->currency, 'unit_number' => $number,
-                ]);
-                if ($accountUnit->wasRecentlyCreated) {
-                    $number++;
-                }
-            }
+            ProductStockItem::firstOrCreate(
+                ['supplier_purchase_id' => $purchase->id, 'supplier_unit_index' => $index + 1],
+                ['product_id' => $item->product_id, 'order_item_id' => $item->id, 'secret' => $secret],
+            );
         }
-        if ($complete) {
-            $f->update(['state' => 'delivered', 'delivered_at' => now(), 'next_attempt_at' => null]);
-        }
+        $f->update(['state' => 'delivered', 'delivered_at' => now(), 'next_attempt_at' => null]);
     }
 
     private function remainingCostLimit(SupplierFulfillment $f): int
@@ -737,96 +660,6 @@ final class SupplierFulfillmentService
             return;
         }
         $this->finish($f, $order);
-    }
-
-    /** BuyMail terminal partial results prove both delivered quantity and actual debit. */
-    private function finalizeBuyMail(SupplierFulfillment $f, Order $order, SupplierPurchase $purchase, SupplierOrderResult $result, Collection $suppliers, Collection $catalog): void
-    {
-        $supplier = $suppliers->get($purchase->supplier_id);
-        $sku = $catalog->get($purchase->supplier_catalog_item_id);
-        $collision = SupplierPurchase::query()->where('supplier_id', $purchase->supplier_id)->where('supplier_order_id', $result->orderId)->whereKeyNot($purchase->id)->exists();
-        if ($result->orderId === null || $result->requestedQuantity !== $purchase->quantity
-            || $result->quantity === null || $result->costMicros === null
-            || $result->quantity < 0 || $result->quantity > $purchase->quantity
-            || count($result->accountUnits) !== $result->quantity || count($result->deliveries) !== $result->quantity
-            || $collision || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $result->orderId)
-            || ($purchase->committed_at !== null && ($purchase->actual_cost_micros !== $result->costMicros || $purchase->observed_quantity !== $result->quantity))) {
-            $purchase->update(['state' => 'review', 'last_error' => 'order_identity_mismatch']);
-            $this->review($f, $order, 'order_identity_mismatch');
-
-            return;
-        }
-        if (($purchase->account_units ?? []) !== [] && array_column($purchase->account_units, 'id') !== array_column($result->accountUnits, 'id')) {
-            $purchase->update(['state' => 'review', 'last_error' => 'delivery_evidence_conflict']);
-            $this->review($f, $order, 'delivery_evidence_conflict');
-
-            return;
-        }
-        foreach ($purchase->account_units ?? [] as $index => $existingUnit) {
-            $observedUnit = $result->accountUnits[$index] ?? null;
-            if ($observedUnit === null || $existingUnit['email'] !== $observedUnit['email'] || $existingUnit['password'] !== $observedUnit['password'] || $existingUnit['price'] !== $observedUnit['price']) {
-                $purchase->update(['state' => 'review', 'last_error' => 'delivery_evidence_conflict']);
-                $this->review($f, $order, 'delivery_evidence_conflict');
-
-                return;
-            }
-        }
-        $withinLimit = $purchase->committed_at !== null || SupplierMoney::costIdr($result->costMicros, 1) <= $this->remainingCostLimit($f);
-        $purchase->forceFill([
-            'supplier_order_id' => $result->orderId, 'observed_quantity' => $result->quantity,
-            'actual_cost_micros' => $result->costMicros, 'delivery_payload' => $result->deliveries,
-            'trusted_delivery_payload' => $result->deliveries, 'account_units' => $result->accountUnits,
-            'state' => $result->outcome === 'partial' ? 'settled' : 'delivered', 'next_attempt_at' => null,
-        ]);
-        if ($purchase->committed_at === null) {
-            $this->commitDebit($f, $purchase, $suppliers, $catalog);
-        }
-        $purchase->save();
-        $reusedUnit = SupplierAccountUnit::query()->where('supplier_id', $purchase->supplier_id)
-            ->whereIn('external_id', array_column($result->accountUnits, 'id'))->where('supplier_purchase_id', '!=', $purchase->id)->exists();
-        if ($reusedUnit) {
-            $this->review($f, $order, 'duplicate_account_identity');
-
-            return;
-        }
-        if (! $withinLimit) {
-            $this->review($f, $order, 'cost_mismatch');
-
-            return;
-        }
-        if ($f->state === 'delivered' || SupplierManualHandoff::query()->where('supplier_fulfillment_id', $f->id)->exists()) {
-            // Manual replacement already satisfied the customer; only settle original economics.
-            if ($f->state !== 'delivered') {
-                $this->review($f, $order, 'external_handoff_remaining');
-            }
-            $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
-
-            return;
-        }
-        $this->assertActive($order);
-        $this->materialize($f, $purchase, $result->deliveries, false);
-        $remaining = $this->outstandingQuantity($f);
-        if ($remaining === 0) {
-            $f->update(['state' => 'delivered', 'delivered_at' => now(), 'next_attempt_at' => null]);
-            $this->finish($f, $order);
-        } elseif ($remaining > 0) {
-            $cost = $this->pricing->costMicros($sku, $remaining);
-            if ($result->quantity > 0 && $f->purchases()->count() < 3 && $cost !== null
-                && $supplier->is_active && $supplier->currency_confirmed && $supplier->sync_expires_at?->isFuture()
-                && $sku->orderable && ! $sku->requires_input
-                && $cost <= max(0, $supplier->balance_micros - $supplier->reserved_balance_micros)
-                && $sku->stock - $sku->reserved_quantity >= $remaining
-                && SupplierMoney::costIdr($cost, 1) <= $this->remainingCostLimit($f)) {
-                $this->hold($f, $supplier, $sku, $cost, $remaining);
-                $f->update(['state' => 'pending', 'current_purchase_id' => null, 'next_attempt_at' => now(), 'last_error' => null]);
-                DB::afterCommit(fn () => ProcessSupplierFulfillment::dispatch($f->id));
-            } else {
-                $this->review($f, $order, 'partial_unfulfilled');
-            }
-        } else {
-            throw new InvalidOrderTransition('Supplier quantity invariant violated.');
-        }
-        $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
     }
 
     private function finish(SupplierFulfillment $f, Order $order): void
@@ -1124,7 +957,7 @@ final class SupplierFulfillmentService
             $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'transport_unavailable');
         }
         // Uncorrelated recovery must carry complete matching economic metadata, not name/time heuristics.
-        $requestedQuantity = $supplier->provider === 'buymail' ? $result->requestedQuantity : $result->quantity;
+        $requestedQuantity = $result->quantity;
         if (($purchase->supplier_order_id === null && ($result->orderId !== $orderId || $requestedQuantity !== $purchase->quantity || $result->costMicros === null)) || ($purchase->supplier_order_id !== null && $purchase->supplier_order_id !== $orderId)) {
             $result = new SupplierOrderResult('ambiguous', null, null, null, [], 'order_identity_mismatch');
         }

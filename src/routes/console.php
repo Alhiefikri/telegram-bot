@@ -14,10 +14,6 @@ use Illuminate\Support\Facades\Schedule;
 // Redis queue is only a wakeup path; neither command creates customer payments.
 Schedule::command('suppliers:sync --limit=5')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('suppliers:recover --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
-Schedule::command('suppliers:recover-warranty --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
-// Deadline reminders are materialized from durable PostgreSQL unit state; the
-// queue job is only the delivery wakeup and the effect ledger survives Redis loss.
-Schedule::command('suppliers:notify-warranty-deadlines --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('usdt-funding:recover --limit=25 --json')->everyMinute()->withoutOverlapping(2)->runInBackground();
 // Drift and coverage authority for the Customer USDT subledger (#558). The run
 // is bounded per facet and records sanitized evidence that alerting consumes;

@@ -98,7 +98,7 @@ yang diizinkan, sinkron, dan pastikan kapasitas supplier menjadi nol. Turunkan
 kembali, sinkron, dan cek kapasitas pulih. Pastikan stok lokal nol agar tidak
 menutupi hasil guard. Ini menguji batas margin, bukan mengubah harga provider.
 
-Uji otomatis respons harga berubah berada pada suite Supplier/BuyMail. Provider
+Uji otomatis respons harga berubah berada pada suite Supplier. Provider
 CSxStore tidak mendokumentasikan field max-price/quote lock pada POST order.
 Precheck dan freshness tidak menjamin harga tidak berubah saat request
 sedang berlangsung. Biaya aktual di atas ceiling perlu review, bukan klaim
@@ -141,8 +141,7 @@ Catatan berikut merekam penyiapan terdahulu. Nilai cadangan biaya di catatan his
 - HTTP login dan halaman Admin Supplier Reseller berhasil (200) menggunakan
   akun owner dan cookie lokal.
 - Worker supplier dan default dijalankan pada environment yang sama.
-- `php artisan test --compact --filter='Supplier|BuyMail'`: 216 passed,
-  15 skipped, 1.366 assertions. Skipped bukan bukti concurrency PostgreSQL.
+- Hasil historis lane supplier: 216 passed, 15 skipped, 1.366 assertions. Angka ini mendahului penghapusan suite provider lama; skipped bukan bukti concurrency PostgreSQL.
 - Operator sudah memasukkan key CSxStore lewat Dashboard. Sinkron GET real
   berhasil: 29 produk. Produk `Api test`, SKU `48`, biaya USD 0,01
   (Rp180 pada kurs Rp18.000), stok 2, mendukung pengiriman otomatis.

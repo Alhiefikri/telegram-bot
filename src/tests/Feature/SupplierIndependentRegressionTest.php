@@ -1006,7 +1006,7 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         $this->assertSame('4.000000', $connection['available_balance']);
     }
 
-    public function test_recovery_only_enqueues_non_buymail_purchase_without_scheduler_transport(): void
+    public function test_recovery_only_enqueues_purchase_without_scheduler_transport(): void
     {
         [, $fulfillment] = $this->paidSupplierOrder(provider: 'toolorax');
         Http::fake(fn () => Http::response(['ok' => false], 500));

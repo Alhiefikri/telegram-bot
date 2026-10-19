@@ -41,10 +41,6 @@ final class TelegramOutboundEffectPolicy
 
     /** @var list<string> */
     private const NON_RETRYABLE_FAILURE_CODES = [
-        'warranty_notification_unavailable',
-        'warranty_reminder_unavailable',
-        'warranty_reminder_expired',
-        'warranty_reminder_no_longer_eligible',
         'checkout_expired',
         'checkout_not_pending',
         'checkout_payment_missing',
@@ -89,13 +85,11 @@ final class TelegramOutboundEffectPolicy
 
     /** @var array<string, int> */
     private const MAX_ATTEMPTS = [
-        TelegramOutboundEffectType::WarrantyNotification->value => 3,
         TelegramOutboundEffectType::AdminOrderPendingNotification->value => self::ADMIN_ORDER_NOTIFICATION_MAX_ATTEMPTS,
         TelegramOutboundEffectType::AdminOrderPaidNotification->value => self::ADMIN_ORDER_NOTIFICATION_MAX_ATTEMPTS,
         TelegramOutboundEffectType::AdminOrderExpiredNotification->value => self::ADMIN_ORDER_NOTIFICATION_MAX_ATTEMPTS,
         TelegramOutboundEffectType::AdminOrderReviewNotification->value => 3,
         TelegramOutboundEffectType::ManualPaymentProof->value => self::MANUAL_PAYMENT_PROOF_MAX_ATTEMPTS,
-        TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 3,
         TelegramOutboundEffectType::BalanceAdjustmentNotice->value => 3,
         TelegramOutboundEffectType::SupplierHealth->value => 3,
         TelegramOutboundEffectType::UsdtTopUpReceipt->value => 3,
@@ -122,7 +116,6 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::AdminOrderPaidNotification->value => 'admin_order_paid_notification_attempts_exhausted',
         TelegramOutboundEffectType::AdminOrderExpiredNotification->value => 'admin_order_expired_notification_attempts_exhausted',
         TelegramOutboundEffectType::ManualPaymentProof->value => 'manual_payment_proof_attempts_exhausted',
-        TelegramOutboundEffectType::WarrantyDeadlineReminder->value => 'warranty_deadline_reminder_attempts_exhausted',
         TelegramOutboundEffectType::SupplierHealth->value => 'supplier_health_attempts_exhausted',
         TelegramOutboundEffectType::UsdtTopUpReceipt->value => 'usdt_top_up_receipt_attempts_exhausted',
         TelegramOutboundEffectType::UsdtRefundReceipt->value => 'usdt_refund_receipt_attempts_exhausted',

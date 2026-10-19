@@ -2,6 +2,7 @@
 
 namespace App\Services\Suppliers;
 
+use App\Enums\SupplierProvider;
 use App\Models\Product;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
@@ -79,8 +80,7 @@ final class SupplierPricing
 
     public function isEligible(Product $product, Supplier $supplier, SupplierCatalogItem $item, SupplierPricePolicy $policy, int $quantity, int $retailSubtotal): bool
     {
-        $providerMaximum = $supplier->provider === 'buymail' ? min(50, max(1, (int) ($supplier->account_metadata['max_quantity_per_order'] ?? 50))) : 10000;
-        if ($quantity < 1 || $quantity > $providerMaximum || $supplier->purchase_paused_until?->isFuture() || ! $supplier->is_active || ! $supplier->currency_confirmed
+        if (SupplierProvider::tryFrom($supplier->provider) === null || $quantity < 1 || $quantity > 10000 || ! $supplier->is_active || ! $supplier->currency_confirmed
             || $supplier->exchange_rate_idr <= 0 || ! SupplierExchangeRate::isPlausible($supplier->currency, $supplier->exchange_rate_idr)
             || $supplier->synced_at === null
             || $supplier->sync_expires_at === null || ! $supplier->sync_expires_at->isFuture()
@@ -106,8 +106,7 @@ final class SupplierPricing
     /** A contiguous purchasable range; never advertise a quantity across an unprofitable tier gap. */
     public function capacity(Product $product, Supplier $supplier, SupplierCatalogItem $item, SupplierPricePolicy $policy): int
     {
-        $providerMaximum = $supplier->provider === 'buymail' ? min(50, max(1, (int) ($supplier->account_metadata['max_quantity_per_order'] ?? 50))) : 10000;
-        $limit = min($providerMaximum, max(0, (int) $item->stock - (int) $item->reserved_quantity));
+        $limit = min(10000, max(0, (int) $item->stock - (int) $item->reserved_quantity));
         if ($limit === 0) {
             return 0;
         }

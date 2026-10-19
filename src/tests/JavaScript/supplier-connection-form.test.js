@@ -14,7 +14,6 @@ const providers = {
   csxstore: { currency: "USD", confirm: false, band: null },
   canboso: { currency: "USD", confirm: false, band: null },
   arrs: { currency: "USD", confirm: true, band: null },
-  buymail: { currency: "IDR", confirm: false, band: null },
 };
 
 function fixture(provider, rate, sample = null) {
@@ -68,14 +67,6 @@ test("same fixed currency retains its rate but account-selected currency require
   select("canboso");
   assert.equal(form.$refs.exchangeRate.value, "18000");
   select("arrs");
-  assert.equal(form.$refs.exchangeRate.value, "");
-});
-
-test("leaving the fixed IDR wallet never carries its unit rate into VND", () => {
-  const { form, select } = fixture("nastele", "0.75");
-  select("buymail");
-  assert.equal(form.$refs.exchangeRate.value, "1");
-  select("nastele");
   assert.equal(form.$refs.exchangeRate.value, "");
 });
 

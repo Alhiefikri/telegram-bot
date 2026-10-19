@@ -161,6 +161,17 @@ final class SupplierPricingTest extends TestCase
         $this->assertFalse($pricing->isEligible($product, $supplier, $item, $policy, 1, 20000));
     }
 
+    public function test_retired_provider_cannot_authorize_purchases_or_advertise_capacity(): void
+    {
+        [$product, $supplier, $item] = $this->resources();
+        $pricing = app(SupplierPricing::class);
+        $policy = $this->policy();
+        $supplier->provider = 'retired-provider';
+
+        $this->assertFalse($pricing->isEligible($product, $supplier, $item, $policy, 1, 20000));
+        $this->assertSame(0, $pricing->capacity($product, $supplier, $item, $policy));
+    }
+
     public function test_free_supplier_units_still_require_the_minimum_profit_floor(): void
     {
         [$product, $supplier, $item] = $this->resources();
@@ -196,7 +207,7 @@ final class SupplierPricingTest extends TestCase
         $product = new Product(['price_amount' => 20000]);
         $product->forceFill(['id' => 1, 'stock' => 0, 'reserved_stock' => 0, 'local_stock_items_exists' => false]);
         $product->setRelation('quantityPriceTiers', new Collection);
-        $supplier = new Supplier(['currency' => 'USDT', 'currency_confirmed' => true, 'exchange_rate_idr' => 16000, 'is_active' => true]);
+        $supplier = new Supplier(['provider' => 'prodseller', 'currency' => 'USDT', 'currency_confirmed' => true, 'exchange_rate_idr' => 16000, 'is_active' => true]);
         $supplier->forceFill(['id' => 1, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5), 'balance_micros' => 100000000, 'reserved_balance_micros' => 0]);
         $item = new SupplierCatalogItem(['supplier_id' => 1, 'currency' => 'USDT', 'unit_price_micros' => 1000000, 'stock' => 10, 'orderable' => true, 'requires_input' => false, 'synced_at' => now()]);
         $item->forceFill(['reserved_quantity' => 0]);

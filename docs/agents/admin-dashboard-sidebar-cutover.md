@@ -21,7 +21,7 @@ The [#605 release parity inventory](admin-dashboard-release-parity.md) is the ev
 | Ringkasan | `/admin?tab=stats` | daily revenue, currency/period boundaries, actionable attention and recent orders |
 | Produk | `/admin?tab=produk`, `product_form=create` | product/family/category, image/banner, stock/account input and bulk delete |
 | Pesanan | `/admin?tab=penjualan` | sales, Order/Payment operations and linked review queues |
-| Supplier | `/admin?tab=suppliers` | connections, catalog/import/mapping/pricing, purchases/recovery, warranty and BuyMail |
+| Supplier | `/admin?tab=suppliers` | connections, catalog/import/mapping/pricing, purchases/recovery |
 | Siaran | `/admin?tab=broadcast` | broadcast forms, validation, queue and outbound behavior |
 | Store Channel | `/admin?tab=telegram-channel` | configuration, test and fake proof actions |
 | Pengaturan | `/admin?tab=settings&section=pembayaran`, `saldo`, or `diagnostik` | payment, maintenance, funding/receiver policy and balance diagnostics |
@@ -179,7 +179,7 @@ Known limitation in that same extreme state: the legacy family/product modals ne
 Run from `src/`:
 
 - `php artisan test --filter='AdminDashboard|AdminCategoryCrudTest|AdminTelegramWelcomeBannerTest|AdminStockBulkDeletionTest|AdminDashboardProductFormsTest'`: 164 passed, 1,936 assertions.
-- `php artisan test --filter='AdminBalanceAdjustmentDashboardTest|WarrantyAdminTest|SupplierAdminTest|ProductionReleaseHardeningTest|AdminDashboardAccessTest|StorefrontLandingPageTest'`: 147 passed, 1,348 assertions.
+- Historical financial/supplier/access regression batch: 147 passed, 1,348 assertions. This batch predates retirement of provider-specific warranty surfaces.
 - `npm run test:js`: 57 passed.
 - `npm run build`: Vite production build passed.
 - `npx playwright test tests/Browser/admin-dashboard-responsive.spec.js -g 'accent controls|auth surfaces|upload controls|catalog placeholder'`: passed; adds the accent-contrast (theme, hover, drawer, filter-pill), auth-contrast (login, password confirmation, linked shell), upload-contract, 200%-text and real-upload tests.
@@ -254,12 +254,12 @@ Follow-up to #597, after the #601/#602 blocker repairs. Presentation only: route
 - **One accent, role-split** (`--admin-accent` fill, `--admin-accent-ink` on fill, `--admin-accent-strong` for accent text, `--admin-accent-hover` fill hover) is reused unchanged from #602. Nothing in this restyle introduces a second palette; semantic success/warning/danger boxes keep their tokens and their text labels.
 - **Emoji removed from headings only** (`📦 Produk Saya`, `🧩 Kelola Product Family`, `⚠️ Replacement & Refund Policy`, …). The emoji carried no state and competed with the real status badges; action-button emoji that name an action (`✏️`, `🗑️`) were kept or replaced by the plain label so the accessible name stays stable.
 - **The custom `supplier-*` CSS family was deleted** (~165 CSS lines) after all four consumer views moved onto the shared primitives. It duplicated the button/badge/card primitives with different borders, hard shadows, uppercase eyebrows and a form-control reset, which is exactly the second visual language the ticket forbids.
-- **Linked supplier pages gained their own page context in the shared topbar** (`admin/suppliers/layout.blade.php` now passes the child's `@section('title')` to `linked-shell`) and a content-level heading, because the topbar previously said only "Supplier" for five different pages and the warranty/purchases/BuyMail pages had no heading at all. This follows spec §5.2 (context label + current page title) and adds no route or tab.
+- **Linked supplier pages gained their own page context in the shared topbar** (`admin/suppliers/layout.blade.php` passes the child's `@section('title')` to `linked-shell`) and a content-level heading. This follows spec §5.2 (context label + current page title) and adds no route or tab.
 
 ### Browser-lane and test changes
 
-- `admin-dashboard-responsive.spec.js`: the linked-pages lane now also walks `admin.orders.show`, the purchases queue and the warranty page; the seed exposes `adminOrderPath`; the supplier workspace is located by `data-supplier-workspace` instead of the deleted `.supplier-workspace` rule; a new lane walks every touched operational surface at 375/768/1280px in light and dark, asserting the shared topbar, a content heading below it, and zero document overflow, with screenshots per surface/width/theme.
-- `buymail-warranty.spec.js`: the warranty panel assertion now expects the page's own topbar title.
+- `admin-dashboard-responsive.spec.js`: the linked-pages lane walks `admin.orders.show` and the purchases queue; the seed exposes `adminOrderPath`; the supplier workspace is located by `data-supplier-workspace` instead of the deleted `.supplier-workspace` rule. The operational lane checks the shared topbar, a content heading and document overflow across breakpoints and themes.
+- `supplier-connection.spec.js` retains the provider-independent password confirmation, key encryption/redaction and catalog navigation scenario in a disposable fixture.
 
 ### Exercised states (browser lanes, disposable SQLite fixtures)
 
@@ -287,11 +287,10 @@ Nothing in the lanes asserts CSS class names, exact markup or copy wording beyon
 Run from `src/`:
 
 - `php artisan test --filter='AdminDashboard|AdminCategoryCrudTest|AdminTelegramWelcomeBannerTest|AdminStockBulkDeletionTest|AdminOrderPaymentOperationsTest|ManualFulfillmentReviewTest|AdminTelegramOutboundEffectReviewTest|AdminStoreChannelTest|AdminCatalogPolicyAndStockAuditTest|ProductStockIntakeTest|ProductStockDeletionFakeSalesProofTest|StructuredStockSecurityAndRolloutTest'` — passed, 278 tests / 2,912 assertions.
-- `php artisan test --filter='SupplierAdminTest|SupplierDepositTest|SupplierPricingClarityTest|WarrantyAdminTest|WarrantyWebTest|BuyMailFulfillmentTest|SupplierIndependentRegressionTest|AdminDashboardAccessTest|ProductionReleaseHardeningTest|StorefrontLandingPageTest|AdminBalanceAdjustmentDashboardTest|AdminUsdtTopUpReviewTest|AdminTelegramWelcomeBannerTest|AdminStoreChannelTest'` — passed, 257 tests / 2,287 assertions.
+- Historical supplier/financial/Admin regression batch: 257 tests / 2,287 assertions passed. This result predates retirement of provider-specific warranty and deposit suites and is not a current suite result.
 - `npm run test:js` — passed, 57 tests.
 - `npm run build` — Vite production build passed (run by both browser lanes).
 - `npm run test:browser:admin` — passed, 102 tests (12.8m), including the new multi-breakpoint operational lane and the extended linked-pages lane.
-- `npm run test:browser:buymail` — passed, 3 tests, including the new supplier-catalog click-through.
 - `php artisan view:cache` plus `php -l` over every compiled view — all views compile; this caught two real defects during the work (a bare `{{ }}` in attribute position left the component tag uncompiled, and an escaped `@section('title')` string reaching the topbar double-escaped).
 - Token-inventory diff of every changed view (`route(...)`, `name="..."`, `@csrf`, `@method`, `@can`, `@error`, `@if/@foreach/@forelse/@empty/@endif`) — identical before and after.
 
@@ -538,7 +537,7 @@ carries a text label, so no status is conveyed by color alone.
 
 ## Historical #600 verification record
 
-The earlier #600 note listed 139 PHP tests / 1,747 assertions, 56 JS tests, a Vite build, 87 admin browser tests and 3 BuyMail browser tests as passing. It did not retain a commit-bound command report here. Those historical claims are not current verification, do not supersede the later review failures, and do not authorize release. Use the [#605 command/outcome record](admin-dashboard-release-parity.md#commands-and-outcomes), including failed and not-run cases, instead of carrying these counts forward.
+The earlier #600 note listed PHP/JavaScript/build/browser checks as passing without retaining a commit-bound command report here. Those historical claims are not current verification, do not supersede the later review failures, and do not authorize release. Use the [#605 command/outcome record](admin-dashboard-release-parity.md#commands-and-outcomes), including failed and not-run cases, instead of carrying those counts forward.
 
 ## Rollback
 

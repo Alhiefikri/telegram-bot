@@ -5,7 +5,6 @@ namespace App\Services\Warranty;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
-use App\Jobs\ProcessWarrantyReplacement;
 use App\Models\Customer;
 use App\Models\OrderRefund;
 use App\Models\Payment;
@@ -19,14 +18,14 @@ use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtOrderRefundService;
 use Illuminate\Support\Facades\DB;
 
-/** Customer settlement is independent of Supplier Balance recovery. */
+/** Settles retained claim refund entitlements without contacting a supplier. */
 final class WarrantySettlementService
 {
     public function __construct(private readonly WarrantyClaimService $claims, private readonly StoreBalanceLedger $ledger, private readonly AuditLogger $audit) {}
 
     public function choose(Customer $customer, string $claimPublicId, string $choice): WarrantyClaim
     {
-        if (! in_array($choice, ['refund', 'replacement'], true)) {
+        if ($choice !== 'refund') {
             throw new InvalidOrderTransition('Invalid warranty settlement.');
         }
         $initial = WarrantyClaim::query()->where('public_id', $claimPublicId)
@@ -75,15 +74,6 @@ final class WarrantySettlementService
                 || $unit->retail_currency !== $payment->currency || $unit->retail_amount <= 0) {
                 throw new InvalidOrderTransition('This claim is not eligible for settlement.');
             }
-            if ($choice === 'replacement') {
-                $claim->update(['settlement_choice' => 'replacement', 'settlement_state' => 'replacement_pending', 'replacement_next_attempt_at' => now()]);
-                $stock->update(['retired_at' => now(), 'retired_reason' => 'warranty_replacement']);
-                $this->audit->log('warranty.replacement_selected', $claim, new: ['unit_id' => $unit->id]);
-                app(WarrantyNotificationPipeline::class)->record($claim);
-                DB::afterCommit(fn () => ProcessWarrantyReplacement::dispatch($claim->id));
-
-                return $claim->fresh();
-            }
             $registered = (int) OrderRefund::query()->where('payment_id', $payment->id)->whereIn('state', ['requested', 'uncertain', 'confirmed'])->sum('amount');
             if ($unit->retail_amount > RefundAllocation::remaining($payment->amount, $registered)) {
                 throw new InvalidOrderTransition('Refund exceeds remaining buyer entitlement.');
@@ -108,7 +98,6 @@ final class WarrantySettlementService
                 }
             }
             $this->audit->log('warranty.refund_selected', $claim, new: ['refund_id' => $refund->id, 'amount' => $refund->amount, 'currency' => $refund->currency]);
-            app(WarrantyNotificationPipeline::class)->record($claim);
 
             return $claim->fresh();
         }, 5);
@@ -175,7 +164,6 @@ final class WarrantySettlementService
                 }
             }
             $this->audit->log('warranty.external_refund_recorded', $claim, new: ['refund_id' => $refund->id, 'amount' => $amount, 'currency' => $currency, 'result' => $result], user: $actor);
-            app(WarrantyNotificationPipeline::class)->record($claim);
 
             return $refund->fresh();
         }, 5);
