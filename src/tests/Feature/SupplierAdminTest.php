@@ -24,7 +24,6 @@ use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -241,7 +240,6 @@ final class SupplierAdminTest extends TestCase
         $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $this->connectionInput(['provider' => 'csxstore', 'currency' => 'USDT']))->assertStatus(422);
         $this->assertSame(0, Supplier::query()->count());
     }
-
 
     public function test_only_owner_and_admin_can_manage_connections_catalog_and_monitor(): void
     {

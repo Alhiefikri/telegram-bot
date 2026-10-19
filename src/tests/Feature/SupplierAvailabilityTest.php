@@ -75,7 +75,7 @@ final class SupplierAvailabilityTest extends TestCase
         }
         $activeBefore = $active->fresh()->getRawOriginal();
 
-        $migration = require database_path('migrations/2026_10_19_000001_retire_unsupported_supplier_connections.php');
+        $migration = require database_path('migrations/2026_10_19_000002_retire_unsupported_supplier_connections.php');
         $migration->up();
         $migration->up();
 
@@ -105,7 +105,7 @@ final class SupplierAvailabilityTest extends TestCase
         $sentBefore = $sent->fresh()->getRawOriginal();
         $activeBefore = $active->fresh()->getRawOriginal();
 
-        (require database_path('migrations/2026_10_19_000001_retire_unsupported_supplier_connections.php'))->up();
+        (require database_path('migrations/2026_10_19_000002_retire_unsupported_supplier_connections.php'))->up();
 
         foreach ([$obsolete, $reminder] as $effect) {
             $effect->refresh();
@@ -123,7 +123,7 @@ final class SupplierAvailabilityTest extends TestCase
         $metadata = '2026_10_03_000001_add_supplier_account_metadata';
         $batch = DB::table('migrations')->where('migration', $metadata)->value('batch');
         DB::table('migrations')->where('migration', $metadata)->update(['migration' => '2026_10_03_000001_previous_supplier_contract']);
-        DB::table('migrations')->where('migration', '2026_10_19_000001_retire_unsupported_supplier_connections')->delete();
+        DB::table('migrations')->where('migration', '2026_10_19_000002_retire_unsupported_supplier_connections')->delete();
 
         $this->artisan('migrate', ['--force' => true])->assertSuccessful();
 

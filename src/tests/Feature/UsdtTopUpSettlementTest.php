@@ -46,7 +46,7 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
 
     public function test_exact_final_receipt_commits_money_resolution_accounting_audit_and_outbound_once(): void
     {
-        $snapshot = $this->target->getAttributes();
+        $snapshot = $this->target->fresh()->getAttributes();
         $this->settle();
         $this->assertSame(1_000_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
         $this->assertSame('settled', DB::table('customer_usdt_top_up_settlement_work')->value('state'));

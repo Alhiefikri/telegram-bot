@@ -250,7 +250,10 @@ final class CustomerApiOrderNotificationTest extends NonTransactionalDatabaseTes
 
     private function assertSafe(string $payload, bool $public = true): void
     {
-        foreach (['local-password-private', 'supplier-password-private', 'upstream-private', ...($public ? ['buyer-private@example.test', 'privatebuyer'] : [])] as $secret) {
+        // Operator notices name the purchased Supplier on purpose (docs/runbook-supplier-api-reseller.md);
+        // only credentials and Customer-visible identity must never appear.
+        $secrets = ['local-password-private', 'supplier-password-private', $public ? 'upstream-private' : 'upstream-private-key', ...($public ? ['buyer-private@example.test', 'privatebuyer'] : [])];
+        foreach ($secrets as $secret) {
             $this->assertStringNotContainsString($secret, $payload);
         }
     }

@@ -57,7 +57,7 @@ class UsdtTopUpReviewTest extends UsdtTopUpTestCase
 
     public function test_revised_actual_amount_is_credited_once_and_original_snapshots_survive(): void
     {
-        $original = $this->target->getAttributes();
+        $original = $this->target->fresh()->getAttributes();
         $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '1250000000000000000')];
         $this->settle();
         $preview = $this->review('settled', '1.25');
@@ -87,7 +87,7 @@ class UsdtTopUpReviewTest extends UsdtTopUpTestCase
     #[DataProvider('mismatchedDeposits')]
     public function test_review_resolves_recorded_actual_deposit_without_losing_or_double_counting_it(string $raw, string $decimal, string $micro): void
     {
-        $original = $this->target->getAttributes();
+        $original = $this->target->fresh()->getAttributes();
         $this->rpc->receipt['logs'] = [$this->rpc->log(amount: $raw)];
         $this->settle();
         $report = app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100);
