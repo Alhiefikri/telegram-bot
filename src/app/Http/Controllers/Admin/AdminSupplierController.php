@@ -153,7 +153,7 @@ final class AdminSupplierController extends Controller
         $fulfillments = SupplierFulfillment::query()->with([
             'currentPurchase.supplier', 'currentPurchase.latestHistoryReconciliation',
             'reservedSupplier', 'manualHandoffs:id,supplier_fulfillment_id,quantity',
-            'order:id,customer_id,invoice_number,order_status,payment_status,telegram_receipt_sent_at,expires_at',
+            'order:id,customer_id,invoice_number,order_status,payment_status,telegram_receipt_sent_at,expires_at,created_at',
             'order.customer:id,telegram_id',
             'orderItem:id,product_name',
         ])

@@ -24,6 +24,7 @@
     @forelse($fulfillments as $fulfillment)
         <x-admin-dashboard.card as="article" padding="compact" shadow="sm">
             <h3 class="break-all text-base font-semibold text-admin-ink">{{ $fulfillment->order->invoice_number }}</h3>
+            <p class="mt-1 text-sm text-admin-ink">Invoice dibuat: <time datetime="{{ $fulfillment->order->created_at->toIso8601String() }}">{{ $fulfillment->order->created_at->timezone(config('app.timezone'))->format('d M Y H:i:s T') }}</time></p>
             <p class="mt-1 text-sm text-admin-ink">{{ $fulfillment->orderItem->product_name }} · {{ $fulfillment->quantity }} unit</p>
             <a class="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline" href="{{ route('admin.orders.show', $fulfillment->order_id) }}">Lihat detail pesanan dan pengiriman</a>
             @if($invoice !== '')
