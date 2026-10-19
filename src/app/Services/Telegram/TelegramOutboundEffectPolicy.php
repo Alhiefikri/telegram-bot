@@ -7,6 +7,7 @@ use App\Enums\TelegramOutboundEffectType;
 use App\Models\TelegramOutboundEffect;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Family policy for the durable Telegram Outbound Effect ledger.
@@ -41,6 +42,14 @@ final class TelegramOutboundEffectPolicy
 
     /** @var list<string> */
     private const NON_RETRYABLE_FAILURE_CODES = [
+        // Retired warranty flows can no longer produce these codes, but
+        // historical ledger rows carry them and the dispatch-family index
+        // predicate still lists them: this runtime list must stay a superset of
+        // that predicate or PostgreSQL stops using the partial index.
+        'warranty_notification_unavailable',
+        'warranty_reminder_unavailable',
+        'warranty_reminder_expired',
+        'warranty_reminder_no_longer_eligible',
         'checkout_expired',
         'checkout_not_pending',
         'checkout_payment_missing',
@@ -138,6 +147,12 @@ final class TelegramOutboundEffectPolicy
         private readonly TelegramBalanceReceiptDeliveryPause $deliveryPause,
     ) {}
 
+    /** @return list<string> */
+    public static function nonRetryableFailureCodes(): array
+    {
+        return self::NON_RETRYABLE_FAILURE_CODES;
+    }
+
     /** @return Builder<TelegramOutboundEffect> */
     public function applyRetryableConstraints(Builder $query, ?string $effectType = null): Builder
     {
@@ -155,20 +170,12 @@ final class TelegramOutboundEffectPolicy
             }
         }
 
-        $query
-            ->where(function (Builder $state): void {
-                $state
-                    ->where('state', TelegramOutboundEffectState::Pending->value)
-                    ->orWhere(function (Builder $failed): void {
-                        $failed
-                            ->where('state', TelegramOutboundEffectState::Failed->value)
-                            ->where(function (Builder $error): void {
-                                $error
-                                    ->whereNull('last_error_code')
-                                    ->orWhereNotIn('last_error_code', self::NON_RETRYABLE_FAILURE_CODES);
-                            });
-                    });
-            });
+        // The retryable state predicate is inlined, never bound: PostgreSQL only
+        // uses the dispatch-family and state indexes when it can prove the
+        // restriction implies their predicates at plan time, and a bound
+        // parameter cannot be proven. A cached generic plan would otherwise
+        // degrade every sweep into a sequential scan of the whole ledger.
+        $query->whereRaw($this->retryableStatePredicate());
 
         $maximums = $effectType === null
             ? self::MAX_ATTEMPTS
@@ -237,6 +244,24 @@ final class TelegramOutboundEffectPolicy
         }
 
         return $query;
+    }
+
+    /**
+     * Retryable membership as inlined SQL so the planner can match the
+     * dispatch-family and state index predicates with or without a cached
+     * generic plan.
+     */
+    private function retryableStatePredicate(): string
+    {
+        $pdo = DB::getPdo();
+        $codes = implode(', ', array_map(
+            static fn (string $code): string => $pdo->quote($code),
+            self::NON_RETRYABLE_FAILURE_CODES,
+        ));
+
+        return '(state = '.$pdo->quote(TelegramOutboundEffectState::Pending->value)
+            .' or (state = '.$pdo->quote(TelegramOutboundEffectState::Failed->value)
+            .' and (last_error_code is null or last_error_code not in ('.$codes.'))))';
     }
 
     public function canClaim(TelegramOutboundEffect $effect, CarbonInterface $at): bool
