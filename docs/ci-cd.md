@@ -62,6 +62,7 @@ production image job elevates only itself to `packages: write`.
   - Validates every workflow with `actionlint` and audits locked Composer production dependencies plus npm dependencies.
   - Rejects duplicate migration filename prefixes via `./scripts/check-migration-prefixes.sh`, so migration order stays deterministic. Prefixes that already shipped with a duplicate are allowlisted in `scripts/migration-prefix-allowlist.txt` and are never renamed, because Laravel keys the `migrations` table by filename.
   - The October 8 supplier sync backoff migration uses prefix `2026_10_08_000004`; `000001`–`000003` belong to the USDT migrations. The supplier migration was renamed before production deployment, without allowlisting the collision.
+  - The October 19 funding-method icon migration uses prefix `2026_10_19_000003`, assigned before production deployment; `000001` remains the already-released shared USDT top-up migration and `000002` belongs to supplier retirement.
   - Prepares PHP 8.4, Node 24, Composer dependencies, npm dependencies, and admin assets once for all application test lanes. This avoids repeating toolchain setup on a single serial runner.
   - Enforces Laravel Pint and keeps the fast SQLite suite parallel via ParaTest (`composer test -- --parallel`).
   - Before pushing PHP changes, run `cd src && ./vendor/bin/pint` and then `./vendor/bin/pint --test`; CI checks the whole tree, including migrations and tests.
