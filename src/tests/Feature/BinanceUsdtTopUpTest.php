@@ -18,6 +18,7 @@ use App\Services\UsdtTopUps\BinanceUsdtTopUpSettlement;
 use App\Services\UsdtTopUps\UsdtTopUpReview;
 use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
 use DomainException;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -62,6 +63,51 @@ final class BinanceUsdtTopUpTest extends TestCase
         $service->check($other->id);
         $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
         $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $other->id)->value('state'));
+    }
+
+    #[DataProvider('compatibleTransactionIdentifiers')]
+    public function test_transaction_id_accepted_by_product_checkout_also_credits_top_up_once(string $orderId): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771030);
+        $this->fakeHistory($this->transaction($target, ['orderId' => $orderId]));
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $customer = Customer::findOrFail($target->customer_id);
+        $service->submit($customer, $target->id, 'TX-445011487581044736');
+        $service->check($target->id);
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_settlement_work')->sole()->state);
+        $this->assertSame(1_500_000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $service->submit($customer, $target->id, $orderId !== '' ? $orderId : 'TX-445011487581044736');
+        $this->travel(61)->seconds();
+        $service->recover();
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $this->assertSame(1_500_000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+    }
+
+    public static function compatibleTransactionIdentifiers(): array
+    {
+        return ['distinct Order ID' => ['445011487581044736'], 'transaction ID only' => ['']];
+    }
+
+    #[DataProvider('compatibleTransactionIdentifiers')]
+    public function test_owner_can_resolve_an_amount_mismatch_submitted_by_transaction_id(string $orderId): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771038);
+        $this->fakeHistory($this->transaction($target, ['orderId' => $orderId, 'amount' => '2']));
+        $settlement = app(BinanceUsdtTopUpSettlement::class);
+        $settlement->submit(Customer::findOrFail($target->customer_id), $target->id, 'TX-445011487581044736');
+        $settlement->check($target->id);
+        $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->sole()->state);
+        $owner = $this->reviewOwner();
+        $review = app(UsdtTopUpReview::class);
+        $preview = $review->request($owner, $target->id, 'settled', '2', 'TX-445011487581044736', 'Verified transfer amount mismatch');
+        $review->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $this->assertSame(2_000_000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
     }
 
     public function test_second_transfer_after_settlement_is_claimed_for_review_without_another_credit(): void
@@ -293,6 +339,16 @@ final class BinanceUsdtTopUpTest extends TestCase
     public static function invalidIncomingTransfers(): array
     {
         return [
+            'underpaid by one micro' => [['amount' => '1.499999']],
+            'overpaid by one micro' => [['amount' => '1.500001']],
+            'zero transfer' => [['amount' => '0']],
+            'missing receiver' => [['receiverInfo' => []]],
+            'Pay ID cannot match a conflicting account via binanceId' => [['receiverInfo' => ['accountId' => '87654321', 'binanceId' => '12345678']]],
+            'pending' => [['status' => 'PENDING']],
+            'processing' => [['status' => 'PROCESSING']],
+            'cancelled' => [['status' => 'CANCELLED']],
+            'refunded' => [['status' => 'REFUNDED']],
+            'unknown status' => [['status' => 'UNKNOWN']],
             'receiver' => [['receiverInfo' => ['accountId' => '99999999']]],
             'asset' => [['currency' => 'USDC']],
             'failed' => [['status' => 'FAILED']],
@@ -640,6 +696,231 @@ final class BinanceUsdtTopUpTest extends TestCase
             $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
             $this->assertSame(0, DB::table('external_money_receipts')->count());
         }
+    }
+
+    #[DataProvider('acceptedReceiverShapes')]
+    public function test_valid_receiver_namespaces_and_success_statuses_credit_exact_micro_usdt(array $receiver, bool $uidOnly, array $status): void
+    {
+        $this->freezeTime();
+        if ($uidOnly) {
+            config(['services.binance.pay_id' => '', 'services.binance.pay_uid' => '11223344']);
+        }
+        $target = $this->target(771031, '0.000001');
+        $payload = $this->transaction($target, ['amount' => '0.000001000000000000', 'receiverInfo' => $receiver]);
+        unset($payload['status']);
+        $this->fakeHistory(array_replace($payload, $status));
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $service->check($target->id);
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $this->assertSame(1, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+        $this->assertSame(1, (int) DB::table('customer_usdt_balance_entries')->sole()->amount_micro);
+        $this->assertSame(0, DB::table('store_balance_entries')->count());
+    }
+
+    public static function acceptedReceiverShapes(): array
+    {
+        return [
+            'Pay ID via accountId with COMPLETED' => [['accountId' => '12345678'], false, ['status' => 'COMPLETED']],
+            'C2C Pay ID via binanceId with PAID' => [['binanceId' => '12345678'], false, ['status' => 'PAID']],
+            'UID namespace with transactionStatus' => [['binanceId' => '11223344'], true, ['transactionStatus' => 'SUCCESS']],
+            'legacy history without status' => [['accountId' => '12345678'], false, []],
+        ];
+    }
+
+    #[DataProvider('malformedProviderTransfers')]
+    public function test_malformed_provider_transfer_stays_unresolved_without_claiming_money(array $changes): void
+    {
+        $target = $this->target(771032);
+        $this->fakeHistory($this->transaction($target, $changes));
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $service->recover();
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(0, DB::table('external_money_receipts')->count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame('pending', DB::table('customer_usdt_top_up_inbox')->sole()->state);
+    }
+
+    public static function malformedProviderTransfers(): array
+    {
+        return [
+            'nested transfer status' => [['status' => ['value' => 'FAILED']]],
+            'boolean transfer status' => [['status' => false]],
+            'nested alternate status' => [['status' => null, 'transactionStatus' => ['value' => 'FAILED']]],
+            'sub-micro precision' => [['amount' => '1.5000001']],
+            'overflow' => [['amount' => '9223372036854.775808']],
+            'exponential notation' => [['amount' => '1.5e0']],
+            'missing transaction identity' => [['transactionId' => '']],
+            'nested amount' => [['amount' => ['value' => '1.5']]],
+            'malformed timestamp' => [['transactionTime' => 'yesterday']],
+        ];
+    }
+
+    #[DataProvider('paymentWindowBoundaries')]
+    public function test_payment_timestamp_boundaries_are_exact_even_when_verification_is_late(string $boundary, int $offsetMs, bool $settles): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $target = $this->target(771033);
+        $timestamp = ($boundary === 'start' ? $target->created_at : $target->expires_at)->getTimestampMs() + $offsetMs;
+        $this->travelTo($target->expires_at->toImmutable()->addMinute());
+        $this->fakeHistory($this->transaction($target, ['transactionTime' => $timestamp]));
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $service->check($target->id);
+        $this->assertSame($settles ? 'settled' : 'manual_review', DB::table('customer_usdt_top_up_settlement_work')->sole()->state);
+        if ($settles) {
+            $this->assertSame(1_500_000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+            $this->assertTrue((bool) DB::table('customer_usdt_top_up_resolutions')->sole()->late);
+        } else {
+            $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+            $this->assertSame(0, DB::table('external_money_receipts')->count());
+        }
+    }
+
+    public static function paymentWindowBoundaries(): array
+    {
+        return [
+            'exact creation time' => ['start', 0, true],
+            'one millisecond before creation' => ['start', -1, false],
+            'exact deadline' => ['end', 0, true],
+            'one millisecond after deadline' => ['end', 1, false],
+        ];
+    }
+
+    public function test_foreign_customer_cannot_submit_a_hint_for_another_customers_target(): void
+    {
+        $target = $this->target(771034);
+        $foreign = Customer::factory()->create();
+        try {
+            app(BinanceUsdtTopUpSettlement::class)->submit($foreign, $target->id, '445011487581044736');
+            $this->fail('Foreign customer supplied a funding hint.');
+        } catch (AuthorizationException) {
+            $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
+            $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+            Http::assertNothingSent();
+        }
+    }
+
+    public function test_transfer_after_customer_cancel_is_held_for_review_without_reopening_resolution(): void
+    {
+        $target = $this->target(771035);
+        $customer = Customer::findOrFail($target->customer_id);
+        $this->assertTrue(app(TelegramUsdtFundingActions::class)->cancelTarget($customer, $target->id));
+        $resolution = DB::table('customer_usdt_top_up_resolutions')->sole();
+        $this->fakeHistory($this->transaction($target));
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit($customer, $target->id, '445011487581044736');
+        $service->check($target->id);
+        $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->sole()->state);
+        $this->assertSame('receipt_after_resolution', DB::table('customer_usdt_top_up_settlement_work')->sole()->last_error);
+        $this->assertEquals($resolution, DB::table('customer_usdt_top_up_resolutions')->sole());
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+    }
+
+    public function test_expired_worker_cannot_credit_and_recovery_settles_once(): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771036);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $firstLookup = true;
+        Http::fake(['*sapi/v1/pay/transactions*' => function () use ($target, &$firstLookup) {
+            if ($firstLookup) {
+                $firstLookup = false;
+                $this->travel(121)->seconds();
+            }
+
+            return Http::response(['code' => '000000', 'success' => true, 'data' => [$this->transaction($target)]]);
+        }]);
+        $service->check($target->id);
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(0, DB::table('external_money_receipts')->count());
+        $service->recover();
+        $this->assertSame(1_500_000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+        $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
+        $service->recover();
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+    }
+
+    public function test_receipt_obligation_failure_rolls_back_credit_and_global_claim_then_recovers_once(): void
+    {
+        $target = $this->target(771037);
+        $this->fakeHistory($this->transaction($target));
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        DB::unprepared("CREATE TRIGGER reject_binance_receipt BEFORE INSERT ON telegram_outbound_effects BEGIN SELECT RAISE(ABORT, 'receipt obligation failed'); END");
+        try {
+            $service->recover();
+            foreach (['customer_usdt_balance_entries', 'customer_usdt_balance_accounting_events', 'customer_usdt_top_up_resolutions', 'external_money_receipts'] as $table) {
+                $this->assertSame(0, DB::table($table)->count(), $table);
+            }
+            $this->assertNull(CustomerUsdtFundingReservation::findOrFail($target->reservation_id)->resolved_at);
+        } finally {
+            DB::unprepared('DROP TRIGGER reject_binance_receipt');
+        }
+        $this->travel(3)->minutes();
+        $service->recover();
+        $this->assertSame(1_500_000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(1, DB::table('telegram_outbound_effects')->count());
+    }
+
+    #[DataProvider('providerFailures')]
+    public function test_provider_failure_never_credits_and_later_recovery_settles_once(int $status, mixed $body): void
+    {
+        $this->freezeTime();
+        config(['services.binance.history_max_attempts' => 1]);
+        $target = $this->target(771039);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::sequence()
+            ->push($body, $status)
+            ->push(['code' => '000000', 'success' => true, 'data' => [$this->transaction($target)]])]);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $service->recover();
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(0, DB::table('external_money_receipts')->count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertNull(CustomerUsdtFundingReservation::findOrFail($target->reservation_id)->resolved_at);
+        $this->travel(3)->minutes();
+        $service->recover();
+        $service->recover();
+        $this->assertSame(1_500_000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+    }
+
+    public static function providerFailures(): array
+    {
+        return [
+            'rate limit' => [429, ['code' => 'RATE_LIMIT', 'success' => false]],
+            'request timeout' => [408, ['code' => 'TIMEOUT', 'success' => false]],
+            'provider unavailable' => [503, ['code' => 'UNAVAILABLE', 'success' => false]],
+            'unauthorized credential' => [401, ['code' => 'UNAUTHORIZED', 'success' => false]],
+            'invalid signature' => [400, ['code' => '100001001', 'success' => false]],
+            'API rejection over HTTP 200' => [200, ['code' => 'REJECTED', 'success' => false]],
+            'malformed response' => [200, '<html>upstream error</html>'],
+            'malformed history list' => [200, ['code' => '000000', 'success' => true, 'data' => 'not a list']],
+        ];
+    }
+
+    public function test_transient_rate_limit_then_success_credits_once_within_bounded_transport_retries(): void
+    {
+        $target = $this->target(771040);
+        config(['services.binance.history_max_attempts' => 2, 'services.binance.history_retry_delay_ms' => 0]);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::sequence()
+            ->push(['code' => 'RATE_LIMIT', 'success' => false], 429, ['Retry-After' => '0'])
+            ->push(['code' => '000000', 'success' => true, 'data' => [$this->transaction($target)]])]);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $service->recover();
+        $this->assertSame(1_500_000, (int) DB::table('customer_usdt_balance_accounts')->sole()->balance_micro);
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $service->recover();
+        $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
+        Http::assertSentCount(2);
     }
 
     private function reviewOwner(): User

@@ -254,7 +254,7 @@ class TelegramMenuIntents
         }
         $keyboard[] = [[
             'text' => $this->locale->translate($customer, 'balance.activity.detail.back'),
-            'callback_data' => 'balance',
+            'callback_data' => 'balance:activity',
         ], $this->navButton($customer, 'menu.home', 'menu:home')];
 
         return new TelegramNavigationSurface(
@@ -298,8 +298,10 @@ class TelegramMenuIntents
                 // A drifted projection hides activity amounts entirely; the
                 // notice above already explains why nothing is shown.
                 $lines[] = '';
-                $lines[] = $this->locale->translate($customer, 'balance.activity.title');
                 $recent = $this->recentWalletActivity($customer, $usdt['available']);
+                $lines[] = $this->locale->translate($customer, 'balance.recent.title', [
+                    'count' => count($recent),
+                ]);
                 if ($recent === []) {
                     $lines[] = $this->locale->translate($customer, 'balance.activity.empty');
                 }
@@ -319,6 +321,10 @@ class TelegramMenuIntents
                 $keyboard[] = [[
                     'text' => $this->locale->translate($customer, 'balance.add'),
                     'callback_data' => 'balance:add',
+                ]];
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'balance.activity.button'),
+                    'callback_data' => 'balance:activity',
                 ]];
             }
 
@@ -357,7 +363,10 @@ class TelegramMenuIntents
         $keyboard = [[[
             'text' => $this->locale->translate($customer, 'balance.add'),
             'callback_data' => 'balance:add',
-        ]], $this->navigationRow($customer)];
+        ]], [[
+            'text' => $this->locale->translate($customer, 'balance.activity.back'),
+            'callback_data' => 'balance',
+        ], $this->navButton($customer, 'menu.home', 'menu:home')]];
         foreach ($page->items as $item) {
             $keyboard[] = [[
                 'text' => $this->locale->translate($customer, 'balance.activity.detail_button', [
@@ -397,7 +406,7 @@ class TelegramMenuIntents
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::Balance,
             $this->locale->code($customer),
-            $this->captions->html(implode("\n", $lines)),
+            $this->captions->html(implode("\n", $lines), PHP_INT_MAX),
             ['inline_keyboard' => $keyboard],
         );
     }

@@ -79,13 +79,62 @@ final class TelegramUsdtBalanceIntents
     public function checkingSurface(Customer $customer, string $hintKey): TelegramNavigationSurface
     {
         return new TelegramNavigationSurface(
-            TelegramNavigationScreen::UsdtBalance,
+            TelegramNavigationScreen::UsdtPayment,
             $this->locale->code($customer),
             $this->captions->html(implode("\n", [
                 $this->locale->translate($customer, 'balance.usdt.checking.title'),
                 '━━━━━━━━━━━━━━',
                 $this->locale->translate($customer, $hintKey),
             ])),
+            ['inline_keyboard' => []],
+        );
+    }
+
+    public function binanceVerificationSurface(
+        Customer $customer,
+        UsdtTopUpStatus $status,
+        bool $alreadyCredited = false,
+        ?string $noticeKey = null,
+    ): TelegramNavigationSurface {
+        $credited = $status->balanceAfterMicro !== null;
+        $state = match (true) {
+            $credited => $alreadyCredited ? 'already_paid' : 'paid',
+            $status->state === UsdtTopUpStatus::STATE_REVIEW => 'review',
+            $status->isTerminal() => 'closed',
+            $noticeKey === 'balance.usdt.verification.invalid' => 'invalid',
+            default => 'pending',
+        };
+        $messageKey = match ($state) {
+            'paid', 'already_paid', 'review' => 'balance.usdt.verification.'.$state,
+            'closed' => 'balance.usdt.status.'.$status->state.'_note',
+            default => $noticeKey ?? 'balance.usdt.verification.pending',
+        };
+        $lines = [
+            $this->locale->translate($customer, 'balance.usdt.verification.'.$state.'_title'),
+            '━━━━━━━━━━━━━━',
+            $this->locale->translate($customer, $messageKey),
+            '',
+            $this->locale->translate($customer, 'balance.usdt.status.invoice', ['reference' => $status->reference]),
+            $this->locale->translate($customer, 'balance.usdt.status.method', ['rail' => 'Binance Pay']),
+            $this->locale->translate($customer, 'balance.usdt.verification.expected', [
+                'amount' => $this->usdt($status->payableMicro),
+            ]),
+        ];
+        if ($status->receivedMicro !== null) {
+            $lines[] = $this->locale->translate($customer, 'balance.usdt.verification.received', [
+                'amount' => $this->usdt($status->receivedMicro),
+            ]);
+        }
+        if ($credited) {
+            $lines[] = $this->locale->translate($customer, 'balance.usdt.receipt.usd_credit', [
+                'amount' => $this->usdt($status->creditMicro),
+            ]);
+        }
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::UsdtPayment,
+            $this->locale->code($customer),
+            $this->captions->html(implode("\n", $lines)),
             ['inline_keyboard' => []],
         );
     }
@@ -121,13 +170,11 @@ final class TelegramUsdtBalanceIntents
             // One idea per paragraph: what to send, where to send it, then how
             // to prove it. Customers scan this screen on a phone.
             $minutes = max(1, (int) ceil(($status->deadline->getTimestamp() - now()->getTimestamp()) / 60));
-            $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'balance.usdt.status.method', ['rail' => $railLabel]);
             $lines[] = $this->locale->translate($customer, 'balance.usdt.status.window', [
                 'minutes' => $minutes,
                 'deadline' => $this->locale->formatDate($customer, $status->deadline),
             ]);
-            $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'balance.usdt.status.send_exact', [
                 'amount' => $this->copyableValue($this->usdt($status->payableMicro), $copyable),
             ]);
@@ -136,11 +183,13 @@ final class TelegramUsdtBalanceIntents
                     'amount' => $this->usdt($status->feeMicro),
                 ]);
             }
-            $lines[] = $this->locale->translate($customer, $isBinance
-                ? 'balance.usdt.preview.usd_credit'
-                : 'balance.usdt.status.credit', [
-                    'amount' => $this->usdt($status->creditMicro),
-                ]);
+            if (! $isBinance || $status->feeMicro > 0) {
+                $lines[] = $this->locale->translate($customer, $isBinance
+                    ? 'balance.usdt.preview.usd_credit'
+                    : 'balance.usdt.status.credit', [
+                        'amount' => $this->usdt($status->creditMicro),
+                    ]);
+            }
             if ($isShared && (int) ($snapshot['requested_micro'] ?? 0) !== (int) $target->amount_micro) {
                 $lines[] = $this->locale->translate($customer, 'balance.usdt.preview.shared_note', [
                     'requested' => $this->usdt((int) ($snapshot['requested_micro'] ?? 0)),
@@ -153,7 +202,8 @@ final class TelegramUsdtBalanceIntents
                 $lines[] = '';
                 $lines[] = $this->locale->translate($customer, ! empty($snapshot['receiver_pay_id'])
                     ? 'balance.usdt.status.pay_id_title' : 'balance.usdt.status.uid_title');
-                $lines[] = $this->copyableValue((string) ($snapshot['receiver_pay_id'] ?? $snapshot['receiver_uid'] ?? ''), $copyable);
+                $lines[] = $this->copyableValue((string) (! empty($snapshot['receiver_pay_id'])
+                    ? $snapshot['receiver_pay_id'] : ($snapshot['receiver_uid'] ?? '')), $copyable);
                 $lines[] = '';
                 $lines[] = $this->locale->translate($customer, 'balance.usdt.status.binance_howto');
             } else {
@@ -223,18 +273,28 @@ final class TelegramUsdtBalanceIntents
         ]);
         $keyboard = [];
         if ($status->acceptsCustomerLookup()) {
+            if ($isBinance && $status->isAwaitingPayment()) {
+                $payId = (string) (! empty($snapshot['receiver_pay_id'])
+                    ? $snapshot['receiver_pay_id'] : ($snapshot['receiver_uid'] ?? ''));
+                if ($payId !== '') {
+                    $keyboard[] = [[
+                        'text' => $this->locale->translate($customer, 'balance.usdt.status.copy_receiver'),
+                        'copy_text' => ['text' => $payId],
+                    ]];
+                }
+            }
             $keyboard[] = [
                 [
                     'text' => $this->locale->translate($customer, 'balance.usdt.status.check'),
                     'callback_data' => 'usdt:check:'.$target->id,
                 ],
-                [
-                    'text' => $this->locale->translate($customer, $isBinance
-                        ? 'balance.usdt.status.order_id'
-                        : 'balance.usdt.status.hash'),
-                    'callback_data' => ($isBinance ? 'usdt:order:' : 'usdt:hash:').$target->id,
-                ],
             ];
+            if (! $isBinance) {
+                $keyboard[] = [[
+                    'text' => $this->locale->translate($customer, 'balance.usdt.status.hash'),
+                    'callback_data' => 'usdt:hash:'.$target->id,
+                ]];
+            }
             // A Customer who picked the wrong amount must be able to start over
             // without waiting for the deadline.
             $keyboard[] = [[
@@ -243,10 +303,12 @@ final class TelegramUsdtBalanceIntents
                 'style' => 'danger',
             ]];
         }
-        $keyboard[] = $this->menu->navigationRow($customer);
+        if (! $status->acceptsCustomerLookup()) {
+            $keyboard[] = [$this->menu->navigationRow($customer)[1]];
+        }
 
         return new TelegramNavigationSurface(
-            TelegramNavigationScreen::UsdtBalance,
+            TelegramNavigationScreen::UsdtPayment,
             $this->locale->code($customer),
             strtr($this->captions->html(implode("\n", $lines), PHP_INT_MAX), $copyable),
             ['inline_keyboard' => $keyboard],

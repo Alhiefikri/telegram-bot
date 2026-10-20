@@ -32,6 +32,22 @@ class TelegramBotClientTest extends TestCase
         app(CustomEmojiCapability::class)->markAvailable();
     }
 
+    public function test_plain_text_receipt_omits_null_parse_mode_instead_of_sending_an_unsupported_mode(): void
+    {
+        Http::fake(function ($request) {
+            if (array_key_exists('parse_mode', $request->data())) {
+                return Http::response(['ok' => false, 'description' => 'Bad Request: unsupported parse_mode'], 400);
+            }
+
+            return Http::response(['ok' => true, 'result' => ['message_id' => 802]]);
+        });
+        $text = "Saldo USD: 3\nReferensi: <TEST> & saldo tidak dikredit ulang.";
+        $response = app(TelegramBotClient::class)->sendMessage(12345, $text, options: ['parse_mode' => null]);
+
+        $this->assertSame(802, $response['result']['message_id']);
+        $this->assertSame($text, Http::recorded()->sole()[0]['text']);
+    }
+
     #[DataProvider('copyBlockFallbackCases')]
     public function test_custom_emoji_fallback_preserves_literal_copy_block_and_utf16_range(bool $cachedUnavailable, bool $photo): void
     {

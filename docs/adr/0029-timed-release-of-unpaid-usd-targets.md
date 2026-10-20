@@ -35,6 +35,9 @@ in practice needed an operator to intervene.
   paths use the same transactional close with the immutable
   `cancelled_by_customer` resolution, skip targets with an active settlement
   lease, and never move money.
+- Successful inline cancellation deletes the payment instruction message,
+  clears the pending lookup prompt, and sends Home as the new canonical root.
+  The immutable target/resolution history remains available.
 
 ## Consequences
 

@@ -34,9 +34,16 @@ request being ignored.
 - An already-open target is shown as itself with an explicit notice. A new
   amount request can never silently reuse the previously requested amount and
   never creates a second target.
-- A pasted Binance Order ID or BSC transaction hash first renders a transient
-  checking surface, then the authoritative lookup runs synchronously and the
-  durable result replaces the same message. The hint is still only a hint.
+- A pasted Binance Order ID sends a new text-only checking reply below the
+  Customer's message, then edits only that reply with the durable result.
+  The invoice remains the canonical root and is not edited or deleted by
+  submission. First credit is labelled successful; a repeat submission for an
+  already-credited invoice is labelled already paid and never credits twice.
+  Pending/invalid replies explain waiting, checking the Order ID and avoiding
+  a second transfer in Indonesian, English and Malay. Provider outages retain
+  durable recovery and the lookup prompt. Closed/review states remain distinct.
+- A pasted BSC hash retains its existing canonical checking/status interaction.
+  Lookup input is never proof of payment on either rail.
 
 ## Consequences
 

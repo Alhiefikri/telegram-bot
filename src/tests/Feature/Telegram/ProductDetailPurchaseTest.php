@@ -122,7 +122,6 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         );
 
         $this->assertNotNull($balance, 'Detail harus menampilkan tombol Saldo.');
-        $this->assertSame('Balance · Rp10.000', $balance['text']);
         $this->assertSame('5368324170671202286', $balance['icon_custom_emoji_id'] ?? null);
     }
 
@@ -150,7 +149,6 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertCount(1, $keyboard[4]);
         $this->assertSame('primary', $keyboard[2][0]['style'] ?? null);
         $this->assertSame('💳 QRIS · Rp10.000', $keyboard[2][0]['text']);
-        $this->assertStringContainsString('Balance · Rp10.000', $keyboard[3][0]['text']);
         $this->assertStringStartsWith('detail:pay:balance:', $keyboard[3][0]['callback_data']);
         $this->assertStringContainsString('Price: Rp10.000', (string) $detail['text']);
         $this->assertStringContainsString('Available stock: 3', (string) $detail['text']);
@@ -1480,6 +1478,11 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             'private',
             88082,
         ))->assertOk();
+        $this->assertDatabaseCount('orders', 0);
+        $wallet = Http::recorded(fn ($request): bool => str_contains(json_encode($request->data()), 'checkout:wallet:idr:'))->last()[0]->data();
+        $callback = collect($wallet['reply_markup']['inline_keyboard'])->flatten(1)->first(
+            fn (array $button): bool => str_starts_with($button['callback_data'] ?? '', 'checkout:wallet:idr:'))['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(3180822, 'idr-pay', $callback, [], 318082, 'private', 123457))->assertOk();
 
         $order = Order::query()->sole();
         $payment = $order->payments()->sole();

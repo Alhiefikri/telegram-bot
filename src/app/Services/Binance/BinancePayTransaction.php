@@ -38,6 +38,11 @@ final readonly class BinancePayTransaction
         if ($amountMicro === null) {
             return null;
         }
+        foreach (['status', 'transactionStatus'] as $field) {
+            if (isset($payload[$field]) && ! is_string($payload[$field])) {
+                return null;
+            }
+        }
 
         $receiver = is_array($payload['receiverInfo'] ?? null) ? $payload['receiverInfo'] : [];
         $receiverAccountId = self::stringValue($receiver['accountId'] ?? null);

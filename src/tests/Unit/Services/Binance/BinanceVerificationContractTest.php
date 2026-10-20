@@ -81,6 +81,11 @@ class BinanceVerificationContractTest extends TestCase
         foreach (['1.0000001', '0.0000001', '9223372036854.775808', '1e3', 'NaN', '+1'] as $amount) {
             yield 'invalid amount '.$amount => [array_replace($valid, ['amount' => $amount])];
         }
+        foreach (['status', 'transactionStatus'] as $field) {
+            foreach ([['value' => 'FAILED'], false] as $status) {
+                yield 'malformed '.$field.' '.get_debug_type($status) => [array_replace($valid, [$field => $status])];
+            }
+        }
         yield 'invalid timestamp' => [array_replace($valid, ['transactionTime' => 'yesterday'])];
     }
 

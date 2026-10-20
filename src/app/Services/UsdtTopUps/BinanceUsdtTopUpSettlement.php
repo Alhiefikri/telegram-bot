@@ -131,7 +131,7 @@ final class BinanceUsdtTopUpSettlement
         $transactions = array_values(array_filter(array_map(fn ($payload): ?BinancePayTransaction => BinancePayTransaction::fromPayload($payload), $result->transactions)));
         $transaction = null;
         foreach ($transactions as $candidate) {
-            if (hash_equals((string) $candidate->orderId(), (string) $claim['inbox']->provider_reference)) {
+            if ($candidate->matchesSubmittedOrderId((string) $claim['inbox']->provider_reference) !== false) {
                 $transaction = $candidate;
                 break;
             }

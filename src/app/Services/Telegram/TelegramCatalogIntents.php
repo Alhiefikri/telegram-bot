@@ -549,9 +549,7 @@ class TelegramCatalogIntents
                     // post-restore barrier, so an active pause hides this
                     // button instead of offering a guaranteed rejection.
                     $keyboard[] = [[
-                        ...$this->uiIcons->apply('menu.balance', $this->locale->translate($customer, 'catalog.detail.pay_balance', [
-                            'amount' => number_format($quote->idrSubtotal, 0, ',', '.'),
-                        ])),
+                        ...$this->uiIcons->apply('menu.balance', $this->locale->translate($customer, 'catalog.detail.pay_balance')),
                         'callback_data' => 'detail:pay:balance:'.$productId.':'.$token,
                     ]];
                 }

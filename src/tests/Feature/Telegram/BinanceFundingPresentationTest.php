@@ -59,7 +59,7 @@ final class BinanceFundingPresentationTest extends TestCase
         $this->customer = Customer::factory()->create(['telegram_id' => 771050, 'locale' => 'en']);
         TelegramNavigationRoot::query()->create([
             'customer_id' => $this->customer->id, 'chat_id' => '771050', 'message_id' => 100,
-            'media_kind' => 'text', 'screen' => 'home', 'locale' => 'en', 'generation' => 1,
+            'media_kind' => 'text', 'screen' => 'usdt_payment', 'locale' => 'en', 'generation' => 1,
         ]);
     }
 
@@ -72,7 +72,6 @@ final class BinanceFundingPresentationTest extends TestCase
         $copy = $this->visible($surface->caption);
         $this->assertStringContainsString('🧾 Invoice: usdt:', $copy);
         $this->assertStringContainsString('Send exactly: 0.300001 USDT', $copy);
-        $this->assertStringContainsString('Balance credit: 0.300001 USD', $copy);
         $this->assertStringNotContainsString('Application fee', $copy);
         $this->assertStringContainsString("Binance Pay ID\n12345678", $copy);
         $this->assertStringContainsString('until '.app(TelegramLocale::class)->formatDate($this->customer, $target->expires_at), $copy);
@@ -86,7 +85,6 @@ final class BinanceFundingPresentationTest extends TestCase
         $this->assertSame('HTML', $surface->options['parse_mode']);
         $buttons = array_merge(...$surface->keyboard['inline_keyboard']);
         $this->assertContains('usdt:check:'.$target->id, array_column($buttons, 'callback_data'));
-        $this->assertContains('usdt:order:'.$target->id, array_column($buttons, 'callback_data'));
         $this->assertSame(1, CustomerUsdtTopUp::count());
         $this->assertSame(0, CustomerUsdtBalanceEntry::count());
         Http::assertNothingSent();
@@ -104,32 +102,26 @@ final class BinanceFundingPresentationTest extends TestCase
             '445011487581044736',
         ));
 
+        $sends = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->values();
         $edits = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'))->values();
-        $this->assertCount(2, $edits, 'The placeholder and the durable result both edit the canonical message.');
-        $checking = $edits[0][0]->data();
-        $result = $edits[1][0]->data();
-        $this->assertSame((int) $checking['message_id'], (int) $result['message_id']);
+        $this->assertCount(1, $sends);
+        $this->assertCount(1, $edits);
+        $this->assertSame(901, (int) $edits[0][0]['message_id']);
+        $this->assertNotSame(100, (int) $edits[0][0]['message_id']);
+        $this->assertSame(100, TelegramNavigationRoot::sole()->message_id);
+        $this->assertSame(['inline_keyboard' => []], $sends[0][0]['reply_markup']);
+        $this->assertStringContainsString($target->reference, $edits[0][0]['text']);
+        $this->assertSame(['inline_keyboard' => []], $edits[0][0]['reply_markup']);
 
-        $checkingCopy = $this->visible((string) $checking['text']);
-        $this->assertStringContainsString('⏳ Checking your payment…', $checkingCopy);
-        $this->assertStringContainsString('Matching the Binance Order ID against the payment history. This takes a moment.', $checkingCopy);
-        $this->assertStringNotContainsString('Balance after credit', $checkingCopy);
-        $this->assertSame(['inline_keyboard' => []], $checking['reply_markup']);
-
-        $resultCopy = $this->visible((string) $result['text']);
-        $this->assertStringContainsString('Payment received and the balance was credited.', $resultCopy);
-        $this->assertStringContainsString('Nominal: 0.3 USDT', $resultCopy);
-        $this->assertStringContainsString('Verified received: 0.3 USDT', $resultCopy);
-        $this->assertStringContainsString('Credited: 0.3 USD', $resultCopy);
-        $this->assertStringContainsString('Balance before credit: 0 USD', $resultCopy);
-        $this->assertStringContainsString('Balance after credit: 0.3 USD', $resultCopy);
-        $this->assertStringContainsString('Status: Balance credited', $resultCopy);
-        $this->assertStringContainsString($target->reference, $resultCopy);
-        $resultMarkup = json_encode($result['reply_markup'], JSON_THROW_ON_ERROR);
-        $this->assertStringNotContainsString('usdt:check:', $resultMarkup);
-        $this->assertStringNotContainsString('usdt:order:', $resultMarkup);
-        $this->assertStringNotContainsString('usdt:history', $resultMarkup);
-        $this->assertStringContainsString('menu:home', $resultMarkup);
+        $this->assertTrue(app(TelegramUsdtFundingCallbackHandler::class)->handleOrderIdInput(
+            $this->customer, '771050', '445011487581044736',
+        ));
+        $replies = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'))->values();
+        $this->assertCount(2, $replies);
+        $this->assertNotSame((int) $replies[0][0]['message_id'], (int) $replies[1][0]['message_id']);
+        $this->assertSame(100, TelegramNavigationRoot::sole()->message_id);
+        $this->assertCount(1, Http::recorded(fn (Request $request): bool => str_contains($request->url(), '/sapi/v1/pay/transactions')));
+        $this->assertSame(1, DB::table('customer_usdt_top_up_inbox')->count());
 
         $this->assertSame(1, CustomerUsdtBalanceEntry::count());
         $this->assertSame(300_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
@@ -152,13 +144,13 @@ final class BinanceFundingPresentationTest extends TestCase
             '445011487581044736',
         ));
 
+        $sends = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->values();
         $edits = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'))->values();
-        $this->assertCount(2, $edits);
-        $this->assertStringContainsString('⏳ Checking your payment…', $this->visible((string) $edits[0][0]['text']));
-        $copy = $this->visible((string) $edits[1][0]['text']);
-        $this->assertStringContainsString('Order ID received as a lookup hint.', $copy);
-        $this->assertStringContainsString('Send exactly: 0.3 USDT', $copy);
-        $this->assertStringContainsString('Status: Awaiting payment', $copy);
+        $this->assertCount(1, $sends);
+        $this->assertCount(1, $edits);
+        $this->assertSame(901, (int) $edits[0][0]['message_id']);
+        $this->assertSame(100, TelegramNavigationRoot::sole()->message_id);
+        $this->assertSame($target->id, app(TelegramUsdtFundingSession::class)->promptedTopUpId($this->customer));
 
         $this->assertSame(1, DB::table('customer_usdt_top_up_inbox')->count());
         $this->assertSame('445011487581044736', DB::table('customer_usdt_top_up_inbox')->value('provider_reference'));
@@ -166,6 +158,48 @@ final class BinanceFundingPresentationTest extends TestCase
         $this->assertSame(0, CustomerUsdtBalanceEntry::count());
         $this->assertSame(0, TelegramOutboundEffect::count());
         $this->assertSame(0, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+    }
+
+    public function test_invalid_order_id_replies_separately_without_consuming_a_lookup_and_allows_retry(): void
+    {
+        $target = $this->open('0.3');
+        app(TelegramUsdtFundingSession::class)->promptHash($this->customer, $target->id);
+        $this->fakeTransactionHistory([$this->transaction($target)]);
+        $handler = app(TelegramUsdtFundingCallbackHandler::class);
+
+        $this->assertTrue($handler->handleOrderIdInput($this->customer, '771050', 'not an order id'));
+        $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+        $this->assertSame($target->id, app(TelegramUsdtFundingSession::class)->promptedTopUpId($this->customer));
+        $this->assertCount(0, Http::recorded(fn (Request $request): bool => str_contains($request->url(), '/sapi/v1/pay/transactions')));
+        $this->assertSame(100, TelegramNavigationRoot::sole()->message_id);
+
+        $this->assertTrue($handler->handleOrderIdInput($this->customer, '771050', '445011487581044736'));
+        $this->assertSame(1, CustomerUsdtBalanceEntry::count());
+        $this->assertSame(300_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+        $this->assertSame(1, DB::table('customer_usdt_top_up_inbox')->count());
+    }
+
+    public function test_provider_outage_keeps_the_hint_and_invoice_available_without_claiming_payment(): void
+    {
+        $target = $this->open('0.3');
+        app(TelegramUsdtFundingSession::class)->promptHash($this->customer, $target->id);
+        Http::fake([
+            '*sapi/v1/pay/transactions*' => fn () => throw new ConnectionException('Provider unavailable'),
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 901]]),
+        ]);
+
+        $this->assertTrue(app(TelegramUsdtFundingCallbackHandler::class)->handleOrderIdInput(
+            $this->customer, '771050', '445011487581044736',
+        ));
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame('pending', DB::table('customer_usdt_top_up_inbox')->value('state'));
+        $this->assertSame($target->id, app(TelegramUsdtFundingSession::class)->promptedTopUpId($this->customer));
+        $this->assertSame(100, TelegramNavigationRoot::sole()->message_id);
+        $edits = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'));
+        $this->assertCount(1, $edits);
+        $this->assertSame(901, (int) $edits->sole()[0]['message_id']);
     }
 
     public function test_comma_and_dot_amounts_open_one_confirmed_target(): void
@@ -391,9 +425,12 @@ final class BinanceFundingPresentationTest extends TestCase
     /** @param list<array<string, mixed>> $transactions */
     private function fakeTransactionHistory(array $transactions): void
     {
+        $messageId = 900;
         Http::fake([
             '*sapi/v1/pay/transactions*' => Http::response(['code' => '000000', 'success' => true, 'data' => $transactions]),
-            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 901]]),
+            'https://api.telegram.org/*' => function () use (&$messageId) {
+                return Http::response(['ok' => true, 'result' => ['message_id' => ++$messageId]]);
+            },
         ]);
     }
 

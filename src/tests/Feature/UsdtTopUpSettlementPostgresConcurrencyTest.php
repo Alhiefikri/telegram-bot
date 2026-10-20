@@ -321,6 +321,60 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
         $this->assertSame(0, DB::table('customer_usdt_top_up_fee_events')->count());
     }
 
+    public function test_three_binance_workers_credit_one_target_once_and_preserve_the_order_alias(): void
+    {
+        $this->configureBinance();
+        $target = $this->binanceTarget(951105);
+        $customer = Customer::findOrFail($target->customer_id);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $transaction = $this->binanceTransaction();
+        $service->submit($customer, $target->id, $transaction['transactionId']);
+        $results = $this->runConcurrentWorkers(3, function () use ($target, $transaction): string {
+            $this->fakeBinanceHistory($transaction);
+
+            return app(BinanceUsdtTopUpSettlement::class)->check($target->id) ? 'checked' : 'deferred';
+        }, 'binance-same-target-race');
+        $this->assertWorkersSucceeded($results);
+        $this->fakeBinanceHistory($transaction);
+        $service->recover();
+        $service->submit($customer, $target->id, $transaction['orderId']);
+        $this->travel(61)->seconds();
+        $service->recover();
+        $this->assertSame(300_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('source_id', $target->id)->count());
+        $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->count());
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $this->assertSame(1, DB::table('telegram_outbound_effects')->where('source_id', $target->id)->count());
+    }
+
+    public function test_binance_worker_death_during_history_lookup_recovers_without_lost_or_duplicate_credit(): void
+    {
+        $this->configureBinance();
+        $target = $this->binanceTarget(951106);
+        $customer = Customer::findOrFail($target->customer_id);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit($customer, $target->id, '445011487581044736');
+        $results = $this->runConcurrentWorkers(1, function () use ($target): string {
+            Http::fake(['*sapi/v1/pay/transactions*' => function () {
+                posix_kill(getmypid(), SIGKILL);
+            }]);
+            app(BinanceUsdtTopUpSettlement::class)->check($target->id);
+
+            return 'unexpected_completion';
+        }, 'binance-history-crash');
+        $this->assertSame(SIGKILL, $results[0]['signal']);
+        $this->assertSame(0, CustomerUsdtBalanceEntry::where('source_id', $target->id)->count());
+        $this->assertSame(0, DB::table('external_money_receipts')->count());
+        $this->travel(3)->minutes();
+        $this->fakeBinanceHistory($this->binanceTransaction());
+        $service->recover();
+        $service->recover();
+        $this->assertSame(300_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('source_id', $target->id)->count());
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->sole()->kind);
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+    }
+
     private function configureBinance(): void
     {
         Http::preventStrayRequests();

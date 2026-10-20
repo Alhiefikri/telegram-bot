@@ -131,6 +131,12 @@ class TelegramNavigationRootService
             return $this->replaceRoot($claimed, $chatId, $surface, deleteBeforeSend: true);
         }
 
+        if ($claimed->screen !== $surface->screen
+            && ($claimed->screen === TelegramNavigationScreen::UsdtPayment
+                || $surface->screen === TelegramNavigationScreen::UsdtPayment)) {
+            return $this->replaceRoot($claimed, $chatId, $surface, deleteBeforeSend: true);
+        }
+
         if (($surface->screen === TelegramNavigationScreen::Product
                 && ($claimed->screen !== TelegramNavigationScreen::Product
                     || ($claimed->media_kind === TelegramNavigationMediaKind::Photo
@@ -300,7 +306,7 @@ class TelegramNavigationRootService
             if ($deleteBeforeSend) {
                 $this->bot->deleteMessage($chatId, $root->message_id);
             }
-            $sent = $surface->screen === TelegramNavigationScreen::Product
+            $sent = in_array($surface->screen, [TelegramNavigationScreen::Product, TelegramNavigationScreen::UsdtPayment], true)
                 ? $this->sendProduct($chatId, $surface)
                 : $this->banner->send(
                     $chatId,

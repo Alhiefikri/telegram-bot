@@ -468,6 +468,9 @@ class TelegramBotClient
      */
     private function normalizeCustomEmojiText(array $payload): array
     {
+        if (($payload['parse_mode'] ?? null) === null) {
+            unset($payload['parse_mode']);
+        }
         if (is_array($payload['reply_markup'] ?? null) || is_string($payload['reply_markup'] ?? null)) {
             $payload['reply_markup'] = $this->customEmoji->iconsFromReplyMarkup($payload['reply_markup']);
             $payload['reply_markup'] = $this->defaultInlineButtonStyles($payload['reply_markup']);

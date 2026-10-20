@@ -18,7 +18,7 @@ use Illuminate\Support\Collection;
 
 final class StoreBalanceActivityService
 {
-    public const PAGE_SIZE = 5;
+    public const PAGE_SIZE = 10;
 
     public const WEB_PAGE_SIZE = 25;
 

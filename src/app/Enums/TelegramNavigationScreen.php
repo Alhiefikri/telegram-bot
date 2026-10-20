@@ -10,6 +10,7 @@ enum TelegramNavigationScreen: string
     case AddBalance = 'add_balance';
     case UsdtFundingAmount = 'usdt_funding_amount';
     case UsdtBalance = 'usdt_balance';
+    case UsdtPayment = 'usdt_payment';
     case Orders = 'orders';
     case Support = 'support';
     case Api = 'api';

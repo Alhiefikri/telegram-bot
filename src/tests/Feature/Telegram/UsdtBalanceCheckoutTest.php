@@ -37,12 +37,11 @@ final class UsdtBalanceCheckoutTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Queue::fake([SendTelegramReceipt::class]);
         $customer = $this->fixture();
-        $this->postTelegramWebhook($this->callbackUpdate(55501, 'choose', 'checkout', [], 555001, 'private', 55501))->assertOk();
-        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains(json_encode($request->data()), 'checkout:usdt_balance')
-            && str_contains(json_encode($request->data()), '2.000001 USDT'));
-        $this->postTelegramWebhook($this->callbackUpdate(55502, 'pay', 'checkout:usdt_balance', [], 555001, 'private', 55501))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(55503, 'retry', 'checkout:usdt_balance', [], 555001, 'private', 55501))->assertOk();
+        $callback = $this->openWalletChooser('usd');
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->postTelegramWebhook($this->callbackUpdate(55502, 'pay', $callback, [], 555001, 'private', 123457))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(55503, 'retry', $callback, [], 555001, 'private', 123457))->assertOk();
         $order = Order::sole();
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
         $this->assertSame('usdt_balance', $order->payments()->sole()->provider);
@@ -58,8 +57,9 @@ final class UsdtBalanceCheckoutTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Queue::fake([SendTelegramReceipt::class]);
         $customer = $this->fixture();
-        $this->postTelegramWebhook($this->callbackUpdate(55504, 'group', 'checkout:usdt_balance', ['id' => 555001], -555, 'group', 55501))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(55505, 'foreign-chat', 'checkout:usdt_balance', ['id' => 555001], 555002, 'private', 55501))->assertOk();
+        $callback = $this->openWalletChooser('usd');
+        $this->postTelegramWebhook($this->callbackUpdate(55504, 'group', $callback, ['id' => 555001], -555, 'group', 123457))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(55505, 'foreign-chat', $callback, ['id' => 555001], 555002, 'private', 123457))->assertOk();
         $this->assertDatabaseCount('orders', 0);
         $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
     }
@@ -69,10 +69,10 @@ final class UsdtBalanceCheckoutTest extends TelegramBotTestSupport
         $this->fakeTelegramHttp();
         Queue::fake([SendTelegramReceipt::class]);
         $customer = $this->fixture();
+        $callback = $this->openWalletChooser('usd');
         app(CustomerUsdtFundingPolicyManager::class)->pause(CustomerUsdtFundingPauseScope::Spending, 'Incident', User::factory()->create(), null);
         $this->postTelegramWebhook($this->callbackUpdate(55506, 'paused-choose', 'checkout', [], 555001, 'private', 55501))->assertOk();
-        Http::assertNotSent(fn ($request): bool => str_contains(json_encode($request->data()), 'checkout:usdt_balance'));
-        $this->postTelegramWebhook($this->callbackUpdate(55507, 'paused-pay', 'checkout:usdt_balance', [], 555001, 'private', 55501))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(55507, 'paused-pay', $callback, [], 555001, 'private', 123457))->assertOk();
         $this->assertDatabaseCount('orders', 0);
         $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
     }
@@ -86,6 +86,7 @@ final class UsdtBalanceCheckoutTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(55508, 'choose-idr', 'checkout', [], 555001, 'private', 55501))->assertOk();
         $this->assertNotNull($this->lastPayload('checkout:balance'));
         $ledger->creditTopUp($customer, 30_000, 'telegram-idr-fixture', 'telegram-idr-fixture');
+        $callback = $this->openWalletChooser('idr');
         app(CustomerUsdtFundingPolicyManager::class)->pause(CustomerUsdtFundingPauseScope::Spending, 'Incident', User::factory()->create(), null);
 
         $this->recordedMarker = Http::recorded()->count();
@@ -94,7 +95,7 @@ final class UsdtBalanceCheckoutTest extends TelegramBotTestSupport
         $this->assertNull($this->lastPayload('checkout:balance'));
 
         // A stale callback from the pre-pause selector stays fail-closed.
-        $this->postTelegramWebhook($this->callbackUpdate(55510, 'paused-idr-pay', 'checkout:balance', [], 555001, 'private', 55501))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(55510, 'paused-idr-pay', $callback, [], 555001, 'private', 123457))->assertOk();
         $this->assertDatabaseCount('orders', 0);
         $this->assertDatabaseCount('payments', 0);
         $this->assertSame(30_000, $ledger->snapshot($customer)->balance());
@@ -132,14 +133,84 @@ final class UsdtBalanceCheckoutTest extends TelegramBotTestSupport
         app(BalanceRestoreGateService::class)->open(now()->subHours(2), now()->subHour(), 'pitr drill', 'operator-a');
 
         $this->postTelegramWebhook($this->callbackUpdate(55520, 'restore-choose', 'checkout', [], 555001, 'private', 55501))->assertOk();
-        Http::assertNotSent(fn ($request): bool => str_contains(json_encode($request->data()), 'checkout:balance')
-            || str_contains(json_encode($request->data()), 'checkout:usdt_balance'));
+        Http::assertNotSent(fn ($request): bool => str_contains(json_encode($request->data()), 'checkout:balance'));
         $this->assertNotNull($this->lastPayload('checkout:current'));
 
         $this->recordedMarker = Http::recorded()->count();
         $this->openProductDetail($customer, Product::sole());
         $this->assertNotNull($this->lastPayload('detail:pay:qris'));
         $this->assertNull($this->lastPayload('detail:pay:balance'));
+    }
+
+    public function test_direct_usd_purchase_spends_exact_balance_without_touching_idr_and_replays_once(): void
+    {
+        $this->fakeTelegramHttp();
+        Queue::fake([SendTelegramReceipt::class]);
+        $customer = $this->fixture(1_000_000, 1_000_000);
+        app(StoreBalanceLedger::class)->creditTopUp($customer, 30_000, 'usd-isolation', 'usd-isolation');
+        $product = Product::sole();
+        $this->openProductDetail($customer, $product);
+        $detail = $this->lastPayload('detail:pay:balance:');
+        $button = collect($detail['reply_markup']['inline_keyboard'])->flatten(1)->first(
+            fn (array $button): bool => str_starts_with($button['callback_data'] ?? '', 'detail:pay:balance:'));
+        $this->postTelegramWebhook($this->callbackUpdate(55601, 'open-wallet', $button['callback_data'], [], 555001, 'private', 55510))->assertOk();
+        $this->assertDatabaseCount('orders', 0);
+        $usd = $this->walletCallback('usd');
+        $idr = $this->walletCallback('idr');
+        $this->postTelegramWebhook($this->callbackUpdate(55602, 'usd-pay', $usd, [], 555001, 'private', 123457))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(55603, 'idr-replay', $idr, [], 555001, 'private', 123457))->assertOk();
+        $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(30_000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertSame('usdt_balance', Order::sole()->payments()->sole()->provider);
+        $this->assertSame(PaymentStatus::Paid, Order::sole()->payment_status);
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('kind', UsdtBalanceEntryKind::PurchaseDebit)->count());
+        $this->assertSame(Order::sole()->orderItems()->sole()->id, ProductStockItem::sole()->order_item_id);
+    }
+
+    public function test_insufficient_usd_does_not_fall_back_to_funded_idr_wallet(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = $this->fixture(999_999, 1_000_000);
+        app(StoreBalanceLedger::class)->creditTopUp($customer, 30_000, 'no-fallback', 'no-fallback');
+        $callback = $this->openWalletChooser('usd');
+        $this->postTelegramWebhook($this->callbackUpdate(55610, 'insufficient-usd', $callback, [], 555001, 'private', 123457))->assertOk();
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertSame(999_999, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertSame(30_000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
+        $this->assertNull(ProductStockItem::sole()->order_item_id);
+    }
+
+    public function test_changed_price_wrong_message_and_cancelled_choice_cannot_spend(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = $this->fixture();
+        $callback = $this->openWalletChooser('usd');
+        $this->postTelegramWebhook($this->callbackUpdate(55620, 'wrong-message', $callback, [], 555001, 'private', 123458))->assertOk();
+        $this->assertDatabaseCount('orders', 0);
+        Product::sole()->update(['usdt_price_amount' => 2_500_000]);
+        $this->postTelegramWebhook($this->callbackUpdate(55621, 'changed-price', $callback, [], 555001, 'private', 123457))->assertOk();
+        $this->assertDatabaseCount('orders', 0);
+        $cancel = $this->walletCallback('cancel');
+        $this->postTelegramWebhook($this->callbackUpdate(55622, 'cancel-wallet', $cancel, [], 555001, 'private', 123457))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(55623, 'cancelled-pay', $callback, [], 555001, 'private', 123457))->assertOk();
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+    }
+
+    private function openWalletChooser(string $currency): string
+    {
+        $this->postTelegramWebhook($this->callbackUpdate(55700, 'choose-wallet', 'checkout:balance', [], 555001, 'private', 55501))->assertOk();
+
+        return $this->walletCallback($currency);
+    }
+
+    private function walletCallback(string $currency): string
+    {
+        $payload = $this->lastPayload('checkout:wallet:'.$currency.':');
+        $this->assertNotNull($payload);
+
+        return collect($payload['reply_markup']['inline_keyboard'])->flatten(1)->first(
+            fn (array $button): bool => str_starts_with($button['callback_data'] ?? '', 'checkout:wallet:'.$currency.':'))['callback_data'];
     }
 
     private function openProductDetail(Customer $customer, Product $product): void
@@ -167,15 +238,15 @@ final class UsdtBalanceCheckoutTest extends TelegramBotTestSupport
         return $record === null ? null : $record[0]->data();
     }
 
-    private function fixture(): Customer
+    private function fixture(int $balance = 3_000_000, int $price = 2_000_001): Customer
     {
         $customer = Customer::factory()->create(['telegram_id' => 555001, 'locale' => 'en']);
-        $product = Product::factory()->create(['price_amount' => 15_000, 'usdt_price_amount' => 2_000_001, 'stock' => 1, 'reserved_stock' => 0]);
+        $product = Product::factory()->create(['price_amount' => 15_000, 'usdt_price_amount' => $price, 'stock' => 1, 'reserved_stock' => 0]);
         ProductStockItem::create(['product_id' => $product->id, 'secret' => 'private-checkout-credential']);
         $cart = app(CartService::class)->activeCartFor($customer);
         app(CartService::class)->addItem($cart, $product, 1);
         app(CustomerUsdtBalanceLedger::class)->creditVerifiedTopUp($customer,
-            new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits(3_000_000), 'telegram-fixture', 'telegram-receipt', 'v1'), 'telegram-fixture-credit');
+            new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits($balance), 'telegram-fixture', 'telegram-receipt', 'v1'), 'telegram-fixture-credit');
 
         return $customer;
     }

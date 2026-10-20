@@ -80,7 +80,7 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         $customer = Customer::factory()->create(['telegram_id' => 46302, 'locale' => 'en']);
         $ledger = app(StoreBalanceLedger::class);
 
-        for ($index = 1; $index <= 6; $index++) {
+        for ($index = 1; $index <= 11; $index++) {
             $topUp = $this->makeTopUp(
                 $customer,
                 StoreBalanceTopUpStatus::Paid,
@@ -98,12 +98,12 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         }
 
         $firstPage = app(StoreBalanceActivityService::class)->firstPage($customer);
-        $this->assertCount(5, $firstPage->items);
+        $this->assertCount(10, $firstPage->items);
         $this->assertNotNull($firstPage->olderCursor);
 
         $olderPage = app(StoreBalanceActivityService::class)->olderPage($customer, $firstPage->olderCursor);
 
-        $this->assertSame('#6', $olderPage->items[0]->reference);
+        $this->assertSame('#11', $olderPage->items[0]->reference);
         $this->assertSame('credited', $olderPage->items[0]->state);
     }
 
@@ -222,12 +222,56 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         $this->assertFalse($item->topUpCanRetry);
     }
 
+    public function test_wallet_history_reveals_the_purchase_hidden_by_the_recent_activity_preview(): void
+    {
+        $this->fakeCanonicalTelegram();
+        $customer = Customer::factory()->create(['telegram_id' => 46310, 'locale' => 'id']);
+        $topUp = $this->makeTopUp($customer, StoreBalanceTopUpStatus::Paid, 'provider_SUCCESS', now());
+        $ledger = app(StoreBalanceLedger::class);
+        $ledger->credit($customer, 5000, StoreBalanceEntryKind::TopUpCredit, 'balance_top_up', (string) $topUp->id, 'wallet-history:credit');
+        $orders = [];
+        foreach (range(1, 5) as $index) {
+            $this->travel(1)->minutes();
+            $order = Order::factory()->for($customer)->create([
+                'invoice_number' => 'INV-WALLET-HISTORY-'.$index,
+                'order_status' => OrderStatus::Completed,
+                'payment_status' => PaymentStatus::Paid,
+                'total_amount' => 1000,
+            ]);
+            $ledger->debit($customer, 1000, 'order', (string) $order->id, 'wallet-history:debit:'.$index);
+            $orders[] = $order;
+        }
+
+        $this->postTelegramWebhook($this->messageUpdate(46300, '/start', [], 46310))->assertOk();
+        $root = app(TelegramNavigationRootService::class)->currentForChat($customer, '46310');
+        $this->postTelegramWebhook($this->callbackUpdate(
+            46301, 'wallet-preview', 'balance', [], 46310, 'private', $root->message_id,
+        ))->assertOk();
+        $overview = $this->lastCanonicalEdit(46310);
+        $buttons = collect($overview['reply_markup']['inline_keyboard'])->flatten(1);
+        $history = $buttons->firstWhere('callback_data', 'balance:activity');
+        $this->assertNotNull($history, 'The abbreviated wallet must offer access to the full history.');
+
+        $entryCount = StoreBalanceEntry::query()->count();
+        $this->postTelegramWebhook($this->callbackUpdate(
+            46302, 'wallet-history', $history['callback_data'], [], 46310, 'private', $root->message_id,
+        ))->assertOk();
+
+        $copy = $this->editCopy($this->lastCanonicalEdit(46310));
+        foreach ($orders as $order) {
+            $this->assertStringContainsString('#'.$order->invoice_number, $copy);
+        }
+        $this->assertStringContainsString('Referensi: #'.$topUp->id, $copy);
+        $this->assertSame(0, $ledger->snapshot($customer)->balance());
+        $this->assertSame($entryCount, StoreBalanceEntry::query()->count());
+    }
+
     public function test_activity_callbacks_use_cursors_and_reject_foreign_or_tampered_tokens(): void
     {
         $this->fakeCanonicalTelegram();
         $customer = Customer::factory()->create(['telegram_id' => 46311, 'locale' => 'en']);
         $ledger = app(StoreBalanceLedger::class);
-        for ($index = 1; $index <= 6; $index++) {
+        for ($index = 1; $index <= 11; $index++) {
             $ledger->credit(
                 $customer,
                 1000,
@@ -251,8 +295,15 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
             $root->message_id,
         ))->assertOk();
 
+        $root->refresh();
         $firstEdit = $this->lastCanonicalEdit(46311);
         $firstKeyboard = $firstEdit['reply_markup']['inline_keyboard'];
+        foreach (range(2, 11) as $reference) {
+            $this->assertMatchesRegularExpression(
+                '/Reference: #'.$reference.'(?:\n|$)/',
+                $this->editCopy($firstEdit),
+            );
+        }
         $this->assertSame($root->message_id, (int) $firstEdit['message_id']);
         $this->assertSame(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto')
             && (string) ($request['chat_id'] ?? '') === '46311')->count());
@@ -272,7 +323,7 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         ))->assertOk();
         $olderEdit = $this->lastCanonicalEdit(46311);
         $this->assertStringContainsString('#1', $this->editCopy($olderEdit));
-        $this->assertStringNotContainsString('#6', $this->editCopy($olderEdit));
+        $this->assertStringNotContainsString('#11', $this->editCopy($olderEdit));
 
         $newerCallback = null;
         foreach ($olderEdit['reply_markup']['inline_keyboard'] as $row) {
@@ -293,8 +344,8 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
             $root->message_id,
         ))->assertOk();
         $newerEdit = $this->lastCanonicalEdit(46311);
-        $this->assertStringContainsString('#6', $this->editCopy($newerEdit));
-        $this->assertStringNotContainsString('#1', $this->editCopy($newerEdit));
+        $this->assertStringContainsString('#11', $this->editCopy($newerEdit));
+        $this->assertDoesNotMatchRegularExpression('/Reference: #1(?:\n|$)/', $this->editCopy($newerEdit));
 
         $this->postTelegramWebhook($this->callbackUpdate(
             46315,
@@ -307,7 +358,7 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
         ))->assertOk();
         $detailEdit = $this->lastCanonicalEdit(46311);
         $this->assertStringContainsString('Store Balance activity details', $this->editCopy($detailEdit));
-        $this->assertStringContainsString('#6', $this->editCopy($detailEdit));
+        $this->assertStringContainsString('#11', $this->editCopy($detailEdit));
 
         $foreign = Customer::factory()->create(['telegram_id' => 46312, 'locale' => 'en']);
         $this->postTelegramWebhook($this->messageUpdate(46316, '/start', [], 46312))->assertOk();
@@ -550,11 +601,17 @@ final class StoreBalanceActivityTest extends TelegramBotTestSupport
     private function lastCanonicalEdit(int $chatId): array
     {
         $edits = Http::recorded(fn (Request $request): bool => (str_ends_with($request->url(), '/editMessageCaption')
-                || str_ends_with($request->url(), '/editMessageText'))
+                || str_ends_with($request->url(), '/editMessageText')
+                || str_ends_with($request->url(), '/sendMessage'))
             && (string) ($request['chat_id'] ?? '') === (string) $chatId);
-        $this->assertNotEmpty($edits, "Expected a canonical edit for chat {$chatId}.");
+        $this->assertNotEmpty($edits, "Expected a canonical message for chat {$chatId}.");
 
-        return $edits->last()[0]->data();
+        [$request, $response] = $edits->last();
+
+        return [
+            ...$request->data(),
+            'message_id' => $request['message_id'] ?? $response->json('result.message_id'),
+        ];
     }
 
     private function editCopy(array $edit): string

@@ -165,19 +165,15 @@ final class TelegramRoutineNavigationTest extends TelegramBotTestSupport
         $this->assertSame($root->message_id, (int) $edit['message_id']);
         $this->assertStringContainsString('💰 Saldo Saya', $this->editCopy($edit));
         $this->assertStringContainsString('🇮🇩 Saldo Rupiah: Rp 25.000', $this->editCopy($edit));
-        $this->assertStringContainsString('Aktivitas terbaru', $this->editCopy($edit));
         $this->assertStringContainsString('1. Top-up · +Rp 25.000 · Dikreditkan', $this->editCopy($edit));
         $keyboard = $edit['reply_markup']['inline_keyboard'];
         $this->assertSame(['balance:add'], array_column($keyboard[0], 'callback_data'));
-        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[1], 'callback_data'));
-        $this->assertCount(2, $keyboard, 'Activity history is inline; no extra history buttons.');
         $this->assertStringContainsString('💎 Saldo USDT: 0 USDT', $this->editCopy($edit));
 
         $this->postTelegramWebhook($this->callbackUpdate(45413, 'balance-activity', 'balance:activity', [], 45411, 'private', $root->message_id))->assertOk();
 
         $activityEdit = $this->lastCanonicalEdit(45411);
         $this->assertSame($root->message_id, (int) $activityEdit['message_id']);
-        $this->assertStringContainsString('Aktivitas terbaru', $this->editCopy($activityEdit));
         $this->assertStringContainsString('Referensi: #1', $this->editCopy($activityEdit));
 
         $this->postTelegramWebhook($this->callbackUpdate(45414, 'balance-add', 'balance:add', [], 45411, 'private', $root->message_id))->assertOk();

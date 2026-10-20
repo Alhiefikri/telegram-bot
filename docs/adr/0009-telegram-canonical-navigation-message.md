@@ -55,6 +55,26 @@ Deletion precedes delivery as requested. If delivery fails after deletion,
 the customer may need `/product` to reopen the catalog; ambiguous sends are
 not retried blindly.
 
+### USD payment instruction exception (2026-10-20)
+
+Choosing a USD funding amount deletes the originating menu and sends a new
+text-only `usdt_payment` root. The invoice never inherits the welcome banner.
+Check callbacks and BSC lookup hints update that payment message; leaving the
+payment screen deletes it and sends the destination menu as the next root.
+A successful cancel clears the lookup prompt and opens Home, using the same
+unpaid-target cancellation boundary as `/start`. Active settlement leases
+still prevent cancellation; the customer sees the current status instead.
+
+The existing generation/lease fencing and delete-before-send failure semantics
+apply. The immutable funding target, resolution, ledger and durable receipt
+are not deleted with the Telegram instruction message.
+
+Binance Order ID submission sends a separate transient checking reply at the
+chat tail and edits that reply with verified success, already credited,
+pending, invalid, review or closed information. It never promotes the reply
+to the root or rewrites the invoice. No inline navigation is attached to this
+noncanonical reply. Durable settlement receipts retain their existing owner.
+
 Rendering leases the stored generation before touching Telegram and commits the
 new screen/locale projection only after the edit is proven. A lost lease, an
 ambiguous Telegram result, or `message is not modified` therefore never

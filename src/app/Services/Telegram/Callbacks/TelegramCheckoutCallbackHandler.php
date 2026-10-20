@@ -2,9 +2,11 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Enums\BalancePaymentPreference;
 use App\Enums\PaymentStatus;
 use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\CustomerUsdtFundingUnavailable;
+use App\Exceptions\InsufficientCheckoutBalance;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InsufficientStoreBalance;
 use App\Exceptions\InsufficientUsdtBalance;
@@ -25,6 +27,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Services\CartService;
+use App\Services\Checkout\BalanceCheckoutRequest;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\Checkout\CheckoutPricingSnapshot;
@@ -94,7 +97,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         return $context->data === 'checkout'
             || $context->data === 'checkout:current'
             || $context->data === 'checkout:balance'
-            || $context->data === 'checkout:usdt_balance'
+            || preg_match('/^checkout:wallet:(idr|usd|cancel):[a-f0-9]{16}$/', $context->data) === 1
             || $context->data === 'checkout:binance'
             || preg_match('/^checkout:binance:(?:rail:)?(binance_pay_id|usdt_bep20):[a-f0-9]{16}$/', $context->data) === 1
             || preg_match('/^checkout:binance:cancel:[a-f0-9]{16}$/', $context->data) === 1
@@ -127,20 +130,15 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         if ($context->data === 'checkout:balance') {
-            $checkoutKey = $this->checkoutIntentKey($context->customer, $context->chatId, $context->messageId, $this->checkoutIntentPayload($context->data));
-            $this->withCheckoutIntentLock($context, $checkoutKey, fn () => $this->checkout($context, CheckoutPaymentIntents::RAIL_STORE_BALANCE, true, $checkoutKey));
+            $this->openBalanceSelector($context);
 
             return true;
         }
 
-        if ($context->data === 'checkout:usdt_balance') {
-            if (! $context->isPrivate() || $context->chatId !== (string) $context->customer->telegram_id) {
-                $this->bot->answerCallbackQuery($context->callbackQueryId);
-
-                return true;
-            }
-            $checkoutKey = $this->checkoutIntentKey($context->customer, $context->chatId, $context->messageId, $this->checkoutIntentPayload($context->data));
-            $this->withCheckoutIntentLock($context, $checkoutKey, fn () => $this->checkout($context, CheckoutPaymentIntents::RAIL_USDT_BALANCE, true, $checkoutKey));
+        if (preg_match('/^checkout:wallet:(idr|usd|cancel):([a-f0-9]{16})$/', $context->data, $matches) === 1) {
+            $state = Cache::get($this->balanceSelectorKey($context->customer));
+            $this->withCheckoutIntentLock($context, $state['checkoutKey'] ?? null,
+                fn () => $this->handleBalanceSelection($context, $matches[1], $matches[2]));
 
             return true;
         }
@@ -183,6 +181,12 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                     $checkoutKey,
                     fn () => $this->openDetailBinanceSelector($context, $productId, $token),
                 );
+            } elseif ($paymentMethod === 'balance') {
+                $this->withCheckoutIntentLock(
+                    $context,
+                    $checkoutKey,
+                    fn () => $this->openBalanceSelector($context, $productId, $token, $checkoutKey),
+                );
             } else {
                 $this->withCheckoutIntentLock(
                     $context,
@@ -195,6 +199,155 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         return false;
+    }
+
+    private function balanceSelectorKey(Customer $customer): string
+    {
+        return 'telegram:balance-selector:'.$customer->getKey();
+    }
+
+    private function openBalanceSelector(TelegramCallbackContext $context, ?int $productId = null, ?string $token = null, ?string $checkoutKey = null): void
+    {
+        if (! $context->isPrivate() || $context->chatId !== (string) $context->customer->telegram_id || ! $context->messageId) {
+            $this->sendRailSelectionStale($context);
+
+            return;
+        }
+        if (! app(CustomerUsdtFundingGate::class)->spendingAvailability()->available || $this->maintenance->current()->active) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'checkout.usdt_balance.unavailable'));
+
+            return;
+        }
+        if ($productId !== null) {
+            $selection = $this->session->get($context->customer);
+            $product = Product::query()->withAvailability()->publicVisible()->whereKey($productId)->first();
+            $quote = $product === null ? null : $this->safeQuote($product, (int) ($selection['quantity'] ?? 0));
+            if ($selection === null || $selection['mode'] !== 'browsing'
+                || (int) $selection['productId'] !== $productId
+                || ! hash_equals((string) $selection['interactionToken'], (string) $token)
+                || $quote === null || $product->availableStock() < $selection['quantity']) {
+                $this->sendSelectionStale($context);
+
+                return;
+            }
+            $state = ['productId' => $productId, 'token' => $token, 'quantity' => $selection['quantity']];
+            $idrTotal = $quote->idrSubtotal;
+            $usdTotal = $quote->usdtSubtotal;
+        } else {
+            $cart = $this->carts->currentActiveCartFor($context->customer);
+            $preview = $cart === null ? null : $this->cartPricing($cart);
+            if ($preview === null) {
+                $this->sendRailSelectionStale($context);
+
+                return;
+            }
+            $state = ['cartId' => (int) $cart->getKey(), 'cartFingerprint' => $this->cartFingerprint($cart)];
+            $idrTotal = $preview['snapshot']->idrTotal();
+            $usdTotal = $preview['snapshot']->usdtTotal();
+            $checkoutKey = $this->checkoutIntentKey($context->customer, $context->chatId, $context->messageId, 'checkout:choice');
+        }
+        if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+            return;
+        }
+        $state += ['chatId' => $context->chatId, 'checkoutKey' => $checkoutKey,
+            'nonce' => bin2hex(random_bytes(8)), 'idrTotal' => $idrTotal, 'usdTotal' => $usdTotal];
+        $buttons = [];
+        foreach (['idr' => $idrTotal, 'usd' => $usdTotal] as $currency => $total) {
+            if ($total === null) {
+                continue;
+            }
+            $buttons[] = [[
+                ...$this->uiIcons->apply('menu.balance', $this->locale->translate($context->customer, 'checkout.wallet.'.$currency, [
+                    'amount' => $currency === 'idr' ? number_format($total, 0, ',', '.') : $this->checkoutIntents->formatUsdt($total),
+                ])),
+                'callback_data' => 'checkout:wallet:'.$currency.':'.$state['nonce'],
+                'style' => 'primary',
+            ]];
+        }
+        $buttons[] = [[
+            ...$this->uiIcons->apply('menu.back', $this->locale->translate($context->customer, 'checkout.payment.cancel')),
+            'callback_data' => 'checkout:wallet:cancel:'.$state['nonce'],
+            'style' => 'primary',
+        ]];
+        $this->bot->answerCallbackQuery($context->callbackQueryId);
+        $response = $this->bot->sendMessage($context->chatId,
+            $this->locale->translate($context->customer, 'checkout.wallet.choose'), ['inline_keyboard' => $buttons]);
+        $messageId = data_get($response, 'result.message_id');
+        if (is_numeric($messageId) && (int) $messageId > 0) {
+            Cache::put($this->balanceSelectorKey($context->customer), $state + ['messageId' => (int) $messageId], now()->addMinutes(10));
+        } else {
+            Cache::forget($this->balanceSelectorKey($context->customer));
+        }
+    }
+
+    private function handleBalanceSelection(TelegramCallbackContext $context, string $currency, string $nonce): void
+    {
+        $state = Cache::get($this->balanceSelectorKey($context->customer));
+        if (! is_array($state) || ! $context->isPrivate()
+            || $context->chatId !== (string) $context->customer->telegram_id
+            || $state['chatId'] !== $context->chatId
+            || $state['messageId'] !== $context->messageId
+            || ! hash_equals($state['nonce'], $nonce)) {
+            $this->sendRailSelectionStale($context);
+
+            return;
+        }
+        if ($currency === 'cancel') {
+            Cache::forget($this->balanceSelectorKey($context->customer));
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            if (isset($state['productId'])) {
+                $selection = $this->session->get($context->customer);
+                $product = Product::query()->withAvailability()->publicVisible()->find($state['productId']);
+                if ($selection !== null && $product !== null) {
+                    $this->catalog->renderProductDetail($context->customer, $context->chatId, $product, $selection);
+                }
+            } else {
+                $this->choosePaymentMethod($context);
+            }
+
+            return;
+        }
+        if ($this->checkoutIntentAlreadyHandled($state['checkoutKey'])) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+            return;
+        }
+        $rail = $currency === 'usd' ? CheckoutPaymentIntents::RAIL_USDT_BALANCE : CheckoutPaymentIntents::RAIL_STORE_BALANCE;
+        if ($currency === 'usd' && $state['usdTotal'] === null) {
+            $this->sendRailSelectionStale($context);
+
+            return;
+        }
+        $balanceRequest = new BalanceCheckoutRequest(
+            preference: $currency === 'usd' ? BalancePaymentPreference::UsdOnly : BalancePaymentPreference::IdrOnly,
+            expectedIdrTotal: $currency === 'idr' ? $state['idrTotal'] : null,
+            expectedUsdTotalMicro: $currency === 'usd' ? $state['usdTotal'] : null,
+        );
+        if (isset($state['productId'])) {
+            $selection = $this->session->get($context->customer);
+            $product = Product::query()->withAvailability()->publicVisible()->find($state['productId']);
+            $quote = $product === null ? null : $this->safeQuote($product, (int) ($selection['quantity'] ?? 0));
+            if ($quote === null || ($selection['quantity'] ?? null) !== $state['quantity']
+                || ($currency === 'usd' ? $quote->usdtSubtotal !== $state['usdTotal'] : $quote->idrSubtotal !== $state['idrTotal'])) {
+                $this->sendRailSelectionStale($context);
+
+                return;
+            }
+            $this->checkoutProductDetail($context, $rail, $state['productId'], $state['token'], $state['checkoutKey'], $balanceRequest);
+        } else {
+            $cart = $this->carts->currentActiveCartFor($context->customer);
+            $preview = $cart === null ? null : $this->cartPricing($cart);
+            if ($preview === null || (int) $cart->getKey() !== $state['cartId']
+                || $this->cartFingerprint($cart) !== $state['cartFingerprint']
+                || ($currency === 'usd' ? $preview['snapshot']->usdtTotal() !== $state['usdTotal'] : $preview['snapshot']->idrTotal() !== $state['idrTotal'])) {
+                $this->sendRailSelectionStale($context);
+
+                return;
+            }
+            $this->checkout($context, $rail, true, $state['checkoutKey'], $balanceRequest);
+        }
     }
 
     private function openCartBinanceSelector(TelegramCallbackContext $context): void
@@ -467,7 +620,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         ]), (string) config('app.key'));
     }
 
-    private function checkoutProductDetail(TelegramCallbackContext $context, string $rail, int $productId, string $token, string $checkoutKey): void
+    private function checkoutProductDetail(TelegramCallbackContext $context, string $rail, int $productId, string $token, string $checkoutKey, ?BalanceCheckoutRequest $balanceRequest = null): void
     {
         if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
@@ -475,7 +628,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             return;
         }
 
-        $this->session->withLock($context->customer, function () use ($context, $rail, $productId, $token, $checkoutKey): void {
+        $this->session->withLock($context->customer, function () use ($context, $rail, $productId, $token, $checkoutKey, $balanceRequest): void {
             if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
                 $this->bot->answerCallbackQuery($context->callbackQueryId);
 
@@ -526,7 +679,8 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             // Resolve the rail before mutating the active Cart. The checkout
             // service remains the authoritative second check inside its transaction.
             $requestedRail = match ($rail) {
-                'balance' => CheckoutPaymentIntents::RAIL_STORE_BALANCE,
+                CheckoutPaymentIntents::RAIL_STORE_BALANCE => CheckoutPaymentIntents::RAIL_STORE_BALANCE,
+                CheckoutPaymentIntents::RAIL_USDT_BALANCE => CheckoutPaymentIntents::RAIL_USDT_BALANCE,
                 'binance' => CheckoutPaymentIntents::RAIL_BINANCE_PAY_ID,
                 default => CheckoutPaymentIntents::RAIL_QRIS,
             };
@@ -548,7 +702,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             }
 
             $this->session->forget($context->customer);
-            $this->checkout($context, $requestedRail, false, $checkoutKey);
+            $this->checkout($context, $requestedRail, false, $checkoutKey, $balanceRequest);
         });
     }
 
@@ -681,9 +835,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             'callback_data' => 'checkout:current',
         ]];
         $balanceButton = [[
-            ...$this->uiIcons->apply('menu.balance', $this->locale->translate($context->customer, 'checkout.payment.store_balance', [
-                'amount' => number_format($snapshot->idrTotal(), 0, ',', '.'),
-            ])),
+            ...$this->uiIcons->apply('menu.balance', $this->locale->translate($context->customer, 'checkout.wallet.pay')),
             'callback_data' => 'checkout:balance',
         ]];
         $buttons = [$qrisButton];
@@ -692,14 +844,6 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             // barrier, so an active pause hides it instead of offering a
             // button that is guaranteed to be rejected.
             $buttons[] = $balanceButton;
-        }
-        if ($usdtBalanceSelectable) {
-            $buttons[] = [[
-                ...$this->uiIcons->apply('menu.balance', $this->locale->translate($context->customer, 'checkout.payment.usdt_balance', [
-                    'amount' => $this->checkoutIntents->formatUsdt($snapshot->usdtTotal()),
-                ])),
-                'callback_data' => 'checkout:usdt_balance',
-            ]];
         }
         if ($this->checkoutIntents->binanceRailSelectable() && $snapshot->usdtTotal() !== null) {
             $buttons[] = [[
@@ -717,7 +861,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         $this->bot->sendMessage($context->chatId, $paymentMethodMessage, ['inline_keyboard' => $buttons], ['parse_mode' => 'HTML']);
     }
 
-    private function checkout(TelegramCallbackContext $context, string|bool $rail = 'qris', bool $answerCallback = true, ?string $checkoutKey = null): void
+    private function checkout(TelegramCallbackContext $context, string|bool $rail = 'qris', bool $answerCallback = true, ?string $checkoutKey = null, ?BalanceCheckoutRequest $balanceRequest = null): void
     {
         if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
             if ($answerCallback) {
@@ -786,13 +930,18 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 'payment_mode' => $paymentMode,
                 'customer_correlation_id' => DogfoodTiming::correlation($context->customer->telegram_id),
                 'cart_correlation_id' => DogfoodTiming::correlation($cart->id),
-            ], fn () => $this->checkout->checkout($cart, $paymentIntent, checkoutKey: $checkoutKey));
+            ], fn () => $this->checkout->checkout($cart, $balanceRequest === null ? $paymentIntent : null, checkoutKey: $checkoutKey, balanceRequest: $balanceRequest));
         } catch (CheckoutMaintenanceActive $exception) {
             $this->bot->sendMessage(
                 $context->chatId,
                 $this->maintenanceMessage($context->customer, $exception->state),
                 $this->maintenanceKeyboard($context->customer),
             );
+
+            return;
+        } catch (InsufficientCheckoutBalance) {
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer,
+                $paymentRail === CheckoutPaymentIntents::RAIL_USDT_BALANCE ? 'checkout.usdt_balance.insufficient' : 'checkout.balance.insufficient'));
 
             return;
         } catch (InsufficientStoreBalance) {
@@ -804,7 +953,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
             return;
         } catch (CustomerUsdtFundingUnavailable) {
-            $key = $paymentIntent->provider() === PaymentProvider::STORE_BALANCE
+            $key = $paymentRail === CheckoutPaymentIntents::RAIL_STORE_BALANCE
                 ? 'checkout.balance.recovery'
                 : 'checkout.usdt_balance.unavailable';
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, $key));
@@ -1032,7 +1181,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function checkoutIntentPayload(string $data): string
     {
-        if (in_array($data, ['checkout:current', 'checkout:balance', 'checkout:usdt_balance', 'checkout:binance'], true)) {
+        if (in_array($data, ['checkout:current', 'checkout:balance', 'checkout:binance'], true)) {
             return 'checkout:choice';
         }
 

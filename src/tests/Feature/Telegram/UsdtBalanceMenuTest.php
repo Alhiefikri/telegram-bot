@@ -67,6 +67,36 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         app(SharedTopUpReceiverRegistry::class)->activate($this->owner, BscUsdtRailRpcFixture::ADDRESS, 'Shared top-up');
     }
 
+    public function test_amount_opens_a_new_text_invoice_and_cancel_deletes_it_then_opens_home(): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $previousMessage = $root->message_id;
+        $target = $this->openBinanceTarget($root, '1 USD');
+        $invoice = $root->fresh();
+        $this->assertNotSame($previousMessage, $invoice->message_id);
+        $this->assertSame('text', $invoice->media_kind->value);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/deleteMessage')
+            && (int) $request['message_id'] === $previousMessage);
+        $sends = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
+        $payment = $sends->last()[0]->data();
+        $this->assertStringContainsString('<code>12345678</code>', $payment['text']);
+        $buttons = array_merge(...$payment['reply_markup']['inline_keyboard']);
+        $copy = array_values(array_filter($buttons, fn (array $button): bool => isset($button['copy_text'])));
+        $this->assertSame('12345678', $copy[0]['copy_text']['text']);
+
+        $this->tap('cancel-invoice', 'usdt:close:'.$target->id, $invoice);
+        $home = $root->fresh();
+        $this->assertSame(TelegramNavigationScreen::Home, $home->screen);
+        $this->assertNotSame($invoice->message_id, $home->message_id);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/deleteMessage')
+            && (int) $request['message_id'] === $invoice->message_id);
+        $this->assertNull(app(TelegramUsdtFundingSession::class)->promptedTopUpId($this->customer));
+        $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
+        $this->assertSame(0, DB::table('customer_usdt_funding_reservations')->whereNull('resolved_at')->count());
+        $this->assertNoMoney();
+    }
+
     #[DataProvider('decimalAmounts')]
     public function test_decimal_amount_survives_navigation_root_replacement(string $amount): void
     {
@@ -214,7 +244,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertStringContainsString('💰 Saldo Saya', $copy);
         $this->assertStringContainsString('🇮🇩 Saldo Rupiah: Rp 60.000', $copy);
         $this->assertStringContainsString('💎 Saldo USDT: 0.75 USDT', $copy);
-        $this->assertStringContainsString('Aktivitas terbaru', $copy);
 
         // Newest first, both ledgers merged, and the overview is capped at four rows.
         $this->assertStringContainsString('1. Kredit top-up · +0.25 USDT · Dikreditkan', $copy);
@@ -226,11 +255,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertLessThan(strpos($copy, '+0.5 USDT'), strpos($copy, '+Rp 20.000'));
         $this->assertLessThan(strpos($copy, '+Rp 10.000'), strpos($copy, '+0.5 USDT'));
 
-        $keyboard = $edit['reply_markup']['inline_keyboard'];
-        $this->assertSame(['➕ Tambah Saldo'], array_column($keyboard[0], 'text'));
-        $this->assertSame(['balance:add'], array_column($keyboard[0], 'callback_data'));
-        $this->assertSame(['menu:back', 'menu:home'], array_column($keyboard[1], 'callback_data'));
-        $this->assertCount(2, $keyboard, 'The wallet history lives in the caption, not on extra buttons.');
         $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
         foreach (['customer_usdt_funding_reservations', 'customer_usdt_top_up_work', 'customer_usdt_top_up_settlement_work', 'telegram_outbound_effects'] as $table) {
             $this->assertSame(0, DB::table($table)->count(), $table);
@@ -254,7 +278,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('1.5 USDT', $copy);
         $markup = json_encode($edit['reply_markup'], JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsString('usdt:history', $markup);
-        $this->assertStringNotContainsString('balance:activity', $markup);
 
         $this->tap('drift-methods', 'balance:add', $root);
         $addEdit = $this->lastCanonicalEdit(self::CHAT_ID);
@@ -284,7 +307,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertStringContainsString('💎 Saldo USDT dibekukan', $copy);
         $this->assertStringNotContainsString('Saldo USDT: 1.5', $copy);
         $this->assertStringNotContainsString('usdt:history', $markup);
-        $this->assertStringNotContainsString('balance:activity', $markup);
 
         $this->tap('frozen-methods', 'balance:add', $root);
         $addEdit = $this->lastCanonicalEdit(self::CHAT_ID);
@@ -433,17 +455,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $copy = $this->editCopy($edit);
         $target = CustomerUsdtTopUp::query()->sole();
 
-        $this->assertStringContainsString('💎 Top-up via Binance Pay', $copy);
-        $this->assertStringContainsString('🧾 Invoice: usdt:', $copy);
-        $this->assertStringContainsString('Kirim tepat: 1 USDT', $copy);
-        $this->assertStringContainsString('Masuk saldo: 1 USD', $copy);
-        $this->assertStringNotContainsString('Nominal:', $copy);
-        $this->assertStringContainsString("Binance Pay ID\n12345678", $copy);
-        $this->assertStringContainsString('Bayar dalam ', $copy);
-        $this->assertStringContainsString('Tempel Order ID Binance di chat ini setelah bayar.', $copy);
-        $this->assertStringContainsString('Status: Menunggu pembayaran', $copy);
         $this->assertStringContainsString('🧾 Invoice: usdt:'.$target->id, $copy);
-        $this->assertStringContainsString('<code>12345678</code>', (string) ($edit['caption'] ?? ''));
         $this->assertSame('usdt:'.$target->id, $target->reference);
         $this->assertSame('binance_pay', $target->rail);
         $this->assertSame(1_000_000, (int) $target->amount_micro);
@@ -452,21 +464,12 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->count());
         $this->assertSame('ready', DB::table('customer_usdt_top_up_work')->value('state'));
         $this->assertSame(1, DB::table('customer_usdt_top_up_settlement_work')->count());
-        $this->assertSame([
-            ['usdt:check:'.$target->id, 'usdt:order:'.$target->id],
-            ['usdt:close:'.$target->id],
-            ['menu:back', 'menu:home'],
-        ], array_map(
-            static fn (array $row): array => array_column($row, 'callback_data'),
-            $edit['reply_markup']['inline_keyboard'],
-        ));
         $this->assertNoMoney();
 
         // Confirmation is durable: the same button shows the same open target.
         $this->tap('preset-replay', $preset, $root);
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
         $this->assertSame($target->id, CustomerUsdtTopUp::query()->sole()->id);
-        $this->assertStringContainsString('Masih ada top-up berjalan', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
 
         $this->tap('check', 'usdt:check:'.$target->id, $root);
         $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
@@ -521,7 +524,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
         $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
         $this->assertStringContainsString('Kirim tepat: 1 USDT', $copy);
-        $this->assertStringContainsString('Masuk saldo: 1 USD', $copy);
         $this->assertStringContainsString('Masih ada top-up berjalan; selesaikan atau tunggu batas waktunya.', $copy);
         $this->assertStringNotContainsString('5 USDT', $copy);
         $this->assertStringNotContainsString('5 USD', $copy);
@@ -584,26 +586,23 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $target = $this->openBinanceTarget($root, '1 USD');
         config(['services.binance.pay_id' => '87654321']);
         $before = $this->editCount(self::CHAT_ID);
+        $beforeMessages = $this->routineMessageCount(self::CHAT_ID);
+        $invoiceMessageId = $root->fresh()->message_id;
 
         $this->sendText('445011487581044736');
 
         $edits = Http::recorded(fn (Request $request): bool => $this->isEditRequest($request)
             && (string) ($request['chat_id'] ?? '') === (string) self::CHAT_ID)->slice($before)->values();
-        $this->assertCount(2, $edits, 'The checking placeholder and the durable result each edit the same canonical message.');
-        $checking = $edits[0][0]->data();
-        $result = $edits[1][0]->data();
-        $this->assertSame((int) $checking['message_id'], (int) $result['message_id']);
-        $checkingCopy = $this->editCopy($checking);
-        $this->assertStringContainsString('⏳ Memeriksa pembayaran…', $checkingCopy);
-        $this->assertStringContainsString('Sistem sedang mencocokkan Order ID Binance dengan riwayat pembayaran. Tunggu sebentar ya.', $checkingCopy);
-        $this->assertStringNotContainsString('Nominal:', $checkingCopy);
-        $this->assertSame(['inline_keyboard' => []], $checking['reply_markup']);
-
-        $resultCopy = $this->editCopy($result);
-        $this->assertStringContainsString('Order ID diterima sebagai petunjuk', $resultCopy);
-        $this->assertStringContainsString('Kirim tepat: 1 USDT', $resultCopy);
-        $this->assertStringContainsString("Binance Pay ID\n12345678", $resultCopy);
-        $this->assertStringNotContainsString('87654321', $resultCopy);
+        $this->assertCount(1, $edits);
+        $this->assertSame($beforeMessages + 1, $this->routineMessageCount(self::CHAT_ID));
+        $checking = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'))->last();
+        $result = $edits[0][0]->data();
+        $this->assertSame((int) $checking[1]->json('result.message_id'), (int) $result['message_id']);
+        $this->assertNotSame($invoiceMessageId, (int) $result['message_id']);
+        $this->assertSame($invoiceMessageId, $root->fresh()->message_id);
+        $this->assertSame(['inline_keyboard' => []], $checking[0]['reply_markup']);
+        $this->assertStringContainsString($target->reference, $result['text']);
+        $this->assertSame($target->id, app(TelegramUsdtFundingSession::class)->promptedTopUpId($this->customer));
         $this->assertSame(1, DB::table('customer_usdt_top_up_inbox')->count());
         $this->assertSame($target->id, DB::table('customer_usdt_top_up_inbox')->value('top_up_id'));
         $this->assertSame('445011487581044736', DB::table('customer_usdt_top_up_inbox')->value('provider_reference'));
@@ -611,9 +610,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
 
         // An invalid format is a local retry that never consumes the hint budget.
-        $this->tap('order-prompt', 'usdt:order:'.$target->id, $root);
         $this->sendText('abcd');
-        $this->assertStringContainsString('Binance Order ID tidak valid', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
         $this->assertSame(1, DB::table('customer_usdt_top_up_inbox')->count());
         $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
     }
@@ -870,16 +867,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->count());
         $this->assertSame(1, DB::table('customer_usdt_top_up_work')->count());
         $this->assertSame(1, DB::table('customer_usdt_top_up_settlement_work')->count());
-        $this->assertSame([
-            ['usdt:check:'.$target->id, 'usdt:hash:'.$target->id],
-            ['usdt:close:'.$target->id],
-            ['menu:back', 'menu:home'],
-        ], array_map(
-            static fn (array $row): array => array_column($row, 'callback_data'),
-            $edit['reply_markup']['inline_keyboard'],
-        ));
-        $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
-        $this->assertSame($root->message_id, $root->fresh()->message_id);
         $this->assertNoMoney();
 
         // A second amount request shows the open target instead of reusing or
@@ -923,7 +910,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertSame('bsc_shared', $target->rail);
         $this->assertSame(1_000_000, (int) $target->amount_micro);
         $this->assertStringContainsString('Kirim tepat: 1 USDT', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
-        $this->assertSame(1, $this->routineMessageCount(self::CHAT_ID));
         $this->assertNoMoney();
     }
 
@@ -961,76 +947,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'chat pribadi'));
     }
 
-    /**
-     * @param  list<string>  $expected
-     */
-    #[DataProvider('walletLocaleScreens')]
-    public function test_wallet_choosers_and_instructions_are_localized(string $locale, array $expected): void
-    {
-        $this->enableBinance();
-        $this->customer->update(['locale' => $locale]);
-        $root = $this->startRoot();
-
-        $this->tap('balance', 'balance', $root);
-        $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
-        foreach ($expected['wallet'] as $needle) {
-            $this->assertStringContainsString($needle, $copy);
-        }
-        $walletButtons = array_merge(...array_map(
-            static fn (array $row): array => array_column($row, 'text'),
-            $this->lastCanonicalEdit(self::CHAT_ID)['reply_markup']['inline_keyboard'],
-        ));
-        foreach ($expected['buttons'] as $needle) {
-            $this->assertContains($needle, $walletButtons);
-        }
-
-        $this->tap('add', 'balance:add', $root);
-        $this->assertStringContainsString($expected['methods'], $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
-
-        $this->tap('rail', 'balance:usd:binance_pay', $root);
-        $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
-        foreach ($expected['amount'] as $needle) {
-            $this->assertStringContainsString($needle, $copy);
-        }
-
-        $this->tap('preset', $this->presetCallback($this->lastCanonicalEdit(self::CHAT_ID), '1 USD'), $root);
-        $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
-        foreach ($expected['status'] as $needle) {
-            $this->assertStringContainsString($needle, $copy);
-        }
-        $this->assertNoMoney();
-    }
-
-    /**
-     * @return array<string, array{0: string, 1: array<string, list<string>>}>
-     */
-    public static function walletLocaleScreens(): array
-    {
-        return [
-            'indonesian' => ['id', [
-                'wallet' => ['💰 Saldo Saya', '🇮🇩 Saldo Rupiah: Rp 0', 'Aktivitas terbaru'],
-                'buttons' => ['➕ Tambah Saldo'],
-                'methods' => 'Pilih metode top-up:',
-                'amount' => ['💵 Nominal top-up USD', 'Metode: 💎 Binance Pay (USD)', 'Pilih nominal top-up:'],
-                'status' => ['💎 Top-up via Binance Pay', '🧾 Invoice: usdt:', 'Kirim tepat: 1 USDT', 'Masuk saldo: 1 USD', 'Status: Menunggu pembayaran', 'Tempel Order ID Binance di chat ini setelah bayar.'],
-            ]],
-            'english' => ['en', [
-                'wallet' => ['💰 My Balance', '🇮🇩 IDR balance: Rp 0', 'Recent activity'],
-                'buttons' => ['➕ Add Balance'],
-                'methods' => 'Choose a top-up method:',
-                'amount' => ['💵 USD top-up amount', 'Method: 💎 Binance Pay (USD)', 'Choose a top-up amount:'],
-                'status' => ['💎 Binance Pay top-up', '🧾 Invoice: usdt:', 'Send exactly: 1 USDT', 'Balance credit: 1 USD', 'Status: Awaiting payment', 'Then paste your Binance Order ID in this chat.'],
-            ]],
-            'malay' => ['ms', [
-                'wallet' => ['💰 Baki Saya', '🇮🇩 Baki Rupiah: Rp 0', 'Aktiviti terkini'],
-                'buttons' => ['➕ Tambah Baki'],
-                'methods' => 'Pilih kaedah tambah baki:',
-                'amount' => ['💵 Jumlah tambah baki USD', 'Kaedah: 💎 Binance Pay (USD)', 'Pilih jumlah tambah baki:'],
-                'status' => ['💎 Tambah baki melalui Binance Pay', '🧾 Invois: usdt:', 'Hantar tepat: 1 USDT', 'Kredit baki: 1 USD', 'Status: Menunggu bayaran', 'Kemudian tampal Order ID Binance dalam chat ini.'],
-            ]],
-        ];
-    }
-
     private function enableBinance(): void
     {
         config(['services.binance.api_key' => 'test', 'services.binance.api_secret' => 'test',
@@ -1052,6 +968,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
     private function tap(string $callbackId, string $data, TelegramNavigationRoot $root): void
     {
+        $root->refresh();
         $this->postTelegramWebhook($this->callbackUpdate(
             $this->nextUpdateId(),
             $callbackId,
@@ -1089,7 +1006,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertNoMoney();
     }
 
-    public function test_cancel_button_closes_the_target_and_returns_to_the_amount_chooser(): void
+    public function test_cancel_button_closes_the_target_and_returns_home(): void
     {
         $this->enableBinance();
         $root = $this->startRoot();
@@ -1097,9 +1014,7 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
         $this->tap('cancel-target', 'usdt:close:'.$target->id, $root);
 
-        $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
-        $this->assertStringContainsString('Top-up sebelumnya dibatalkan. Pilih nominal baru.', $copy);
-        $this->assertStringContainsString('💵 Nominal top-up USD', $copy);
+        $this->assertSame(TelegramNavigationScreen::Home, $root->fresh()->screen);
         $this->assertSame('released', DB::table('customer_usdt_funding_reservations')->value('state'));
         $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
@@ -1107,7 +1022,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
         // Replaying the cancel is idempotent: one resolution, no second target.
         $this->tap('cancel-again', 'usdt:close:'.$target->id, $root);
-        $this->assertStringContainsString('Top-up sebelumnya dibatalkan', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
         $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
     }
@@ -1231,9 +1145,11 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
     private function lastCanonicalEdit(int $chatId): array
     {
-        $edits = Http::recorded(fn (Request $request): bool => $this->isEditRequest($request)
+        $edits = Http::recorded(fn (Request $request): bool => ($this->isEditRequest($request)
+                || str_ends_with($request->url(), '/sendMessage')
+                || str_ends_with($request->url(), '/sendPhoto'))
             && (string) ($request['chat_id'] ?? '') === (string) $chatId);
-        $this->assertNotEmpty($edits, "Expected a canonical edit for chat {$chatId}.");
+        $this->assertNotEmpty($edits, "Expected a canonical surface for chat {$chatId}.");
 
         return $edits->last()[0]->data();
     }

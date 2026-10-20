@@ -348,7 +348,7 @@ final class UsdtTopUpReview
         $matches = [];
         foreach ($history->transactions as $payload) {
             $transaction = BinancePayTransaction::fromPayload($payload);
-            if ($transaction !== null && hash_equals($orderId, $transaction->orderId())) {
+            if ($transaction !== null && $transaction->matchesSubmittedOrderId($orderId) !== false) {
                 $rawStatus = $payload['status'] ?? $payload['transactionStatus'] ?? '';
                 $status = is_string($rawStatus) ? strtoupper(trim($rawStatus)) : '';
                 $matches[] = ['transaction' => $transaction, 'evidence' => $transaction->sanitizedPayload() + [
@@ -451,7 +451,7 @@ final class UsdtTopUpReview
                     $type = filled($payId) ? 'pay_id' : 'uid';
                     $receiver = filled($payId) ? $payId : ($snapshot['receiver_uid'] ?? '');
                     $identity = MoneyReceiptIdentity::binancePay($type, $receiver, $transaction->transactionId());
-                    $aliases = $transaction->orderId() !== $transaction->transactionId()
+                    $aliases = $transaction->orderId() !== '' && $transaction->orderId() !== $transaction->transactionId()
                         ? [new MoneyReceiptAlias('binance_order_id', MoneyReceiptIdentity::binancePay($type, $receiver, $transaction->orderId()))] : [];
                     $receipt = new VerifiedMoneyReceipt($identity, 'customer:'.$customer->id, 'USDT',
                         (string) $amount->units(), 6, MoneyReceiptTarget::customerUsdtTopUp($target->id),

@@ -18,6 +18,7 @@ use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramNavigationPresenter;
 use App\Services\Telegram\TelegramNavigationRootService;
 use App\Services\Telegram\TelegramNavigationSurface;
+use App\Services\Telegram\TelegramOutboundResponseValidator;
 use App\Services\Telegram\TelegramUsdtActivityToken;
 use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramUsdtFundingActions;
@@ -72,6 +73,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         private readonly TelegramCatalogQuerySession $catalogQueries,
         private readonly TelegramNavigationPresenter $navigation,
         private readonly TelegramNavigationRootService $roots,
+        private readonly TelegramOutboundResponseValidator $responses,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -243,29 +245,46 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         if (($targetRail !== '' ? $targetRail : (string) ($snapshot['rail'] ?? '')) !== CustomerUsdtFundingRail::BinancePay->value) {
             return false;
         }
-        if (! $this->statuses->for($target)->acceptsCustomerLookup()) {
-            $this->hashSession->forget($customer);
-            $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.hash_closed');
-
-            return true;
-        }
-        $orderId = BinanceOrderId::normalize(trim($text));
-        if ($orderId === null) {
-            $this->presentStatus($customer, $chatId, $target, 'balance.usdt.notice.order_invalid');
-
-            return true;
-        }
-
-        $this->verifyAndPresent(
-            $customer,
-            $chatId,
-            $target,
-            'balance.usdt.checking.order',
-            fn () => $this->binanceSettlement->submit($customer, (string) $target->id, $orderId),
-            'balance.usdt.notice.order_recorded',
-        );
+        $this->verifyBinanceOrderId($customer, $chatId, $target, $text);
 
         return true;
+    }
+
+    private function verifyBinanceOrderId(Customer $customer, string $chatId, CustomerUsdtTopUp $target, string $text): void
+    {
+        $checking = $this->usdt->checkingSurface($customer, 'balance.usdt.checking.order');
+        $response = $this->bot->sendMessage($chatId, $checking->caption, $checking->keyboard, $checking->options);
+        $messageId = (int) $this->responses->messageIdFromResponse($response, 'Binance verification reply');
+        $before = $this->statuses->for($target);
+        $alreadyCredited = $before->balanceAfterMicro !== null;
+        $notice = null;
+        $orderId = BinanceOrderId::normalize(trim($text));
+
+        if ($orderId === null) {
+            $notice = 'balance.usdt.verification.invalid';
+        } elseif ($before->acceptsCustomerLookup()) {
+            try {
+                $this->binanceSettlement->submit($customer, (string) $target->id, $orderId);
+                try {
+                    $this->binanceSettlement->check((string) $target->id);
+                } catch (Throwable) {
+                    // The hint is durable; recovery retries the provider lookup.
+                }
+            } catch (AuthorizationException) {
+                $notice = 'balance.usdt.verification.closed';
+            } catch (InvalidArgumentException) {
+                $notice = 'balance.usdt.verification.limited';
+            }
+        }
+
+        $status = $this->statuses->for($target->refresh());
+        if ($status->acceptsCustomerLookup() || $status->balanceAfterMicro !== null) {
+            $this->hashSession->promptHash($customer, (string) $target->id);
+        } else {
+            $this->hashSession->forget($customer);
+        }
+        $result = $this->usdt->binanceVerificationSurface($customer, $status, $alreadyCredited, $notice);
+        $this->bot->editMessageText($chatId, $messageId, $result->caption, $result->keyboard, $result->options);
     }
 
     public function handleHashInput(Customer $customer, string $chatId, string $text): bool
@@ -341,11 +360,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         }
 
         try {
-            if ($this->railOf($target) === CustomerUsdtFundingRail::BinancePay) {
-                $this->binanceSettlement->check((string) $target->id);
-            } else {
-                $this->settlement->check((string) $target->id);
-            }
+            $this->settlement->check((string) $target->id);
         } catch (Throwable) {
             // The hint is durable. Recovery retries settlement; the webhook
             // still renders the honest current state for this target.
@@ -356,6 +371,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         // A rail check only means an inspection ran; the paid notice requires
         // durable settlement evidence, never the boolean return value.
         $status = $this->statuses->for($fresh);
+        $this->presenter->armLookup($customer, $fresh);
         $this->presentStatus(
             $customer,
             $chatId,
@@ -364,14 +380,6 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
                 ? 'balance.usdt.notice.paid'
                 : $recordedKey,
         );
-    }
-
-    private function railOf(CustomerUsdtTopUp $target): ?CustomerUsdtFundingRail
-    {
-        $snapshot = is_array($target->payment_snapshot) ? $target->payment_snapshot : [];
-        $value = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
-
-        return CustomerUsdtFundingRail::tryFrom($value !== '' ? $value : (string) ($snapshot['rail'] ?? ''));
     }
 
     /**
@@ -418,12 +426,10 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
                 return [$this->staleSurface($customer), 'balance.usdt.stale'];
             }
             if ($this->funding->cancelTarget($customer, (string) $target->id)) {
+                $this->hashSession->forget($customer);
+
                 return [
-                    $this->menu->usdAmountSurface(
-                        $customer,
-                        $this->railOf($target) ?? CustomerUsdtFundingRail::BscShared,
-                        'balance.usdt.notice.cancelled_target',
-                    ),
+                    $this->menu->homeSurface($customer, $context->chatId),
                     'balance.usdt.notice.cancelled_target',
                 ];
             }

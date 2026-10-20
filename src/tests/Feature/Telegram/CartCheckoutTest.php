@@ -225,11 +225,14 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $selectorPayload = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '12348')->first()[0]->data();
         $selectorJson = json_encode($selectorPayload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-        $this->assertStringContainsString('Balance · Rp15.000', $selectorJson);
-        $this->assertStringNotContainsString('Rp20.000', $selectorJson);
         $this->assertStringContainsString('checkout:balance', $selectorJson);
         $this->postTelegramWebhook($this->callbackUpdate(31, 'balance-checkout', 'checkout:balance', [], 12348, 'private', 9001))
             ->assertOk();
+        $this->assertDatabaseCount('orders', 0);
+        $wallet = Http::recorded(fn ($request): bool => str_contains(json_encode($request->data()), 'checkout:wallet:idr:'))->last()[0]->data();
+        $callback = collect($wallet['reply_markup']['inline_keyboard'])->flatten(1)->first(
+            fn (array $button): bool => str_starts_with($button['callback_data'] ?? '', 'checkout:wallet:idr:'))['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(33, 'idr-pay', $callback, [], 12348, 'private', 123457))->assertOk();
 
         $order = Order::query()->sole();
         $payment = $order->payments()->sole();
@@ -346,7 +349,6 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Wholesale 3+: Rp9.000/unit · 💎 1.8 USDT/unit', $text);
         $this->assertStringContainsString('Total: Rp63.000 · 💎 11.4 USDT', $text);
         $this->assertStringContainsString('QRIS · Rp63.000', $keyboard);
-        $this->assertStringContainsString('Balance · Rp63.000', $keyboard);
         $this->assertStringContainsString('USDT · 11.4 USDT', $keyboard);
         $this->assertStringNotContainsString('checkout.payment_method', $text);
         $this->assertSame(0, Order::count());
