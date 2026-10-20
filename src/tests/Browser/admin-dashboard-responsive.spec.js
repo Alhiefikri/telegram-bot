@@ -644,27 +644,35 @@ test("customer checkout: keeps the mobile sticky action aligned with the canonic
     await expect(stickySubmit).toHaveText(/Buat invoice Binance Pay/);
     await expect(stickySubmit).toBeEnabled();
 
-    const metrics = await page.evaluate(() => {
-      const sticky = document.querySelector("[data-checkout-sticky-action]");
-      const main = document.querySelector("main");
-      const stickyRect = sticky?.getBoundingClientRect();
-      const mainStyle = main ? getComputedStyle(main) : null;
+    const readMetrics = () =>
+      page.evaluate(() => {
+        const sticky = document.querySelector("[data-checkout-sticky-action]");
+        const main = document.querySelector("main");
+        const stickyRect = sticky?.getBoundingClientRect();
+        const mainStyle = main ? getComputedStyle(main) : null;
 
-      return {
-        position: sticky ? getComputedStyle(sticky).position : "",
-        bottom: stickyRect?.bottom ?? 0,
-        viewportHeight: window.innerHeight,
-        height: stickyRect?.height ?? 0,
-        paddingBottom: mainStyle
-          ? Number.parseFloat(mainStyle.paddingBottom)
-          : 0,
-        documentWidth: Math.max(
-          document.documentElement.scrollWidth,
-          document.body.scrollWidth
-        ),
-      };
-    });
+        return {
+          position: sticky ? getComputedStyle(sticky).position : "",
+          bottom: stickyRect?.bottom ?? 0,
+          viewportHeight: window.innerHeight,
+          height: stickyRect?.height ?? 0,
+          paddingBottom: mainStyle
+            ? Number.parseFloat(mainStyle.paddingBottom)
+            : 0,
+          documentWidth: Math.max(
+            document.documentElement.scrollWidth,
+            document.body.scrollWidth
+          ),
+        };
+      });
 
+    await expect
+      .poll(async () => {
+        const metrics = await readMetrics();
+        return metrics.paddingBottom - metrics.height;
+      })
+      .toBeGreaterThanOrEqual(-1);
+    const metrics = await readMetrics();
     expect(metrics.position).toBe("fixed");
     expect(
       Math.abs(metrics.bottom - metrics.viewportHeight)
