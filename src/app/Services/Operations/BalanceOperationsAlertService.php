@@ -611,6 +611,7 @@ final class BalanceOperationsAlertService
             TelegramOutboundEffectType::UsdtRefundReceipt->value,
             TelegramOutboundEffectType::BalanceTopUpReceipt->value,
             TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value,
+            TelegramOutboundEffectType::BalanceTopUpPaidNotification->value,
             TelegramOutboundEffectType::OwnerCompensationNotification->value,
         ];
 

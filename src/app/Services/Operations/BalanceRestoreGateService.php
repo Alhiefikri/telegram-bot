@@ -51,6 +51,7 @@ final class BalanceRestoreGateService
         TelegramOutboundEffectType::UsdtRefundReceipt->value,
         TelegramOutboundEffectType::BalanceTopUpReceipt->value,
         TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value,
+        TelegramOutboundEffectType::BalanceTopUpPaidNotification->value,
         TelegramOutboundEffectType::OwnerCompensationNotification->value,
         TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
         TelegramOutboundEffectType::BalanceOperationsAlert->value,

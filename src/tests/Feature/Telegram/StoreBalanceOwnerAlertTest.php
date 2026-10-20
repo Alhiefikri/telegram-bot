@@ -6,7 +6,9 @@ use App\Enums\StoreBalanceFundingIntentStatus;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Events\StoreBalanceTopUpSettled;
 use App\Jobs\SendStoreBalanceTopUpOwnerAlert;
+use App\Listeners\MaterializeStoreBalanceTopUpReceipt;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\StoreBalanceFundingIntent;
@@ -136,6 +138,77 @@ final class StoreBalanceOwnerAlertTest extends TelegramBotTestSupport
         $this->assertSame('balance_top_up_owner_alert_not_eligible', $effect->last_error_code);
         $this->assertNull($effect->next_attempt_at);
         Http::assertNothingSent();
+    }
+
+    public function test_settled_top_up_notifies_only_admin_once_even_after_replayed_event(): void
+    {
+        $this->fakeTelegramHttp();
+        Queue::fake();
+        $topUp = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'amount' => 100000,
+            'provider_total_payment' => 100700,
+            'provider_fee' => 700,
+            'paid_at' => now(),
+            'settled_at' => now(),
+        ]);
+        $listener = app(MaterializeStoreBalanceTopUpReceipt::class);
+        $event = new StoreBalanceTopUpSettled((string) $topUp->getKey());
+        $listener->handle($event);
+        $listener->handle($event);
+
+        $effects = TelegramOutboundEffect::query()
+            ->where('source_id', (string) $topUp->getKey())
+            ->where('effect_type', 'admin.balance_top_up_paid_notification')
+            ->get();
+        $this->assertCount(1, $effects);
+        $effect = $effects->sole();
+        $this->assertSame('admin', $effect->target_type);
+        $this->assertSame(self::ADMIN_CHAT_ID, $effect->telegram_chat_id);
+        $job = new SendStoreBalanceTopUpOwnerAlert((string) $topUp->getKey(), effectId: (string) $effect->getKey());
+        $job->handle();
+        $job->handle();
+
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        Http::assertSentCount(1);
+        Http::assertSent(function (Request $request) use ($topUp): bool {
+            $text = (string) $request['text'];
+
+            return $request['chat_id'] === self::ADMIN_CHAT_ID
+                && str_contains($text, 'Hasil topup balance')
+                && str_contains($text, $topUp->merchant_ref)
+                && str_contains($text, '@owner_alert_test ('.$topUp->customer->telegram_id.')')
+                && str_contains($text, 'Status pembayaran: Paid')
+                && str_contains($text, 'Saldo dikreditkan: Rp100.000')
+                && str_contains($text, 'Total pembayaran: Rp100.700')
+                && str_contains($text, 'Metode: QRIS')
+                && ! str_contains($text, 'Earning:')
+                && ! str_contains($text, 'provider-signature-secret')
+                && ! str_contains($text, 'secret-qris');
+        });
+    }
+
+    public function test_paid_notification_recovery_excludes_unsettled_and_old_top_ups(): void
+    {
+        Queue::fake();
+        $recent = $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'settled_at' => now(),
+        ]);
+        $this->makeTopUp(['status' => StoreBalanceTopUpStatus::Paid]);
+        $this->makeTopUp(['status' => StoreBalanceTopUpStatus::Payable]);
+        $this->makeTopUp([
+            'status' => StoreBalanceTopUpStatus::Paid,
+            'settled_at' => now()->subDays(8),
+        ]);
+
+        $outbound = app(StoreBalanceTopUpOutbound::class);
+        $this->assertSame(1, $outbound->recoverMissingPaidNotifications(10));
+        $this->assertSame(0, $outbound->recoverMissingPaidNotifications(10));
+        $effect = TelegramOutboundEffect::query()
+            ->where('effect_type', 'admin.balance_top_up_paid_notification')
+            ->sole();
+        $this->assertSame((string) $recent->getKey(), $effect->source_id);
     }
 
     /** @param array<string, mixed> $overrides */

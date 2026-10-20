@@ -110,7 +110,8 @@ final class TelegramOutboundEffectDispatcher
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
             ),
-            TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value => SendStoreBalanceTopUpOwnerAlert::dispatch(
+            TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value,
+            TelegramOutboundEffectType::BalanceTopUpPaidNotification->value => SendStoreBalanceTopUpOwnerAlert::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),

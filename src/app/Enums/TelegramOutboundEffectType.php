@@ -14,6 +14,7 @@ enum TelegramOutboundEffectType: string
     case BalanceTopUpReceipt = 'balance.top_up_receipt';
     case BalanceTopUpPaymentProof = 'admin.balance_top_up_payment_proof';
     case BalanceTopUpOwnerAlert = 'admin.balance_top_up_owner_alert';
+    case BalanceTopUpPaidNotification = 'admin.balance_top_up_paid_notification';
     case BalanceTopUpChannelProof = 'balance.top_up_channel_proof';
     case OwnerCompensationNotification = 'balance.owner_compensation_notification';
     case ReceiptCredentials = 'receipt.credentials';

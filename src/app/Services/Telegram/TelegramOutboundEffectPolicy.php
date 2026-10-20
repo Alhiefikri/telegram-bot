@@ -115,6 +115,7 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::BalanceTopUpInstructions->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
         TelegramOutboundEffectType::BalanceTopUpReceipt->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
         TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
+        TelegramOutboundEffectType::BalanceTopUpPaidNotification->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
         TelegramOutboundEffectType::BalanceTopUpChannelProof->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
         TelegramOutboundEffectType::OwnerCompensationNotification->value => self::BALANCE_TOP_UP_MAX_ATTEMPTS,
     ];
@@ -139,6 +140,7 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::BalanceTopUpInstructions->value => 'balance_top_up_attempts_exhausted',
         TelegramOutboundEffectType::BalanceTopUpReceipt->value => 'balance_top_up_receipt_attempts_exhausted',
         TelegramOutboundEffectType::BalanceTopUpOwnerAlert->value => 'balance_top_up_owner_alert_attempts_exhausted',
+        TelegramOutboundEffectType::BalanceTopUpPaidNotification->value => 'balance_top_up_paid_notification_attempts_exhausted',
         TelegramOutboundEffectType::BalanceTopUpChannelProof->value => 'balance_top_up_channel_proof_attempts_exhausted',
         TelegramOutboundEffectType::OwnerCompensationNotification->value => 'balance_owner_compensation_attempts_exhausted',
     ];

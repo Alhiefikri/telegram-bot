@@ -861,6 +861,17 @@ top-ups that may carry money but cannot be settled automatically materialize at
 most one `admin.balance_top_up_owner_alert` effect per top-up through
 `StoreBalanceTopUpOutbound::recoverMissingOwnerAlerts`; plain expired top-ups
 without money evidence stay silent.
+Successful IDR top-ups also hand off one private
+`admin.balance_top_up_paid_notification` from
+`MaterializeStoreBalanceTopUpReceipt`, independently of the Store Channel toggle.
+`SendStoreBalanceTopUpOwnerAlert` and `BalanceTopUpOwnerAlertDeliveryPipeline`
+deliver the success family separately from unresolved-money alerts. The admin
+message includes merchant reference, buyer username/Telegram ID, credited balance,
+payable total, method/provider and paid time; top-ups are not reported as earnings.
+`StoreBalanceTopUpOutbound::recoverMissingPaidNotifications` repairs missing
+handoffs for settlements within seven days without resending existing effects.
+Verification: `StoreBalanceOwnerAlertTest` covers private-only delivery, replay
+deduplication and recovery excluding unsettled/older top-ups.
 Settled top-ups also publish one public Store Channel proof
 (`balance.top_up_channel_proof`) through
 `MaterializeStoreBalanceTopUpChannelProof`, reusing the paid-invoice renderer and

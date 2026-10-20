@@ -23,6 +23,7 @@ final class MaterializeStoreBalanceTopUpReceipt
         }
 
         $this->storeBalanceTopUps->handoffReceipt($topUp);
+        $this->storeBalanceTopUps->handoffPaidNotification($topUp);
         DeleteStoreBalanceTopUpInstruction::dispatch((string) $topUp->getKey())
             ->onQueue('notifications')
             ->afterCommit();

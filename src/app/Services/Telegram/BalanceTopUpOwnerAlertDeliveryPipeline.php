@@ -2,6 +2,8 @@
 
 namespace App\Services\Telegram;
 
+use App\Enums\StoreBalanceTopUpStatus;
+use App\Enums\TelegramOutboundEffectType;
 use App\Models\Customer;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
@@ -9,9 +11,8 @@ use App\Support\Money;
 use Throwable;
 
 /**
- * Admin-facing alert for Store Balance top-ups that may carry real money but
- * could not be settled automatically. Delivery is claim/finalize work only;
- * the top-up lifecycle and the ledger protocol stay authoritative.
+ * Admin-facing delivery for settled top-ups and unresolved money alerts.
+ * The top-up lifecycle and the shared ledger protocol stay authoritative.
  */
 final class BalanceTopUpOwnerAlertDeliveryPipeline
 {
@@ -38,7 +39,10 @@ final class BalanceTopUpOwnerAlertDeliveryPipeline
                 ->whereKey($effectId)
                 ->where('source_type', StoreBalanceTopUp::class)
                 ->where('source_id', $topUpId)
-                ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_OWNER_ALERT)
+                ->whereIn('effect_type', [
+                    TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_OWNER_ALERT,
+                    TelegramOutboundEffectType::BalanceTopUpPaidNotification->value,
+                ])
                 ->firstOrFail();
 
         if ($effect === null) {
@@ -76,7 +80,11 @@ final class BalanceTopUpOwnerAlertDeliveryPipeline
                 return;
             }
 
-            if (! $topUp->isEligibleForOwnerAttention()) {
+            $paidNotification = $claimed->effect_type === TelegramOutboundEffectType::BalanceTopUpPaidNotification->value;
+            $eligible = $paidNotification
+                ? $topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_at !== null
+                : $topUp->isEligibleForOwnerAttention();
+            if (! $eligible) {
                 $this->ledger->finalizeNotDeliverable(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
@@ -88,7 +96,7 @@ final class BalanceTopUpOwnerAlertDeliveryPipeline
 
             $response = $this->bot->sendMessage(
                 (string) $claimed->telegram_chat_id,
-                $this->message($topUp),
+                $paidNotification ? $this->paidMessage($topUp) : $this->message($topUp),
             );
             $messageId = $this->responseValidator->messageIdFromResponse($response, 'Store Balance owner alert');
 
@@ -97,7 +105,7 @@ final class BalanceTopUpOwnerAlertDeliveryPipeline
                 (string) $claimed->claim_token,
                 $messageId,
                 [
-                    'delivery_context' => 'balance_top_up_owner_alert',
+                    'delivery_context' => $paidNotification ? 'balance_top_up_paid_notification' : 'balance_top_up_owner_alert',
                     'delivery_method' => 'sendMessage',
                 ],
             );
@@ -120,6 +128,38 @@ final class BalanceTopUpOwnerAlertDeliveryPipeline
                 throw $exception;
             }
         }
+    }
+
+    private function paidMessage(StoreBalanceTopUp $topUp): string
+    {
+        $customer = $topUp->customer;
+        $username = trim((string) $customer?->username);
+        $buyer = $username !== ''
+            ? '@'.ltrim($username, '@')
+            : (trim((string) $customer?->first_name) ?: 'Customer');
+        if (filled($customer?->telegram_id)) {
+            $buyer .= ' ('.$customer->telegram_id.')';
+        }
+
+        return implode("\n", [
+            $this->uiIcons->renderLegacyIcons('🔔 Hasil topup balance'),
+            '━━━━━━━━━━━━━━',
+            'Invoice: '.$topUp->merchant_ref,
+            'Pembeli: '.$buyer,
+            'Sumber: Telegram Bot',
+            'Status pembayaran: Paid',
+            'Saldo dikreditkan: '.Money::rupiah($topUp->amount),
+            ...($topUp->provider_total_payment !== null
+                ? ['Total pembayaran: '.Money::rupiah($topUp->provider_total_payment)]
+                : []),
+            'Metode: '.strtoupper((string) ($topUp->provider_payment_method ?: $topUp->provider)),
+            'Provider: '.strtoupper((string) $topUp->provider),
+            '',
+            'Paid at: '.($topUp->paid_at ?? $topUp->settled_at)
+                ->copy()->timezone((string) config('app.timezone'))->format('d M Y, H:i'),
+            '',
+            'Topup selesai. Saldo sudah dikreditkan. Tidak perlu proses ulang.',
+        ]);
     }
 
     private function message(StoreBalanceTopUp $topUp): string

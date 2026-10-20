@@ -492,6 +492,42 @@ class TelegramOutboundEffectService
         );
     }
 
+    public function recordBalanceTopUpPaidNotification(StoreBalanceTopUp $topUp): ?TelegramOutboundEffect
+    {
+        $chatId = $this->adminTargetChatId();
+        if ($chatId === null
+            || $topUp->status !== StoreBalanceTopUpStatus::Paid
+            || $topUp->settled_at === null) {
+            return null;
+        }
+
+        $effectKey = 'balance-top-up:'.$topUp->getKey().':admin-paid:v1';
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => $effectKey,
+                'sequence' => 1,
+                'effect_type' => TelegramOutboundEffectType::BalanceTopUpPaidNotification->value,
+                'source_type' => StoreBalanceTopUp::class,
+                'source_id' => (string) $topUp->getKey(),
+                'target_type' => 'admin',
+                'telegram_chat_id' => $chatId,
+                'queue' => self::RECEIPT_QUEUE,
+                'telegram_method' => 'sendMessage',
+                'locale' => null,
+                'template_version' => 'balance-top-up-admin-paid:v1',
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+                'outcome_metadata' => [
+                    'delivery_context' => 'balance_top_up_paid_notification',
+                    'delivery_method' => 'sendMessage',
+                ],
+            ],
+        );
+    }
+
     public function recordBalanceTopUpChannelProof(StoreBalanceTopUp $topUp): ?TelegramOutboundEffect
     {
         $setting = StoreChannelSetting::current();

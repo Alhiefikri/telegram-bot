@@ -23,6 +23,7 @@ final class BalanceOperationMetrics
         'usdt.refund_receipt',
         'balance.top_up_receipt',
         'admin.balance_top_up_owner_alert',
+        'admin.balance_top_up_paid_notification',
         'balance.owner_compensation_notification',
     ];
 
