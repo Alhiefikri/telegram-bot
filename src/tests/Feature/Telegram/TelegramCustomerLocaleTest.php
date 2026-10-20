@@ -441,13 +441,13 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertCount(3, $enPaymentButtons);
         $this->assertCount(3, $msPaymentButtons);
         $this->assertSame('💳 QRIS · Rp50.000', $idPaymentButtons[0]['text']);
-        $this->assertSame('💰 Saldo · Rp50.000', $idPaymentButtons[1]['text']);
+        $this->assertSame('💰 Bayar dengan Saldo', $idPaymentButtons[1]['text']);
         $this->assertSame('💎 USDT · 3 USDT', $idPaymentButtons[2]['text']);
         $this->assertSame('💳 QRIS · Rp50.000', $enPaymentButtons[0]['text']);
-        $this->assertSame('💰 Balance · Rp50.000', $enPaymentButtons[1]['text']);
+        $this->assertSame('💰 Pay with Balance', $enPaymentButtons[1]['text']);
         $this->assertSame('💎 USDT · 3 USDT', $enPaymentButtons[2]['text']);
         $this->assertSame('💳 QRIS · Rp50.000', $msPaymentButtons[0]['text']);
-        $this->assertSame('💰 Baki · Rp50.000', $msPaymentButtons[1]['text']);
+        $this->assertSame('💰 Bayar dengan Baki', $msPaymentButtons[1]['text']);
         $this->assertSame('💎 USDT · 3 USDT', $msPaymentButtons[2]['text']);
         $this->assertStringNotContainsString('checkout.payment_method', json_encode($idPayload, JSON_THROW_ON_ERROR));
         $this->assertLocalizedCopy($idPayload, ['🌍 QRIS Antarnegara', 'ID', 'TH', 'MY', 'SG', 'JP', 'KR', 'CN', 'Ketersediaan bergantung pada aplikasi, PJP, dan merchant.'], ['QRIS Antarnegara tersedia melalui koneksi:', 'Ketersediaan tetap bergantung pada aplikasi pembayaran/PJP']);

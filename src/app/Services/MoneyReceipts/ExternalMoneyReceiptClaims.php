@@ -55,7 +55,29 @@ final class ExternalMoneyReceiptClaims
             ->lockForUpdate()
             ->first();
 
-        if ($record !== null && ! $this->fingerprintsMatch($record, $receipt)) {
+        $inserted = false;
+        if ($record === null) {
+            // A concurrent claim may commit between the lookup above and this
+            // insert. ON CONFLICT DO NOTHING waits for that transaction to
+            // settle, so the re-read below always observes the established row.
+            $inserted = $this->insertReceipt($receipt);
+            $record = ExternalMoneyReceipt::query()
+                ->where('canonical_key', $receipt->canonicalKey())
+                ->lockForUpdate()
+                ->first();
+        }
+
+        if ($record === null) {
+            throw new ExternalMoneyReceiptClaimRejected(
+                ExternalMoneyReceiptClaimOutcome::Conflict,
+                'The external money receipt could not be established.',
+            );
+        }
+
+        // Compare fingerprint and alias ownership only against the established
+        // record. Deciding them from a pre-insert lookup that observed no row
+        // would turn a replay racing a commit into a false Conflict.
+        if (! $this->fingerprintsMatch($record, $receipt)) {
             return ExternalMoneyReceiptClaimOutcome::Conflict;
         }
 
@@ -64,25 +86,6 @@ final class ExternalMoneyReceiptClaims
                 ExternalMoneyReceiptClaimOutcome::Conflict,
                 'A verified alias of this receipt is already attached to different funds.',
             );
-        }
-
-        $inserted = false;
-        if ($record === null) {
-            $inserted = $this->insertReceipt($receipt);
-            $record = ExternalMoneyReceipt::query()
-                ->where('canonical_key', $receipt->canonicalKey())
-                ->lockForUpdate()
-                ->first();
-
-            if ($record === null) {
-                throw new ExternalMoneyReceiptClaimRejected(
-                    ExternalMoneyReceiptClaimOutcome::Conflict,
-                    'The external money receipt could not be established.',
-                );
-            }
-            if (! $inserted && ! $this->fingerprintsMatch($record, $receipt)) {
-                return ExternalMoneyReceiptClaimOutcome::Conflict;
-            }
         }
 
         if ($record->status->isReview()) {
