@@ -65,10 +65,9 @@ class KlikQrisSandboxWebhookController extends Controller
                 'merchant_ref_hash' => hash('sha256', (string) ($payload['order_id'] ?? '')),
             ]);
 
-            // The callback event is already durable at this point. Queue the
-            // same payload for a later authoritative check and only surface a
-            // server error if the durability boundary itself cannot be reached.
-            VerifyKlikQrisWebhookPayment::dispatch($payload)->onConnection('database')->onQueue('payments');
+            // The durable callback event remains available to reconciliation.
+            // Send the wakeup to the same runtime connection as the workers.
+            VerifyKlikQrisWebhookPayment::dispatch($payload)->onQueue('payments');
         }
 
         return response()->json(['success' => true]);

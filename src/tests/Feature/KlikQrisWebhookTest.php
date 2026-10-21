@@ -381,6 +381,51 @@ class KlikQrisWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_deferred_callback_reaches_the_runtime_worker_without_leaving_database_cutover_blockers(): void
+    {
+        \Illuminate\Support\Facades\Schema::create('runtime_jobs', function (\Illuminate\Database\Schema\Blueprint $table): void {
+            $table->id();
+            $table->string('queue')->index();
+            $table->longText('payload');
+            $table->unsignedTinyInteger('attempts');
+            $table->unsignedInteger('reserved_at')->nullable();
+            $table->unsignedInteger('available_at');
+            $table->unsignedInteger('created_at');
+        });
+        config()->set('queue.default', 'runtime');
+        config()->set('queue.connections.runtime', array_replace(config('queue.connections.database'), [
+            'table' => 'runtime_jobs',
+            'after_commit' => false,
+        ]));
+        $payment = $this->payableKlikQrisPayment();
+        $providerAvailable = false;
+        Http::fake(function () use (&$providerAvailable, $payment) {
+            return $providerAvailable
+                ? Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200)
+                : Http::response(['message' => 'temporary'], 500);
+        });
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))
+            ->assertOk()->assertExactJson(['success' => true]);
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertNull(PaymentEvent::query()->where('provider', 'klikqris')->sole()->processed_at);
+        $this->assertDatabaseCount('jobs', 0);
+        $this->assertDatabaseCount('runtime_jobs', 1);
+
+        $providerAvailable = true;
+        $this->artisan('queue:work', [
+            'connection' => 'runtime',
+            '--queue' => 'payments',
+            '--once' => true,
+        ])->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertNotNull(PaymentEvent::query()
+            ->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::table('runtime_jobs')->where('queue', 'payments')->count());
+    }
+
     public function test_status_transient_outage_is_acknowledged_and_readiness_faults_still_surface(): void
     {
         Queue::fake();

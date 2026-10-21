@@ -34,6 +34,8 @@ docker stats --no-stream
 
 A nonzero queue depth is not a cutover failure by itself if workers are actively processing; investigate sustained or growing backlog, failed jobs, Redis memory near 96 MiB, and container restarts. Compare CPU and memory observations with the recorded baseline under comparable workload. Do not infer a production CPU reduction from repository configuration or a synthetic benchmark.
 
+KlikQRIS deferred callback verification uses the configured runtime queue connection on `payments`, never an explicit database connection. The callback event is persisted before deferral; the scheduled KlikQRIS reconciliation remains the recovery path if the volatile queue loses the wakeup. A provider outage must not leave a new row in the inactive PostgreSQL `jobs` table and block the next application startup.
+
 ## Rollback from Redis to the database queue
 
 Use the GitHub Actions rollback operation. When the recorded previous release uses the database driver, the release script stops candidate `app` and `scheduler` producers, then runs the total-depth check against every operational Redis queue. Reserved and delayed jobs are included.
