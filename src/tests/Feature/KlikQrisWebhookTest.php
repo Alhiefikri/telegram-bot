@@ -18,11 +18,14 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\TestCase;
 
@@ -383,7 +386,7 @@ class KlikQrisWebhookTest extends TestCase
 
     public function test_deferred_callback_reaches_the_runtime_worker_without_leaving_database_cutover_blockers(): void
     {
-        \Illuminate\Support\Facades\Schema::create('runtime_jobs', function (\Illuminate\Database\Schema\Blueprint $table): void {
+        Schema::create('runtime_jobs', function (Blueprint $table): void {
             $table->id();
             $table->string('queue')->index();
             $table->longText('payload');
@@ -423,7 +426,7 @@ class KlikQrisWebhookTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertNotNull(PaymentEvent::query()
             ->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
-        $this->assertSame(0, \Illuminate\Support\Facades\DB::table('runtime_jobs')->where('queue', 'payments')->count());
+        $this->assertSame(0, DB::table('runtime_jobs')->where('queue', 'payments')->count());
     }
 
     public function test_status_transient_outage_is_acknowledged_and_readiness_faults_still_surface(): void
