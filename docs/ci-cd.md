@@ -63,19 +63,29 @@ production image job elevates only itself to `packages: write`.
   - Rejects duplicate migration filename prefixes via `./scripts/check-migration-prefixes.sh`, so migration order stays deterministic. Prefixes that already shipped with a duplicate are allowlisted in `scripts/migration-prefix-allowlist.txt` and are never renamed, because Laravel keys the `migrations` table by filename.
   - The October 8 supplier sync backoff migration uses prefix `2026_10_08_000004`; `000001`–`000003` belong to the USDT migrations. The supplier migration was renamed before production deployment, without allowlisting the collision.
   - The October 19 funding-method icon migration uses prefix `2026_10_19_000003`, assigned before production deployment; `000001` remains the already-released shared USDT top-up migration and `000002` belongs to supplier retirement.
-  - Prepares PHP 8.4, Node 24, Composer dependencies, npm dependencies, and admin assets once for all application test lanes. This avoids repeating toolchain setup on a single serial runner.
+  - Runs four independent matrix jobs after the dependency/security audit: `application`, `browser`, `postgres-release`, and `postgres-concurrency`. Each gets PHP 8.4, Node 24, dependencies, built assets, and isolated PostgreSQL/Redis services. The small repeated setup cost avoids serializing the expensive suites. Matrix `fail-fast` is disabled so a failed lane does not discard the other lanes' diagnostic evidence.
   - Enforces Laravel Pint and keeps the fast SQLite suite parallel via ParaTest (`composer test -- --parallel`).
   - Before pushing PHP changes, run `cd src && ./vendor/bin/pint` and then `./vendor/bin/pint --test`; CI checks the whole tree, including migrations and tests.
   - Rollback restores the public release marker as soon as application image alignment is proven, before runtime health checks. A failed heartbeat must not leave the candidate SHA advertised after the previous image has been restored; rollback health still fails closed.
-  - Runs the customer Playwright smoke against the already-built assets instead of rebuilding them in a separate job.
-  - Runs the authoritative PostgreSQL release lane in the same isolated job against a PostgreSQL 16 service with health checking and CI-only credentials, matching production's database major version.
-  - Applies every migration to an empty PostgreSQL database, runs production-critical Telegram update, inventory, checkout, payment, and queue-state integration tests, then executes the process-level concurrency deploy gate with unexpected skips treated as failures.
-  - Uploads PostgreSQL migration logs, JUnit XML, human-readable test/failure/skip summaries, and concurrency evidence on success or failure.
-  - Builds the production image only after dependency audits and every application test lane pass, using a persistent named BuildKit builder that retains cache locally without changing the resulting content-addressed image.
+  - Runs the customer and supplier Playwright smoke in the browser job against that job's built assets.
+  - Applies every migration to an empty PostgreSQL 16 database, then runs the release integration selection with `--group=postgres-release --exclude-group=concurrency --fail-on-skipped`.
+  - Runs the complete `concurrency` group in a separate job through `scripts/concurrency-deploy-gate.sh`, retaining its disposable database and no-skips gate. Tests tagged with both groups execute only here. Keep the union of both selections intact when changing groups or the release manifest; never exclude concurrency tests from both lanes.
+  - Nontransactional PostgreSQL fixtures invalidate Laravel's `RefreshDatabaseState::$migrated` flag so a later transactional test refreshes the database instead of inheriting committed rows. Lane membership must not depend on an intervening test class cleaning the database.
+  - Uploads PostgreSQL migration logs, JUnit XML, test summaries, and concurrency evidence on success or failure. Artifact names include the matrix lane and run attempt to avoid upload collisions.
+  - Builds the production image only after the dependency audit and all four test jobs pass. Hosted runners are ephemeral: the named BuildKit builder alone does not retain cache across runs. Explicit `type=gha,scope=production` import/export preserves build layers, including intermediate stages (`mode=max`), without changing immutable image verification.
   - Runs container-level verification against that image, then publishes successful `main` images to GHCR as `ghcr.io/<owner>/<repository>:<commit-sha>`.
   - Retries an interrupted GHCR push at most three times with short backoff. Docker skips content-addressed layers already present in the registry, while the job-level timeout remains the hard upper bound; this is a bounded network recovery, not an automatic workflow rerun loop.
   - Records the immutable `sha256` digest in a `production-image` commit status and the CI job summary.
   - Every job has a bounded timeout. Failed PHPUnit, Playwright, and Docker jobs upload diagnostic artifacts retained for 14 days.
+
+The October 21 lane split was checked against PHPUnit's actual test listings:
+the original 357 release and 329 concurrency selections overlapped by 216 cases.
+The new selections contain 141 release and 329 concurrency cases: all 470 unique
+cases remain, with no overlap. Local PHP 8.4/PostgreSQL 16/Redis verification
+passed both complete selections with zero skipped tests. These counts describe
+that revision, not a fixed test-count requirement. Hosted elapsed time still
+needs measurement after the changed workflow runs; local timings are not a
+GitHub Actions performance benchmark.
 
 - `.github/workflows/deploy-production.yml`
   - Triggers only by manual `workflow_dispatch` from `main`.

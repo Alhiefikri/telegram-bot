@@ -43,12 +43,16 @@ jobs:
         run: npm audit --audit-level=high
 
   application-tests:
-    name: Application, browser, and PostgreSQL tests
+    name: Tests (${{ matrix.lane }})
     runs-on: ubuntu-24.04
     needs: [workflow-security]
     container:
       image: ubuntu:24.04
-    timeout-minutes: 90
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [application, browser, postgres-release, postgres-concurrency]
     services:
       postgres:
         image: postgres:16-alpine
@@ -56,8 +60,6 @@ jobs:
           POSTGRES_DB: telegram_bot_ci_test
           POSTGRES_USER: telegram_bot_ci
           POSTGRES_PASSWORD: ci-only-not-production
-        ports:
-          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci_test"
           --health-interval 5s
@@ -104,7 +106,7 @@ jobs:
             curl \
             zstd
 
-      - name: Set up PHP once for all test lanes
+      - name: Set up PHP for the test lane
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         env:
           # setup-php installs inside the job container instead of a runner tool cache.
@@ -138,12 +140,14 @@ jobs:
           composer install --no-interaction --prefer-dist --no-progress
 
       - name: Check PHP code style with Pint
+        if: matrix.lane == 'application'
         run: ./vendor/bin/pint --test
 
       - name: Install frontend dependencies
         run: npm ci
 
       - name: Run JavaScript unit tests
+        if: matrix.lane == 'application'
         run: npm run test:js
 
       - name: Build and verify admin assets
@@ -158,9 +162,11 @@ jobs:
           mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
 
       - name: Run parallel SQLite PHPUnit suite
+        if: matrix.lane == 'application'
         run: composer test -- --parallel --log-junit junit.xml
 
       - name: Exercise production release and rollback paths
+        if: matrix.lane == 'application'
         working-directory: .
         run: |
           ./scripts/test-deploy-production-release.sh
@@ -169,12 +175,15 @@ jobs:
           ./scripts/test-concurrency-deploy-gate.sh
 
       - name: Install Playwright Chromium
+        if: matrix.lane == 'browser'
         run: npx playwright install --with-deps chromium
 
       - name: Run customer and supplier browser smoke without rebuilding assets
+        if: matrix.lane == 'browser'
         run: npx playwright test tests/Browser/admin-dashboard-responsive.spec.js tests/Browser/supplier-connection.spec.js -g "customer checkout|supplier creation"
 
       - name: Migrate empty PostgreSQL database
+        if: matrix.lane == 'postgres-release'
         env:
           DB_CONNECTION: pgsql
           DB_HOST: postgres
@@ -191,6 +200,7 @@ jobs:
           php artisan migrate:status --ansi 2>&1 | tee ../artifacts/postgres-release/migration-status.log
 
       - name: Run production-critical PostgreSQL integration tests
+        if: matrix.lane == 'postgres-release'
         env:
           DB_HOST: postgres
           DB_PORT: 5432
@@ -206,6 +216,7 @@ jobs:
             --configuration=phpunit.postgres.xml \
             --testsuite="PostgreSQL release integration" \
             --group=postgres-release \
+            --exclude-group=concurrency \
             --fail-on-skipped \
             --log-junit="$artifact_dir/junit.xml" \
             --no-coverage \
@@ -222,6 +233,7 @@ jobs:
           exit "$phpunit_status"
 
       - name: Run PostgreSQL concurrency deploy gate without skips
+        if: matrix.lane == 'postgres-concurrency'
         working-directory: .
         env:
           RUN_CONCURRENCY_TESTS: '1'
@@ -229,11 +241,11 @@ jobs:
         run: ./scripts/concurrency-deploy-gate.sh
 
       - name: Upload PostgreSQL release evidence
-        if: always()
+        if: always() && startsWith(matrix.lane, 'postgres-')
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: postgres-release-gate-${{ github.run_attempt }}
+          name: ${{ matrix.lane }}-gate-${{ github.run_attempt }}
           path: |
             artifacts/postgres-release/
             artifacts/postgres-concurrency/
@@ -245,7 +257,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: application-test-failure-${{ github.run_attempt }}
+          name: ${{ matrix.lane }}-test-failure-${{ github.run_attempt }}
           path: |
             src/junit.xml
             src/test-results/
@@ -301,6 +313,8 @@ jobs:
           pull: true
           push: false
           tags: ${{ env.LOCAL_IMAGE_TAG }}
+          cache-from: type=gha,scope=production
+          cache-to: type=gha,scope=production,mode=max
 
       - name: Capture Docker build diagnostics
         if: always()

@@ -2,6 +2,7 @@
 
 namespace Tests\Support;
 
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -16,6 +17,7 @@ abstract class NonTransactionalDatabaseTestCase extends TestCase
 
         if (DB::getDriverName() === 'pgsql') {
             $this->assertSame(0, PostgresTestDatabase::migrateFresh());
+            RefreshDatabaseState::$migrated = false;
 
             return;
         }
