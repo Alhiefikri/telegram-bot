@@ -177,7 +177,7 @@ Expected values include `allowed_actions: selected`, `sha_pinning_required: true
 Protect `main` with these settings:
 
 - Require a pull request before merging, with at least one approval.
-- Require the current successful CI check names: `Workflow validation and dependency audit`, `Application, browser, and PostgreSQL tests`, and `Build, verify, and publish production image`.
+- Require the current successful CI check names: `Workflow validation and dependency audit`, `Tests (application)`, `Tests (browser)`, `Tests (postgres-release)`, `Tests (postgres-concurrency)`, and `Build, verify, and publish production image`.
 - Require branches to be up to date before merging.
 - Require all review conversations to be resolved.
 - Do not allow force pushes or branch deletion.

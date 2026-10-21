@@ -1093,7 +1093,9 @@ SH);
         $postgresConfig = file_get_contents(base_path('phpunit.postgres.xml'));
         $concurrencyGate = file_get_contents(base_path('../scripts/concurrency-deploy-gate.sh'));
 
-        $this->assertStringContainsString('name: Application, browser, and PostgreSQL tests', $workflow);
+        $this->assertStringContainsString('name: Tests (${{ matrix.lane }})', $workflow);
+        $this->assertStringContainsString('lane: [application, browser, postgres-release, postgres-concurrency]', $workflow);
+        $this->assertStringContainsString('fail-fast: false', $workflow);
         $this->assertStringContainsString('image: postgres:16-alpine', $workflow);
         $this->assertStringContainsString('--health-cmd "pg_isready -U telegram_bot_ci -d telegram_bot_ci_test"', $workflow);
         $this->assertStringContainsString('DB_CONNECTION: pgsql', $workflow);
@@ -1101,10 +1103,11 @@ SH);
         $this->assertStringContainsString('php artisan migrate:fresh --force --ansi', $workflow);
         $this->assertStringContainsString('--configuration=phpunit.postgres.xml', $workflow);
         $this->assertStringContainsString('--group=postgres-release', $workflow);
+        $this->assertStringContainsString('--exclude-group=concurrency', $workflow);
         $this->assertStringContainsString('--fail-on-skipped', $workflow);
         $this->assertStringContainsString('RUN_CONCURRENCY_TESTS: \'1\'', $workflow);
         $this->assertStringContainsString('./scripts/concurrency-deploy-gate.sh', $workflow);
-        $this->assertStringContainsString('postgres-release-gate-${{ github.run_attempt }}', $workflow);
+        $this->assertStringContainsString('name: ${{ matrix.lane }}-gate-${{ github.run_attempt }}', $workflow);
         $this->assertStringContainsString('if: always()', $workflow);
 
         foreach ([
