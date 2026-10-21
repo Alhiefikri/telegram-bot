@@ -10,17 +10,17 @@ final readonly class SakurupiahChannelAddition
 
     public ?string $kind;
 
-    public ?int $defaultExpiredHours;
+    public int|float|null $defaultExpiredHours;
 
     public ?string $settlement;
 
     public function __construct(
         ?SakurupiahFee $additionalFee = null,
         ?string $kind = null,
-        ?int $defaultExpiredHours = null,
+        int|float|null $defaultExpiredHours = null,
         ?string $settlement = null,
     ) {
-        if ($defaultExpiredHours !== null && $defaultExpiredHours < 1) {
+        if ($defaultExpiredHours !== null && (! is_finite((float) $defaultExpiredHours) || $defaultExpiredHours <= 0)) {
             throw new InvalidArgumentException('Sakurupiah channel expiry must be positive.');
         }
 
@@ -40,7 +40,7 @@ final readonly class SakurupiahChannelAddition
         return $this->kind;
     }
 
-    public function defaultExpiredHours(): ?int
+    public function defaultExpiredHours(): int|float|null
     {
         return $this->defaultExpiredHours;
     }

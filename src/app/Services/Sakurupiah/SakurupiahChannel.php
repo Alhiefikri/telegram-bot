@@ -61,7 +61,7 @@ final readonly class SakurupiahChannel
             $addition = new SakurupiahChannelAddition(
                 additionalFee: self::optionalFee($rawAddition, 'tambahan_biaya'),
                 kind: SakurupiahPayloadReader::optionalString($rawAddition, 'jenis', 64),
-                defaultExpiredHours: SakurupiahPayloadReader::optionalInteger($rawAddition, 'default_expired', allowZero: false),
+                defaultExpiredHours: self::optionalExpiryHours($rawAddition),
                 settlement: SakurupiahPayloadReader::optionalString($rawAddition, 'settlement', 64),
             );
         }
@@ -151,6 +151,27 @@ final readonly class SakurupiahChannel
         }
 
         return rtrim($feeUnit, '%');
+    }
+
+    /** @param array<mixed> $payload */
+    private static function optionalExpiryHours(array $payload): int|float|null
+    {
+        $value = $payload['default_expired'] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if ((! is_int($value) && ! is_float($value) && ! is_string($value))
+            || preg_match('/^[0-9]+(?:\.[0-9]+)?$/D', (string) $value) !== 1
+        ) {
+            throw new SakurupiahSchemaException;
+        }
+
+        $hours = (float) $value;
+        if (! is_finite($hours) || $hours <= 0 || $hours >= PHP_INT_MAX) {
+            throw new SakurupiahSchemaException;
+        }
+
+        return floor($hours) === $hours ? (int) $hours : $hours;
     }
 
     private static function normalizeFeeValue(mixed $value, bool $percent): mixed

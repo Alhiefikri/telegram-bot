@@ -14,6 +14,27 @@ Automated release evidence is recorded in
 [`docs/sakurupiah-release-evidence.md`](sakurupiah-release-evidence.md). This
 runbook and the evidence document never contain production credentials.
 
+## Channel lookup failure with an active QRISC channel
+
+The 2026-10-21 production investigation found HTTP 200 from
+`list-payment.php` and an active QRISC channel, while readiness returned
+`SAKURUPIAH_QRIS_CHANNEL_LOOKUP`. The DANA channel advertised
+`addition.default_expired = "0.5"` hours. Parsing that duration as an integer
+rejected the entire channel list, including the valid QRISC channel.
+
+Channel expiry metadata accepts positive fractional hours; whole hours retain
+their integer representation for QRISC contract comparison. Monetary amounts
+remain whole-IDR values and are not parsed through this duration parser.
+Regression coverage: `SakurupiahGatewayTest` exercises the mixed DANA/QRISC list
+through readiness, and `SakurupiahDtoTest` covers fractional and invalid durations.
+
+For this failure, deploy the parser correction through the normal release flow;
+clearing cache or changing credentials does not repair the old parser. Recheck
+`php artisan sakurupiah:check-readiness --json` and the Admin provider availability
+after release. Keep the Owner's provider selection unchanged during diagnosis.
+A one-off PHP smoke using the corrected parser against the production API
+returned `ready=true`; that smoke alone does not update the running application.
+
 ## Deployment-time configuration
 
 Only the separate merchant credential pairs belong in the server-side `.env`.

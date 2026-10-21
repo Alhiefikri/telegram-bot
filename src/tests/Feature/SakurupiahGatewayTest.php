@@ -110,6 +110,37 @@ class SakurupiahGatewayTest extends TestCase
             && $request['method'] === 'list');
     }
 
+    public function test_fractional_dana_expiry_does_not_block_qris_readiness(): void
+    {
+        $channel = [
+            'kode' => 'QRISC',
+            'nama' => 'QRISC Custom Merchant',
+            'minimal' => '200',
+            'maksimal' => '20000000',
+            'tipe' => 'DIRECT',
+            'status' => 'Aktif',
+            'addition' => ['default_expired' => '24'],
+        ];
+        Http::fake(fn () => Http::response([
+            'status' => '200',
+            'data' => [
+                array_replace($channel, [
+                    'kode' => 'DANA',
+                    'nama' => 'DANA',
+                    'tipe' => 'REDIRECT',
+                    'addition' => ['default_expired' => '0.5'],
+                ]),
+                $channel,
+            ],
+        ]));
+
+        $report = app(\App\Services\Sakurupiah\SakurupiahProviderReadiness::class)->observe();
+
+        $this->assertTrue($report->isReady(), $report->configurationMessage());
+        $this->assertSame('QRISC', $report->qrisChannel()?->code);
+        $this->assertSame(24, $report->qrisChannel()?->addition?->defaultExpiredHours());
+    }
+
     public function test_balance_posts_provider_path_and_returns_typed_amount(): void
     {
         Http::fake(fn () => Http::response([

@@ -12,6 +12,7 @@ use App\Services\Sakurupiah\SakurupiahSchemaException;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class SakurupiahDtoTest extends TestCase
@@ -87,6 +88,43 @@ class SakurupiahDtoTest extends TestCase
         $this->assertSame('5500', $nominal->fee?->submitted());
         $this->assertNull($nominal->percent);
         $this->assertSame(5500, $nominal->feeAmount());
+    }
+
+    #[DataProvider('channelExpiryCases')]
+    public function test_channel_expiry_accepts_positive_decimal_hours_only(mixed $expiry, int|float|null $expected): void
+    {
+        if ($expected === null) {
+            $this->expectException(SakurupiahSchemaException::class);
+        }
+
+        $channel = SakurupiahChannel::fromPayload([
+            'kode' => 'DANA',
+            'nama' => 'DANA',
+            'minimal' => '1000',
+            'maksimal' => '2000000',
+            'tipe' => 'REDIRECT',
+            'status' => 'Aktif',
+            'addition' => ['default_expired' => $expiry],
+        ]);
+
+        $this->assertSame($expected, $channel->addition?->defaultExpiredHours());
+    }
+
+    public static function channelExpiryCases(): array
+    {
+        return [
+            'half hour string' => ['0.5', 0.5],
+            'half hour number' => [0.5, 0.5],
+            'whole hours remain integers' => ['24', 24],
+            'whole decimal hours remain integers' => ['24.0', 24],
+            'zero' => ['0', null],
+            'negative' => ['-0.5', null],
+            'non numeric' => ['invalid', null],
+            'whitespace' => [' 0.5', null],
+            'boolean' => [true, null],
+            'non finite' => [INF, null],
+            'overflow' => [str_repeat('9', 400), null],
+        ];
     }
 
     public function test_invoice_parser_accepts_qualified_scalar_variants_and_exposes_typed_values(): void
