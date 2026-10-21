@@ -9,6 +9,7 @@ use App\Services\Sakurupiah\SakurupiahHistoryFilter;
 use App\Services\Sakurupiah\SakurupiahHttpException;
 use App\Services\Sakurupiah\SakurupiahJsonException;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
+use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahReadinessException;
 use App\Services\Sakurupiah\SakurupiahSchemaException;
 use App\Services\Sakurupiah\SakurupiahTransportException;
@@ -134,7 +135,7 @@ class SakurupiahGatewayTest extends TestCase
             ],
         ]));
 
-        $report = app(\App\Services\Sakurupiah\SakurupiahProviderReadiness::class)->observe();
+        $report = app(SakurupiahProviderReadiness::class)->observe();
 
         $this->assertTrue($report->isReady(), $report->configurationMessage());
         $this->assertSame('QRISC', $report->qrisChannel()?->code);
