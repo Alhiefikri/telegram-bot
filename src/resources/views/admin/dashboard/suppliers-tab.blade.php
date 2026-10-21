@@ -49,6 +49,21 @@
                     <div class="mt-auto flex flex-wrap gap-3">
                         <x-admin-dashboard.button :href="route('admin.suppliers.catalog', $connection['id'])" variant="primary" size="sm">Katalog privat / impor / pemetaan <span aria-hidden="true">→</span></x-admin-dashboard.button>
                         <form method="POST" action="{{ route('admin.suppliers.sync', $connection['id']) }}" x-data="{ syncing: false }" x-on:submit="if (syncing) { $event.preventDefault() } else { syncing = true }">@csrf<x-admin-dashboard.button type="submit" variant="neutral" size="sm" x-bind:disabled="syncing" x-text="syncing ? 'Sedang memperbarui katalog...' : 'Sinkron katalog dan saldo'">Sinkron katalog dan saldo</x-admin-dashboard.button></form>
+                        <div x-data="{ deleting: false }">
+                            <x-admin-dashboard.button type="button" variant="destructive" size="sm" x-on:click="$refs.deleteDialog.showModal()">Hapus supplier</x-admin-dashboard.button>
+                            <dialog x-ref="deleteDialog" class="m-auto w-[calc(100%_-_2rem)] max-w-md rounded-xl border border-admin-line bg-admin-surface p-5 text-admin-ink shadow-admin-lg backdrop:bg-black/40" aria-labelledby="supplier-delete-title-{{ $connection['id'] }}" aria-describedby="supplier-delete-help-{{ $connection['id'] }}">
+                                <h2 id="supplier-delete-title-{{ $connection['id'] }}" class="break-words text-xl font-semibold text-admin-ink">Hapus {{ $connection['name'] }}?</h2>
+                                <p id="supplier-delete-help-{{ $connection['id'] }}" class="mt-2 text-sm leading-6 text-admin-muted">Koneksi, API key tersimpan, dan katalog privatnya akan dihapus dari aplikasi. Saldo di situs supplier tidak ditarik atau dihapus. Koneksi dengan pemetaan produk, dana tertahan, atau riwayat transaksi tidak dapat dihapus.</p>
+                                <form method="POST" action="{{ route('admin.suppliers.destroy', $connection['id']) }}" class="mt-4 flex flex-wrap gap-3" x-on:submit="if (deleting) { $event.preventDefault() } else { deleting = true }">
+                                    @csrf
+                                    @method('DELETE')
+                                    <input type="hidden" name="version" value="{{ $connection['version'] }}">
+                                    <input type="hidden" name="confirm_delete" value="1">
+                                    <x-admin-dashboard.button type="button" variant="neutral" x-on:click="$refs.deleteDialog.close()" x-bind:disabled="deleting" autofocus>Batal</x-admin-dashboard.button>
+                                    <x-admin-dashboard.button type="submit" variant="destructive" x-bind:disabled="deleting" x-text="deleting ? 'Menghapus...' : 'Ya, hapus supplier'">Ya, hapus supplier</x-admin-dashboard.button>
+                                </form>
+                            </dialog>
+                        </div>
                     </div>
                 </div>
                 <details class="border-t border-admin-line"><summary class="min-h-11 cursor-pointer px-5 py-3 text-sm font-medium text-admin-ink">Edit koneksi</summary><div class="px-5 pb-5"><div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">@include('admin.suppliers.connection-form')</div></div></details>

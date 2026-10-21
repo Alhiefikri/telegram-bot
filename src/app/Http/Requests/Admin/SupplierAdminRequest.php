@@ -55,6 +55,10 @@ final class SupplierAdminRequest extends FormRequest
                 'version' => [$action === 'store' ? 'nullable' : 'required', 'integer', 'min:0'],
                 'url' => ['prohibited'], 'base_url' => ['prohibited'],
             ],
+            'destroy' => [
+                'version' => ['required', 'integer', 'min:1'],
+                'confirm_delete' => ['required', 'accepted'],
+            ],
             'import' => [
                 'supplier_version' => ['required', 'integer', 'min:0'],
                 'name' => ['required', 'string', 'max:255'],

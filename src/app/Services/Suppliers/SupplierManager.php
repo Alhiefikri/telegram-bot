@@ -12,9 +12,11 @@ use App\Models\SupplierFulfillment;
 use App\Models\SupplierPurchase;
 use App\Models\User;
 use App\Services\AuditLogger;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
+use JsonException;
 use RuntimeException;
 
 final class SupplierManager
@@ -83,6 +85,61 @@ final class SupplierManager
         }
 
         return $saved;
+    }
+
+    public function delete(Supplier $supplier, int $version, User $actor, ?string $ip): void
+    {
+        abort_unless($actor->role?->canManageStoreOperations() === true, 403);
+        DB::transaction(function () use ($supplier, $version, $actor, $ip): void {
+            $connection = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+            if ($connection->version !== $version) {
+                throw ValidationException::withMessages(['version' => 'Konfigurasi supplier berubah. Muat ulang sebelum menghapus.']);
+            }
+            if ($connection->sync_token !== null && $connection->sync_lease_expires_at?->isFuture()) {
+                throw ValidationException::withMessages(['connection' => 'Sinkron supplier masih berjalan. Tunggu sampai selesai sebelum menghapus.']);
+            }
+            $catalog = SupplierCatalogItem::query()->where('supplier_id', $connection->id)->orderBy('id')->lockForUpdate()->get(['id', 'reserved_quantity']);
+            $catalogIds = $catalog->pluck('id')->all();
+            if ($connection->reserved_balance_micros > 0 || $catalog->contains(fn ($item) => $item->reserved_quantity > 0)) {
+                throw ValidationException::withMessages(['connection' => 'Supplier masih memiliki saldo atau stok tertahan. Selesaikan reservasi terlebih dahulu.']);
+            }
+            if (ProductSupplierSource::query()->whereIn('supplier_catalog_item_id', $catalogIds)->exists()) {
+                throw ValidationException::withMessages(['connection' => 'Supplier masih dipetakan ke produk. Lepas pemetaan melalui workspace produk sebelum menghapus.']);
+            }
+            $historyMessage = 'Supplier memiliki riwayat transaksi atau pemenuhan dan tidak dapat dihapus. Nonaktifkan koneksi untuk menghentikan pembelian baru.';
+            if (SupplierPurchase::query()->where('supplier_id', $connection->id)->orWhereIn('supplier_catalog_item_id', $catalogIds)->exists()
+                || SupplierFulfillment::query()->where('reserved_supplier_id', $connection->id)->orWhereIn('reserved_catalog_item_id', $catalogIds)->exists()
+                || SupplierAccountUnit::query()->where('supplier_id', $connection->id)->exists()
+                || SupplierDeposit::query()->where('supplier_id', $connection->id)->exists()
+                || DB::table('supplier_webhook_events')->where('supplier_id', $connection->id)->exists()) {
+                throw ValidationException::withMessages(['connection' => $historyMessage]);
+            }
+            // Fallback sources are encrypted history, not foreign keys; keep those connections too.
+            if ($catalogIds !== []) {
+                foreach (SupplierFulfillment::query()->select(['id', 'sources_snapshot'])->lazyById(100) as $fulfillment) {
+                    try {
+                        $snapshot = $fulfillment->sources_snapshot;
+                    } catch (DecryptException|JsonException) {
+                        throw ValidationException::withMessages(['connection' => 'Riwayat pemenuhan tidak dapat dibaca. Pulihkan riwayat sebelum menghapus supplier.']);
+                    }
+                    if (! is_array($snapshot) || ! array_is_list($snapshot)) {
+                        throw ValidationException::withMessages(['connection' => 'Riwayat pemenuhan tidak dapat dibaca. Pulihkan riwayat sebelum menghapus supplier.']);
+                    }
+                    foreach ($snapshot as $candidate) {
+                        if (! is_array($candidate) || ! isset($candidate['catalog_item_id'])
+                            || ! (is_int($candidate['catalog_item_id']) || (is_string($candidate['catalog_item_id']) && ctype_digit($candidate['catalog_item_id'])))) {
+                            throw ValidationException::withMessages(['connection' => 'Riwayat pemenuhan tidak dapat dibaca. Pulihkan riwayat sebelum menghapus supplier.']);
+                        }
+                        if (in_array((int) $candidate['catalog_item_id'], $catalogIds, true)) {
+                            throw ValidationException::withMessages(['connection' => $historyMessage]);
+                        }
+                    }
+                }
+            }
+            $this->audit->log('supplier.deleted', $connection, ['supplier_id' => $connection->id, 'provider' => $connection->provider, 'version' => $connection->version], null, $actor, $ip);
+            SupplierCatalogItem::query()->where('supplier_id', $connection->id)->delete();
+            $connection->delete();
+        }, 5);
     }
 
     /**

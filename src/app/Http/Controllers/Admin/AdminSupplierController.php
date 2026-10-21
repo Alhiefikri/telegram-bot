@@ -45,6 +45,21 @@ final class AdminSupplierController extends Controller
         return $this->mutate(fn () => $manager->save($supplier, $request->validated(), $request->attributes->get('adminUser'), $request->ip()), 'Supplier diperbarui. Sinkronisasi ulang diperlukan.');
     }
 
+    public function destroy(SupplierAdminRequest $request, Supplier $supplier, SupplierManager $manager)
+    {
+        try {
+            $manager->delete($supplier, $request->integer('version'), $request->attributes->get('adminUser'), $request->ip());
+        } catch (ValidationException $exception) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $exception->validator->errors()->first(), 'errors' => $exception->errors()], 409);
+            }
+
+            return redirect()->route('admin.dashboard', ['tab' => 'suppliers'])->with('error', $exception->validator->errors()->first());
+        }
+
+        return $this->saved('Supplier dihapus. Koneksi dan API key tersimpan telah dihapus dari aplikasi.');
+    }
+
     public function sync(SupplierAdminRequest $request, Supplier $supplier, SupplierCatalogSync $sync, AdminSupplierDashboardData $dashboard)
     {
         // This POST is only a CSRF-protected local action. Provider snapshot is GET-only.

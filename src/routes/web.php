@@ -259,6 +259,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::prefix('suppliers')->name('suppliers.')->group(function (): void {
                 Route::post('/', [AdminSupplierController::class, 'store'])->name('store');
                 Route::patch('{supplier}', [AdminSupplierController::class, 'update'])->name('update');
+                Route::delete('{supplier}', [AdminSupplierController::class, 'destroy'])->name('destroy');
                 Route::post('{supplier}/sync', [AdminSupplierController::class, 'sync'])->middleware('throttle:10,1')->name('sync');
                 Route::get('{supplier}/catalog', [AdminSupplierController::class, 'catalog'])->name('catalog');
                 Route::post('catalog/{catalogItem}/import', [AdminSupplierController::class, 'import'])->name('import');

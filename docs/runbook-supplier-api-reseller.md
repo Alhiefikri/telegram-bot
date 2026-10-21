@@ -35,6 +35,30 @@ Form Detail produk tidak lagi menampilkan Spesifikasi tambahan & dukungan (jenis
 
 An account supports multiple SKUs with one credential. Adding another SKU from an implemented provider is an Admin operation, not a code change. A new provider contract or an unsupported fulfillment/input type still needs implementation and qualification.
 
+### Menghapus koneksi duplikat atau tidak terpakai
+
+Di **Admin → Supplier Reseller**, tekan **Hapus supplier** pada kartu koneksi yang
+ingin dibuang. Dialog menyebut nama koneksi dan dampak penghapusan; **Batal** atau
+Escape menutup dialog tanpa perubahan. **Ya, hapus supplier** menghapus koneksi,
+API key tersimpan, dan katalog privat koneksi tersebut secara permanen dari
+aplikasi. Tidak ada request ke supplier, penarikan saldo, atau penghapusan akun
+di situs supplier. Koneksi lainnya tidak berubah.
+
+Penghapusan hanya untuk Owner/Admin dan memeriksa ulang versi koneksi saat
+submit. Sinkronisasi yang masih berjalan, saldo/stok tertahan, pemetaan produk
+(termasuk yang nonaktif), serta riwayat pembelian, reservasi pemenuhan, account
+unit, deposit, webhook, atau sumber cadangan dalam snapshot pemenuhan menolak
+penghapusan. Lepas pemetaan yang belum pernah dipakai melalui workspace produk
+terlebih dahulu. Koneksi yang memiliki riwayat harus **dinonaktifkan**, bukan
+dihapus; Orders, bukti keuangan, dan hak refund tetap dipertahankan. Riwayat
+snapshot yang tidak dapat dibaca juga menolak penghapusan katalog.
+
+`SupplierManager::delete()` mengunci Supplier lalu baris katalog, memeriksa
+dependensi, dan mencatat `supplier.deleted` tanpa API key dalam transaksi yang
+sama dengan penghapusan. Kegagalan audit membatalkan penghapusan. Tidak ada
+migrasi schema untuk fitur ini. Cakupan regresi berada di `SupplierAdminTest`.
+
+
 ### Nastele
 
 Select **Nastele** in the existing Supplier Reseller connection form and enter a

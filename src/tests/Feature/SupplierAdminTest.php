@@ -22,6 +22,7 @@ use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\AuditLogger;
 use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierAvailability;
+use App\Services\Suppliers\SupplierManager;
 use App\Services\Suppliers\SupplierMoney;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -35,6 +36,173 @@ use Tests\Support\NonTransactionalDatabaseTestCase as TestCase;
 final class SupplierAdminTest extends TestCase
 {
     private const KEY = 'supplier-secret-canary-never-return-7a39';
+
+    public function test_delete_removes_only_the_selected_unused_connection_and_its_private_catalog(): void
+    {
+        $this->owner();
+        Http::fake();
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        $other = $this->supplier(['name' => 'Keep this connection']);
+        $otherCatalog = $this->item($other);
+        DB::table('supplier_health_states')->insert(['supplier_id' => $supplier->id, 'error_codes' => '[]']);
+        // A broken encrypted key must not prevent removal of an unused connection.
+        DB::table('suppliers')->where('id', $supplier->id)->update(['api_key' => 'unreadable-ciphertext']);
+
+        $this->delete(route('admin.suppliers.destroy', $supplier), ['version' => 1, 'confirm_delete' => 1])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'suppliers']))->assertSessionHas('status');
+
+        $this->assertModelMissing($supplier);
+        $this->assertModelMissing($catalog);
+        $this->assertModelExists($other);
+        $this->assertModelExists($otherCatalog);
+        $this->assertDatabaseMissing('supplier_health_states', ['supplier_id' => $supplier->id]);
+        $audit = AuditLog::query()->where('action', 'supplier.deleted')->sole();
+        $this->assertSame((string) $supplier->id, $audit->subject_id);
+        $this->assertStringNotContainsString(self::KEY, $audit->toJson());
+        Http::assertNothingSent();
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertSee('Keep this connection');
+    }
+
+    public function test_delete_requires_explicit_confirmation_and_current_version(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['version' => 4]);
+        $this->deleteJson(route('admin.suppliers.destroy', $supplier), ['version' => 4])
+            ->assertUnprocessable()->assertJsonValidationErrors('confirm_delete');
+        $this->deleteJson(route('admin.suppliers.destroy', $supplier), ['version' => 3, 'confirm_delete' => 1])
+            ->assertConflict()->assertJsonValidationErrors('version');
+        $this->assertModelExists($supplier);
+        $this->assertSame(0, AuditLog::where('action', 'supplier.deleted')->count());
+    }
+
+    public function test_delete_requires_store_operations_role_at_http_and_service_boundaries(): void
+    {
+        $supplier = $this->supplier();
+        $actor = User::factory()->create(['role' => UserRole::Support]);
+        $this->actingAs($actor)->delete(route('admin.suppliers.destroy', $supplier), ['version' => 1, 'confirm_delete' => 1])
+            ->assertForbidden();
+        try {
+            app(SupplierManager::class)->delete($supplier, 1, $actor, null);
+            $this->fail('Unauthorized connection deletion must be rejected.');
+        } catch (HttpException $exception) {
+            $this->assertSame(403, $exception->getStatusCode());
+        }
+        $this->assertModelExists($supplier);
+    }
+
+    #[DataProvider('deleteCommitmentCases')]
+    public function test_delete_preserves_connections_with_reservations_or_running_sync(string $case): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(match ($case) {
+            'wallet_hold' => ['reserved_balance_micros' => 1],
+            'sync_lease' => ['sync_token' => (string) Str::uuid(), 'sync_lease_expires_at' => now()->addMinute()],
+            default => [],
+        });
+        $catalog = $this->item($supplier, ['reserved_quantity' => $case === 'sku_hold' ? 1 : 0]);
+
+        $this->delete(route('admin.suppliers.destroy', $supplier), ['version' => 1, 'confirm_delete' => 1])
+            ->assertRedirect(route('admin.dashboard', ['tab' => 'suppliers']))->assertSessionHas('error');
+
+        $this->assertModelExists($supplier);
+        $this->assertModelExists($catalog);
+        $this->assertSame(0, AuditLog::where('action', 'supplier.deleted')->count());
+    }
+
+    public static function deleteCommitmentCases(): array
+    {
+        return [['wallet_hold'], ['sku_hold'], ['sync_lease']];
+    }
+
+    public function test_delete_blocks_inactive_product_mappings_and_preserves_product_capacity(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        $product = Product::factory()->create(['supplier_available_stock' => 8, 'supplier_available_until' => now()->addMinutes(5)]);
+        $source = $this->source($product, $catalog, ['is_active' => false]);
+        $availableUntil = $product->supplier_available_until;
+
+        $this->deleteJson(route('admin.suppliers.destroy', $supplier), ['version' => 1, 'confirm_delete' => 1])
+            ->assertConflict()->assertJsonValidationErrors('connection');
+
+        $this->assertModelExists($source);
+        $this->assertModelExists($supplier);
+        $this->assertSame(8, $product->fresh()->supplier_available_stock);
+        $this->assertTrue($availableUntil->equalTo($product->fresh()->supplier_available_until));
+    }
+
+    #[DataProvider('deleteHistoryCases')]
+    public function test_delete_preserves_transaction_and_retained_fallback_history(string $case): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        if ($case === 'deposit') {
+            DB::table('supplier_deposits')->insert([
+                'id' => (string) Str::uuid(), 'supplier_id' => $supplier->id, 'idempotency_key' => 'historical-deposit',
+                'account_id_snapshot' => 'historical-account', 'amount' => 5000, 'state' => 'paid',
+            ]);
+        } else {
+            $fulfillment = $this->detachFulfillment(Product::factory()->create(), $case === 'snapshot' ? [['catalog_item_id' => $catalog->id]] : []);
+            if ($case === 'reservation') {
+                $fulfillment->update(['reserved_supplier_id' => $supplier->id, 'reserved_catalog_item_id' => $catalog->id]);
+            } elseif ($case === 'purchase') {
+                SupplierPurchase::create([
+                    'supplier_fulfillment_id' => $fulfillment->id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $catalog->id,
+                    'reference' => (string) Str::uuid(), 'quantity' => 1, 'expected_cost_micros' => 1000000,
+                    'exchange_rate_idr' => 16000, 'state' => 'delivered',
+                ]);
+            } elseif ($case === 'unreadable_snapshot') {
+                DB::table('supplier_fulfillments')->where('id', $fulfillment->id)->update(['sources_snapshot' => 'unreadable-ciphertext']);
+            }
+        }
+
+        $this->deleteJson(route('admin.suppliers.destroy', $supplier), ['version' => 1, 'confirm_delete' => 1])
+            ->assertConflict()->assertJsonValidationErrors('connection');
+
+        $this->assertModelExists($supplier);
+        $this->assertModelExists($catalog);
+        $this->assertSame(0, AuditLog::where('action', 'supplier.deleted')->count());
+    }
+
+    public static function deleteHistoryCases(): array
+    {
+        return [['reservation'], ['purchase'], ['deposit'], ['snapshot'], ['unreadable_snapshot']];
+    }
+
+    public function test_delete_allows_expired_sync_leases_and_unrelated_fulfillment_history(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['sync_token' => (string) Str::uuid(), 'sync_lease_expires_at' => now()->subSecond()]);
+        $catalog = $this->item($supplier);
+        $otherCatalog = $this->item($this->supplier());
+        $history = $this->detachFulfillment(Product::factory()->create(), [['catalog_item_id' => $otherCatalog->id]]);
+
+        $this->deleteJson(route('admin.suppliers.destroy', $supplier), ['version' => 1, 'confirm_delete' => 1])->assertOk();
+
+        $this->assertModelMissing($supplier);
+        $this->assertModelMissing($catalog);
+        $this->assertModelExists($history);
+        $this->assertModelExists($otherCatalog);
+    }
+
+    public function test_delete_audit_failure_keeps_connection_and_catalog(): void
+    {
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $supplier = $this->supplier();
+        $catalog = $this->item($supplier);
+        $this->mock(AuditLogger::class)->shouldReceive('log')->once()->andThrow(new \RuntimeException('audit unavailable'));
+        try {
+            app(SupplierManager::class)->delete($supplier, 1, $actor, null);
+            $this->fail('Deletion must fail when the audit cannot be recorded.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('audit unavailable', $exception->getMessage());
+        }
+        $this->assertModelExists($supplier);
+        $this->assertModelExists($catalog);
+    }
 
     public function test_sync_rejection_keeps_safe_reason_and_shows_actionable_feedback(): void
     {
