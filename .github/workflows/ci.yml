@@ -112,7 +112,7 @@ jobs:
           # setup-php installs inside the job container instead of a runner tool cache.
           runner: self-hosted
         with:
-          php-version: '8.4'
+          php-version: '8.4.27'
           extensions: bcmath, gd, intl, pcntl, pdo_pgsql, pdo_sqlite, pgsql, posix, redis, sqlite3, zip
           coverage: none
           tools: composer:v2

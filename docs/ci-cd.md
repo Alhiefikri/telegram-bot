@@ -51,10 +51,32 @@ so no persistent self-hosted workspace ownership repair is required.
 
 The test lanes deliberately run `npm ci` without the `setup-node` npm cache.
 The production image builds from public Docker Hub bases (`composer:2`,
-`node:24-slim`, `php:8.4-fpm`) with the fixed Buildx builder
+`node:24-slim`, `php:8.4.27-fpm`) with the fixed Buildx builder
 `telegram-bot-production`; BuildKit uses explicit public resolvers (`1.1.1.1`,
 then `8.8.8.8`). The workflow-level token must retain `packages: read`; the
 production image job elevates only itself to `packages: write`.
+
+### PHP security baseline
+
+Production runtime and both PHP test workflows pin PHP **8.4.27**. This is the
+October 21, 2026 security release fixing unauthenticated remote code execution
+vulnerabilities **CVE-2026-109618** and **CVE-2026-109619**; PHP-FPM is affected.
+See the [official PHP security advisory](https://www.php.net/archive/2026.php#2026-10-21-5)
+and [8.4.27 release announcement](https://www.php.net/releases/8_4_27.php).
+Keep these three pins aligned when adopting later security patches.
+
+A source/configuration update does not patch existing containers. Build a new
+application image and release its approved immutable digest through the normal
+deployment workflow so app workers and scheduler use the patched runtime.
+Restarting the previous image alone does not apply the fix.
+
+Local verification on October 22 built `telegram-bot:php-security-8.4.27`
+using `docker build --network=host` after the default Docker network failed
+to fetch PECL Redis. The resulting image reported PHP 8.4.27, passed
+`php-fpm -t`, loaded the required runtime extensions, booted Laravel 13.34.0,
+and served `GET /up` with HTTP 200 and `Application up` using isolated testing
+configuration. This is a local smoke check, not a production deploy or a
+full application regression suite.
 
 ## Workflows
 
@@ -63,7 +85,7 @@ production image job elevates only itself to `packages: write`.
   - Rejects duplicate migration filename prefixes via `./scripts/check-migration-prefixes.sh`, so migration order stays deterministic. Prefixes that already shipped with a duplicate are allowlisted in `scripts/migration-prefix-allowlist.txt` and are never renamed, because Laravel keys the `migrations` table by filename.
   - The October 8 supplier sync backoff migration uses prefix `2026_10_08_000004`; `000001`–`000003` belong to the USDT migrations. The supplier migration was renamed before production deployment, without allowlisting the collision.
   - The October 19 funding-method icon migration uses prefix `2026_10_19_000003`, assigned before production deployment; `000001` remains the already-released shared USDT top-up migration and `000002` belongs to supplier retirement.
-  - Runs four independent matrix jobs after the dependency/security audit: `application`, `browser`, `postgres-release`, and `postgres-concurrency`. Each gets PHP 8.4, Node 24, dependencies, built assets, and isolated PostgreSQL/Redis services. The small repeated setup cost avoids serializing the expensive suites. Matrix `fail-fast` is disabled so a failed lane does not discard the other lanes' diagnostic evidence.
+  - Runs four independent matrix jobs after the dependency/security audit: `application`, `browser`, `postgres-release`, and `postgres-concurrency`. Each gets PHP 8.4.27, Node 24, dependencies, built assets, and isolated PostgreSQL/Redis services. The small repeated setup cost avoids serializing the expensive suites. Matrix `fail-fast` is disabled so a failed lane does not discard the other lanes' diagnostic evidence.
   - Enforces Laravel Pint and keeps the fast SQLite suite parallel via ParaTest (`composer test -- --parallel`).
   - Before pushing PHP changes, run `cd src && ./vendor/bin/pint` and then `./vendor/bin/pint --test`; CI checks the whole tree, including migrations and tests.
   - Rollback restores the public release marker as soon as application image alignment is proven, before runtime health checks. A failed heartbeat must not leave the candidate SHA advertised after the previous image has been restored; rollback health still fails closed.

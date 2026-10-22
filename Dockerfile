@@ -16,7 +16,7 @@ COPY src/vite.config.js ./
 COPY --from=vendor /app/vendor ./vendor
 RUN npm run build
 
-FROM php:8.4-fpm AS runtime
+FROM php:8.4.27-fpm AS runtime
 
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=3 update \
