@@ -8,6 +8,7 @@ use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\DeleteBuyerBinanceCheckoutInstruction;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendProductPriceChangeNotifications;
+use App\Jobs\SendTelegramReceipt;
 use App\Models\Order;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
@@ -125,7 +126,12 @@ class RecoverTelegramOutboundEffects extends Command
                 ->fromSub($dispatchableEffects, 'telegram_outbound_effects');
             $pages->load('dispatchable_effects', $dispatchPage, $pageLimit)
                 ->each(function ($effect) use (&$dispatched, $dispatcher): void {
-                    $dispatcher->dispatch($effect, now()->toISOString());
+                    $dispatcher->dispatch(
+                        $effect,
+                        now()->toISOString(),
+                        enqueueStage: SendTelegramReceipt::ENQUEUE_RECOVERY,
+                        enqueueReason: SendTelegramReceipt::REASON_RECOVERY_SWEEP,
+                    );
                     $dispatched++;
                 });
             $dispatched += $recovery->recoverMissingStoreBalanceTopUpEffects($pageLimit);
@@ -281,7 +287,12 @@ class RecoverTelegramOutboundEffects extends Command
                                 $effect = $outboundEffects->recordReceipt($order, $order->customer);
                                 if ($effect !== null) {
                                     $stage = 'receipt_dispatch';
-                                    $dispatcher->dispatch($effect, now()->toISOString());
+                                    $dispatcher->dispatch(
+                                        $effect,
+                                        now()->toISOString(),
+                                        enqueueStage: SendTelegramReceipt::ENQUEUE_RECOVERY,
+                                        enqueueReason: SendTelegramReceipt::REASON_RECOVERY_SWEEP,
+                                    );
                                     $dispatched++;
                                     Log::info('telegram.receipt_recovery_materialized', [
                                         'order_id' => (string) $order->getKey(),

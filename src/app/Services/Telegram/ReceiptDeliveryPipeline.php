@@ -76,6 +76,7 @@ final class ReceiptDeliveryPipeline
                 (string) $messageId,
             );
             if ($finalized !== null) {
+                $this->observeSentEffect($finalized, $order);
                 $this->credentialPins->pin($order, $finalized);
                 $this->synchronizeSentProjection($finalized, $order->id);
                 $this->materializeCompletedActionPanel($finalized);
@@ -265,6 +266,57 @@ final class ReceiptDeliveryPipeline
     public function reconcileMissingCredentialPins(int $chunk = 100): int
     {
         return $this->credentialPins->reconcileMissingPins($chunk);
+    }
+
+    /**
+     * Record the two receipt boundaries the baseline measures: the first
+     * Telegram acknowledgement for a credential-bearing unit and completion of
+     * the whole receipt group. A Telegram acknowledgement proves the Bot API
+     * accepted the message, never that the customer read it.
+     */
+    private function observeSentEffect(TelegramOutboundEffect $effect, Order $order): void
+    {
+        if (! DogfoodTiming::enabled()) {
+            return;
+        }
+
+        $context = [
+            'order_correlation_id' => DogfoodTiming::correlation($order->getKey()),
+            'customer_correlation_id' => DogfoodTiming::correlation($order->customer?->telegram_id ?: $order->customer_id),
+            'effect_correlation_id' => DogfoodTiming::correlation($effect->getKey()),
+            'sequence' => (int) $effect->sequence,
+        ];
+
+        if ($this->isCredentialBearing($effect) && ! $this->hasEarlierCredentialAcknowledgement($effect)) {
+            DogfoodTiming::log('dogfood.telegram.receipt_first_credential_acknowledged', $context + [
+                'telegram_acknowledged_at' => now()->toISOString(),
+            ]);
+        }
+
+        if ($this->ledger->isReceiptGroupComplete($effect->effect_group_key)) {
+            DogfoodTiming::log('dogfood.telegram.receipt_completed', $context + [
+                'receipt_completed_at' => now()->toISOString(),
+            ]);
+        }
+    }
+
+    private function isCredentialBearing(TelegramOutboundEffect $effect): bool
+    {
+        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
+
+        return ($metadata['contains_credentials'] ?? null) !== false
+            && ! ((int) $effect->sequence === 1
+                && $effect->template_version === TelegramOutboundEffectService::TEMPLATE_RECEIPT_INVOICE);
+    }
+
+    private function hasEarlierCredentialAcknowledgement(TelegramOutboundEffect $effect): bool
+    {
+        return TelegramOutboundEffect::query()
+            ->where('effect_group_key', $effect->effect_group_key)
+            ->where('sequence', '<', (int) $effect->sequence)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->get(['id', 'sequence', 'template_version', 'outcome_metadata'])
+            ->contains(fn (TelegramOutboundEffect $earlier): bool => $this->isCredentialBearing($earlier));
     }
 
     private function receiptIsEligible(Order $order): bool

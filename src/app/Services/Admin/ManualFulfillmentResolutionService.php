@@ -240,8 +240,14 @@ class ManualFulfillmentResolutionService
         $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
         $this->audit->log('manual_fulfillment_review.fulfilled', $review, ['state' => ManualFulfillmentReview::STATE_PENDING], ['reason' => $reason, 'order_status' => OrderStatus::Completed->value], $actor, $ip);
         if (! $isPendingBscReview) {
-            SendTelegramReceipt::dispatch((string) $order->getKey())
-                ->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
+            SendTelegramReceipt::dispatch(
+                (string) $order->getKey(),
+                false,
+                now()->toISOString(),
+                null,
+                SendTelegramReceipt::ENQUEUE_FIRST,
+                SendTelegramReceipt::REASON_MANUAL_FULFILLMENT,
+            )->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
         }
 
         return $resolved;

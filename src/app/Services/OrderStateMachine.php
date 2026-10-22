@@ -28,6 +28,7 @@ use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtOrderRefundService;
+use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -738,9 +739,28 @@ class OrderStateMachine implements OrderLifecycle
     private function dispatchReceiptMaterialization(Order $order): void
     {
         DB::afterCommit(function () use ($order): void {
+            $committedAt = now()->toISOString();
+
+            if (DogfoodTiming::enabled()) {
+                DogfoodTiming::log('dogfood.telegram.paid_committed', [
+                    'order_correlation_id' => DogfoodTiming::correlation($order->getKey()),
+                    'customer_correlation_id' => DogfoodTiming::correlation($order->customer?->telegram_id ?: $order->customer_id),
+                    'paid_committed_at' => $committedAt,
+                    'enqueue_stage' => SendTelegramReceipt::ENQUEUE_FIRST,
+                    'enqueue_reason' => SendTelegramReceipt::REASON_PAID_COMMIT,
+                ]);
+            }
+            $jobEnqueuedAt = now()->toISOString();
+
             try {
-                SendTelegramReceipt::dispatch((string) $order->getKey())
-                    ->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
+                SendTelegramReceipt::dispatch(
+                    (string) $order->getKey(),
+                    false,
+                    $jobEnqueuedAt,
+                    null,
+                    SendTelegramReceipt::ENQUEUE_FIRST,
+                    SendTelegramReceipt::REASON_PAID_COMMIT,
+                )->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
             } catch (Throwable $exception) {
                 Log::warning('telegram.receipt_handoff_dispatch_failed', [
                     'order_id' => (string) $order->getKey(),

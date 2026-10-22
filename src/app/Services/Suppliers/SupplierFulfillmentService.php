@@ -680,8 +680,14 @@ final class SupplierFulfillmentService
         }
         DB::afterCommit(function () use ($order): void {
             try {
-                SendTelegramReceipt::dispatch((string) $order->id)
-                    ->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
+                SendTelegramReceipt::dispatch(
+                    (string) $order->id,
+                    false,
+                    now()->toISOString(),
+                    null,
+                    SendTelegramReceipt::ENQUEUE_FIRST,
+                    SendTelegramReceipt::REASON_SUPPLIER_FULFILLMENT,
+                )->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
             } catch (Throwable $exception) {
                 Log::warning('telegram.receipt_handoff_dispatch_failed', [
                     'order_id' => (string) $order->getKey(),

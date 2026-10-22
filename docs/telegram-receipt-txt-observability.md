@@ -1,5 +1,10 @@
 # Telegram receipt TXT observability and benchmark
 
+See [telegram-latency-baseline.md](telegram-latency-baseline.md) for the
+paid-receipt queue-wait contract and the disposable PostgreSQL/Redis baseline
+that starts at payment observation rather than at the TXT exporter.
+
+
 The TXT/action-panel path emits structured DogfoodTiming events only when
 the existing dogfood timing switch is enabled. No new metrics backend,
 database table, queue, or environment setting is used.

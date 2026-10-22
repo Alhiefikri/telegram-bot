@@ -9,6 +9,7 @@ use App\Enums\TelegramOutboundEffectType;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
+use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Throwable;
@@ -106,6 +107,7 @@ final class AdminOrderNotificationDeliveryPipeline
             );
 
             if ($finalized !== null) {
+                $this->observeAdminNotice($claimed, $finalized, $order);
                 $this->synchronizeSentProjection($finalized);
             }
 
@@ -172,6 +174,28 @@ final class AdminOrderNotificationDeliveryPipeline
         }
 
         return $repaired;
+    }
+
+    /**
+     * The admin-notice boundary is the Telegram Bot API acknowledgement for
+     * the paid notification. It stays separate from receipt completion and
+     * from the later outcome update for an unresolved notice.
+     */
+    private function observeAdminNotice(
+        TelegramOutboundEffect $claimed,
+        TelegramOutboundEffect $finalized,
+        Order $order,
+    ): void {
+        if ($claimed->effect_type !== TelegramOutboundEffectType::AdminOrderPaidNotification->value
+            || ! DogfoodTiming::enabled()) {
+            return;
+        }
+
+        DogfoodTiming::log('dogfood.telegram.admin_paid_notification_acknowledged', [
+            'order_correlation_id' => DogfoodTiming::correlation($order->getKey()),
+            'effect_correlation_id' => DogfoodTiming::correlation($finalized->getKey()),
+            'telegram_acknowledged_at' => now()->toISOString(),
+        ]);
     }
 
     private function preparePaidOutcome(TelegramOutboundEffect $effect): bool

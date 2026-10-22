@@ -1419,6 +1419,7 @@ Gunakan test boundary yang sesuai:
 - `tests/Feature/StructuredStockSecurityAndRolloutTest.php` — persisted readiness safety gate, fingerprint readiness, URL safety, malformed-row repair, and canary persistence scan.
 - `tests/Feature/CredentialDeliveryPresentationTest.php` and `tests/Feature/Telegram/StructuredCredentialDeliveryTest.php` — shared paid projection, no serialization, ordered OTP/Auth Token delivery, and Manual Delivery Review ambiguity.
 - `tests/Feature/Telegram/TelegramOutboundEffect*Test.php`, `AdminTelegram*OutboundEffectTest.php`, dan `AdminTelegramBroadcastQueueTest.php` — ledger protocol, Manual Delivery Review, Admin Broadcast recovery, contract, deletion-boundary, dan family behavior.
+- `tests/Feature/Telegram/TelegramReceiptLatencyTimingTest.php` — initial/retry/recovery enqueue stage and timestamp propagation, missing-timestamp unknown semantics, first credential acknowledgement and receipt completion events without credential/chat values. `tests/Feature/TelegramLatencyBaselineCommandTest.php` covers disposable/postgres/option guards and `tests/Unit/TelegramLatencyBaselineReportTest.php` covers nearest-rank percentiles, unknown counts and the no-SLO report text.
 - `tests/Feature/KlikQrisReportingTest.php` — provider reporting contract, pagination, retries, schema validation, redaction, and cache identity.
 - `tests/Feature/AdminDashboardReportingTest.php` — active-tab isolation, role policy, local matching, filters, safe errors, pagination, and proof URL safety.
 - `tests/Feature/CustomerAccountTest.php` — customer ownership, all Order filters/statuses, pagination, non-paid privacy, and paid credential continuity.
@@ -1683,6 +1684,42 @@ identity. Root text enlargement is not native 200% browser zoom, and browser
 CSS/inset emulation is not Telegram Android/iOS acceptance. No production
 deployment or human sign-off is implied by these checks.
 
+
+### Paid receipt latency baseline and queue-wait contract (#649)
+
+`SendTelegramReceipt` owns the queue-wait boundary. Every dispatch site now
+passes an ISO `job_enqueued_at` plus an `enqueue_stage`/`enqueue_reason` pair
+(`first_enqueue`, `retry_enqueue`, `recovery_enqueue`); the initial paid handoff,
+manual/supplier fulfillment handoffs, the shared effect dispatcher and
+`telegram:recover-outbound` are covered. A missing timestamp logs
+`queue_wait_ms: null` with `queue_wait_unknown: true`; it is never coerced to
+zero. `OrderStateMachine` logs `dogfood.telegram.paid_committed` at the
+post-commit handoff, `KlikQrisCallbackProcessor` logs
+`dogfood.telegram.payment_observed` with both provider `paid_at` and application
+observation time, and `ReceiptDeliveryPipeline` logs the first credential-bearing
+Telegram acknowledgement and receipt-group completion. The admin notification
+pipeline logs its own Telegram acknowledgement. Button webhook ACK stays in
+`dogfood.telegram.webhook_ack` (`ack_kind`, `action_state`) and is separate from
+the queued action result (`dogfood.telegram.handler_finished`).
+
+`App\Services\Telegram\LatencyBaseline\TelegramLatencyBaseline` is the
+repeatable local baseline. It runs the real checkout, order lifecycle, receipt
+pipeline and admin notice owners against disposable PostgreSQL/Redis with a real
+Redis `queue:work notifications` process, a bounded provider fixture
+(`KlikQrisLatencyFixtureProvider`) and the fake Telegram transport. Scenarios are
+`idle`, `backlog-expired`, `slow-notification`, `slow-provider` and
+`slow-telegram`; each records its dataset, worker topology and delay fixtures.
+`LatencyBaselineReport` emits nearest-rank p50/p95/max with sample and unknown
+counts, failed/retry/duplicate counts and sanitized raw samples; cold-start
+warm-up batches are separate from warmed runs. The command
+`telegram:latency-baseline` fails closed outside local/testing, non-PostgreSQL,
+non-Redis, real-Telegram or non-disposable databases, and
+`scripts/telegram-latency-baseline.sh` starts/removes the disposable containers.
+It installs no cron, scheduler, monitor or production probe. Full contract and
+limits: [telegram-latency-baseline.md](../../docs/telegram-latency-baseline.md).
+Verification entry points: `tests/Feature/Telegram/TelegramReceiptLatencyTimingTest.php`,
+`tests/Feature/TelegramLatencyBaselineCommandTest.php` and
+`tests/Unit/TelegramLatencyBaselineReportTest.php`.
 
 ## 11. Checklist perubahan untuk AI
 

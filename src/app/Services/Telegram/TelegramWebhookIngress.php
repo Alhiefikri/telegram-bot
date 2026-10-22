@@ -61,6 +61,8 @@ class TelegramWebhookIngress
             'telegram_update_id' => $update->id,
             'update_correlation_id' => DogfoodTiming::correlation($validated['update_id']),
             'ack_duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+            'ack_kind' => isset($payload['callback_query']) ? 'callback_query' : 'message',
+            'action_state' => 'queued_or_duplicate',
             'job_enqueued_at' => $jobEnqueuedAt?->toISOString(),
             'duplicate' => $duplicate,
         ]);

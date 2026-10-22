@@ -11,6 +11,7 @@ use App\Models\StoreBalanceTopUpEvent;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -80,6 +81,7 @@ class KlikQrisCallbackProcessor
         try {
             $processedEvent = $this->nativeQris->tryWithPaymentLock($payment, function () use ($payment, $event): PaymentEvent {
                 $transaction = $this->client->transactionStatus($payment);
+                $this->logProviderObservation($payment, $transaction, 'callback');
 
                 return $this->applyAuthoritativeTransaction($payment, $transaction, $event);
             });
@@ -98,6 +100,31 @@ class KlikQrisCallbackProcessor
         }
 
         return $processedEvent;
+    }
+
+    /**
+     * Keep provider time and application observation time separate. A
+     * provider-paid timestamp from the payload is not when this application
+     * learned about it, and neither is the later paid-commit timestamp.
+     */
+    private function logProviderObservation(
+        Payment $payment,
+        KlikQrisTransaction $transaction,
+        string $source,
+    ): void {
+        if (! DogfoodTiming::enabled()) {
+            return;
+        }
+
+        DogfoodTiming::log('dogfood.telegram.payment_observed', [
+            'payment_correlation_id' => DogfoodTiming::correlation($payment->getKey()),
+            'order_correlation_id' => DogfoodTiming::correlation($payment->order_id),
+            'provider' => PaymentProvider::KLIKQRIS,
+            'observation_source' => $source,
+            'provider_status' => $transaction->status(),
+            'provider_paid_at' => $transaction->paidAt()?->toISOString(),
+            'application_observed_at' => now()->toISOString(),
+        ]);
     }
 
     private function canVerifyCallback(KlikQrisCallback $callback, ?Payment $payment): bool
@@ -226,6 +253,7 @@ class KlikQrisCallbackProcessor
     public function processReconciliationForPayment(Payment $payment, KlikQrisTransaction $transaction): PaymentEvent
     {
         $transaction->assertMatches($payment);
+        $this->logProviderObservation($payment, $transaction, 'reconciliation');
         $signaturePersisted = $this->nativeQris->persistAuthoritativeTransactionSignature($payment, $transaction);
         $event = $this->events->logReconciliation($transaction, $payment);
 

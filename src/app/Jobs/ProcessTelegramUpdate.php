@@ -49,6 +49,7 @@ class ProcessTelegramUpdate implements ShouldQueue
             DogfoodTiming::log('dogfood.telegram.handler_finished', DogfoodTiming::queryStats() + [
                 'telegram_update_id' => $this->telegramUpdateId,
                 'correlation_id' => DogfoodTiming::correlation($this->telegramUpdateId),
+                'action_completed_at' => now()->toISOString(),
                 'handler_duration_ms' => DogfoodTiming::elapsedMs($startedAt),
                 'memory_before_bytes' => $memoryBefore,
                 'memory_after_bytes' => memory_get_usage(true),

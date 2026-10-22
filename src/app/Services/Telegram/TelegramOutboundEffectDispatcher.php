@@ -50,6 +50,8 @@ final class TelegramOutboundEffectDispatcher
         TelegramOutboundEffect $effect,
         ?string $jobEnqueuedAt = null,
         bool $force = false,
+        ?string $enqueueStage = null,
+        ?string $enqueueReason = null,
     ): void {
         if (! $force && ! $this->ledger->isDispatchable($effect)) {
             return;
@@ -131,6 +133,8 @@ final class TelegramOutboundEffectDispatcher
                 $force,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),
+                $enqueueStage ?? SendTelegramReceipt::ENQUEUE_FIRST,
+                $enqueueReason ?? SendTelegramReceipt::REASON_EFFECT_DISPATCH,
             ),
             TelegramOutboundEffectType::ReceiptTxtDownload->value => SendTelegramReceiptTxt::dispatch(
                 (string) $effect->source_id,
@@ -199,6 +203,11 @@ final class TelegramOutboundEffectDispatcher
 
     public function dispatchExplicitResend(TelegramOutboundEffect $effect): void
     {
-        $this->dispatch($effect, force: true);
+        $this->dispatch(
+            $effect,
+            force: true,
+            enqueueStage: SendTelegramReceipt::ENQUEUE_RETRY,
+            enqueueReason: SendTelegramReceipt::REASON_EXPLICIT_RESEND,
+        );
     }
 }
