@@ -18,6 +18,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -55,7 +56,7 @@ class KlikQrisWebhookTest extends TestCase
         $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
         $event = PaymentEvent::query()->where('provider', 'klikqris')->where('event_type', PaymentEventType::Callback->value)->sole();
         $this->assertNotNull($event->processed_at);
-        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $payment->order_id);
+        Queue::assertPushedOn(TelegramOutboundEffectService::RECEIPT_QUEUE, SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $payment->order_id);
         Queue::assertPushed(SendTelegramReceipt::class, 1);
         Http::assertSentCount(1);
     }

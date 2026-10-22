@@ -198,7 +198,22 @@ final class TelegramOutboundEffectDispatcher
             default => null,
         };
 
-        $pending?->onQueue((string) ($effect->queue ?: TelegramOutboundEffect::CHECKOUT_QUEUE))->afterCommit();
+        $pending?->onQueue($this->queueFor($effect))->afterCommit();
+    }
+
+    /**
+     * Receipt families are always routed by type. A persisted queue value can
+     * predate the dedicated receipt worker, so delivery never depends on the
+     * stored metadata being normalized first; the cutover command still
+     * rewrites that metadata for operators and review screens.
+     */
+    public function queueFor(TelegramOutboundEffect $effect): string
+    {
+        if (in_array($effect->effect_type, TelegramOutboundEffectService::RECEIPT_EFFECT_TYPES, true)) {
+            return TelegramOutboundEffectService::RECEIPT_QUEUE;
+        }
+
+        return (string) ($effect->queue ?: TelegramOutboundEffect::CHECKOUT_QUEUE);
     }
 
     public function dispatchExplicitResend(TelegramOutboundEffect $effect): void

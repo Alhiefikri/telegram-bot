@@ -8,6 +8,7 @@ use App\Enums\CredentialFormat;
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\ProcessTelegramUpdate;
 use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
@@ -16,13 +17,16 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\TelegramOutboundEffect;
+use App\Models\TelegramUpdate;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\OrderCheckoutService;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\DogfoodTiming;
+use App\Support\QueueTopology;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -46,11 +50,16 @@ final class TelegramLatencyBaseline
         'idle',
         'backlog-expired',
         'slow-notification',
+        'slow-payment',
         'slow-provider',
         'slow-telegram',
     ];
 
+    public const WORKER_TOPOLOGIES = ['split', 'combined'];
+
     private const SLOW_TRANSPORT_MS = 500;
+
+    private const SLOW_PAYMENT_PROBE_MS = 3000;
 
     private KlikQrisCallbackProcessor $observations;
 
@@ -63,7 +72,7 @@ final class TelegramLatencyBaseline
     ) {}
 
     /**
-     * @param  array{scenarios: list<string>, batches: int, samples: int, warmup_batches: int, interval_ms: int, timeout_seconds: int, worker_sleep: int, provider_latency_ms: int, telegram_latency_ms: int, backlog: int, output: string, run_id: string}  $options
+     * @param  array{scenarios: list<string>, batches: int, samples: int, warmup_batches: int, interval_ms: int, timeout_seconds: int, worker_sleep: int, worker_topology: string, provider_latency_ms: int, telegram_latency_ms: int, backlog: int, output: string, run_id: string}  $options
      * @return array<string, mixed>
      */
     public function run(array $options): array
@@ -127,26 +136,25 @@ final class TelegramLatencyBaseline
             }
         }
 
-        $this->clearQueue();
+        $this->clearQueues();
 
         $provider->pendingMerchantRefs = [];
         $providerBacklog = $this->seedProviderBacklog($config, $ordinal, $provider);
         $notificationBacklog = $this->seedNotificationBacklog($config, $ordinal);
-        $worker = new LatencyBaselineWorker(
-            $this->workerEnvironment($config),
-            [
-                'queue' => LatencyBaselineWorker::QUEUE,
-                'sleep' => $options['worker_sleep'],
-                'tries' => 3,
-                'timeout' => 60,
-                'max_time' => max(120, $options['timeout_seconds'] * 2),
-            ],
-        );
+        $workers = $this->workers($config, $options);
 
         $provider->statusDelayMs = $config['provider_latency_ms'];
-        $worker->start();
+        foreach ($workers as $worker) {
+            $worker->start();
+        }
+
+        $interactionProbe = null;
 
         try {
+            if ($config['interaction_probe']) {
+                $interactionProbe = $this->runInteractionProbe($config, $options, $collector, $workers, $ordinal);
+            }
+
             foreach ($samples as $sampleIndex => $sample) {
                 if ($config['provider_backlog'] > 0) {
                     $this->observeViaReconciliationBacklog($sample, $config, $provider);
@@ -162,10 +170,26 @@ final class TelegramLatencyBaseline
                 }
             }
 
-            $this->waitForBatch($samples, $collector, $worker, $options['timeout_seconds']);
+            $this->waitForBatch(
+                $samples,
+                $collector,
+                array_values($workers),
+                $options['timeout_seconds'],
+                $interactionProbe['update_id'] ?? null,
+            );
         } finally {
-            $worker->stop();
-            $collector->ingestWorkerOutput($worker->output());
+            foreach ($workers as $worker) {
+                $worker->stop();
+                $collector->ingestWorkerOutput($worker->output());
+            }
+        }
+
+        if ($interactionProbe !== null) {
+            $interactionProbe = $this->finalizeInteractionProbe(
+                $interactionProbe,
+                $collector,
+                $workers,
+            );
         }
 
         $raw = [];
@@ -184,12 +208,19 @@ final class TelegramLatencyBaseline
                 'orders_seeded' => count($samples),
                 'provider_history_backlog' => $providerBacklog,
                 'notification_backlog' => $notificationBacklog,
+                'worker_topology' => $options['worker_topology'],
                 'interval_ms' => $options['interval_ms'],
                 'timeout_seconds' => $options['timeout_seconds'],
                 'product_quantity' => 1,
                 'stock_source' => 'local Product Stock Item allocated by checkout',
             ],
-            'worker' => $worker->description(),
+            'worker' => reset($workers)->description(),
+            'workers' => array_map(
+                static fn (LatencyBaselineWorker $worker): array => $worker->description(),
+                $workers,
+            ),
+            'resources' => $this->resourceSummary($workers),
+            'interaction_probe' => $interactionProbe,
             'fixture' => [
                 'provider' => KlikQrisLatencyFixtureProvider::class,
                 'provider_status_delay_ms' => $config['provider_latency_ms'],
@@ -201,6 +232,7 @@ final class TelegramLatencyBaseline
                 'telegram_transport' => 'App\\Services\\Telegram\\FakeTelegramBotClient',
                 'telegram_latency_ms' => $config['telegram_latency_ms'],
                 'admin_target' => 'synthetic numeric chat from TELEGRAM_ADMIN_CHAT_ID',
+                'queue_probe_latency_ms' => $config['probe_latency_ms'],
             ],
             'cold' => $this->report->summarize($coldSamples),
             'warm' => $this->report->summarize($warmSamples),
@@ -218,6 +250,8 @@ final class TelegramLatencyBaseline
             'telegram_latency_ms' => $options['telegram_latency_ms'],
             'provider_backlog' => 0,
             'notification_backlog' => 0,
+            'interaction_probe' => false,
+            'probe_latency_ms' => 0,
         ];
 
         return match ($scenario) {
@@ -227,6 +261,10 @@ final class TelegramLatencyBaseline
                 'telegram_latency_ms' => max(self::SLOW_TRANSPORT_MS, $options['telegram_latency_ms']),
                 'notification_backlog' => 1,
             ]),
+            'slow-payment' => array_replace($base, [
+                'interaction_probe' => true,
+                'probe_latency_ms' => self::SLOW_PAYMENT_PROBE_MS,
+            ]),
             'slow-provider' => array_replace($base, [
                 'provider_latency_ms' => max(self::SLOW_TRANSPORT_MS, $options['provider_latency_ms']),
             ]),
@@ -235,6 +273,250 @@ final class TelegramLatencyBaseline
             ]),
             default => throw new RuntimeException('Unknown latency baseline scenario: '.$scenario),
         };
+    }
+
+    /**
+     * @return array<string, LatencyBaselineWorker>
+     */
+    private function workers(array $config, array $options): array
+    {
+        $maxTime = max(120, $options['timeout_seconds'] * 2);
+        $baseEnvironment = $this->workerEnvironment($config);
+        $fastTelegramEnvironment = array_replace($baseEnvironment, [
+            'DOGFOOD_FAKE_TELEGRAM_LATENCY_US' => '0',
+        ]);
+        $topology = [];
+
+        if ($options['worker_topology'] === 'combined') {
+            $topology['receipt-and-notifications'] = [
+                'queue' => QueueTopology::NOTIFICATIONS.','.TelegramOutboundEffectService::RECEIPT_QUEUE,
+                'environment' => $baseEnvironment,
+            ];
+
+            if ($config['interaction_probe']) {
+                $topology['payments-and-interactions'] = [
+                    'queue' => QueueTopology::PAYMENTS.','.QueueTopology::INTERACTIONS,
+                    'environment' => $baseEnvironment,
+                ];
+            }
+        } else {
+            // The slow-notification scenario injects delay only into the
+            // unrelated notification worker. Slowing the receipt worker too
+            // would measure Telegram transport latency, not queue contention.
+            $receiptEnvironment = $config['notification_backlog'] > 0
+                ? $fastTelegramEnvironment
+                : $baseEnvironment;
+
+            $topology['receipts'] = [
+                'queue' => TelegramOutboundEffectService::RECEIPT_QUEUE,
+                'environment' => $receiptEnvironment,
+            ];
+            $topology['notifications'] = [
+                'queue' => QueueTopology::NOTIFICATIONS,
+                'environment' => $baseEnvironment,
+            ];
+
+            if ($config['interaction_probe']) {
+                $topology['interactions'] = [
+                    'queue' => QueueTopology::INTERACTIONS,
+                    'environment' => $baseEnvironment,
+                ];
+                $topology['payments'] = [
+                    'queue' => QueueTopology::PAYMENTS,
+                    'environment' => $baseEnvironment,
+                ];
+            }
+        }
+
+        $workers = [];
+        foreach ($topology as $name => $worker) {
+            $workers[$name] = new LatencyBaselineWorker(
+                $worker['environment'],
+                [
+                    'queue' => $worker['queue'],
+                    'sleep' => $options['worker_sleep'],
+                    'tries' => 3,
+                    'timeout' => 60,
+                    'max_time' => $maxTime,
+                ],
+            );
+        }
+
+        return $workers;
+    }
+
+    /**
+     * @param  array<string, LatencyBaselineWorker>  $workers
+     * @return array{worker_count: int, worker_peak_rss_total_bytes: int, worker_peak_rss_max_bytes: int}
+     */
+    private function resourceSummary(array $workers): array
+    {
+        $rss = array_values(array_filter(array_map(
+            static fn (LatencyBaselineWorker $worker): ?int => $worker->description()['peak_rss_bytes'],
+            $workers,
+        ), static fn (?int $value): bool => $value !== null));
+
+        return [
+            'worker_count' => count($workers),
+            'worker_peak_rss_total_bytes' => array_sum($rss),
+            'worker_peak_rss_max_bytes' => $rss === [] ? 0 : max($rss),
+        ];
+    }
+
+    /**
+     * Occupy the payments queue with a local probe, then enqueue a real
+     * Telegram update behind it. The probe never calls a provider.
+     *
+     * @param  array<string, LatencyBaselineWorker>  $workers
+     * @return array<string, mixed>
+     */
+    private function runInteractionProbe(
+        array $config,
+        array $options,
+        LatencyBaselineEventCollector $collector,
+        array $workers,
+        int $ordinal,
+    ): array {
+        $marker = 'slow-payment-'.$options['run_id'].'-'.$ordinal;
+        $probeCorrelation = DogfoodTiming::correlation($marker);
+
+        SlowPaymentVerificationProbe::dispatch($config['probe_latency_ms'], $marker)
+            ->onQueue(QueueTopology::PAYMENTS);
+
+        $probeStarted = $this->waitForEvent(
+            $collector,
+            $workers,
+            'dogfood.telegram.queue_probe_started',
+            $probeCorrelation,
+            10.0,
+        );
+
+        $chatId = 8_800_000 + $ordinal;
+        $customer = Customer::query()->create([
+            'telegram_id' => $chatId,
+            'first_name' => 'Latency Update',
+            'locale' => 'en',
+        ]);
+        $update = TelegramUpdate::query()->create([
+            'update_id' => random_int(1_000_000_000, 2_000_000_000),
+            'customer_id' => $customer->getKey(),
+            'payload' => ['message' => [
+                'message_id' => 1,
+                'date' => now()->timestamp,
+                'text' => '/start',
+                'chat' => ['id' => $chatId, 'type' => 'private'],
+                'from' => [
+                    'id' => $chatId,
+                    'is_bot' => false,
+                    'first_name' => 'Latency Update',
+                    'language_code' => 'en',
+                ],
+            ]],
+            'processed_at' => null,
+            'created_at' => now(),
+        ]);
+
+        $enqueuedAt = now()->toISOString();
+        ProcessTelegramUpdate::dispatch($update->id, $enqueuedAt)
+            ->onQueue(QueueTopology::INTERACTIONS);
+
+        $pickup = $this->waitForEvent(
+            $collector,
+            $workers,
+            'dogfood.telegram.job_picked_up',
+            DogfoodTiming::correlation($update->id),
+            10.0,
+        );
+
+        return [
+            'update_id' => (int) $update->id,
+            'correlation_id' => DogfoodTiming::correlation($update->id),
+            'probe_correlation_id' => $probeCorrelation,
+            'probe_latency_ms' => (int) $config['probe_latency_ms'],
+            'probe_started' => $probeStarted !== null,
+            'interaction_queue' => QueueTopology::INTERACTIONS,
+            'payment_queue' => QueueTopology::PAYMENTS,
+            'worker_topology' => $options['worker_topology'],
+            'enqueued_at' => $enqueuedAt,
+            'queue_wait_ms' => is_numeric($pickup['context']['queue_wait_ms'] ?? null)
+                ? (int) $pickup['context']['queue_wait_ms']
+                : null,
+            'picked_up_at' => $pickup['context']['job_picked_up_at'] ?? null,
+            'picked_up' => $pickup !== null,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $probe
+     * @param  array<string, LatencyBaselineWorker>  $workers
+     * @return array<string, mixed>
+     */
+    private function finalizeInteractionProbe(
+        array $probe,
+        LatencyBaselineEventCollector $collector,
+        array $workers,
+    ): array {
+        $this->pumpWorkers($collector, $workers);
+        $update = TelegramUpdate::query()->find($probe['update_id']);
+
+        $finished = $collector->first(
+            'dogfood.telegram.queue_probe_finished',
+            (string) $probe['probe_correlation_id'],
+        );
+        $pickupToProcessed = $probe['picked_up_at'] !== null && $update?->processed_at !== null
+            ? $this->diffMs((string) $probe['picked_up_at'], $update->processed_at->toISOString())
+            : null;
+
+        return [
+            ...$probe,
+            'processed' => $update?->processed_at !== null,
+            'terminal_failed' => $update?->terminal_failed_at !== null,
+            'pickup_to_processed_ms' => $pickupToProcessed,
+            'probe_finished' => $finished !== null,
+            'complete' => ($probe['probe_started'] ?? false) === true
+                && $probe['picked_up'] === true
+                && $finished !== null
+                && $update?->processed_at !== null
+                && $update?->terminal_failed_at === null,
+        ];
+    }
+
+    /**
+     * @param  array<string, LatencyBaselineWorker>  $workers
+     * @return array<string, mixed>|null
+     */
+    private function waitForEvent(
+        LatencyBaselineEventCollector $collector,
+        array $workers,
+        string $event,
+        string $correlation,
+        float $timeoutSeconds,
+    ): ?array {
+        $deadline = microtime(true) + $timeoutSeconds;
+
+        while (microtime(true) < $deadline) {
+            $this->pumpWorkers($collector, $workers);
+
+            $match = $collector->first($event, $correlation);
+            if ($match !== null) {
+                return $match;
+            }
+
+            usleep(50_000);
+        }
+
+        return $collector->first($event, $correlation);
+    }
+
+    /**
+     * @param  array<string, LatencyBaselineWorker>  $workers
+     */
+    private function pumpWorkers(LatencyBaselineEventCollector $collector, array $workers): void
+    {
+        foreach ($workers as $worker) {
+            $worker->pump();
+            $collector->ingestWorkerOutput($worker->output());
+        }
     }
 
     /**
@@ -405,7 +687,7 @@ final class TelegramLatencyBaseline
             ]);
 
             SendAdminOrderExpiredNotification::dispatch((string) $order->getKey(), now()->toISOString())
-                ->onQueue(LatencyBaselineWorker::QUEUE);
+                ->onQueue(QueueTopology::NOTIFICATIONS);
         }
 
         return $config['notification_backlog'];
@@ -463,18 +745,19 @@ final class TelegramLatencyBaseline
 
     /**
      * @param  list<array<string, mixed>>  $samples
+     * @param  list<LatencyBaselineWorker>  $workers
      */
     private function waitForBatch(
         array $samples,
         LatencyBaselineEventCollector $collector,
-        LatencyBaselineWorker $worker,
+        array $workers,
         int $timeoutSeconds,
+        ?int $updateId = null,
     ): void {
         $deadline = microtime(true) + $timeoutSeconds;
 
         while (microtime(true) < $deadline) {
-            $worker->pump();
-            $collector->ingestWorkerOutput($worker->output());
+            $this->pumpWorkers($collector, $workers);
 
             $complete = true;
             foreach ($samples as $sample) {
@@ -485,16 +768,34 @@ final class TelegramLatencyBaseline
                 }
             }
 
+            if ($complete && $updateId !== null) {
+                $update = TelegramUpdate::query()->find($updateId);
+                $complete = $update !== null
+                    && ($update->processed_at !== null || $update->terminal_failed_at !== null);
+            }
+
             if ($complete) {
                 return;
             }
 
-            if (! $worker->isRunning()) {
+            if (! $this->anyWorkerRunning($workers)) {
                 return;
             }
 
             usleep(100_000);
         }
+    }
+
+    /** @param  list<LatencyBaselineWorker>  $workers */
+    private function anyWorkerRunning(array $workers): bool
+    {
+        foreach ($workers as $worker) {
+            if ($worker->isRunning()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -601,13 +902,16 @@ final class TelegramLatencyBaseline
         }
     }
 
-    private function clearQueue(): void
+    private function clearQueues(): void
     {
-        Artisan::call('queue:clear', [
-            'connection' => 'redis',
-            '--queue' => LatencyBaselineWorker::QUEUE,
-            '--force' => true,
-        ]);
+        foreach (QueueTopology::operational() as $queue) {
+            Artisan::call('queue:clear', [
+                'connection' => 'redis',
+                '--queue' => $queue,
+                '--force' => true,
+            ]);
+        }
+
         Cache::flush();
     }
 

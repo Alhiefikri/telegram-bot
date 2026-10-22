@@ -69,6 +69,75 @@ Historical migrations that introduced the old columns remain in the repository
 for reproducible fresh-install history. They are not runtime compatibility
 artifacts after the contract migration.
 
+## Dedicated receipt queue cutover (#651)
+
+Receipt credential units, their ordered successors and the text fallback use
+`telegram-receipts`, not `notifications`. The durable ledger and
+`telegram:recover-outbound` remain the correctness owners; the cutover only
+moves wakeups and persisted routing metadata.
+
+1. Record the source queue depths before stopping anything:
+
+   ```sh
+   php artisan ops:check-queue-depth --queue=notifications --queue=telegram-receipts --include-reserved-and-delayed
+   ```
+
+2. Stop the notification worker gracefully and let its current job finish.
+   Do not SIGKILL it. In the Compose runtime, stop
+   `laravel-notification-worker:*`; the receipt worker is not started yet.
+   If the previous release still serves receipts and payments from the old
+   topology, stop `laravel-update-worker:*` after its current job finishes so
+   a payment backlog cannot keep consuming default updates.
+3. Run the dry run and inspect the counts:
+
+   ```sh
+   php artisan telegram:receipt-queue-cutover --from=notifications --dry-run --json
+   ```
+
+   `effects.matched` counts persisted receipt effects, and `queued.pending` /
+   `queued.delayed` count the queued wakeups that would move. `queued.reserved`
+   is reported, never stolen; those jobs belong to an in-flight worker.
+4. Run the real cutover:
+
+   ```sh
+   php artisan telegram:receipt-queue-cutover --from=notifications --json
+   ```
+
+   The command rewrites only `receipt.credentials`, `receipt.order_actions` and
+   `receipt.txt_download` metadata. Admin notices, email, payment proofs, Sales
+   Proof and cleanup remain on `notifications`. Pending wakeups move atomically
+   per payload and the destination queue is notified. A worker that crashes
+   while holding a reserved job leaves that job recoverable by the source
+   worker after `retry_after`; run the cutover again after the retry appears.
+5. Start the new topology and restart long-lived workers:
+
+   ```sh
+   php artisan queue:restart
+   php artisan ops:health --db --queue-schema --queue-depth --supervisor
+   ```
+
+   The supervised queues are `default`, `payments`, `telegram-receipts`,
+   `notifications`, `telegram-outbound`, `telegram-broadcast`,
+   `telegram-stock`, `binance-verification` and `suppliers`.
+
+If a wakeup is lost, the receipt effect rows are still pending in PostgreSQL.
+`telegram:recover-outbound` redispatches them through the type-based dispatcher,
+which always routes receipt families to `telegram-receipts`. Do not recreate
+receipt content or resend an ambiguous unit by hand.
+
+Rollback uses the same command in reverse while the receipt worker is stopped:
+
+```sh
+php artisan telegram:receipt-queue-cutover --from=telegram-receipts --to=notifications --dry-run
+php artisan telegram:receipt-queue-cutover --from=telegram-receipts --to=notifications
+```
+
+Rollback moves wakeups and metadata only. It does not change a receipt's
+delivery state, claim token, sequence or ambiguity record. Deploy the previous
+application image before a rollback: the current dispatcher routes receipt
+families by type and would keep sending them to `telegram-receipts` even after
+the metadata is moved back.
+
 ## Runtime recovery contract
 
 The dedicated `outbound-recovery` Compose service owns this sweep; the

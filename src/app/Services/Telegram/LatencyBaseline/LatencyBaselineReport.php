@@ -126,6 +126,14 @@ final class LatencyBaselineReport
             $lines[] = '';
             $lines[] = 'Worker: '.json_encode($result['worker'] ?? [], JSON_UNESCAPED_SLASHES);
             $lines[] = '';
+            if (isset($result['workers']) && is_array($result['workers'])) {
+                $lines[] = 'Workers: '.json_encode($result['workers'], JSON_UNESCAPED_SLASHES);
+                $lines[] = '';
+            }
+            if (isset($result['interaction_probe']) && is_array($result['interaction_probe'])) {
+                $lines[] = 'Payment/update isolation probe: '.json_encode($result['interaction_probe'], JSON_UNESCAPED_SLASHES);
+                $lines[] = '';
+            }
             $lines[] = 'Fixture: '.json_encode($result['fixture'] ?? [], JSON_UNESCAPED_SLASHES);
             $lines[] = '';
 

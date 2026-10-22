@@ -197,7 +197,8 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id),
             $effect->effect_group_key,
         );
-        Queue::assertPushed(
+        Queue::assertPushedOn(
+            TelegramOutboundEffectService::RECEIPT_QUEUE,
             SendTelegramReceipt::class,
             fn (SendTelegramReceipt $job): bool => $job->orderId === (string) $order->id
                 && $job->effectId === (string) $effect->getKey(),
@@ -239,7 +240,11 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             $receiptEffects->first()->template_version,
         );
         $this->assertStringNotContainsString('buyer@example', json_encode($receiptEffects->sole()->getAttributes(), JSON_THROW_ON_ERROR));
-        Queue::assertPushed(SendTelegramReceipt::class, 1);
+        Queue::assertPushedOn(
+            TelegramOutboundEffectService::RECEIPT_QUEUE,
+            SendTelegramReceipt::class,
+            static fn (SendTelegramReceipt $job): bool => $job->orderId === (string) $order->id,
+        );
     }
 
     public function test_receipt_uses_the_persisted_product_icon_snapshot_for_its_caption(): void
@@ -828,7 +833,8 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->artisan('telegram:recover-outbound')
             ->assertSuccessful();
 
-        Queue::assertPushed(
+        Queue::assertPushedOn(
+            TelegramOutboundEffectService::RECEIPT_QUEUE,
             SendTelegramReceipt::class,
             fn (SendTelegramReceipt $job): bool => $job->orderId === (string) $order->id
                 && $job->effectId !== null,

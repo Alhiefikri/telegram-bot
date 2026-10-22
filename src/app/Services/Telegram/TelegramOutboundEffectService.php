@@ -9,6 +9,9 @@ use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Jobs\SendTelegramReceipt;
+use App\Jobs\SendTelegramReceiptActionPanel;
+use App\Jobs\SendTelegramReceiptTxt;
 use App\Models\BalanceAdjustmentRequest;
 use App\Models\BalanceOperationsAlertEpisode;
 use App\Models\Customer;
@@ -35,6 +38,7 @@ use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
 use App\Support\PaymentProvider;
+use App\Support\QueueTopology;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -196,15 +200,33 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_PRICE_CHANGE_STORE_CHANNEL = 'price-change-store-channel-v1';
 
-    public const RECEIPT_QUEUE = 'notifications';
+    /** Credential receipt units, their successors and their text fallback. */
+    public const RECEIPT_QUEUE = QueueTopology::RECEIPTS;
+
+    /** Email, admin notices, proofs and other non-credential notifications. */
+    public const NOTIFICATION_QUEUE = QueueTopology::NOTIFICATIONS;
 
     public const STOCK_NOTIFICATION_QUEUE = 'telegram-stock';
+
+    /** @var list<string> */
+    public const RECEIPT_EFFECT_TYPES = [
+        self::TYPE_RECEIPT_CREDENTIALS,
+        self::TYPE_RECEIPT_TXT_DOWNLOAD,
+        self::TYPE_RECEIPT_ORDER_ACTIONS,
+    ];
+
+    /** @var list<class-string> */
+    public const RECEIPT_JOB_CLASSES = [
+        SendTelegramReceipt::class,
+        SendTelegramReceiptTxt::class,
+        SendTelegramReceiptActionPanel::class,
+    ];
 
     public const RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::RECEIPT_TXT_DOWNLOAD_MAX_ATTEMPTS;
 
     public const RECEIPT_ACTIONS_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::RECEIPT_ACTIONS_MAX_ATTEMPTS;
 
-    public const SALES_PROOF_QUEUE = 'notifications';
+    public const SALES_PROOF_QUEUE = self::NOTIFICATION_QUEUE;
 
     public const SALES_PROOF_MAX_ATTEMPTS = TelegramOutboundEffectPolicy::SALES_PROOF_MAX_ATTEMPTS;
 
@@ -477,7 +499,7 @@ class TelegramOutboundEffectService
                 'source_id' => $topUpId,
                 'target_type' => 'admin',
                 'telegram_chat_id' => $chatId,
-                'queue' => self::RECEIPT_QUEUE,
+                'queue' => self::NOTIFICATION_QUEUE,
                 'telegram_method' => 'sendMessage',
                 'locale' => null,
                 'template_version' => self::TEMPLATE_BALANCE_TOP_UP_OWNER_ALERT,
@@ -513,7 +535,7 @@ class TelegramOutboundEffectService
                 'source_id' => (string) $topUp->getKey(),
                 'target_type' => 'admin',
                 'telegram_chat_id' => $chatId,
-                'queue' => self::RECEIPT_QUEUE,
+                'queue' => self::NOTIFICATION_QUEUE,
                 'telegram_method' => 'sendMessage',
                 'locale' => null,
                 'template_version' => 'balance-top-up-admin-paid:v1',

@@ -78,7 +78,7 @@ class HealthCheck extends Command
         }
 
         if ($this->option('supervisor')) {
-            $result = Process::run('supervisorctl -c /etc/supervisor/conf.d/supervisord.conf status php-fpm laravel-update-worker:* laravel-outbound-worker:* laravel-notification-worker:* laravel-broadcast-worker:* laravel-stock-worker:* laravel-binance-verification-worker:* laravel-supplier-worker:*');
+            $result = Process::run('supervisorctl -c /etc/supervisor/conf.d/supervisord.conf status php-fpm laravel-update-worker:* laravel-payment-verification-worker:* laravel-receipt-worker:* laravel-outbound-worker:* laravel-notification-worker:* laravel-broadcast-worker:* laravel-stock-worker:* laravel-binance-verification-worker:* laravel-supplier-worker:*');
 
             if (! $result->successful() || str_contains($result->output().$result->errorOutput(), 'FATAL') || str_contains($result->output(), 'STOPPED') || str_contains($result->output(), 'EXITED') || ! str_contains($result->output(), 'RUNNING')) {
                 $healthy = false;

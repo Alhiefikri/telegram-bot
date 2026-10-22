@@ -199,3 +199,141 @@ stderr is parsed for dogfood events and is not persisted.
 #656 should rerun this runner (same image, dataset and bounded options) before
 and after tuning. Use the resulting raw samples and counts, not this single
 run, for before/after claims.
+
+## Issue #651 queue isolation
+
+Issue #651 changed the worker topology, so this section compares the old
+shared-worker shape with the supervised split topology using the same local
+runner, dataset, fixture and sleep. It is local synthetic evidence, not a
+production measurement.
+
+### Commands
+
+```bash
+# Shared-worker comparison (measurement only; not a runtime topology)
+LATENCY_BASELINE_IMAGE=telegram-bot:php-security-8.4.27 \
+LATENCY_BASELINE_SCENARIO=idle,slow-notification \
+scripts/telegram-latency-baseline.sh \
+  --batches=3 --samples=5 --warmup-batches=1 \
+  --interval-ms=250 --timeout-seconds=150 \
+  --worker-sleep=3 --worker-topology=combined
+
+# Split runtime topology, same dataset
+LATENCY_BASELINE_IMAGE=telegram-bot:php-security-8.4.27 \
+LATENCY_BASELINE_SCENARIO=idle,slow-notification \
+scripts/telegram-latency-baseline.sh \
+  --batches=3 --samples=5 --warmup-batches=1 \
+  --interval-ms=250 --timeout-seconds=90 \
+  --worker-sleep=3 --worker-topology=split
+
+# Payment verification vs bot update
+LATENCY_BASELINE_IMAGE=telegram-bot:php-security-8.4.27 \
+LATENCY_BASELINE_SCENARIO=slow-payment \
+scripts/telegram-latency-baseline.sh \
+  --batches=2 --samples=3 --warmup-batches=1 \
+  --interval-ms=250 --timeout-seconds=90 \
+  --worker-sleep=1 --worker-topology=combined
+
+LATENCY_BASELINE_IMAGE=telegram-bot:php-security-8.4.27 \
+LATENCY_BASELINE_SCENARIO=slow-payment \
+scripts/telegram-latency-baseline.sh \
+  --batches=2 --samples=3 --warmup-batches=1 \
+  --interval-ms=250 --timeout-seconds=90 \
+  --worker-sleep=1 --worker-topology=split
+```
+
+Run ids: split receipts `20261022T152441Z-258680`; combined receipts
+`20261022T152729Z-261341`; split payment `20261022T152729Z-261336`; combined
+payment `20261022T152954Z-263887`. All four runs had 15/15 (receipts) or 6/6
+(payment probe) complete warm samples and zero failed jobs.
+
+### Receipt isolation (warm samples, n=15)
+
+| Scenario | Queue wait p50 | p95 | e2e observation→admin p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `idle`, combined shared worker | 9416 ms | 10613 ms | 10277.87 ms | 11886.47 ms |
+| `idle`, split | 2628 ms | 3329 ms | 4770.56 ms | 6676.04 ms |
+| `slow-notification`, combined shared worker | 22589 ms | 34497 ms | 24691.41 ms | 36639.52 ms |
+| `slow-notification`, split | 2566 ms | 3137 ms | 5591.46 ms | 7252.59 ms |
+
+The split `slow-notification` queue wait is statistically the same as split
+`idle` (2566 ms vs 2628 ms p50) even though the unrelated notification worker
+is 500 ms slower per Telegram call. The combined worker remains blocked:
+22589 ms p50. The earlier #649 run (same shared worker, 15 samples) measured
+14731 ms p50, so this is a real contention shape, not a one-off.
+
+In split `slow-notification`, pickup→first credential ACK was 352.21 ms p50
+(378.47 p95) and receipt completion→admin notice was 2544.24 ms p50. The admin
+notice still waits on the slower notification worker; that is separate from
+receipt pickup and completion.
+
+### Payment verification vs bot update
+
+Each scenario enqueues a local `SlowPaymentVerificationProbe` for 3000 ms on
+`payments`, waits for the probe to start, then posts a real `/start` update to
+`ProcessTelegramUpdate` on `default`. The probe performs no provider call.
+
+| Topology | Update enqueue→pickup | Pickup→processed | Complete |
+| --- | ---: | ---: | --- |
+| combined `payments,default` | 3665 ms | 251.49 ms | yes |
+| split `payments` / `default` | 2198 ms | 401.22 ms | yes |
+
+The split update does not wait for the 3 s probe; the remaining ~2.2 s is the
+worker's `--sleep=1` poll boundary plus update handling, not payment backlog.
+The combined topology has one worker, so the update waits until the probe
+finishes.
+
+### Cutover smoke (disposable Redis/PostgreSQL)
+
+A disposable PostgreSQL 16 / Redis 7 stack was migrated, seeded with one
+`receipt.credentials` effect on `notifications`, one admin paid effect, one
+pending `SendTelegramReceipt`, one delayed `SendTelegramReceipt` and one admin
+job. `telegram:receipt-queue-cutover --from=notifications --dry-run --json`
+reported `effects.matched=1`, `queued.pending=1`, `queued.delayed=1`,
+`queued.reserved=0` and changed nothing. The real run moved the receipt effect
+to `telegram-receipts`, left `notifications=1` (the admin job), and moved the
+delayed entry to `queues:telegram-receipts:delayed`. The admin effect remained
+on `notifications`. No receipt job remained on `notifications`. The containers
+were removed afterward; no deployment, production Redis or customer message was
+involved.
+
+### Multi-worker receipt correctness
+
+`TelegramReceiptPostgresConcurrencyTest` (PostgreSQL concurrency lane) created a
+paid order with 12 structured credentials, materialized a two-chunk receipt
+group, and raced two workers on the same receipt wakeup. Each chunk plus the
+completed action panel was sent exactly once; the credential chunk sequences
+were `1, 2`; every effect kept `attempts = 1`; the losing worker consumed no
+claim attempt; `orders.telegram_receipt_sent_at` was set. Result: 1 test,
+18 assertions, passed. This exercises duplicate wakeup and claim fencing with
+two processes; ordered chunk delivery is also covered by the existing
+`TelegramReceiptOutboundEffectTest` ambiguity/ordering cases. Redis-loss
+recovery is unchanged: `test_recovery_materializes_a_paid_receipt_without_a_legacy_claim`
+and the other recovery tests rediscover pending ledger rows, and the type-based
+dispatcher routes every receipt back to `telegram-receipts`.
+
+### Worker footprint
+
+| Scenario | Workers | Peak RSS per worker | Sum |
+| --- | ---: | ---: | ---: |
+| split receipts/notifications | 2 | 90.5–96.9 MB | 187.3 MB |
+| split receipts/notifications/interactions/payments | 4 | 80.3–99.0 MB | 367.9 MB |
+| combined receipts/notifications | 1 | 99.1 MB | 99.1 MB |
+| combined payments/interactions | 2 | 98.3–99.4 MB | 196.3 MB |
+
+These are sampled peak RSS values from local `queue:work` processes in the
+disposable app container. They include shared opcache/file mappings and a
+synthetic invoice-rendering workload; the sum overstates physical container
+usage. They are not proof that the production 896 MiB app cgroup has headroom.
+See [the queue topology note](telegram-queue-topology.md#local-resource-observation).
+
+### Limits
+
+- Local synthetic providers/Telegram transports; PostgreSQL and Redis were
+  disposable and are gone.
+- The split receipt worker used `--sleep=3` in the comparison to isolate
+  topology; production uses `--sleep=1`.
+- The payment probe is a local synthetic queue occupant, not a real provider
+  verification job. It measures queue pickup, not provider latency.
+- No production SLO, root-cause claim, deployment, real payment or customer
+  message is implied.

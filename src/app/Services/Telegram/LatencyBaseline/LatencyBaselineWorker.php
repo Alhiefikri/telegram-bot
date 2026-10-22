@@ -14,11 +14,11 @@ use Throwable;
  */
 final class LatencyBaselineWorker
 {
-    public const QUEUE = 'notifications';
-
     private ?Process $process = null;
 
     private string $output = '';
+
+    private int $peakRssBytes = 0;
 
     /**
      * @param  array<string, string>  $environment
@@ -68,6 +68,22 @@ final class LatencyBaselineWorker
         } catch (Throwable) {
             // The pipe may already be closed after the final wait; the output
             // collected while the worker was running remains authoritative.
+        }
+
+        $this->sampleMemory();
+    }
+
+    private function sampleMemory(): void
+    {
+        $pid = $this->process?->getPid();
+        if ($pid === null) {
+            return;
+        }
+
+        $status = @file_get_contents('/proc/'.$pid.'/status');
+        if (is_string($status)
+            && preg_match('/^VmRSS:\s+(\d+)\s+kB$/mi', $status, $matches) === 1) {
+            $this->peakRssBytes = max($this->peakRssBytes, (int) $matches[1] * 1024);
         }
     }
 
@@ -127,6 +143,7 @@ final class LatencyBaselineWorker
             'job_timeout_seconds' => $this->topology['timeout'],
             'max_time_seconds' => $this->topology['max_time'],
             'workers' => 1,
+            'peak_rss_bytes' => $this->peakRssBytes > 0 ? $this->peakRssBytes : null,
             'telegram_latency_ms' => (int) round(((int) ($this->environment['DOGFOOD_FAKE_TELEGRAM_LATENCY_US'] ?? 0)) / 1000),
             'fake_telegram_transport' => ($this->environment['DOGFOOD_FAKE_TELEGRAM_OUTBOUND'] ?? 'false') === 'true',
         ];

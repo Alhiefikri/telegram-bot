@@ -61,7 +61,7 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
         );
 
         Queue::assertPushedOn(
-            'notifications',
+            TelegramOutboundEffectService::RECEIPT_QUEUE,
             SendTelegramReceiptTxt::class,
             fn (SendTelegramReceiptTxt $job): bool => $job->orderId === (string) $order->id
                 && $job->effectId === (string) $effect->id,
@@ -134,7 +134,7 @@ final class TelegramReceiptTxtCallbackTest extends TelegramBotTestSupport
 
         $this->assertCount(0, Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendDocument')));
         Queue::assertPushedOn(
-            'notifications',
+            TelegramOutboundEffectService::RECEIPT_QUEUE,
             SendTelegramReceiptTxt::class,
             fn (SendTelegramReceiptTxt $job): bool => $job->orderId === (string) $order->id
                 && $job->effectId === (string) $effect->id,

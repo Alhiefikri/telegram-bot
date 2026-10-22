@@ -250,7 +250,32 @@ repository root
 - service scheduler yang menjalankan Laravel scheduler tiap menit;
 - Telegram Bot API, KlikQRIS, Binance, and (until the retirement gate passes) Pakasir legacy settlement as external dependencies.
 
-Queue Redis bersifat volatile: restart Redis dapat menghilangkan queued jobs dan session/cache/lock state. Startup menolak cutover selama tabel database queue berisi job; rollback ke driver database menolak berpindah selama queue Redis tidak kosong atau tidak dapat diperiksa. Lihat [ADR 0014](../adr/0014-redis-runtime-state.md) dan [runbook cutover](../runbook-redis-runtime-cutover.md).
+Queue Redis bersifat volatile: restart Redis dapat menghilangkan queued jobs dan session/cache/lock state. Queue operasional dipisah per beban kerja: `default` untuk update/interaksi bot, `payments` untuk verifikasi pembayaran, `telegram-receipts` khusus unit receipt kredensial beserta successor/fallback-nya, `notifications` untuk email/admin notice/proof/cleanup, serta `telegram-outbound`, `telegram-broadcast`, `telegram-stock`, `binance-verification`, dan `suppliers`. `QueueTopology` adalah satu-satunya daftar nama queue yang dipakai health summary, readiness, cutover, dan test consumer. Jangan menggabungkan `payments` dengan `default`, atau receipt dengan `notifications`, karena worker priority tidak mem-preempt job yang sedang berjalan. Detail batas worker, timeout, dan cutover ada di [topologi queue Telegram](../telegram-queue-topology.md).
+
+### Isolasi receipt dan verifikasi pembayaran (#651)
+
+`TelegramOutboundEffectService::RECEIPT_QUEUE` adalah `telegram-receipts`;
+family `receipt.credentials`, `receipt.order_actions` dan
+`receipt.txt_download` memakai queue itu untuk unit pertama, successor,
+text fallback, TXT download, action panel dan resend. `TelegramOutboundEffectDispatcher::queueFor()`
+menurunkan queue dari tipe effect, sehingga recovery atau baris lama yang masih
+menyimpan `notifications` tidak dapat mengembalikan receipt ke worker bersama.
+`NOTIFICATION_QUEUE` tetap `notifications` untuk email, admin notice, proof,
+Sales Proof, Store Balance notice dan cleanup receipt.
+
+`telegram:receipt-queue-cutover` memindahkan metadata effect receipt dan
+wakeup pending/delayed dari queue lama ke queue baru; reserved Redis job tidak
+dicuri dari owner-nya. Urutan drain, rollback dan batas timeout ada di
+[runbook](../runbook-telegram-outbound-effect-contract.md#dedicated-receipt-queue-cutover-651).
+
+Verification entry points: `QueueConsumerTopologyTest` (consumer/isolation/
+timeout dari `supervisord.conf`), `TelegramReceiptQueueCutoverTest` (metadata,
+database jobs, dry-run), `TelegramReceiptPostgresConcurrencyTest` (dua worker
+pada satu receipt multi-chunk, exactly-once dan fencing), serta
+`TelegramReceiptOutboundEffectTest` untuk ordering/ambiguity. Bukti lokal:
+[telegram-latency-baseline-evidence.md](../telegram-latency-baseline-evidence.md#issue-651-queue-isolation).
+
+Startup menolak cutover selama tabel database queue berisi job; rollback ke driver database menolak berpindah selama queue Redis tidak kosong atau tidak dapat diperiksa. Lihat [ADR 0014](../adr/0014-redis-runtime-state.md) dan [runbook cutover](../runbook-redis-runtime-cutover.md).
 
 Suite PHPUnit biasa dipaksa menggunakan SQLite in-memory, cache array, queue sync, dan session array lewat [`src/phpunit.xml`](../../src/phpunit.xml). Itu cepat tetapi tidak membuktikan seluruh locking PostgreSQL; gunakan `composer test:concurrency-gate` untuk race yang menyentuh stok, checkout, payment, atau admin mutation.
 

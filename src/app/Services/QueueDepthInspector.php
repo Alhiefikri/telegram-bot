@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\QueueTopology;
 use Illuminate\Support\Facades\Queue;
 
 class QueueDepthInspector
@@ -9,16 +10,7 @@ class QueueDepthInspector
     /** @return list<string> */
     public function operationalQueues(): array
     {
-        return [
-            'payments',
-            'default',
-            'telegram-outbound',
-            'notifications',
-            'telegram-broadcast',
-            'telegram-stock',
-            'suppliers',
-            (string) config('services.binance.verification_queue', 'binance-verification'),
-        ];
+        return QueueTopology::operational();
     }
 
     /** @return array{depth: int, oldest_pending_at: int|null} */

@@ -278,41 +278,53 @@ class SakurupiahProviderReadinessTest extends TestCase
     /** @return array<string, array{string, string, bool}> */
     public static function supervisorReleaseWorkerCommands(): array
     {
-        $program = "[program:laravel-update-worker]\nprocess_name=%(program_name)s_%(process_num)02d\n";
+        $update = "[program:laravel-update-worker]\nprocess_name=%(program_name)s_%(process_num)02d\n";
+        $payments = "\n[program:laravel-payment-verification-worker]\nprocess_name=%(program_name)s_%(process_num)02d\n";
 
         return [
-            'runtime connection inherited' => [
-                $program.'command=php /var/www/html/artisan queue:work --queue=payments,default --sleep=1 --tries=3 --timeout=60 --max-time=3600',
+            'runtime connections inherited' => [
+                $update.'command=php /var/www/html/artisan queue:work --queue=default --sleep=1 --tries=3 --timeout=60 --max-time=3600'
+                    .$payments.'command=php /var/www/html/artisan queue:work --queue=payments --sleep=1 --tries=3 --timeout=60 --max-time=3600',
                 'redis',
                 true,
             ],
-            'explicit runtime connection' => [
-                $program.'command=php /var/www/html/artisan queue:work redis --queue=payments,default --sleep=1',
+            'explicit runtime connections' => [
+                $update.'command=php /var/www/html/artisan queue:work redis --queue=default --sleep=1'
+                    .$payments.'command=php /var/www/html/artisan queue:work redis --queue=payments --sleep=1',
                 'redis',
                 true,
             ],
-            'legacy connection matching the runtime' => [
-                $program.'command=php /var/www/html/artisan queue:work database --queue=payments,default --sleep=1',
+            'legacy connections matching the runtime' => [
+                $update.'command=php /var/www/html/artisan queue:work database --queue=default --sleep=1'
+                    .$payments.'command=php /var/www/html/artisan queue:work database --queue=payments --sleep=1',
                 'database',
                 true,
             ],
             'hard-coded foreign connection after a driver migration' => [
-                $program.'command=php /var/www/html/artisan queue:work database --queue=payments,default --sleep=1',
+                $update.'command=php /var/www/html/artisan queue:work database --queue=default --sleep=1'
+                    .$payments.'command=php /var/www/html/artisan queue:work database --queue=payments --sleep=1',
                 'redis',
                 false,
             ],
             'missing supervised default queue' => [
-                $program.'command=php /var/www/html/artisan queue:work --queue=payments --sleep=1',
+                $payments.'command=php /var/www/html/artisan queue:work --queue=payments --sleep=1',
+                'redis',
+                false,
+            ],
+            'payments still share the interaction worker' => [
+                $update.'command=php /var/www/html/artisan queue:work --queue=payments,default --sleep=1',
                 'redis',
                 false,
             ],
             'verification queue priority reversed' => [
-                $program.'command=php /var/www/html/artisan queue:work --queue=default,payments --sleep=1',
+                $update.'command=php /var/www/html/artisan queue:work --queue=default --sleep=1'
+                    .$payments.'command=php /var/www/html/artisan queue:work --queue=default,payments --sleep=1',
                 'redis',
                 false,
             ],
             'listener instead of a release worker' => [
-                $program.'command=php /var/www/html/artisan queue:listen --queue=payments,default',
+                $update.'command=php /var/www/html/artisan queue:work --queue=default --sleep=1'
+                    .$payments.'command=php /var/www/html/artisan queue:listen --queue=payments',
                 'redis',
                 false,
             ],

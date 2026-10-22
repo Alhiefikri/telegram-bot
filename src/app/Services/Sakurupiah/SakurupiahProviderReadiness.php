@@ -6,6 +6,7 @@ use App\Enums\SakurupiahEnvironment;
 use App\Exceptions\InvalidCheckout;
 use App\Models\ManualPaymentSetting;
 use App\Support\PaymentProvider;
+use App\Support\QueueTopology;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
@@ -547,7 +548,7 @@ final class SakurupiahProviderReadiness
             $invalid['SAKURUPIAH_VERIFICATION_QUEUE'] = 'Sakurupiah verification must use the supervised default queue.';
         }
         if (! $this->supervisorOwnsVerificationQueue()) {
-            $invalid['SAKURUPIAH_SUPERVISOR_QUEUE'] = 'Supervisor must serve the payments and default queues through the release worker.';
+            $invalid['SAKURUPIAH_SUPERVISOR_QUEUE'] = 'Supervisor must serve payments and default through separate release workers.';
         }
 
         return $invalid;
@@ -597,41 +598,34 @@ final class SakurupiahProviderReadiness
 
     private function supervisorWorkerServesVerificationQueue(string $contents): bool
     {
-        $program = '[program:laravel-update-worker]';
-        $start = strpos($contents, $program);
-        if ($start === false) {
-            return false;
+        $paymentsOwned = false;
+        $interactionOwned = false;
+
+        foreach (QueueTopology::supervisorPrograms($contents) as $worker) {
+            $queues = $worker['queues'];
+
+            // Payment verification and Telegram interactions must not share a
+            // worker: a blocking payment job would hold bot updates again.
+            if (in_array(QueueTopology::PAYMENTS, $queues, true)
+                && in_array(QueueTopology::INTERACTIONS, $queues, true)) {
+                return false;
+            }
+
+            // The release worker must consume the runtime queue connection:
+            // omit the connection to inherit QUEUE_CONNECTION, or name that
+            // same connection. A hard-coded foreign connection silently
+            // consumes the wrong queue after a driver migration.
+            if (preg_match('/queue:work\s+(\S+)/', $worker['command'], $connection) === 1
+                && ! str_starts_with($connection[1], '-')
+                && $connection[1] !== trim((string) config('queue.default'))) {
+                continue;
+            }
+
+            $paymentsOwned = $paymentsOwned || in_array(QueueTopology::PAYMENTS, $queues, true);
+            $interactionOwned = $interactionOwned || in_array(QueueTopology::INTERACTIONS, $queues, true);
         }
 
-        $block = substr($contents, $start + strlen($program));
-        $nextProgram = strpos($block, '[program:');
-        if ($nextProgram !== false) {
-            $block = substr($block, 0, $nextProgram);
-        }
-
-        if (preg_match('/^\s*command\s*=\s*(.+)$/m', $block, $matches) !== 1) {
-            return false;
-        }
-
-        $command = trim($matches[1]);
-        if (! str_contains($command, 'queue:work')
-            || ! str_contains($command, '--queue=payments,default')
-        ) {
-            return false;
-        }
-
-        // The release worker must consume the runtime queue connection:
-        // omit the connection to inherit QUEUE_CONNECTION, or name that
-        // same connection. A hard-coded foreign connection silently
-        // consumes the wrong queue after a driver migration.
-        if (preg_match('/queue:work\s+(\S+)/', $command, $matches) === 1
-            && ! str_starts_with($matches[1], '-')
-            && $matches[1] !== trim((string) config('queue.default'))
-        ) {
-            return false;
-        }
-
-        return true;
+        return $paymentsOwned && $interactionOwned;
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\QueueTopology;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -16,16 +17,7 @@ class ReleaseHealthSummary extends Command
     public function handle(): int
     {
         try {
-            $operationalQueues = [
-                'payments',
-                'default',
-                'telegram-outbound',
-                'notifications',
-                'telegram-broadcast',
-                'telegram-stock',
-                'suppliers',
-                (string) config('services.binance.verification_queue', 'binance-verification'),
-            ];
+            $operationalQueues = QueueTopology::operational();
             $queue = $this->queueSummary();
             $queue['operational_queues'] = $operationalQueues;
             $queue['operational'] = $this->queueSummary($operationalQueues);

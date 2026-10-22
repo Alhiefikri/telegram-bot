@@ -61,7 +61,7 @@ final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
         );
         $this->assertSame(TelegramOutboundEffectService::TYPE_RECEIPT_TXT_DOWNLOAD, $effect->effect_type);
         $this->assertSame(TelegramOutboundEffectService::TEMPLATE_RECEIPT_TXT_DOWNLOAD, $effect->template_version);
-        $this->assertSame('notifications', $effect->queue);
+        $this->assertSame(TelegramOutboundEffectService::RECEIPT_QUEUE, $effect->queue);
         $this->assertSame('sendDocument', $effect->telegram_method);
         $this->assertSame(1, $effect->outcome_metadata['product_count']);
         $this->assertSame(1, $effect->outcome_metadata['item_count']);
@@ -77,7 +77,7 @@ final class TelegramReceiptTxtDownloadTest extends TelegramBotTestSupport
         app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
 
         Queue::assertPushedOn(
-            'notifications',
+            TelegramOutboundEffectService::RECEIPT_QUEUE,
             SendTelegramReceiptTxt::class,
             fn (SendTelegramReceiptTxt $job): bool => $job->orderId === $order->id
                 && $job->effectId === $effect->id,

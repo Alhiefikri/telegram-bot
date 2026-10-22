@@ -27,6 +27,7 @@ use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
 use App\Services\Telegram\SalesProofPostFormatter;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PakasirCheckoutFlow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -101,7 +102,7 @@ class PakasirWebhookTest extends TestCase
             $this->assertNotNull($event->processed_at);
             $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::Callback)->count());
             $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->count());
-            Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
+            Queue::assertPushedOn(TelegramOutboundEffectService::RECEIPT_QUEUE, SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
             Queue::assertPushed(SendTelegramReceipt::class, 1);
             Queue::assertPushedOn('notifications', DeleteAdminPendingOrderNotification::class, fn (DeleteAdminPendingOrderNotification $job): bool => $job->orderId === $order->id);
             Queue::assertPushedOn('notifications', SendAdminOrderPaidNotification::class, fn (SendAdminOrderPaidNotification $job): bool => $job->orderId === $order->id);
@@ -134,7 +135,7 @@ class PakasirWebhookTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
-        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
+        Queue::assertPushedOn(TelegramOutboundEffectService::RECEIPT_QUEUE, SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
         Queue::assertPushed(PublishSalesProofPost::class, 1);
         Queue::assertPushed(SendAdminOrderPaidNotification::class, 1);
         $this->assertTrue((bool) CheckoutMaintenanceSetting::query()->firstOrFail()->is_active);
@@ -507,7 +508,7 @@ class PakasirWebhookTest extends TestCase
             $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
             $this->assertSame(1, PaymentEvent::query()->where('event_type', PaymentEventType::Callback)->count());
             $this->assertSame(1, PaymentEvent::query()->whereNotNull('processed_at')->count());
-            Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
+            Queue::assertPushedOn(TelegramOutboundEffectService::RECEIPT_QUEUE, SendTelegramReceipt::class, fn (SendTelegramReceipt $job): bool => $job->orderId === $order->id);
         } finally {
             Carbon::setTestNow();
         }

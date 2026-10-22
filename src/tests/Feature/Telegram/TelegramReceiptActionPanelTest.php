@@ -68,7 +68,7 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
 
         Queue::assertPushedOn(
-            'notifications',
+            TelegramOutboundEffectService::RECEIPT_QUEUE,
             SendTelegramReceiptActionPanel::class,
             fn (SendTelegramReceiptActionPanel $job): bool => $job->orderId === (string) $order->id
                 && $job->effectId === (string) $panel->id,

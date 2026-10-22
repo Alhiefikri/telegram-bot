@@ -1,7 +1,7 @@
 # Paid receipt latency baseline and timing contract
 
 Issue #649 (part of #648). This is local measurement and instrumentation, not a
-production monitor, not a worker-topology change, and not a production SLO.
+production monitor, not a production worker-count claim, and not a production SLO.
 
 ## Why
 
@@ -96,6 +96,7 @@ php artisan telegram:latency-baseline \
   --confirm-disposable \
   --scenario=all \
   --batches=3 --samples=5 --warmup-batches=1 \
+  --worker-topology=split \
   --output=/artifacts/run
 ```
 
@@ -120,16 +121,28 @@ are local fixtures; no real payment or customer message is created.
 
 Each measured order goes through the real checkout/order models, the real paid
 lifecycle, the real receipt effect pipeline and the real admin notice pipeline.
-The queue is a real Redis queue consumed by a real `queue:work notifications`
-process, not `Queue::fake` or a synchronous in-process call.
+The queues are real Redis queues consumed by real `queue:work` processes
+according to the selected topology, not `Queue::fake` or a synchronous
+in-process call.
 
 | Scenario | Dataset / seed | Delay fixture | Worker |
 | --- | --- | --- | --- |
 | `idle` | One local-stock order per sample | none beyond the fixture provider | Redis, queue `notifications`, sleep 3 s, 3 tries, 60 s job timeout |
 | `backlog-expired` | `--backlog` older KlikQRIS payments whose deadline already passed; they stay first in the active-class cursor, so the measured payment is observed after at least one full backlog sweep | none | same |
-| `slow-notification` | One expired admin notification job ahead of the measured orders | fake Telegram latency ≥ 500 ms so the unrelated notification holds the worker | same |
-| `slow-provider` | Same order dataset | KlikQRIS fixture status delay ≥ 500 ms | same |
-| `slow-telegram` | Same order dataset | fake Telegram latency ≥ 500 ms | same |
+| `slow-notification` | One expired admin notification job ahead of the measured orders | fake Telegram latency ≥ 500 ms on the notification worker only, so the unrelated notification holds that worker | split: receipts and notifications; combined: one shared worker |
+| `slow-payment` | One local payment-queue probe followed by one real `/start` Telegram update; measured orders run in parallel | probe occupies the payments queue for 3 s, no provider call | split: default and payments are separate; combined: one `payments,default` worker |
+| `slow-provider` | Same order dataset | KlikQRIS fixture status delay ≥ 500 ms | same as receipt topology |
+| `slow-telegram` | Same order dataset | fake Telegram latency ≥ 500 ms | same as receipt topology |
+
+Worker topology is selected with `--worker-topology=split|combined`:
+
+- `split` starts one worker per queue: `telegram-receipts`, `notifications`,
+  `default` and `payments` (the latter two only when the scenario has an
+  interaction probe). This is the runtime topology used by the application.
+- `combined` reproduces the pre-cutover head-of-line blocking by serving
+  `notifications,telegram-receipts` in one worker and `payments,default` in
+  another. It exists only for comparison and is not a supported runtime
+  topology.
 
 The default provider fixture reports `SUCCESS` for a synthetic order with a
 recorded `paid_at` two seconds before observation. In `backlog-expired`, older
@@ -147,7 +160,7 @@ credentials, tokens, chat payloads or real delivery.
 
 `--batches` 1–10, `--samples` 1–25, `--warmup-batches` 0–3,
 `--interval-ms` 0–10000, `--timeout-seconds` 5–300, `--worker-sleep` 0–5,
-`--backlog` 0–50. The worker exits by `--max-time`, the runner stops it at the
+`--backlog` 0–50. `--worker-topology` is `split` or `combined`. The worker exits by `--max-time`, the runner stops it at the
 end of every scenario, and the script removes containers/network. No cron,
 scheduler or long-running monitor is installed.
 
@@ -184,3 +197,11 @@ a passing one.
 - The runner does not test webhook ingress ACK latency; it measures the payment
   observation → receipt → admin-notice chain. Button ACK remains separated in
   the existing webhook/handler events.
+- Worker peak RSS is sampled from local `queue:work` processes and includes
+  shared mappings and synthetic invoice rendering; it is not `memory.current`
+  and not proof of production cgroup headroom.
+- `combined` exists only to reproduce the old shared-worker shape. It is not a
+  deployable topology.
+- The `slow-payment` probe is a local queue occupant, not a real provider
+  verification call; it measures update pickup behind a payments backlog, not
+  provider latency.

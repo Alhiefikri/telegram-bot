@@ -34,6 +34,17 @@ class TelegramLatencyBaselineCommandTest extends TestCase
             ->assertFailed();
     }
 
+    public function test_runner_rejects_an_unknown_worker_topology(): void
+    {
+        $this->artisan('telegram:latency-baseline', [
+            '--scenario' => 'idle',
+            '--worker-topology' => 'one-big-worker',
+            '--confirm-disposable' => true,
+        ])
+            ->expectsOutputToContain('--worker-topology must be split or combined')
+            ->assertFailed();
+    }
+
     public function test_runner_rejects_unknown_scenarios_and_out_of_bound_options(): void
     {
         $this->artisan('telegram:latency-baseline', [

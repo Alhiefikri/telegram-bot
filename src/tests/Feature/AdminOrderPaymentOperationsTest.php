@@ -22,6 +22,7 @@ use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\Pakasir\PakasirClient;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -122,7 +123,7 @@ class AdminOrderPaymentOperationsTest extends TestCase
 
         app(AdminOrderOperations::class)->resendReceipt($order, $user, '127.0.0.1');
 
-        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn ($job) => $job->orderId === $order->id && $job->force);
+        Queue::assertPushedOn(TelegramOutboundEffectService::RECEIPT_QUEUE, SendTelegramReceipt::class, fn ($job) => $job->orderId === $order->id && $job->force);
         $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'order.receipt_resent', 'subject_id' => (string) $order->id]);
     }
 
@@ -168,7 +169,7 @@ class AdminOrderPaymentOperationsTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $completed->payments->first()->status);
         $this->assertSame(3, $product->fresh()->stock);
         $this->assertSame(0, $product->fresh()->reserved_stock);
-        Queue::assertPushedOn('notifications', SendTelegramReceipt::class, fn ($job) => $job->orderId === $order->id);
+        Queue::assertPushedOn(TelegramOutboundEffectService::RECEIPT_QUEUE, SendTelegramReceipt::class, fn ($job) => $job->orderId === $order->id);
         $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'order.manual_completed', 'subject_id' => (string) $order->id]);
     }
 

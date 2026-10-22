@@ -127,7 +127,7 @@ class AdminOrderOperations
         $effect = $this->outboundEffects->recordReceiptResend($order);
         $this->dispatcher->dispatchExplicitResend($effect);
 
-        $this->audit->log('order.receipt_resent', $order, null, ['queue' => 'notifications'], $user, $ip);
+        $this->audit->log('order.receipt_resent', $order, null, ['queue' => TelegramOutboundEffectService::RECEIPT_QUEUE], $user, $ip);
     }
 
     /**
