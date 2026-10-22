@@ -126,20 +126,22 @@ process, not `Queue::fake` or a synchronous in-process call.
 | Scenario | Dataset / seed | Delay fixture | Worker |
 | --- | --- | --- | --- |
 | `idle` | One local-stock order per sample | none beyond the fixture provider | Redis, queue `notifications`, sleep 3 s, 3 tries, 60 s job timeout |
-| `backlog-expired` | `--backlog` older expired KlikQRIS payments that stay first in the real `klikqris:reconcile` sweep; the measured payment is observed only after at least one full history sweep | none | same |
+| `backlog-expired` | `--backlog` older KlikQRIS payments whose deadline already passed; they stay first in the active-class cursor, so the measured payment is observed after at least one full backlog sweep | none | same |
 | `slow-notification` | One expired admin notification job ahead of the measured orders | fake Telegram latency ≥ 500 ms so the unrelated notification holds the worker | same |
 | `slow-provider` | Same order dataset | KlikQRIS fixture status delay ≥ 500 ms | same |
 | `slow-telegram` | Same order dataset | fake Telegram latency ≥ 500 ms | same |
 
 The default provider fixture reports `SUCCESS` for a synthetic order with a
 recorded `paid_at` two seconds before observation. In `backlog-expired`, older
-synthetic history reports `PENDING` and consumes the command's `max-payments`
+synthetic backlog reports `PENDING` and consumes the command's `max-payments`
 budget first (`--backlog` rows on sweep 1, one candidate on later sweeps), so the
-`provider_observation_ms` boundary includes the real bounded history sweep; the
-cursor is reset once per sample and the fixture never calls the network. Credentials are synthetic
-structured accounts. The report records `provider_status_delay_ms`,
-`telegram_latency_ms`, backlog size, worker queue/sleep/tries/timeout and the
-dataset shape.
+`provider_observation_ms` boundary includes the real bounded backlog sweep; all
+per-class cursors are reset once per sample and the fixture never calls the
+network. Credentials are synthetic structured accounts. The report records
+`provider_status_delay_ms`, `telegram_latency_ms`, backlog size, worker
+queue/sleep/tries/timeout, dataset shape, and `provider_paid_at` /
+`observation_started_at` / `observation_finished_at`; it never records
+credentials, tokens, chat payloads or real delivery.
 
 ### Bounds
 

@@ -8,6 +8,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendTelegramReceipt;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\TelegramOutboundEffect;
@@ -245,7 +246,7 @@ class KlikQrisReconciliationTest extends TestCase
             ->expectsOutputToContain('processed=0 skipped=1 failed=0')
             ->assertSuccessful();
         $this->assertCount(1, $requested);
-        $this->assertNull(Cache::get('klikqris:reconcile:cursor:sandbox'));
+        $this->assertNull(Cache::get('klikqris:reconcile:active:cursor:sandbox'));
 
         // A fresh run starts from the beginning again because the cursor wrapped.
         $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
@@ -349,6 +350,12 @@ class KlikQrisReconciliationTest extends TestCase
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(PaymentStatus::Paid, $payment->order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Expired, $payment->order->fresh()->order_status);
+        $this->assertSame(
+            ManualFulfillmentReview::REASON_LATE_PAYMENT,
+            ManualFulfillmentReview::query()->where('payment_id', $payment->id)->sole()->reason,
+        );
+        Queue::assertNotPushed(SendTelegramReceipt::class);
     }
 
     public function test_command_continues_chunk_after_status_outage_and_sanitizes_output(): void
@@ -375,6 +382,11 @@ class KlikQrisReconciliationTest extends TestCase
             ->assertExitCode(1);
 
         $this->assertSame(PaymentStatus::Pending, $failed->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $failed->order->fresh()->order_status);
+        $this->assertSame(0, PaymentEvent::query()
+            ->where('payment_id', $failed->id)
+            ->where('event_type', 'reconciliation')
+            ->count());
         $this->assertSame(PaymentStatus::Paid, $processed->fresh()->status);
     }
 
@@ -547,6 +559,297 @@ class KlikQrisReconciliationTest extends TestCase
         Artisan::call('schedule:list');
 
         $this->assertStringNotContainsString('klikqris:reconcile --chunk=100', Artisan::output());
+    }
+
+    public function test_active_payment_is_verified_on_the_first_sweep_while_expired_history_still_progresses(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $history = collect(range(1, 20))->map(fn (int $index): Payment => $this->expiredHistoryPayment($index));
+        $active = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-ACTIVE-FIRST',
+            'created_at' => now()->subMinute(),
+            'updated_at' => now()->subMinute(),
+        ]);
+
+        $requested = [];
+        Http::fake(function ($request) use ($active, $history, &$requested) {
+            $requested[] = $request->url();
+            $isActive = str_contains($request->url(), (string) $active->merchant_ref);
+            $payment = $isActive
+                ? $active
+                : $history->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref));
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($payment, [
+                'status' => $isActive ? 'SUCCESS' : 'PENDING',
+            ]), 200);
+        });
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
+            ->expectsOutputToContain('processed=1 skipped=9 failed=0')
+            ->expectsOutputToContain('classes: active[')
+            ->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Paid, $active->fresh()->status);
+        $this->assertCount(10, $requested);
+        $this->assertStringContainsString((string) $active->merchant_ref, $requested[0]);
+        $this->assertGreaterThanOrEqual(
+            1,
+            count(array_filter($requested, fn (string $url): bool => str_contains($url, 'KLIK-HISTORY-'))),
+        );
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_backlog_larger_than_the_quota_still_pays_every_active_payment_on_the_first_sweep(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $history = collect(range(1, 25))->map(fn (int $index): Payment => $this->expiredHistoryPayment($index));
+        $active = collect(range(1, 3))->map(fn (int $index): Payment => $this->payableKlikQrisPayment([
+            'merchant_ref' => sprintf('KLIK-ACTIVE-%02d', $index),
+            'created_at' => now()->subMinutes(4)->addSeconds($index),
+            'updated_at' => now()->subMinutes(4),
+        ]));
+
+        $requested = [];
+        Http::fake(function ($request) use ($active, $history, &$requested) {
+            $requested[] = $request->url();
+            $payment = $active->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref));
+            $isActive = $payment !== null;
+            $payment ??= $history->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref));
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($payment, [
+                'status' => $isActive ? 'SUCCESS' : 'PENDING',
+            ]), 200);
+        });
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
+            ->expectsOutputToContain('processed=3 skipped=7 failed=0')
+            ->assertSuccessful();
+
+        foreach ($active as $payment) {
+            $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        }
+        $this->assertCount(10, $requested);
+        $this->assertGreaterThanOrEqual(
+            1,
+            count(array_filter($requested, fn (string $url): bool => str_contains($url, 'KLIK-HISTORY-'))),
+        );
+        Queue::assertPushed(SendTelegramReceipt::class, 3);
+    }
+
+    public function test_continuous_active_backlog_keeps_expired_history_progressing(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $history = collect(range(1, 20))->map(fn (int $index): Payment => $this->expiredHistoryPayment($index));
+        $active = collect(range(1, 20))->map(fn (int $index): Payment => $this->payableKlikQrisPayment([
+            'merchant_ref' => sprintf('KLIK-ACTIVE-%02d', $index),
+            'created_at' => now()->subMinutes(4)->addSeconds($index),
+            'updated_at' => now()->subMinutes(4),
+        ]));
+
+        Http::fake(function ($request) use ($active, $history) {
+            $payment = $active->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref))
+                ?? $history->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref));
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($payment, ['status' => 'PENDING']), 200);
+        });
+
+        for ($sweep = 1; $sweep <= 4; $sweep++) {
+            $before = Http::recorded()->count();
+            $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')->assertSuccessful();
+            $requests = Http::recorded()->slice($before);
+
+            $this->assertLessThanOrEqual(10, $requests->count());
+            $this->assertGreaterThanOrEqual(
+                1,
+                $requests->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'KLIK-HISTORY-'))->count(),
+                'Expired history must keep receiving a reserved share of every sweep.',
+            );
+            $this->assertGreaterThanOrEqual(
+                1,
+                $requests->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'KLIK-ACTIVE-'))->count(),
+            );
+        }
+    }
+
+    public function test_tiny_sweep_cap_rotates_each_nonempty_class_instead_of_starving_history(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $active = $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-ROT-ACTIVE']);
+        $unknown = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-ROT-UNKNOWN',
+            'status' => PaymentStatus::Failed,
+            'provider_create_state' => 'outcome_unknown',
+        ]);
+        $history = $this->expiredHistoryPayment(1);
+
+        $requested = [];
+        Http::fake(function ($request) use ($active, $unknown, $history, &$requested) {
+            $requested[] = $request->url();
+            $payment = collect([$active, $unknown, $history])
+                ->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref));
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($payment, ['status' => 'PENDING']), 200);
+        });
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+
+        $this->assertCount(3, $requested);
+        $this->assertStringContainsString((string) $active->merchant_ref, $requested[0]);
+        $this->assertStringContainsString((string) $unknown->merchant_ref, $requested[1]);
+        $this->assertStringContainsString((string) $history->merchant_ref, $requested[2]);
+        $this->assertSame(3, count(array_unique($requested)));
+    }
+
+    public function test_outcome_unknown_and_history_keep_reserved_budget_alongside_active_payments(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $active = $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-CLASS-ACTIVE']);
+        $unknown = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-CLASS-UNKNOWN',
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_payload' => null,
+            'provider_create_state' => 'outcome_unknown',
+            'provider_create_last_error' => 'Illuminate\\Http\\Client\\ConnectionException',
+        ]);
+        $history = $this->expiredHistoryPayment(1);
+
+        $requested = [];
+        Http::fake(function ($request) use ($active, $unknown, $history, &$requested) {
+            $requested[] = $request->url();
+            $payment = collect([$active, $unknown, $history])
+                ->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref));
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($payment, [
+                'status' => $payment->is($unknown) ? 'SUCCESS' : 'PENDING',
+            ]), 200);
+        });
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=3')
+            ->expectsOutputToContain('processed=1 skipped=2 failed=0')
+            ->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Pending, $active->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $unknown->fresh()->status);
+        $this->assertSame(PaymentStatus::Expired, $history->fresh()->status);
+        $this->assertCount(3, $requested);
+        foreach ([$active, $unknown, $history] as $payment) {
+            $this->assertGreaterThanOrEqual(
+                1,
+                count(array_filter($requested, fn (string $url): bool => str_contains($url, (string) $payment->merchant_ref))),
+            );
+        }
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_same_created_at_cursor_tie_walks_each_active_payment_once_before_wrapping(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payments = collect(range(1, 2))->map(fn (int $index): Payment => $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-TIE-'.($index === 1 ? 'A' : 'B'),
+        ]));
+        $tie = now()->subMinutes(3);
+        DB::table('payments')->whereIn('id', $payments->pluck('id')->all())->update([
+            'created_at' => $tie,
+            'updated_at' => $tie,
+        ]);
+        $expected = Payment::query()
+            ->whereIn('id', $payments->pluck('id')->all())
+            ->orderBy('id')
+            ->pluck('merchant_ref')
+            ->all();
+
+        $requested = [];
+        Http::fake(function ($request) use ($payments, &$requested) {
+            $requested[] = $request->url();
+            $payment = $payments->first(fn (Payment $payment): bool => str_contains($request->url(), (string) $payment->merchant_ref));
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($payment, ['status' => 'PENDING']), 200);
+        });
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+
+        $this->assertCount(2, $requested);
+        $this->assertStringContainsString($expected[0], $requested[0]);
+        $this->assertStringContainsString($expected[1], $requested[1]);
+        $this->assertSame(2, count(array_unique($requested)));
+
+        // The third sweep walks past the last tied row, finds no more rows,
+        // and wraps the class cursor.
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+        $this->assertCount(2, $requested);
+        $this->assertNull(Cache::get('klikqris:reconcile:active:cursor:sandbox'));
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+        $this->assertCount(3, $requested);
+        $this->assertStringContainsString($expected[0], $requested[2]);
+    }
+
+    public function test_lost_cursor_cache_restarts_the_active_class_from_the_oldest_payment(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $old = $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-LOSS-OLD',
+            'created_at' => now()->subMinutes(3),
+            'updated_at' => now()->subMinutes(3),
+        ]);
+        $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-LOSS-NEW',
+            'created_at' => now()->subMinute(),
+            'updated_at' => now()->subMinute(),
+        ]);
+
+        $requested = [];
+        Http::fake(function ($request) use ($old, &$requested) {
+            $requested[] = $request->url();
+
+            return Http::response(KlikQrisSandboxScenarios::statusPayload($old, ['status' => 'PENDING']), 200);
+        });
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+        $this->assertNotNull(Cache::get('klikqris:reconcile:active:cursor:sandbox'));
+        $this->assertStringContainsString((string) $old->merchant_ref, $requested[0]);
+
+        Cache::flush();
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=1')->assertSuccessful();
+        $this->assertCount(2, $requested);
+        $this->assertStringContainsString((string) $old->merchant_ref, $requested[1]);
+    }
+
+    public function test_repeated_sweep_after_authoritative_success_does_not_duplicate_receipt_or_payment_event(): void
+    {
+        Queue::fake([SendTelegramReceipt::class]);
+        $payment = $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-REPEAT-SUCCESS']);
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200));
+
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
+            ->expectsOutputToContain('processed=1 skipped=0 failed=0')
+            ->assertSuccessful();
+        $this->artisan('klikqris:reconcile --chunk=100 --max-payments=10')
+            ->expectsOutputToContain('processed=0 skipped=0 failed=0')
+            ->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        Http::assertSentCount(1);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+        $this->assertSame(1, PaymentEvent::query()
+            ->where('payment_id', $payment->id)
+            ->where('event_type', 'reconciliation')
+            ->count());
+    }
+
+    private function expiredHistoryPayment(int $index): Payment
+    {
+        return $this->payableKlikQrisPayment([
+            'merchant_ref' => sprintf('KLIK-HISTORY-%02d', $index),
+            'status' => PaymentStatus::Expired,
+            'created_at' => now()->subDays(2)->addSeconds($index),
+            'updated_at' => now()->subMinutes(5),
+        ]);
     }
 
     private function payableKlikQrisPayment(array $attributes = []): Payment

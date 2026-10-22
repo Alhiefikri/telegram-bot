@@ -2,8 +2,10 @@
 
 namespace App\Services\Telegram\LatencyBaseline;
 
+use App\Console\Commands\ReconcileKlikQrisPayments;
 use App\Enums\CredentialAccessMethod;
 use App\Enums\CredentialFormat;
+use App\Enums\KlikQrisEnvironment;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Jobs\SendAdminOrderExpiredNotification;
@@ -436,9 +438,10 @@ final class TelegramLatencyBaseline
         $provider->providerPaidAt = CarbonImmutable::now()->subSeconds(2);
         $sweeps = 0;
 
-        // Start every observation from the oldest provider history, then keep
-        // the cursor so the next sweep can reach the measured payment.
-        Cache::forget('klikqris:reconcile:cursor:sandbox');
+        // Start every observation from the oldest class cursors so repeated
+        // samples cannot inherit a previous sweep position. The pending
+        // backlog remains ahead of the measured payment in the active class.
+        ReconcileKlikQrisPayments::forgetCursors(KlikQrisEnvironment::runtime());
 
         for ($sweep = 1; $sweep <= 4; $sweep++) {
             Artisan::call('klikqris:reconcile', [

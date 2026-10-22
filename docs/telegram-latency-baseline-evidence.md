@@ -49,13 +49,13 @@ observed/payed through the real application owners.
 | Scenario | Additional seed | Delay fixture |
 | --- | --- | --- |
 | `idle` | none | none |
-| `backlog-expired` | 10 older expired KlikQRIS Payments ahead of the measured payment in the real `klikqris:reconcile` sweep | none |
+| `backlog-expired` | 10 older KlikQRIS backlog Payments (pending status, deadline passed) ahead of the measured payment in the real `klikqris:reconcile` active-class sweep | none |
 | `slow-notification` | 1 expired admin notification job ahead of the measured orders | fake Telegram 500 ms |
 | `slow-provider` | none | KlikQRIS fixture status delay 500 ms |
 | `slow-telegram` | none | fake Telegram 500 ms |
 
 The KlikQRIS fixture is a local adapter implementing the real provider contract;
-it performs no HTTP. History rows report `PENDING`, measured rows report
+it performs no HTTP. Backlog rows report `PENDING`, measured rows report
 `SUCCESS` with a recorded `paid_at` two seconds before observation. Receipts use
 synthetic structured credentials and the fake Telegram transport; no real bot
 token or chat is used.
@@ -94,9 +94,12 @@ had 5 cold samples; they are reported separately and excluded here.
 | observation → admin notice ACK | 5093.71 | 6887.59 | 6887.59 |
 
 The observation boundary is dominated by two `klikqris:reconcile` invocations
-(command bootstrap plus 10 history rows on the first sweep, then only the
+(command bootstrap plus 10 backlog rows on the first sweep, then only the
 target). Every measured payment took exactly two sweeps (`observation_sweeps`
-`2`); the cost is command/runtime overhead, not provider HTTP.
+`2`); the cost is command/runtime overhead, not provider HTTP. This run predates
+#650; since #650 all per-class cursors are reset per observation, and these
+pending backlog rows still fill the active-class budget first, so the two-sweep
+shape is expected to remain for this dataset.
 
 ### slow-notification
 
