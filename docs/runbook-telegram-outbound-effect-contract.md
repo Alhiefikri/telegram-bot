@@ -117,13 +117,15 @@ moves wakeups and persisted routing metadata.
    ```
 
    The supervised queues are `default`, `payments`, `telegram-receipts`,
-   `notifications`, `telegram-outbound`, `telegram-broadcast`,
+   `telegram-pins`, `notifications`, `telegram-outbound`, `telegram-broadcast`,
    `telegram-stock`, `binance-verification` and `suppliers`.
 
 If a wakeup is lost, the receipt effect rows are still pending in PostgreSQL.
 `telegram:recover-outbound` redispatches them through the type-based dispatcher,
-which always routes receipt families to `telegram-receipts`. Do not recreate
-receipt content or resend an ambiguous unit by hand.
+which always routes receipt families to `telegram-receipts`. The same sweep
+repairs a sent credential receipt whose optional pin was lost: it applies the
+unchanged pin eligibility and claim rules and never resends the receipt. Do not
+recreate receipt content or resend an ambiguous unit by hand.
 
 Rollback uses the same command in reverse while the receipt worker is stopped:
 

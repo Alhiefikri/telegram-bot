@@ -15,6 +15,8 @@ final class QueueTopology
 
     public const RECEIPTS = 'telegram-receipts';
 
+    public const PINS = 'telegram-pins';
+
     public const NOTIFICATIONS = 'notifications';
 
     public const OUTBOUND = 'telegram-outbound';
@@ -34,6 +36,7 @@ final class QueueTopology
             self::PAYMENTS,
             self::INTERACTIONS,
             self::RECEIPTS,
+            self::PINS,
             self::NOTIFICATIONS,
             self::OUTBOUND,
             self::BROADCAST,

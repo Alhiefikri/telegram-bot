@@ -62,6 +62,8 @@
             <file>tests/Feature/UsdtOrderRefundPostgresConcurrencyTest.php</file>
             <file>tests/Feature/PakasirWebhookTest.php</file>
             <file>tests/Feature/Telegram/TelegramNavigationRootPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/TelegramCredentialPinPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/TelegramReceiptPostgresConcurrencyTest.php</file>
             <file>tests/Feature/CustomerAuthContractPostgresTest.php</file>
             <file>tests/Feature/CustomerPasswordAuthenticationPostgresTest.php</file>
             <file>tests/Feature/CustomerEmailOtpPostgresTest.php</file>

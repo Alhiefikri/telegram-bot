@@ -11,6 +11,7 @@ observation. It is not a production capacity guarantee or a production SLO.
 | `default` | `ProcessTelegramUpdate` from the webhook/recovery ingress | `laravel-update-worker` | sleep 1 s, tries 3, timeout 60 s |
 | `payments` | KlikQRIS webhook wakeup and customer-cancellation reconciliation | `laravel-payment-verification-worker` | sleep 1 s, tries 3, timeout 60 s |
 | `telegram-receipts` | Paid receipt units, successors, text fallback, TXT download, action panel | `laravel-receipt-worker` | sleep 1 s, tries 3, timeout 60 s |
+| `telegram-pins` | Optional credential pin after a receipt was confirmed sent | `laravel-pin-worker` | sleep 3 s, tries 3, timeout 60 s |
 | `notifications` | Credential email, admin Order/review notices, payment proofs, Sales Proof, Store Balance notices, cleanup jobs | `laravel-notification-worker` | sleep 3 s, tries 3, timeout 60 s |
 | `telegram-outbound` | Checkout instructions and other interaction effects | `laravel-outbound-worker` | sleep 1 s, tries 3, timeout 60 s |
 | `telegram-broadcast` | Admin broadcasts, price notifications | `laravel-broadcast-worker` | sleep 1 s, tries 3, timeout 60 s |
@@ -42,6 +43,15 @@ Email, admin notices, proofs, Sales Proof and receipt cleanup remain on
 `notifications`; they are not moved or silently dropped. `default` still owns
 webhook-driven Telegram updates. No credential value is added to a queue
 payload, cache entry or new table.
+
+Issue #652 moves the optional credential pin out of receipt delivery. The
+receipt pipeline persists `sent`, dispatches the successor and wakes the admin
+notice first, then enqueues `PinTelegramCredentialReceipt` on `telegram-pins`.
+That queue is separate from receipts and notifications because the pin's
+transport timeout (10 s response / 3 s connect) previously sat in the receipt
+worker. A failed or lost pin job leaves the Order unpinned; the existing
+`telegram:recover-outbound` sweep repairs it through the same eligibility and
+claim rules. Neither the pin job nor its worker is a delivery state owner.
 
 ## Timeout and retry consistency
 
@@ -97,10 +107,12 @@ process. The 2026-10-22 disposable runs measured:
 | combined, `slow-payment` | 2 | 98.3–99.4 MB | 196.3 MB |
 
 The production app container is capped at 1.50 CPU / 896 MiB and also runs
-PHP-FPM (`pm.max_children=6`) plus nine supervised queue workers. The sample
+PHP-FPM (`pm.max_children=6`) plus ten supervised queue workers. The sample
 is a peak RSS observation, not `memory.current`: it includes shared file-backed
 and opcache mappings per process, so the arithmetic sum overstates physical
 container usage. It is also a local synthetic workload that renders invoices.
+Issue #652 adds the `telegram-pins` worker, so current split runs have one more
+process than the table's worker counts.
 
 Do not treat this table as proof the existing 896 MiB cap has headroom. Before
 any production rollout, capture `docker stats --no-stream` and the app cgroup
@@ -121,6 +133,13 @@ or deployment action.
 - `TelegramReceiptPostgresConcurrencyTest` races two workers on one multi-chunk
   receipt wakeup and asserts each chunk is sent exactly once, in sequence, with
   no attempt consumed by the losing worker.
+- `TelegramCredentialPinTest` covers deferred dispatch, failed-pin recovery,
+  one canonical pointer, unknown/foreign effects and claim lease behavior;
+  `TelegramCredentialPinPostgresConcurrencyTest` races two pin workers.
+- `telegram:latency-baseline --scenario=pin-normal,pin-slow,pin-failed,pin-recovery`
+  records separate pin dispatch/pickup/duration and proves receipt completion
+  and the admin notice are not waiting on the pin. See
+  [the latency evidence](telegram-latency-baseline-evidence.md#issue-652-pin-isolation).
 - A disposable Redis smoke moved two receipt wakeups (one pending, one delayed)
   from `notifications` to `telegram-receipts`, left the admin notice in place,
   and rewrote only the receipt effect metadata. See

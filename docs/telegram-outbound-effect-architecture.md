@@ -133,7 +133,7 @@ transport details, and synchronization of its own read projection:
 | Store Balance top-up payment proof | Manual-rail customer payment proof forwarded to the admin chat with operator approve/reject actions and admin projection | notifications |
 | Store Balance owner alert | Admin alert for top-ups that may carry money but could not be settled automatically, deduplicated per top-up with sanitized diagnostics | notifications |
 | Store Balance top-up channel proof | Public Store Channel photo proof for a settled top-up, reusing the paid-invoice image and masked-buyer caption | notifications |
-| Receipt credentials | Ordered chunk rendering, credential delivery projection, and completion cleanup | telegram-receipts (cleanup: notifications) |
+| Receipt credentials | Ordered chunk rendering, credential delivery projection, and completion cleanup | telegram-receipts (cleanup: notifications; optional pin: telegram-pins) |
 | Admin Order notifications | Pending, paid, and expired admin projections | notifications |
 | Manual payment proof | Proof attachment forwarding and Payment projection | notifications |
 | Sales Proof Post | Store Channel announcement rendering and SalesProofPost projection | notifications |
@@ -148,6 +148,13 @@ text fallback, explicit resend and recovery cannot route a receipt back to
 uses `payments` and never shares the `default` interaction worker. The full
 consumer table, timeout margins and cutover sequence are in
 [the queue topology note](telegram-queue-topology.md).
+
+The optional credential pin is not a ledger effect. After a receipt is
+persisted as `sent` and the successor/admin handoffs are done,
+`ReceiptDeliveryPipeline` enqueues `PinTelegramCredentialReceipt` on
+`telegram-pins`; `telegram:recover-outbound` repairs a lost or failed attempt.
+The pin therefore cannot delay receipt order, admin wakeup, or Order access,
+and an unknown delivery never triggers one.
 
 The principal adapters are
 CheckoutInstructionDeliveryPipeline, ReceiptDeliveryPipeline,

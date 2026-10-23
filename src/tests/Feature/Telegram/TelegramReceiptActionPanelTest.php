@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Jobs\PinTelegramCredentialReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Models\Customer;
 use App\Models\Order;
@@ -18,6 +19,7 @@ use App\Models\User;
 use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\ReceiptActionPanelDeliveryPipeline;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
+use App\Services\Telegram\TelegramCredentialPinService;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectPolicy;
@@ -507,6 +509,9 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($secret, (string) $this->telegramRequestField($photo, 'caption'));
         $this->assertEmpty($this->telegramRequestField($photo, 'reply_markup'));
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        foreach (Queue::pushed(PinTelegramCredentialReceipt::class) as $pinJob) {
+            $pinJob->handle(app(TelegramCredentialPinService::class));
+        }
         $this->assertSame(424499, $order->fresh()->telegram_credential_message_id);
         $panel = TelegramOutboundEffect::query()->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)->sole();
         app(ReceiptActionPanelDeliveryPipeline::class)->deliver($panel);

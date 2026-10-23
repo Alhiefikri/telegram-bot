@@ -61,5 +61,13 @@ class TelegramLatencyBaselineCommandTest extends TestCase
         ])
             ->expectsOutputToContain('--batches must be between 1 and 10')
             ->assertFailed();
+
+        $this->artisan('telegram:latency-baseline', [
+            '--scenario' => 'pin-slow',
+            '--pin-latency-ms' => 50,
+            '--confirm-disposable' => true,
+        ])
+            ->expectsOutputToContain('--pin-latency-ms must be between 100 and 10000')
+            ->assertFailed();
     }
 }

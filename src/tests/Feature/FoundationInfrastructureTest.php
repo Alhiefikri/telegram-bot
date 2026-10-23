@@ -88,10 +88,14 @@ class FoundationInfrastructureTest extends TestCase
         $this->artisan('ops:health --queue-depth')
             ->expectsOutput('Queue payments: depth=0 oldest_age=0s')
             ->expectsOutput('Queue default: depth=1 oldest_age=180s')
-            ->expectsOutput('Queue telegram-outbound: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue telegram-receipts: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue telegram-pins: depth=0 oldest_age=0s')
             ->expectsOutput('Queue notifications: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue telegram-outbound: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-broadcast: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-stock: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue suppliers: depth=0 oldest_age=0s')
+            ->expectsOutput('Queue binance-verification: depth=0 oldest_age=0s')
             ->assertSuccessful();
     }
 

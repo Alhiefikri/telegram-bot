@@ -10,6 +10,7 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Jobs\DeleteBuyerCheckoutMessages;
+use App\Jobs\PinTelegramCredentialReceipt;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Models\Customer;
@@ -34,6 +35,7 @@ use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCredentialDeliveryRenderer;
+use App\Services\Telegram\TelegramCredentialPinService;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMessageChunker;
 use App\Services\Telegram\TelegramMessageUnit;
@@ -386,9 +388,20 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         }
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
         $this->assertCount(
-            1,
+            0,
             Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/pinChatMessage')),
         );
+        Queue::assertPushed(
+            PinTelegramCredentialReceipt::class,
+            fn (PinTelegramCredentialReceipt $job): bool => $job->effectId === (string) $effects->sole()->getKey()
+                && $job->orderId === (string) $order->getKey(),
+        );
+
+        // The pin is optional queued work; this direct call exercises the job
+        // body without changing the receipt delivery assertions above.
+        Queue::pushed(PinTelegramCredentialReceipt::class)->sole()
+            ->handle(app(TelegramCredentialPinService::class));
+
         $pinRequest = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/pinChatMessage'))->sole()[0];
         $this->assertSame((string) $order->customer->telegram_id, (string) $pinRequest['chat_id']);
         $this->assertSame('834001', (string) $pinRequest['message_id']);

@@ -250,7 +250,7 @@ repository root
 - service scheduler yang menjalankan Laravel scheduler tiap menit;
 - Telegram Bot API, KlikQRIS, Binance, and (until the retirement gate passes) Pakasir legacy settlement as external dependencies.
 
-Queue Redis bersifat volatile: restart Redis dapat menghilangkan queued jobs dan session/cache/lock state. Queue operasional dipisah per beban kerja: `default` untuk update/interaksi bot, `payments` untuk verifikasi pembayaran, `telegram-receipts` khusus unit receipt kredensial beserta successor/fallback-nya, `notifications` untuk email/admin notice/proof/cleanup, serta `telegram-outbound`, `telegram-broadcast`, `telegram-stock`, `binance-verification`, dan `suppliers`. `QueueTopology` adalah satu-satunya daftar nama queue yang dipakai health summary, readiness, cutover, dan test consumer. Jangan menggabungkan `payments` dengan `default`, atau receipt dengan `notifications`, karena worker priority tidak mem-preempt job yang sedang berjalan. Detail batas worker, timeout, dan cutover ada di [topologi queue Telegram](../telegram-queue-topology.md).
+Queue Redis bersifat volatile: restart Redis dapat menghilangkan queued jobs dan session/cache/lock state. Queue operasional dipisah per beban kerja: `default` untuk update/interaksi bot, `payments` untuk verifikasi pembayaran, `telegram-receipts` khusus unit receipt kredensial beserta successor/fallback-nya, `telegram-pins` untuk pin kredensial opsional sesudah receipt terkirim, `notifications` untuk email/admin notice/proof/cleanup, serta `telegram-outbound`, `telegram-broadcast`, `telegram-stock`, `binance-verification`, dan `suppliers`. `QueueTopology` adalah satu-satunya daftar nama queue yang dipakai health summary, readiness, cutover, dan test consumer. Jangan menggabungkan `payments` dengan `default`, atau receipt dengan `notifications`, karena worker priority tidak mem-preempt job yang sedang berjalan. Detail batas worker, timeout, dan cutover ada di [topologi queue Telegram](../telegram-queue-topology.md).
 
 ### Isolasi receipt dan verifikasi pembayaran (#651)
 
@@ -274,6 +274,37 @@ database jobs, dry-run), `TelegramReceiptPostgresConcurrencyTest` (dua worker
 pada satu receipt multi-chunk, exactly-once dan fencing), serta
 `TelegramReceiptOutboundEffectTest` untuk ordering/ambiguity. Bukti lokal:
 [telegram-latency-baseline-evidence.md](../telegram-latency-baseline-evidence.md#issue-651-queue-isolation).
+
+### Pin kredensial di luar critical path receipt (#652)
+
+`ReceiptDeliveryPipeline::deliver()` menyimpan transisi `sent`, menjalankan
+successor/cleanup dan admin wakeup, lalu meng-enqueue
+`PinTelegramCredentialReceipt` ke queue `telegram-pins`. Pin tidak lagi dipanggil
+inline, sehingga timeout transport (10 detik respons / 3 detik connect) tidak
+menahan successor maupun notifikasi admin. `TelegramCredentialPinService`
+memuat ulang Order dan effect, mempertahankan eligibility lama (receipt
+kredensial `sent`, chat privat customer yang cocok, message ID valid,
+`contains_credentials`, belum ada pointer), dan memakai klaim atomik
+`telegram_credential_pin_claim_token`/`_claimed_at` (lease 60 detik) supaya
+hanya satu pesan kanonik yang di-pin walau delivery dan recovery berjalan
+bersamaan. Pointer hanya ditulis setelah respons Bot API yang valid dan tidak
+pernah menimpa pointer lain; kegagalan melepas klaim dan meninggalkan Order
+tanpa pin.
+
+`telegram:recover-outbound` tetap menjadi owner pemulihan: ia memindai receipt
+kredensial `sent` tanpa pointer, mengurutkannya per source/sequence, dan
+menerapkan eligibility/klaim yang sama. Replay sesudah sukses tidak memanggil
+Telegram lagi dan tidak memindahkan pointer. Delivery `unknown`/ambiguous tidak
+memicu pin dan tidak di-resend. Worker `laravel-pin-worker` menjalankan queue
+`telegram-pins` terpisah; tidak ada ledger, outbox, tombol Order, threshold 120
+detik atau kontrak notifikasi pembayaran yang berubah.
+
+Verification entry points: `TelegramCredentialPinTest` (dispatch setelah sent,
+tanpa pin untuk unknown, exactly-one, recovery, replay, efek asing/non-kredensial,
+claim lease, satu pesan kanonik) dan
+`TelegramCredentialPinPostgresConcurrencyTest` (dua proses, stale claim).
+`QueueConsumerTopologyTest` memastikan worker pin terpisah. Bukti runtime lokal
+`pin-normal`/`pin-slow`/`pin-failed`/`pin-recovery`: [latency evidence](../telegram-latency-baseline-evidence.md#issue-652-pin-isolation).
 
 Startup menolak cutover selama tabel database queue berisi job; rollback ke driver database menolak berpindah selama queue Redis tidak kosong atau tidak dapat diperiksa. Lihat [ADR 0014](../adr/0014-redis-runtime-state.md) dan [runbook cutover](../runbook-redis-runtime-cutover.md).
 
@@ -868,7 +899,7 @@ fulfillment uses the manual service's fallback handoff. The
 from the committed paid Order if the after-commit dispatch was lost.
 
 
-`ReceiptDeliveryPipeline` marks only the first successful receipt unit whose transient presentation contains credentials, then asks `TelegramCredentialPinService` to pin that message silently. Pin state is stored on `Order` for idempotency; the outbound-effect recovery command retries only the safe pin side effect and never re-sends credentials. `TelegramOrderIntents` presents up to ten customer-owned successful paid orders (`processing`/`completed`) at a time with deterministic newest-first keyset pagination and compact invoice/status buttons; each selected invoice still resolves through the customer-owned detail query. `/status` adds a bounded latest-item preview, payment/order guidance and deadline, a signed invoice payment link for an unexpired pending order, and current/previous-calendar-month paid spending (Order creation month in the application timezone; refunded Orders excluded). Its month buttons open customer-owned lists of all Order states with ten rows per page; compact `om:YYYYMM` cursors retain the month across adjacent older/newer pages and stay within Telegram’s 64-byte callback limit.
+`ReceiptDeliveryPipeline` marks only the first successful receipt unit whose transient presentation contains credentials, then enqueues `PinTelegramCredentialReceipt` on `telegram-pins` after the `sent` transition; `TelegramCredentialPinService` re-checks pin eligibility and writes one canonical pointer under an atomic claim. The pin never gates the successor or admin wakeup. Pin state is stored on `Order` for idempotency; the outbound-effect recovery command retries only the safe pin side effect and never re-sends credentials. `TelegramOrderIntents` presents up to ten customer-owned successful paid orders (`processing`/`completed`) at a time with deterministic newest-first keyset pagination and compact invoice/status buttons; each selected invoice still resolves through the customer-owned detail query. `/status` adds a bounded latest-item preview, payment/order guidance and deadline, a signed invoice payment link for an unexpired pending order, and current/previous-calendar-month paid spending (Order creation month in the application timezone; refunded Orders excluded). Its month buttons open customer-owned lists of all Order states with ten rows per page; compact `om:YYYYMM` cursors retain the month across adjacent older/newer pages and stay within Telegram’s 64-byte callback limit.
 Untuk KlikQRIS, `delivery_outcome=retry_notice_sent` tidak dianggap selesai: ketika customer menekan Check Payment atau reconciliation menemukan Payment yang sama sudah kembali payable, service mematerialisasi effect sequence 2 dan dispatcher mengantrekan ulang QR melalui Payment yang sama. Effect ini hanya dibuat untuk order/payment yang masih pending dan tidak menduplikasi effect awal `qris_sent`.
 
 Balance top-ups follow the store's selected provider rail (`manual`, `klikqris`,

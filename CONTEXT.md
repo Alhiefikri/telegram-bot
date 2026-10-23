@@ -204,6 +204,10 @@ _Avoid_: Store Maintenance, Store Closure
 A durable business delivery unit addressed to a Telegram customer, administrator, recipient, or Store Channel. It represents a customer-visible or operationally important message/media delivery, not every ephemeral Telegram API call.
 _Avoid_: Telegram API request, background message
 
+**Credential Receipt Pin**:
+An optional convenience that pins the first credential-bearing receipt message for an Order in its private customer chat. It is not delivery success, Order access, or a prerequisite for the next receipt unit, receipt completion, or the admin wakeup; at most one canonical message is recorded per Order, and a lost or failed pin is repaired separately.
+_Avoid_: required delivery step, Order button replacement, second receipt
+
 **Ambiguous Telegram Delivery**:
 An outbound effect whose Telegram outcome cannot be proven because the request or response ended in a timeout, connection failure, or worker interruption. It is not treated as a definite send failure.
 _Avoid_: ordinary send failure, retryable Telegram error

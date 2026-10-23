@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Jobs\DeleteBuyerCheckoutMessages;
+use App\Jobs\PinTelegramCredentialReceipt;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Suppliers\SupplierFulfillmentService;
@@ -44,6 +45,8 @@ final class ReceiptDeliveryPipeline
             return;
         }
 
+        $pinEffect = null;
+
         try {
             $order = Order::query()
                 ->with(['customer', 'orderItems.stockItems', 'orderItems.product'])
@@ -76,8 +79,8 @@ final class ReceiptDeliveryPipeline
                 (string) $messageId,
             );
             if ($finalized !== null) {
+                $pinEffect = $finalized;
                 $this->observeSentEffect($finalized, $order);
-                $this->credentialPins->pin($order, $finalized);
                 $this->synchronizeSentProjection($finalized, $order->id);
                 $this->materializeCompletedActionPanel($finalized);
                 if ($dispatchNext) {
@@ -143,6 +146,10 @@ final class ReceiptDeliveryPipeline
             }
         } finally {
             app(AdminOrderNotificationDeliveryPipeline::class)->wakePaidOrder((string) $claimed->source_id);
+        }
+
+        if ($pinEffect !== null) {
+            $this->dispatchCredentialPin($pinEffect);
         }
     }
 
@@ -326,6 +333,39 @@ final class ReceiptDeliveryPipeline
             && $order->customer?->telegram_id !== null
             && ! app(SupplierFulfillmentService::class)->hasExternalHandoff($order)
             && ! app(SupplierFulfillmentService::class)->hasPending($order);
+    }
+
+    /**
+     * The pin is optional convenience work. It is enqueued only after the
+     * receipt was persisted as sent, and a lost dispatch is repaired by
+     * `telegram:recover-outbound`; it never gates the successor or admin wakeup.
+     */
+    private function dispatchCredentialPin(TelegramOutboundEffect $effect): void
+    {
+        $metadata = is_array($effect->outcome_metadata) ? $effect->outcome_metadata : [];
+        if (($metadata['contains_credentials'] ?? false) !== true
+            || ! $this->responseValidator->isValidMessageId($effect->telegram_message_id)) {
+            return;
+        }
+
+        $enqueuedAt = now()->toISOString();
+        DogfoodTiming::log('dogfood.telegram.credential_pin_dispatched', [
+            'order_correlation_id' => DogfoodTiming::correlation($effect->source_id),
+            'effect_correlation_id' => DogfoodTiming::correlation($effect->getKey()),
+            'sequence' => (int) $effect->sequence,
+            'pin_enqueued_at' => $enqueuedAt,
+        ]);
+
+        try {
+            PinTelegramCredentialReceipt::dispatch(
+                (string) $effect->source_id,
+                (string) $effect->getKey(),
+                $enqueuedAt,
+            )->afterCommit();
+        } catch (Throwable $exception) {
+            // The receipt already succeeded; recovery owns a lost pin wakeup.
+            report($exception);
+        }
     }
 
     private function dispatchNextReceiptEffect(TelegramOutboundEffect $effect): void

@@ -12,7 +12,7 @@ use Throwable;
 final class RunTelegramLatencyBaseline extends Command
 {
     protected $signature = 'telegram:latency-baseline
-        {--scenario=idle : idle, backlog-expired, slow-notification, slow-payment, slow-provider, slow-telegram, or all}
+        {--scenario=idle : idle, backlog-expired, slow-notification, slow-payment, slow-provider, slow-telegram, pin-normal, pin-slow, pin-failed, pin-recovery, or all}
         {--batches=1 : Measured batches per scenario (1-10)}
         {--samples=3 : Orders per batch (1-25)}
         {--warmup-batches=1 : Batches reported separately as cold start (0-3)}
@@ -22,6 +22,7 @@ final class RunTelegramLatencyBaseline extends Command
         {--worker-topology=split : split workers per queue, or combined to reproduce the old shared worker}
         {--provider-latency-ms=0 : Local provider status delay for all scenarios (0-5000)}
         {--telegram-latency-ms=0 : Local fake Telegram delay for all scenarios (0-5000)}
+        {--pin-latency-ms=3000 : Local fake Telegram pin delay for pin-slow (100-10000)}
         {--backlog=10 : Provider history rows for backlog-expired (0-50); slow-notification always uses one unrelated row}
         {--output= : Artifact directory}
         {--json : Print the report as JSON}
@@ -90,6 +91,7 @@ final class RunTelegramLatencyBaseline extends Command
         $workerSleep = $this->intOption('worker-sleep', 0, 5);
         $providerLatency = $this->intOption('provider-latency-ms', 0, 5_000);
         $telegramLatency = $this->intOption('telegram-latency-ms', 0, 5_000);
+        $pinLatency = $this->intOption('pin-latency-ms', 100, 10_000);
         $backlog = $this->intOption('backlog', 0, 50);
         $workerTopology = trim((string) $this->option('worker-topology'));
 
@@ -108,6 +110,7 @@ final class RunTelegramLatencyBaseline extends Command
             'worker_topology' => $workerTopology,
             'provider_latency_ms' => $providerLatency,
             'telegram_latency_ms' => $telegramLatency,
+            'pin_latency_ms' => $pinLatency,
             'backlog' => $backlog,
         ];
     }
@@ -161,6 +164,8 @@ final class RunTelegramLatencyBaseline extends Command
                 'worker' => $scenario['worker'],
                 'workers' => $scenario['workers'] ?? [],
                 'interaction_probe' => $scenario['interaction_probe'] ?? null,
+                'pin' => $scenario['pin'] ?? null,
+                'pin_recovery' => $scenario['pin_recovery'] ?? null,
                 'fixture' => $scenario['fixture'],
                 'samples' => $scenario['samples'],
             ], $result['scenarios']),
@@ -187,6 +192,34 @@ final class RunTelegramLatencyBaseline extends Command
                     $probe['pickup_to_processed_ms'] ?? 'unknown',
                     ($probe['picked_up'] ?? false) ? 'yes' : 'no',
                     ($probe['processed'] ?? false) ? 'yes' : 'no',
+                ));
+            }
+
+            if (is_array($scenarioResult['pin'] ?? null)) {
+                $pin = $scenarioResult['pin'];
+                $this->line(sprintf(
+                    'Pin: sample_count=%s attempts=%s pinned=%s failed=%s pin_p50=%s ms pin_p95=%s ms receipt_completion_before_pin_finish=%s admin_ack_before_pin_finish=%s',
+                    (string) ($pin['sample_count'] ?? 'unknown'),
+                    (string) ($pin['attempts'] ?? 'unknown'),
+                    (string) ($pin['pinned'] ?? 'unknown'),
+                    (string) ($pin['failed'] ?? 'unknown'),
+                    $pin['boundaries']['pin_duration_ms']['p50_ms'] ?? 'unknown',
+                    $pin['boundaries']['pin_duration_ms']['p95_ms'] ?? 'unknown',
+                    (string) ($pin['counts']['receipt_completed_before_pin_finished'] ?? 'unknown'),
+                    (string) ($pin['counts']['admin_ack_before_pin_finished'] ?? 'unknown'),
+                ));
+            }
+
+            if (is_array($scenarioResult['pin_recovery'] ?? null)) {
+                $recovery = $scenarioResult['pin_recovery'];
+                $this->line(sprintf(
+                    'Pin recovery: pinned_before=%s pinned_after_first=%s pinned_after_second=%s attempts_first=%s attempts_second=%s pointer_unchanged=%s',
+                    (string) ($recovery['pinned_before_recovery'] ?? 'unknown'),
+                    (string) ($recovery['pinned_after_first_recovery'] ?? 'unknown'),
+                    (string) ($recovery['pinned_after_second_recovery'] ?? 'unknown'),
+                    (string) ($recovery['attempts_first_recovery'] ?? 'unknown'),
+                    (string) ($recovery['attempts_second_recovery'] ?? 'unknown'),
+                    ($recovery['pointer_unchanged_on_replay'] ?? false) ? 'yes' : 'no',
                 ));
             }
 

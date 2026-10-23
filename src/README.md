@@ -453,7 +453,7 @@ Checklist operasional:
 
 Sebelum cutover queue database ke Redis atau rollback kembali ke database, ikuti [runbook Redis runtime](../docs/runbook-redis-runtime-cutover.md) dan [ADR 0014](../docs/adr/0014-redis-runtime-state.md). Redis tidak memakai persistent volume atau AOF/RDB; jangan memulai rollback database saat queue Redis masih berisi pekerjaan.
 
-Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, `laravel-broadcast-worker` handles `telegram-broadcast`, and `laravel-stock-worker` handles `telegram-stock`. Stock intake commits only the durable notification handoff; recipient rendering/materialization runs after commit in bounded batches, so admin stock requests do not hold inventory transactions while querying every Telegram customer.
+Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-payment-verification-worker` handles `payments`, `laravel-receipt-worker` handles `telegram-receipts`, `laravel-pin-worker` handles `telegram-pins`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, `laravel-broadcast-worker` handles `telegram-broadcast`, and `laravel-stock-worker` handles `telegram-stock`. Stock intake commits only the durable notification handoff; recipient rendering/materialization runs after commit in bounded batches, so admin stock requests do not hold inventory transactions while querying every Telegram customer.
 
 Manual checkout notification retry behavior:
 

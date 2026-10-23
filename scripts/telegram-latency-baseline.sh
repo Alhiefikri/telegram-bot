@@ -42,9 +42,9 @@ Artisan options are passed through, e.g.:
   scripts/telegram-latency-baseline.sh --scenario=slow-payment --worker-topology=combined
 
 Worker topology:
-  split      one worker per queue (receipts, notifications, interactions, payments)
-  combined   receipt+notification and payments+interactions share a worker; this
-             reproduces the pre-cutover head-of-line blocking for comparison
+  split      one worker per queue (receipts, pins, notifications, interactions, payments)
+  combined   receipt+notification+pin and payments+interactions share a worker;
+             this reproduces the pre-cutover head-of-line blocking for comparison
 
 This runner clears the disposable Redis queue/cache and never installs a
 scheduler, cron entry or production monitor.

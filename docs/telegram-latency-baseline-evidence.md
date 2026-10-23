@@ -337,3 +337,102 @@ See [the queue topology note](telegram-queue-topology.md#local-resource-observat
   verification job. It measures queue pickup, not provider latency.
 - No production SLO, root-cause claim, deployment, real payment or customer
   message is implied.
+
+## Issue #652 pin isolation
+
+Issue #652 moves the optional credential pin from an inline call inside
+`ReceiptDeliveryPipeline` to a `PinTelegramCredentialReceipt` job on the
+dedicated `telegram-pins` worker. The receipt is persisted as `sent`, the
+successor/cleanup handoffs run, and the admin wakeup is queued before the pin
+is enqueued. This run compares normal, slow, failed and recovered pins on the
+same local runner, dataset and fake Telegram transport.
+
+### Command
+
+```bash
+LATENCY_BASELINE_IMAGE=telegram-bot:php-security-8.4.27 \
+LATENCY_BASELINE_SCENARIO=pin-normal,pin-slow,pin-failed,pin-recovery \
+scripts/telegram-latency-baseline.sh \
+  --batches=2 --samples=3 --warmup-batches=0 \
+  --interval-ms=250 --timeout-seconds=120 \
+  --worker-sleep=1 --worker-topology=split --pin-latency-ms=3000
+```
+
+Run id: `20261022T233736Z-14226` (exit `0`). Environment: PHP 8.4.27,
+Laravel 13.34.0, PostgreSQL 16.15, Redis 7.4.11, app image
+`telegram-bot:php-security-8.4.27`, split topology with real Redis workers for
+`telegram-receipts`, `telegram-pins`, `notifications` and `default`. Six warm
+samples per scenario, no cold-start batch, 250 ms interval. The runner waited
+for both the admin acknowledgement and the pin event in these scenarios.
+
+Dataset: six synthetic paid orders per scenario, one structured local-stock
+credential each, real checkout/paid lifecycle/receipt/admin pipelines, the
+existing KlikQRIS fixture provider, and the local fake Telegram transport.
+`pin-slow` delays only `pinChatMessage` by 3000 ms on the pin worker;
+`pin-failed` makes the same call return HTTP 400; `pin-recovery` stops the
+workers after six failed attempts and runs `telegram:recover-outbound` twice
+with the failure disabled. No real Telegram call, provider call, payment or
+customer message was involved.
+
+### Pin boundaries (warm, n=6 per scenario)
+
+| Scenario | Pin attempts | Pinned | Pin duration p50 / p95 (ms) | Pin queue wait p50 / p95 (ms) | Finished after receipt p50 / p95 (ms) | Finished after admin ACK p50 / p95 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `pin-normal` | 6 | 6 | 6.86 / 23.71 | 403 / 960 | 459 / 1018 | -347 / 603 |
+| `pin-slow` | 6 | 6 | 3014.59 / 3024.19 | 6179 / 14508 | 9233 / 17558 | 8572 / 16553 |
+| `pin-failed` | 6 | 0 | 8.73 / 49.70 | 514 / 932 | 592 / 1182 | 102 / 357 |
+| `pin-recovery` | 12 | 6 | 10.13 / 15.98 | 359 / 889 | 2276 / 3664 | 1485 / 2763 |
+
+A positive `finished after` value means the pin finished later than that
+boundary. In `pin-slow`, every receipt group completed and every admin notice
+was acknowledged 8.5–17.6 s before the corresponding 3 s pin finished. In
+`pin-failed`, the receipt and admin paths completed before or independently of
+the rejected pin; no Order received a pin pointer (`pinned = 0`,
+`pointer_on_credential_effect = 0`). In `pin-recovery`, all six Orders were
+unpinned before recovery, the first bounded recovery pinned all six, the second
+recovery made zero pin calls (`attempts_second_recovery = 0`), and the recorded
+pointer was unchanged (`pointer_unchanged_on_replay = true`).
+
+The pin queue wait grows in `pin-slow` because one pin worker serializes 3 s
+pins. That backlog is isolated to `telegram-pins`; it is not receipt work.
+
+### Receipt and admin boundaries (warm, n=6)
+
+| Scenario | Receipt queue wait p50 (ms) | Pickup → first credential ACK p50 (ms) | Pickup → receipt completion p50 (ms) | Receipt completion → admin notice p50 (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| `pin-normal` | 991 | 222.45 | 223.76 | 664.95 |
+| `pin-slow` | 623 | 182.18 | 183.46 | 660.30 |
+| `pin-failed` | 1675 | 316.54 | 318.36 | 490.14 |
+
+The 3 s pin does not appear in the receipt or admin boundaries; their p50s are
+in the same local range as the normal and failed cases in this run. The
+per-scenario receipt suite had 6/6 complete warm samples and zero failed jobs.
+These are local synthetic samples, not a production SLO.
+
+### Correctness verification
+
+`TelegramCredentialPinTest` covers deferred dispatch after `sent`, successor
+dispatch being queued before the pin work, no pin for an unknown delivery,
+exactly-one pin, failed-pin recovery by `telegram:recover-outbound`, replay
+after success making no additional call, unknown/foreign/non-credential/
+already-pinned effects, the claim lease, and one canonical message across two
+sent credential chunks.
+`TelegramCredentialPinPostgresConcurrencyTest` races two processes and asserts
+exactly one winner, one canonical pointer and stale-claim reclamation.
+
+### Limits
+
+- Six warm samples per scenario, no cold start and no production-equivalent
+  hardware; the numbers are not percentiles for an SLO.
+- The pin delay/failure and all Telegram responses are local fixtures. The
+  fake transport measures queue separation and the application contract, not
+  Telegram's real latency. The Context7 MCP endpoint was not mounted in this
+  environment, so the queue/after-commit behavior was checked against the
+  installed Laravel 13 framework source and the repository's existing
+  Context7-cited queue notes rather than a live Context7 query.
+- `pin-normal` and `pin-failed` can finish the pin before the admin
+  acknowledgement on some samples; only `pin-slow` proves the admin path does
+  not wait for a slow pin, and the receipt boundaries prove the same for
+  delivery.
+- Disposable PostgreSQL/Redis containers and local artifacts only; no CI,
+  deploy, production probe, real payment or customer message was involved.
