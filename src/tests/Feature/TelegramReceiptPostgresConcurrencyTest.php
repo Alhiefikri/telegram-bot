@@ -41,6 +41,10 @@ final class TelegramReceiptPostgresConcurrencyTest extends TestCase
             $this->markTestSkipped('Receipt races require the isolated PostgreSQL concurrency lane.');
         }
 
+        // The receipt notifier refuses to build a payload without a bot token,
+        // and CI intentionally ships an empty .env.
+        config(['services.telegram.token' => 'receipt-race-token']);
+
         $this->assertSame(0, PostgresTestDatabase::migrateFresh());
     }
 
