@@ -739,6 +739,7 @@
   "order.refresh.rate_limited": "Cek status pembayaran dibatasi sementara. Coba lagi dalam :seconds detik.",
   "order.refresh.pakasir_rate_limited": "Baru bisa cek status pembayaran lagi dalam :seconds detik.",
   "order.refresh.unavailable": "Status pembayaran belum bisa dicek otomatis sekarang. Coba lagi nanti.",
+  "order.refresh.pending": "Verifikasi pembayaran sedang diproses. Pesanan tetap sampai statusnya dikonfirmasi provider.",
   "order.refresh.verified": "Status pembayaran dicek ulang dan sudah terverifikasi.",
   "order.refresh.not_paid": "Status pembayaran sudah dicek. Belum ada pembayaran selesai.",
   "receipt.title": "✅ Pembayaran diterima",

@@ -739,6 +739,7 @@
   "order.refresh.rate_limited": "Payment-status checks are temporarily limited. Try again in :seconds seconds.",
   "order.refresh.pakasir_rate_limited": "You can check your payment status again in :seconds seconds.",
   "order.refresh.unavailable": "Payment status cannot be checked automatically right now. Please try again later.",
+  "order.refresh.pending": "Payment verification is pending. The order stays unchanged until the provider confirms its status.",
   "order.refresh.verified": "Payment status was checked again and verified.",
   "order.refresh.not_paid": "Payment status was checked. No completed payment was found.",
   "receipt.title": "✅ Payment received",

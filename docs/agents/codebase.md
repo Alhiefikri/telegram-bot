@@ -275,6 +275,48 @@ pada satu receipt multi-chunk, exactly-once dan fencing), serta
 `TelegramReceiptOutboundEffectTest` untuk ordering/ambiguity. Bukti lokal:
 [telegram-latency-baseline-evidence.md](../telegram-latency-baseline-evidence.md#issue-651-queue-isolation).
 
+### Status provider di luar lock interaksi chat (#653)
+
+`TelegramOrderIntents` hanya membaca snapshot milik Customer, menerapkan rate
+limit KlikQRIS/Pakasir existing, mengantrekan `VerifyProviderPaymentStatus`
+dan menampilkan Payment Verification Pending. Lookup status tidak lagi berada
+di lock `TelegramChatInteractionLock`. Fast callback ACK tetap hanya dimiliki
+`TelegramWebhookIngress`; ACK bukan completion verifikasi.
+
+Job memakai `QueueTopology::PAYMENTS` pada koneksi queue runtime yang sama
+dengan worker #651, bukan koneksi alternatif yang tidak dilayani. Runtime
+memerlukan koneksi asynchronous Redis/database, bukan `sync`. `ShouldBeUnique`
+mengikat satu Payment selama antrean, eksekusi dan retry (lease uniqueness
+600 detik); rate limit tetap membatasi callback setelah job selesai. Timeout
+job 60 detik berada di bawah default Redis `retry_after` 90 detik dan database
+180 detik; tiga percobaan dengan backoff 15/60 detik tidak mengganti retry HTTP
+finansial existing. Profile provider worker adalah `Reconciliation`, bukan
+budget `Interactive` milik handler.
+
+Payload hanya membawa Payment ID, Customer ID, provider dan timestamp enqueue.
+Worker membaca ulang binding Customer/provider dan eligibility sebelum HTTP.
+Hasil authoritative tetap masuk `KlikQrisCallbackProcessor` atau
+`PakasirCallbackProcessor`; Pakasir tidak memperoleh jalur checkout baru.
+Exception tetap dilaporkan oleh worker, retry tidak mengubah Order menjadi
+unpaid/cancelled, dan eskalasi KlikQRIS tetap melalui
+`TelegramKlikQrisRecoveryEscalator`. Rekonsiliasi terjadwal existing memulihkan
+status jika wakeup Redis hilang atau retry habis, tanpa outbox baru.
+
+Completion job tidak memanggil ulang renderer detail dan tidak mengedit root
+atau menu. Karena tidak membawa target render, hasil terlambat tidak dapat
+menimpa root yang sudah diganti. Receipt dan pemulihan QR sequence 2 tetap
+memakai lifecycle/outbound effect existing yang Customer-scoped dan idempotent.
+Customer dapat membuka detail lagi untuk snapshot status terbaru.
+
+Verification entry points: `ProviderStatusVerificationTest`,
+`KlikQrisCheckoutTest`, `WebhookIngressTest`, `KlikQrisWebhookTest`,
+`PakasirWebhookTest` dan kedua reconciliation suite. Kontrak uniqueness
+dicocokkan melalui Context7 dengan
+[Laravel 13 queues](https://github.com/laravel/docs/blob/13.x/queues.md):
+gunakan `ShouldBeUnique`, bukan `ShouldBeUniqueUntilProcessing`, agar lock
+uniqueness tidak dilepas sebelum HTTP selesai. Bukti runtime terisolasi:
+[status refresh smoke](../telegram-latency-baseline-evidence.md#issue-653-status-refresh).
+
 ### Pin kredensial di luar critical path receipt (#652)
 
 `ReceiptDeliveryPipeline::deliver()` menyimpan transisi `sent`, menjalankan

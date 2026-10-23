@@ -739,6 +739,7 @@
   "order.refresh.rate_limited": "Semakan status bayaran dihadkan buat sementara. Cuba lagi dalam :seconds saat.",
   "order.refresh.pakasir_rate_limited": "Anda boleh menyemak status bayaran semula dalam :seconds saat.",
   "order.refresh.unavailable": "Status bayaran belum dapat disemak secara automatik sekarang. Sila cuba lagi nanti.",
+  "order.refresh.pending": "Pengesahan bayaran sedang diproses. Pesanan kekal sehingga statusnya disahkan oleh penyedia.",
   "order.refresh.verified": "Status bayaran telah disemak semula dan disahkan.",
   "order.refresh.not_paid": "Status bayaran telah disemak. Tiada bayaran selesai ditemui.",
   "receipt.title": "✅ Bayaran diterima",

@@ -436,3 +436,95 @@ exactly one winner, one canonical pointer and stale-claim reclamation.
   delivery.
 - Disposable PostgreSQL/Redis containers and local artifacts only; no CI,
   deploy, production probe, real payment or customer message was involved.
+
+## Issue #653 status refresh
+
+Local run on 2026-10-23, PHP 8.4.27 application image
+`telegram-bot:php-security-8.4.27`, PostgreSQL 16.15 and Redis 7.4.11.
+This exercises the current working-tree `src/` mounted in the container.
+
+### Commands and dataset
+
+A temporary PHP harness was run with `docker run --rm --network <disposable-internal-network>
+--entrypoint php telegram-bot:php-security-8.4.27 /tmp/issue653-smoke.php`.
+The runner created its own PostgreSQL/Redis containers on a Docker `--internal`
+network, supplied synthetic database/transport credentials, migrated the
+disposable database, bootstrapped the actual HTTP kernel and drove the webhook.
+`Http::preventStrayRequests()` was installed in both parent and worker
+processes. Only the exact local-fixture KlikQRIS/Pakasir status URLs and
+Telegram Bot API URLs had HTTP fakes. No external traffic was permitted by
+the Docker network.
+
+Dataset: one synthetic Customer and one pending 1,000-IDR Order/Payment per
+provider, with no Order Items or real credentials. KlikQRIS payable total:
+1,016 IDR. Pakasir records were inserted as historical fixtures; no Pakasir
+checkout was created. Each Customer submitted eight distinct Check callbacks,
+then `/start` while its provider lookup was sleeping for four seconds.
+
+The harness used real `queue:work redis --queue=default --once
+--stop-when-empty` calls for updates and a separate PHP process running
+`queue:work redis --queue=payments --once --stop-when-empty --sleep=0` for
+verification. It waited for the provider-start marker before submitting
+`/start`, and asserted that the next update finished before the provider-end
+marker existed. All transport responses were local fixtures.
+
+### Observations (one sample per provider, milliseconds)
+
+| Provider | Check webhook ACK | Check handler completion | Next webhook ACK | Next action completion | Provider I/O |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| KlikQRIS | 122.72 | 583.75 | 7.91 | 89.13 | 4001.00 |
+| Pakasir | 5.18 | 44.00 | 13.17 | 79.79 | 4000.80 |
+
+Each set of eight checks left exactly one queued verification. Both provider
+jobs settled through the existing processor, leaving one processed settlement
+event per Payment, no failed jobs and the newer Home root unchanged. The
+initial handler made no provider request. ACK was the webhook response
+`answerCallbackQuery`, not a second Bot API acknowledgement.
+
+Before the code change, the new asynchronous regression failed at
+`Http::assertNotSent()` because the detail handler had already requested the
+provider status. After the change, verification occurs only when the
+`payments` worker runs. The temporary harness and disposable containers were
+removed after verification.
+
+### Regression commands and results
+
+```bash
+cd src
+php artisan test --compact tests/Feature/Telegram \
+  tests/Feature/KlikQrisWebhookTest.php tests/Feature/PakasirWebhookTest.php \
+  tests/Feature/KlikQrisReconciliationTest.php tests/Feature/PakasirReconciliationTest.php
+```
+
+Broader integrated run: 1,187 passed, 5 skipped, 11,954 assertions. This includes
+the existing Binance/BSC Telegram contracts; it is not a full-repository test
+claim.
+
+Final focused run after adding timeout/lost-wakeup cases and cleanup:
+
+```bash
+php artisan test --compact \
+  tests/Feature/Telegram/ProviderStatusVerificationTest.php \
+  tests/Feature/Telegram/KlikQrisCheckoutTest.php \
+  tests/Feature/Telegram/WebhookIngressTest.php \
+  tests/Feature/KlikQrisWebhookTest.php tests/Feature/PakasirWebhookTest.php \
+  tests/Feature/KlikQrisReconciliationTest.php tests/Feature/PakasirReconciliationTest.php
+```
+
+Result: 157 passed, 1,206 assertions. New cases cover per-Payment coalescing,
+once-only settlement, timeout and HTTP 503 retry/recovery, lost verification
+wakeup recovered by the existing reconciliation commands, foreign invoices,
+worker Customer/provider rebinding rejection and newer navigation roots.
+The final targeted `vendor/bin/pint --test` passed for the job, intent and two
+changed Telegram test files. All three pending-state locale JSON files parsed.
+
+### Limits
+
+These single local samples prove queue consumption and same-chat lock
+separation, not production latency, provider availability, financial/provider
+qualification or end-to-end credential delivery. Inventory and receipt
+idempotency remain covered by the payment webhook regression suites, not by
+the itemless runtime dataset. No CI/CD operation, deployment, production
+access, real payment or customer message was performed. Context7 was queried
+live for Laravel 13 unique-job behavior; its reference is linked in the
+codebase guide.

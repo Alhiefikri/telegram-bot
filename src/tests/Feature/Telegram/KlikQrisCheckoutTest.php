@@ -357,10 +357,13 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
 
         $checkoutEffect = TelegramOutboundEffect::query()->sole();
         $this->assertSame('retry_notice_sent', $checkoutEffect->outcome_metadata['delivery_outcome'] ?? null);
+        config()->set('queue.default', 'database');
 
         $this->postTelegramWebhook($this->callbackUpdate(9004, 'cb-recover', 'order:INV-KLIK-RECOVER'))
             ->assertOk();
         $this->processQueuedTelegramWebhookJob();
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/qris/status/INV-KLIK-RECOVER'));
+        $this->artisan('queue:work --once --queue=payments --stop-when-empty')->assertSuccessful();
         $this->assertNotEmpty(Http::recorded(fn (Request $request): bool => str_contains($request->url(), '/qris/status/INV-KLIK-RECOVER')));
         $this->assertSame($qrisUrl, $payment->fresh()->provider_qris_url);
         $this->artisan('queue:work --once --queue=telegram-outbound --stop-when-empty')->assertSuccessful();
@@ -474,9 +477,10 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertNull($order->fresh()->manual_checkout_customer_notified_at);
     }
 
-    public function test_telegram_order_detail_refreshes_klikqris_success_before_rendering_without_calling_pakasir(): void
+    public function test_telegram_order_detail_queues_klikqris_verification_without_calling_pakasir(): void
     {
         KlikQrisSandboxScenarios::configureReadySandbox();
+        config()->set('queue.default', 'database');
         $this->mock(PakasirProviderAdapter::class)
             ->shouldReceive('transactionDetail')
             ->never();
@@ -518,19 +522,22 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(9001, 'cb-detail', 'order:INV-KLIK-DETAIL'))
             ->assertOk();
         $this->processQueuedTelegramWebhookJob();
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/qris/status/'));
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+        $this->artisan('queue:work database --once --queue=payments --stop-when-empty')->assertSuccessful();
 
         $this->assertSame(PaymentStatus::Paid, $order->payments()->first()->fresh()->status);
         $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
         $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
         $this->assertNotEmpty($sendMessages);
         $detailBody = $sendMessages->last()[0]->body();
-        $this->assertStringContainsString('Payment has been received', $detailBody);
         $this->assertStringNotContainsString('secret-signature-token', $detailBody);
     }
 
     public function test_telegram_klikqris_pending_outage_and_rate_limit_return_current_detail_safely(): void
     {
         KlikQrisSandboxScenarios::configureReadySandbox();
+        config()->set('queue.default', 'database');
         config()->set('services.klikqris.status_refresh_rate_limit_per_minute', 1);
         $this->mock(PakasirProviderAdapter::class)
             ->shouldReceive('transactionDetail')
@@ -580,9 +587,8 @@ class KlikQrisCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(PaymentStatus::Pending, $order->payments()->first()->fresh()->status);
         $sendMessages = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage'));
         $body = $sendMessages->last()[0]->body();
-        $this->assertStringContainsString('temporarily limited', $body);
-        $this->assertStringContainsString('awaiting payment', $body);
         $this->assertStringNotContainsString('secret-signature-token', $body);
+        $this->artisan('queue:work --once --queue=payments --stop-when-empty')->assertSuccessful();
         Http::assertSent(function (Request $request): bool {
             return str_contains($request->url(), '/qris/status/INV-KLIK-PENDING');
         });

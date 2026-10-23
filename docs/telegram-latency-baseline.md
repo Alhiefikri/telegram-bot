@@ -50,6 +50,17 @@ Button ACK is separate from action completion:
 - `dogfood.telegram.handler_finished` carries `action_completed_at`; it measures
   the queued handler/action result.
 
+For KlikQRIS and historical Pakasir Order checks (#653), handler completion
+means the current snapshot and verification-pending notice were rendered,
+not that provider verification finished. `VerifyProviderPaymentStatus` runs
+on the separate `payments` worker. Its
+`dogfood.telegram.provider_status_job_picked_up` event records enqueue/pickup
+timestamps and queue wait, correlated by Payment digest; authoritative
+observation and paid commit retain their existing lifecycle events.
+The job does not re-render a saved navigation target after completion.
+See the [isolated slow-provider smoke](telegram-latency-baseline-evidence.md#issue-653-status-refresh)
+for separately measured ACK, handler completion and provider I/O.
+
 ## Enqueue stages
 
 `SendTelegramReceipt` records the stage and reason supplied by its dispatcher:
