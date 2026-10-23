@@ -265,6 +265,32 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame($hash, $payment->fresh()->bscDetail->current_tx_hash);
     }
 
+    public function test_reused_amount_ignores_a_transfer_from_before_the_new_invoice(): void
+    {
+        $this->freezeTime();
+        $payment = $this->payment();
+        $payment->bscDetail()->update([
+            'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+        ]);
+        $oldHash = '0x'.str_repeat('1', 64);
+        $newHash = '0x'.str_repeat('2', 64);
+        $this->configureReceipt($payment, $oldHash, blockNumber: 99, blockTimestamp: $payment->created_at->copy()->subSecond());
+        $this->configureReceipt($payment, $newHash, blockTimestamp: $payment->created_at->copy()->addSecond());
+        foreach ([$oldHash, $newHash] as $hash) {
+            $receipt = $this->rpc->receipts[$hash];
+            $log = $receipt['logs'][0];
+            $log['transactionHash'] = $hash;
+            $log['blockNumber'] = $receipt['blockNumber'];
+            $this->rpc->logs[] = $log;
+        }
+
+        $result = app(BscPaymentVerification::class)->verify($payment);
+
+        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
+        $this->assertSame($newHash, $payment->fresh()->provider_reference);
+        $this->assertSame(0, ManualFulfillmentReview::count());
+    }
+
     public function test_exact_transfer_stays_confirming_until_three_confirmations_then_claims_once(): void
     {
         $payment = $this->payment();
@@ -768,6 +794,66 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame($newHash, $detail->current_tx_hash);
         $this->assertSame(2, $detail->tx_submission_version);
         $this->assertSame(PaymentBscDetail::STATUS_TX_SUBMITTED, $detail->verification_status);
+    }
+
+    public function test_expiry_checks_for_an_on_time_transfer_before_releasing_the_order(): void
+    {
+        Queue::fake();
+        $this->freezeTime();
+        $payment = $this->payment();
+        $deadline = now()->subSeconds(10);
+        $payment->update(['expired_at' => $deadline]);
+        $payment->order->update(['expires_at' => $deadline]);
+        $payment->bscDetail()->update([
+            'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+        ]);
+        $hash = '0x'.str_repeat('9', 64);
+        $this->configureReceipt($payment, $hash, blockTimestamp: $deadline->copy()->subSecond());
+        $log = $this->rpc->receipts[$hash]['logs'][0];
+        $log['transactionHash'] = $hash;
+        $log['blockNumber'] = '0x64';
+        $this->rpc->logs = [$log];
+
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->order->payment_status);
+        $this->assertDatabaseCount('manual_fulfillment_reviews', 0);
+    }
+
+    public function test_expiry_keeps_the_order_pending_when_rpc_cannot_establish_payment_status(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $payment->update(['expired_at' => now()->subSeconds(10)]);
+        $payment->order->update(['expires_at' => now()->subSeconds(10)]);
+        $payment->bscDetail()->update([
+            'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+        ]);
+        $this->rpc->blocks['latest'] = null;
+
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $payment->fresh()->order->order_status);
+        $this->assertSame(PaymentBscDetail::STATUS_PROVIDER_ERROR, $payment->fresh()->bscDetail->verification_status);
+    }
+
+    public function test_expiry_releases_an_unpaid_order_after_a_successful_chain_scan(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $payment->update(['expired_at' => now()->subSeconds(10)]);
+        $payment->order->update(['expires_at' => now()->subSeconds(10)]);
+        $payment->bscDetail()->update([
+            'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+        ]);
+        $this->rpc->blocks['latest'] = $this->block(102, now());
+
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $payment->fresh()->order->order_status);
     }
 
     private function payment(string $address = '0x1111111111111111111111111111111111111111'): Payment

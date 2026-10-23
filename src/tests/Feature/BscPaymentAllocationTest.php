@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\BscReceiverVerificationStatus;
-use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\BscPaymentReceiver;
 use App\Models\Cart;
@@ -17,7 +16,9 @@ use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\OrderLifecycle;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\BscTransferLogRpcStub;
 use Tests\TestCase;
 
@@ -122,7 +123,7 @@ class BscPaymentAllocationTest extends TestCase
         $product = Product::factory()->create([
             'stock' => 2,
             'reserved_stock' => 0,
-            'usdt_price_amount' => 1_000_000,
+            'usdt_price_amount' => 3_600_000,
         ]);
 
         $first = app(OrderCheckoutService::class)->checkout(
@@ -137,14 +138,15 @@ class BscPaymentAllocationTest extends TestCase
         $payments = Payment::query()->whereIn('order_id', [$first->id, $second->id])->get();
 
         $this->assertCount(2, $payments);
-        $this->assertSame([1_000_000, 1_000_100], $payments->pluck('amount')->sort()->values()->all());
+        $this->assertSame([3_600_000, 3_601_000], $payments->pluck('amount')->sort()->values()->all());
         $this->assertSame(
-            [1_000_000, 1_000_100],
+            [3_600_000, 3_601_000],
             PaymentBscDetail::query()->whereIn('payment_id', $payments->pluck('id'))->pluck('payable_amount_micro')->sort()->values()->all(),
         );
     }
 
-    public function test_recent_bsc_payments_keep_amounts_reserved_for_late_scans(): void
+    #[DataProvider('closedOrderTransitions')]
+    public function test_a_closed_bsc_order_releases_its_amount_for_a_new_checkout(string $transition): void
     {
         $this->activeReceiver('0x2222222222222222222222222222222222222222');
         $product = Product::factory()->create([
@@ -157,16 +159,74 @@ class BscPaymentAllocationTest extends TestCase
             $this->cartForProduct($product),
             CheckoutPaymentIntents::usdtBep20(),
         );
-        $firstPayment = $first->payments()->sole();
-        $firstPayment->forceFill(['status' => PaymentStatus::Expired])->save();
-        $firstPayment->bscDetail()->update(['verification_status' => PaymentBscDetail::STATUS_EXPIRED]);
+        if ($transition === 'paid') {
+            app(OrderLifecycle::class)->applyPaymentPaid($first->payments()->sole());
+        } elseif ($transition === 'expired') {
+            $first->update(['expires_at' => now()->subMinute()]);
+            $first->payments()->sole()->update(['expired_at' => now()->subMinute()]);
+            app(OrderLifecycle::class)->applyPendingExpiry($first->fresh());
+        } else {
+            app(OrderLifecycle::class)->applyPendingCancellation($first);
+        }
 
         $second = app(OrderCheckoutService::class)->checkout(
             $this->cartForProduct($product),
             CheckoutPaymentIntents::usdtBep20(),
         );
 
-        $this->assertSame(1_000_100, $second->payments()->sole()->amount);
+        $this->assertSame(1_000_000, $second->payments()->sole()->amount);
+    }
+
+    public static function closedOrderTransitions(): array
+    {
+        return [
+            'paid' => ['paid'],
+            'expired' => ['expired'],
+            'cancelled' => ['cancelled'],
+        ];
+    }
+
+    public function test_three_active_checkouts_use_readable_milli_usdt_steps(): void
+    {
+        $this->activeReceiver('0x2222222222222222222222222222222222222222');
+        $product = Product::factory()->create([
+            'stock' => 3,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 3_600_000,
+        ]);
+
+        $amounts = [];
+        for ($i = 0; $i < 3; $i++) {
+            $order = app(OrderCheckoutService::class)->checkout(
+                $this->cartForProduct($product),
+                CheckoutPaymentIntents::usdtBep20(),
+            );
+            $amounts[] = $order->payments()->sole()->amount;
+        }
+
+        $this->assertSame([3_600_000, 3_601_000, 3_602_000], $amounts);
+    }
+
+    public function test_an_old_but_still_pending_bsc_order_keeps_its_amount(): void
+    {
+        $this->activeReceiver('0x2222222222222222222222222222222222222222');
+        $product = Product::factory()->create([
+            'stock' => 2,
+            'reserved_stock' => 0,
+            'usdt_price_amount' => 3_600_000,
+        ]);
+        $first = app(OrderCheckoutService::class)->checkout(
+            $this->cartForProduct($product),
+            CheckoutPaymentIntents::usdtBep20(),
+        );
+        $first->payments()->sole()->forceFill(['created_at' => now()->subHours(73)])->save();
+
+        $second = app(OrderCheckoutService::class)->checkout(
+            $this->cartForProduct($product),
+            CheckoutPaymentIntents::usdtBep20(),
+        );
+
+        $this->assertSame(3_601_000, $second->payments()->sole()->amount);
     }
 
     public function test_pending_or_rejected_receiver_can_never_be_assigned(): void

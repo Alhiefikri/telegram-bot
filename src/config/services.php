@@ -71,8 +71,6 @@ return [
         'rpc_max_attempts' => 2,
         'rpc_retry_delay_ms' => 150,
         'pending_backlog_alert_threshold' => 50,
-        'late_payment_lookback_hours' => 72,
-        'amount_unique_increment_micro' => 100,
         'log_scan_blocks_per_second' => 3,
         // Keep the default within common managed BSC RPC eth_getLogs limits.
         'log_scan_chunk_blocks' => 1_000,

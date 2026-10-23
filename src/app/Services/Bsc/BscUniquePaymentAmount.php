@@ -4,25 +4,24 @@ declare(strict_types=1);
 
 namespace App\Services\Bsc;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Payment;
 
 /**
- * Allocates a deterministic micro-USDT suffix while the payment setting row
- * is locked by the checkout transaction. Recent BSC payments of every
- * verification mode occupy their amount so late transfer-log scans cannot
- * attribute a reused amount to the wrong invoice.
+ * Keeps the catalog amount when free, then tries 0.001-USDT steps.
+ * Checkout holds the payment-setting row lock across allocation and insert.
+ * Only pending Payments on pending Orders occupy an amount.
  */
 final class BscUniquePaymentAmount
 {
-    private const INCREMENT_MICRO = 100;
+    private const INCREMENT_MICRO = 1_000;
 
     private const CANDIDATE_BATCH_SIZE = 1_000;
 
     public function allocate(int $baseAmountMicro): int
     {
-        $increment = max(1, (int) config('services.bsc.amount_unique_increment_micro', self::INCREMENT_MICRO));
-        $lookbackHours = max(1, (int) config('services.bsc.late_payment_lookback_hours', 72));
-        $minimumCreatedAt = now()->subHours($lookbackHours);
+        $increment = self::INCREMENT_MICRO;
         if ($baseAmountMicro < 1) {
             return $baseAmountMicro;
         }
@@ -32,7 +31,8 @@ final class BscUniquePaymentAmount
             $occupied = Payment::query()
                 ->where('provider', 'manual')
                 ->where('method', 'USDT_BEP20')
-                ->where('created_at', '>=', $minimumCreatedAt)
+                ->where('status', PaymentStatus::Pending->value)
+                ->whereHas('order', fn ($order) => $order->where('order_status', OrderStatus::PendingPayment->value))
                 ->whereHas('bscDetail')
                 ->whereBetween('amount', [$rangeStart, $rangeEnd])
                 ->orderBy('amount')

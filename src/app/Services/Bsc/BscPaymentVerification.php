@@ -1366,12 +1366,32 @@ final class BscPaymentVerification
             )];
         }
 
-        return $this->reader->inspectTransferLogs(
+        $inspection = $this->reader->inspectTransferLogs(
             logs: $logs,
             expectedContract: (string) $detail->token_contract,
             expectedReceiver: (string) $detail->receiver_address,
             expectedAmountUnits: (string) $detail->expected_token_units,
         );
+
+        // Closed invoices release their amount. Older transfers in the scan's
+        // clock-skew window must not compete with this invoice's deposit.
+        $blockTimestamps = [];
+        $exactTransfers = [];
+        foreach ($inspection->exactTransfers as $transfer) {
+            if (! isset($blockTimestamps[$transfer->blockNumber])) {
+                $block = $this->rpc->blockByNumber($transfer->blockNumber);
+                $timestamp = $this->blockTimestamp($block['timestamp'] ?? null);
+                if ($timestamp === null || $this->blockNumber($block['number'] ?? null) !== $transfer->blockNumber) {
+                    throw new BscRpcException('BSC RPC returned incomplete transfer-block facts.');
+                }
+                $blockTimestamps[$transfer->blockNumber] = $timestamp->timestamp;
+            }
+            if ($blockTimestamps[$transfer->blockNumber] >= $createdAt->timestamp) {
+                $exactTransfers[] = $transfer;
+            }
+        }
+
+        return new BscTransferInspection($inspection->receiptState, $inspection->transfers, $exactTransfers);
     }
 
     private function ambiguousAmountUniqueTransfer(

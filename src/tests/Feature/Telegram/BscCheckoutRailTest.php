@@ -3,6 +3,7 @@
 namespace Tests\Feature\Telegram;
 
 use App\Enums\TelegramOutboundEffectState;
+use App\Jobs\ForwardManualPaymentProof;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendTelegramReceipt;
@@ -392,6 +393,31 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         Queue::assertNotPushed(VerifyBscPayment::class);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'no transaction hash is needed'));
+    }
+
+    public function test_payment_screenshot_triggers_chain_verification_not_manual_approval(): void
+    {
+        Queue::fake([
+            VerifyBscPayment::class,
+            SendBscCheckoutInstructions::class,
+            ForwardManualPaymentProof::class,
+        ]);
+        $this->fakeTelegramHttp();
+        ManualPaymentSetting::current()->update(['admin_telegram_chat_id' => '999']);
+        $customer = Customer::factory()->create(['telegram_id' => 12345, 'locale' => 'en']);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'usdt_price_amount' => 3_600_100]);
+        $cartService = app(CartService::class);
+        $cart = $cartService->activeCartFor($customer);
+        $cartService->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::usdtBep20());
+        $payment = $order->payments()->sole();
+
+        $this->postTelegramWebhook($this->paymentPhotoUpdate(9030, $order->invoice_number))->assertOk();
+
+        $this->assertNull($payment->fresh()->payment_proof_submitted_at);
+        $this->assertFalse(TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF)->exists());
+        Queue::assertPushed(VerifyBscPayment::class, fn (VerifyBscPayment $job): bool => $job->paymentId === $payment->id);
     }
 
     /** @return array{nonce: ?string, callbacks: list<string>} */

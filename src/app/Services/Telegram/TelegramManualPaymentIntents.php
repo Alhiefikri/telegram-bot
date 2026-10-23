@@ -12,6 +12,8 @@ use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Admin\AdminOrderOperations;
 use App\Services\Binance\BinancePaymentVerification;
+use App\Services\Bsc\BscPaymentVerification;
+use App\Services\Bsc\BscVerificationOutcome;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +43,39 @@ class TelegramManualPaymentIntents
                 $chatId,
                 $this->locale->translate($customer, $invoice === '' ? 'payment.proof.no_pending' : 'payment.proof.invoice_not_found'),
             );
+
+            return;
+        }
+
+        $bscPayment = $order->payments()
+            ->where('provider', 'manual')
+            ->where('method', 'USDT_BEP20')
+            ->first();
+        if ($bscPayment !== null) {
+            $verification = app(BscPaymentVerification::class);
+            try {
+                $verification->queueForStatusRefresh($bscPayment);
+                $status = $verification->status($bscPayment);
+                $key = match ($status->outcome) {
+                    BscVerificationOutcome::Confirmed,
+                    BscVerificationOutcome::AlreadyPaid => 'payment.bsc.already_paid',
+                    BscVerificationOutcome::Mismatch,
+                    BscVerificationOutcome::TransactionAlreadyUsed,
+                    BscVerificationOutcome::ManualReview => 'payment.bsc.manual_review',
+                    BscVerificationOutcome::Expired => 'payment.bsc.expired',
+                    BscVerificationOutcome::ProviderError => 'payment.bsc.provider_error',
+                    default => $status->verificationMode === 'amount_unique'
+                        ? 'payment.bsc.amount_unique_prompt'
+                        : 'payment.bsc.hash_prompt',
+                };
+            } catch (\Throwable $exception) {
+                report($exception);
+                $key = 'payment.bsc.provider_error';
+            }
+            $this->forgetPendingProofPhoto($customer);
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, $key, [
+                'invoice' => $order->invoice_number,
+            ]));
 
             return;
         }

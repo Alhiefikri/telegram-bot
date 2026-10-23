@@ -5,6 +5,8 @@ namespace App\Console\Commands;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
+use App\Services\Bsc\BscPaymentVerification;
+use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\OrderLifecycle;
 use App\Services\Telegram\TelegramOrderExpiredNotifier;
 use Illuminate\Console\Command;
@@ -16,7 +18,7 @@ class ExpirePendingOrders extends Command
 
     protected $description = 'Expire due pending-payment orders and release reservations.';
 
-    public function handle(OrderLifecycle $orders, TelegramOrderExpiredNotifier $notifier): int
+    public function handle(OrderLifecycle $orders, TelegramOrderExpiredNotifier $notifier, BscPaymentVerification $bsc): int
     {
         $processed = 0;
         $skipped = 0;
@@ -34,9 +36,31 @@ class ExpirePendingOrders extends Command
                 ->where('binance_auto_verification_enabled', true)
                 ->whereNotNull('binance_verification_grace_until')
                 ->where('binance_verification_grace_until', '>', now()))
-            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, $notifier, &$processed, &$skipped, &$failed, &$expiredThisRun): void {
+            ->chunkById((int) $this->option('chunk'), function ($chunk) use ($orders, $notifier, $bsc, &$processed, &$skipped, &$failed, &$expiredThisRun): void {
                 foreach ($chunk as $order) {
                     try {
+                        // Inspect outside lifecycle locks: the background reconciler
+                        // may not have observed an on-time transfer yet.
+                        $bscPayment = $order->payments()
+                            ->where('provider', 'manual')
+                            ->where('method', 'USDT_BEP20')
+                            ->where('status', PaymentStatus::Pending->value)
+                            ->first();
+                        if ($bscPayment !== null) {
+                            $verification = $bsc->verify($bscPayment);
+                            $order->refresh();
+                            if ($order->order_status !== OrderStatus::PendingPayment
+                                || in_array($verification->outcome, [
+                                    BscVerificationOutcome::ProviderError,
+                                    BscVerificationOutcome::NotConfigured,
+                                    BscVerificationOutcome::StaleSubmission,
+                                ], true)) {
+                                $skipped++;
+
+                                continue;
+                            }
+                        }
+
                         $result = $orders->applyPendingExpiry($order);
                         if ($result->order === null || ! $result->newlyApplied) {
                             $skipped++;
