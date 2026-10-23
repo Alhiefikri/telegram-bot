@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\SakurupiahEnvironment;
 use App\Models\Payment;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderLookupBudget;
@@ -35,6 +36,19 @@ final class ReconcileSakurupiahPayments extends Command
         TelegramOutboundEffectService $outboundEffects,
         TelegramOutboundEffectDispatcher $outboundEffectDispatcher,
     ): int {
+        return ProviderVerificationProfiles::until($this->executionDeadline(), fn (): int => $this->reconcile(
+            $processor, $readiness, $reconciliationQuery, $lifecycle, $outboundEffects, $outboundEffectDispatcher,
+        ));
+    }
+
+    private function reconcile(
+        SakurupiahCallbackProcessor $processor,
+        SakurupiahProviderReadiness $readiness,
+        SakurupiahReconciliationQuery $reconciliationQuery,
+        SakurupiahInvoiceLifecycleService $lifecycle,
+        TelegramOutboundEffectService $outboundEffects,
+        TelegramOutboundEffectDispatcher $outboundEffectDispatcher,
+    ): int {
         $chunk = $this->validatedChunk();
         if ($chunk === null) {
             $this->error('sakurupiah:reconcile failed: chunk must be between 1 and 1000.');
@@ -57,7 +71,6 @@ final class ReconcileSakurupiahPayments extends Command
         }
 
         $releasedCutoff = now()->subHours($this->releasedLookbackHours());
-        $executionDeadline = $this->executionDeadline();
         $cursorKey = $this->cursorKey($environment);
         $cursor = null;
         $stoppedEarly = false;
@@ -84,7 +97,7 @@ final class ReconcileSakurupiahPayments extends Command
                 ->get();
 
             foreach ($page as $payment) {
-                if (hrtime(true) >= $executionDeadline) {
+                if (ProviderVerificationProfiles::stopReason() !== null) {
                     $budgetExhausted = true;
                     $stoppedEarly = true;
 
@@ -125,12 +138,12 @@ final class ReconcileSakurupiahPayments extends Command
                     $this->deliverRecoveredInstructions($payment, $outboundEffects, $outboundEffectDispatcher);
                 }
 
-                if (hrtime(true) >= $executionDeadline) {
+                if (ProviderVerificationProfiles::stopReason() !== null) {
                     $budgetExhausted = true;
                 }
             }
 
-            if (hrtime(true) >= $executionDeadline) {
+            if (ProviderVerificationProfiles::stopReason() !== null) {
                 $budgetExhausted = true;
             }
 
@@ -148,6 +161,8 @@ final class ReconcileSakurupiahPayments extends Command
         }
 
         $summary = "paid={$paid} expired={$expired} pending={$pending} verification_pending={$verificationPending} invalid={$invalid} busy={$busy} failed={$failed} recovered={$recovered} budget_exhausted=".($budgetExhausted ? '1' : '0');
+        $stopReason = ProviderVerificationProfiles::stopReason() ?? ($stoppedEarly ? 'interrupted' : ($cursor !== null ? 'page_limit' : 'exhausted'));
+        $this->line('sakurupiah:reconcile sweep: requests='.ProviderVerificationProfiles::requests().' stop_reason='.$stopReason.' carry_over='.($stoppedEarly || $cursor !== null ? 'yes' : 'no'));
 
         if ($failed > 0) {
             $this->error('sakurupiah:reconcile completed with partial failures: '.$summary);

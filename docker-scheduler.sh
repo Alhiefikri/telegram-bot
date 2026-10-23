@@ -95,6 +95,7 @@ while true; do
     record_oom_kill_count || true
 
     elapsed=$(( $(date +%s) - started_at ))
+    printf 'scheduler cycle duration_seconds=%s\n' "$elapsed"
     remaining=$(( INTERVAL_SECONDS - elapsed ))
     if [ "$remaining" -lt 1 ]; then
         remaining=1

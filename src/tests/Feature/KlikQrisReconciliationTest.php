@@ -13,6 +13,7 @@ use App\Models\Payment;
 use App\Models\PaymentEvent;
 use App\Models\TelegramOutboundEffect;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -840,6 +841,25 @@ class KlikQrisReconciliationTest extends TestCase
             ->where('payment_id', $payment->id)
             ->where('event_type', 'reconciliation')
             ->count());
+    }
+
+    public function test_sweep_deadline_stops_retry_and_preserves_unattempted_candidate_for_next_sweep(): void
+    {
+        $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-DEADLINE-1']);
+        $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-DEADLINE-2']);
+        config([
+            'services.klikqris.reconcile_max_execution_seconds' => 1,
+            'services.provider_verification.reconciliation.retry_delay_ms' => 1000,
+            'services.provider_verification.reconciliation.retry_max_delay_ms' => 1000,
+        ]);
+        Http::fake(['*' => Http::response([], 503)]);
+        $this->assertSame(1, Artisan::call('klikqris:reconcile'));
+        Http::assertSentCount(1);
+        $this->assertSame(2, Payment::where('provider', 'klikqris')->where('status', PaymentStatus::Pending)->count());
+        $this->assertNull(ProviderVerificationProfiles::deadline());
+        config(['services.provider_verification.reconciliation.retry_delay_ms' => 0]);
+        Artisan::call('klikqris:reconcile', ['--max-payments' => 1]);
+        Http::assertSentCount(4);
     }
 
     private function expiredHistoryPayment(int $index): Payment

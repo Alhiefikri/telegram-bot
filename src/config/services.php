@@ -151,6 +151,7 @@ return [
         'transaction_detail_retry_delay_ms' => 250,
         'transaction_detail_retry_max_delay_ms' => 1_000,
         'reconcile_released_lookback_hours' => 72,
+        'reconcile_max_execution_seconds' => 45.0,
         'redirect_url' => $sakurupiahApplicationUrl,
         'webhook_rate_limit_per_minute' => 30,
         'status_refresh_rate_limit_per_minute' => 3,

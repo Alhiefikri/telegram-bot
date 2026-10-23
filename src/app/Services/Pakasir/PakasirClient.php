@@ -3,6 +3,7 @@
 namespace App\Services\Pakasir;
 
 use App\Models\Payment;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Support\DogfoodTiming;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
@@ -39,18 +40,23 @@ class PakasirClient implements PakasirProviderAdapter
         $this->readiness->verification()->assertReady('Pakasir transaction detail cannot be requested.');
 
         try {
-            $response = $this->timed('transactionDetail', fn () => $this->http()
-                ->retry(
-                    $this->transactionDetailMaxAttempts(),
-                    fn (int $attempt): int => $this->transactionDetailRetryDelayMilliseconds($attempt),
-                    fn (Throwable $exception): bool => $this->shouldRetryTransactionDetail($exception),
-                )
-                ->get($this->baseUrl().'/api/transactiondetail', [
-                    'project' => config('services.pakasir.slug'),
-                    'amount' => $payment->amount,
-                    'order_id' => $payment->merchant_ref,
-                    'api_key' => config('services.pakasir.api_key'),
-                ])->throw()->json());
+            $response = $this->timed('transactionDetail', function () use ($payment) {
+                for ($attempt = 1; ; $attempt++) {
+                    try {
+                        return $this->http()->get($this->baseUrl().'/api/transactiondetail', [
+                            'project' => config('services.pakasir.slug'),
+                            'amount' => $payment->amount,
+                            'order_id' => $payment->merchant_ref,
+                            'api_key' => config('services.pakasir.api_key'),
+                        ])->throw()->json();
+                    } catch (ConnectionException|RequestException $exception) {
+                        if ($attempt >= $this->transactionDetailMaxAttempts() || ! $this->shouldRetryTransactionDetail($exception)) {
+                            throw $exception;
+                        }
+                        ProviderVerificationProfiles::pause($this->transactionDetailRetryDelayMilliseconds($attempt));
+                    }
+                }
+            });
         } catch (ConnectionException|RequestException $exception) {
             throw $this->providerRequestException('Pakasir transaction detail request failed', $exception);
         }
@@ -129,8 +135,11 @@ class PakasirClient implements PakasirProviderAdapter
 
     private function http(): PendingRequest
     {
-        return Http::timeout($this->positiveFloatConfig('services.pakasir.http_timeout_seconds', 10.0))
-            ->connectTimeout($this->positiveFloatConfig('services.pakasir.http_connect_timeout_seconds', 3.0));
+        return ProviderVerificationProfiles::prepareRequest(
+            Http::withOptions([]),
+            $this->positiveFloatConfig('services.pakasir.http_timeout_seconds', 10.0),
+            $this->positiveFloatConfig('services.pakasir.http_connect_timeout_seconds', 3.0),
+        );
     }
 
     private function transactionDetailMaxAttempts(): int

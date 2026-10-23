@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\StoreBalanceTopUp;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Support\PaymentProvider;
@@ -26,6 +27,13 @@ final class ReconcileSakurupiahBalanceTopUps extends Command
         StoreBalanceTopUpService $topUps,
         SakurupiahProviderReadiness $readiness,
     ): int {
+        $deadline = hrtime(true) + (int) (max(1.0, (float) config('services.sakurupiah.reconcile_max_execution_seconds', 45)) * 1_000_000_000);
+
+        return ProviderVerificationProfiles::until($deadline, fn (): int => $this->reconcile($topUps, $readiness));
+    }
+
+    private function reconcile(StoreBalanceTopUpService $topUps, SakurupiahProviderReadiness $readiness): int
+    {
         $chunk = (int) $this->option('chunk');
         $maxTopUps = (int) $this->option('max-top-ups');
         if ($chunk < 1 || $chunk > 1000 || $maxTopUps < 1 || $maxTopUps > 1000) {
@@ -50,7 +58,7 @@ final class ReconcileSakurupiahBalanceTopUps extends Command
         ];
 
         $this->candidateQuery()->limit($chunk)->get()->each(function (StoreBalanceTopUp $topUp) use ($topUps, &$counts, $maxTopUps): void {
-            if ($counts['eligible'] >= $maxTopUps) {
+            if ($counts['eligible'] >= $maxTopUps || ProviderVerificationProfiles::stopReason() !== null) {
                 return;
             }
 
@@ -84,6 +92,9 @@ final class ReconcileSakurupiahBalanceTopUps extends Command
                 $counts['paid']++;
             }
         });
+        $stopReason = ProviderVerificationProfiles::stopReason() ?? ($counts['eligible'] >= $maxTopUps ? 'top_up_limit' : 'page_complete');
+        $carryOver = ProviderVerificationProfiles::stopReason() !== null || $counts['eligible'] >= min($chunk, $maxTopUps);
+        $this->line('sakurupiah:reconcile-balance-top-ups sweep: requests='.ProviderVerificationProfiles::requests().' stop_reason='.$stopReason.' carry_over='.($carryOver ? 'yes' : 'no'));
 
         $this->info('sakurupiah:reconcile-balance-top-ups completed: '
             .'eligible='.$counts['eligible']

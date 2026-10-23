@@ -72,6 +72,14 @@ final class ReconcileStoreBalanceTopUps extends Command
         KlikQrisProviderReadiness $readiness,
         StoreBalanceTopUpOutbound $topUpOutbound,
     ): int {
+        return ProviderVerificationProfiles::until($this->executionDeadline(), fn (): int => $this->reconcile($topUps, $readiness, $topUpOutbound));
+    }
+
+    private function reconcile(
+        StoreBalanceTopUpService $topUps,
+        KlikQrisProviderReadiness $readiness,
+        StoreBalanceTopUpOutbound $topUpOutbound,
+    ): int {
         $chunk = $this->validatedInteger('chunk', self::MAX_CHUNK);
         $maxTopUps = $this->validatedInteger('max-top-ups', self::MAX_TOP_UPS);
         if ($chunk === null || $maxTopUps === null) {
@@ -102,7 +110,6 @@ final class ReconcileStoreBalanceTopUps extends Command
         }
 
         $startedAt = hrtime(true);
-        $executionDeadline = $this->executionDeadline();
         $cursorKey = $this->cursorKey($environment);
         $cursor = $this->resumeCursor($cursorKey, $afterOverride);
         $wrapped = false;
@@ -139,7 +146,7 @@ final class ReconcileStoreBalanceTopUps extends Command
             $eligible += $page->count();
             $stoppedEarly = false;
             foreach ($page as $topUp) {
-                if ($selected >= $maxTopUps || hrtime(true) >= $executionDeadline) {
+                if ($selected >= $maxTopUps || ProviderVerificationProfiles::stopReason() !== null) {
                     $stoppedEarly = true;
 
                     break;
@@ -210,7 +217,7 @@ final class ReconcileStoreBalanceTopUps extends Command
         } while (! $reachedEnd
             && ! $stoppedEarly
             && $selected < $maxTopUps
-            && hrtime(true) < $executionDeadline
+            && ProviderVerificationProfiles::stopReason() === null
             && $pagesFetched < $scanCap);
 
         if ($wrapped) {
@@ -237,7 +244,10 @@ final class ReconcileStoreBalanceTopUps extends Command
             'cursor_wrapped' => $wrapped,
             'pages_fetched' => $pagesFetched,
             'scan_cap' => $scanCap,
-            'budget_exhausted' => hrtime(true) >= $executionDeadline,
+            'budget_exhausted' => ProviderVerificationProfiles::stopReason() === 'deadline',
+            'http_attempt_count' => ProviderVerificationProfiles::requests(),
+            'stop_reason' => ProviderVerificationProfiles::stopReason() ?? ($selected >= $maxTopUps ? 'top_up_limit' : ($pagesFetched >= $scanCap ? 'scan_limit' : 'exhausted')),
+            'carry_over' => ! $wrapped,
             'duration_ms' => $this->elapsedMilliseconds($startedAt),
         ]);
 

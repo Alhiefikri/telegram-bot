@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\ReconcileKlikQrisPayments;
+use App\Console\Commands\ReconcilePakasirPayments;
 use App\Console\Commands\ReconcileSakurupiahPayments;
 use App\Console\Commands\ReconcileStoreBalanceTopUps;
 use App\Enums\KlikQrisEnvironment;
@@ -49,11 +50,15 @@ $klikQrisEnvironment = KlikQrisEnvironment::runtime();
 if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnvironment)) {
     Schedule::command((string) config('services.klikqris.reconciliation_command', 'klikqris:reconcile --chunk=100'))
         ->everyMinute()
-        ->withoutOverlapping(ReconcileKlikQrisPayments::schedulerMutexMinutes());
+        ->withoutOverlapping(ReconcileKlikQrisPayments::schedulerMutexMinutes())
+        ->runInBackground()
+        ->sendOutputTo(storage_path('logs/klikqris-reconciliation.log'));
     Schedule::command('klikqris:backfill-in-flight --chunk=100')->everyFiveMinutes()->withoutOverlapping();
     Schedule::command('klikqris:reconcile-balance-top-ups --chunk=100 --max-top-ups=10')
         ->everyMinute()
-        ->withoutOverlapping(ReconcileStoreBalanceTopUps::schedulerMutexMinutes());
+        ->withoutOverlapping(ReconcileStoreBalanceTopUps::schedulerMutexMinutes())
+        ->runInBackground()
+        ->sendOutputTo(storage_path('logs/klikqris-top-up-reconciliation.log'));
 }
 
 // Every top-up rail needs a deadline sweep, including the manual rail which
@@ -64,21 +69,26 @@ Schedule::command('store-balance:expire-top-ups --chunk=100')
 
 // Sakurupiah reconciliation runs only when the environment is enabled,
 // operationally ready, and the verification queue is served by the release.
-// The reconciliation itself is synchronous scheduler work (no enqueue to an
-// unserved queue); deferred webhook verification already uses the supervised
-// default queue through SakurupiahProviderReadiness checks.
+// Commands run in independent scheduler processes, not an unserved queue.
 $sakurupiahEnvironment = SakurupiahEnvironment::runtime();
 if (app(SakurupiahProviderReadiness::class)->scheduleRegistrationEnabledFor($sakurupiahEnvironment)) {
     Schedule::command((string) config('services.sakurupiah.reconciliation_command', 'sakurupiah:reconcile --chunk=100'))
         ->everyMinute()
-        ->withoutOverlapping(ReconcileSakurupiahPayments::schedulerMutexMinutes());
+        ->withoutOverlapping(ReconcileSakurupiahPayments::schedulerMutexMinutes())
+        ->runInBackground()
+        ->sendOutputTo(storage_path('logs/sakurupiah-reconciliation.log'));
     Schedule::command('sakurupiah:reconcile-balance-top-ups --chunk=100 --max-top-ups=10')
         ->everyMinute()
-        ->withoutOverlapping(2);
+        ->withoutOverlapping(2)
+        ->runInBackground()
+        ->sendOutputTo(storage_path('logs/sakurupiah-top-up-reconciliation.log'));
 }
-Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
-Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
-Schedule::command('bsc:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
+Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping(ReconcilePakasirPayments::schedulerMutexMinutes())
+    ->runInBackground()->sendOutputTo(storage_path('logs/pakasir-reconciliation.log'));
+Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverlapping()
+    ->runInBackground()->sendOutputTo(storage_path('logs/binance-reconciliation.log'));
+Schedule::command('bsc:reconcile --chunk=100')->everyMinute()->withoutOverlapping()
+    ->runInBackground()->sendOutputTo(storage_path('logs/bsc-reconciliation.log'));
 Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping();
 // Credential emails are durable per order row; the queue is only the wakeup
 // path and this run also materializes handoffs that a lifecycle hook missed.

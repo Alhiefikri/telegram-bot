@@ -73,6 +73,19 @@ class ReconcileKlikQrisPayments extends Command
         TelegramOutboundEffectService $outboundEffects,
         TelegramOutboundEffectDispatcher $outboundEffectDispatcher,
     ): int {
+        return ProviderVerificationProfiles::until($this->executionDeadline(), fn (): int => $this->reconcile(
+            $nativeQris, $processor, $readiness, $escalator, $outboundEffects, $outboundEffectDispatcher,
+        ));
+    }
+
+    private function reconcile(
+        KlikQrisNativeQrisService $nativeQris,
+        KlikQrisCallbackProcessor $processor,
+        KlikQrisProviderReadiness $readiness,
+        TelegramKlikQrisRecoveryEscalator $escalator,
+        TelegramOutboundEffectService $outboundEffects,
+        TelegramOutboundEffectDispatcher $outboundEffectDispatcher,
+    ): int {
         $chunk = $this->validatedChunk();
         if ($chunk === null) {
             $this->error('klikqris:reconcile failed: chunk must be between 1 and 1000.');
@@ -109,7 +122,6 @@ class ReconcileKlikQrisPayments extends Command
 
         $startedAt = hrtime(true);
         $releasedCutoff = now()->subHours($this->releasedLookbackHours());
-        $executionDeadline = $this->executionDeadline();
         $pagesFetched = 0;
         $scanCap = $this->cursorScanCap();
         $totals = ['selected' => 0, 'processed' => 0, 'skipped' => 0, 'failed' => 0];
@@ -159,7 +171,6 @@ class ReconcileKlikQrisPayments extends Command
                 $releasedCutoff,
                 $chunk,
                 $scanCap,
-                $executionDeadline,
                 $pagesFetched,
                 $totals,
                 $classStats,
@@ -177,7 +188,7 @@ class ReconcileKlikQrisPayments extends Command
         // the rotation branch above already guarantees progress over sweeps.
         if (! $rotationUsed) {
             foreach (self::CLASS_PRIORITY as $class) {
-                if ($totals['selected'] >= $maxPayments || hrtime(true) >= $executionDeadline) {
+                if ($totals['selected'] >= $maxPayments || ProviderVerificationProfiles::stopReason() !== null) {
                     break;
                 }
                 if ($exhausted[$class] ?? true) {
@@ -192,7 +203,6 @@ class ReconcileKlikQrisPayments extends Command
                     $releasedCutoff,
                     $chunk,
                     $scanCap,
-                    $executionDeadline,
                     $pagesFetched,
                     $totals,
                     $classStats,
@@ -207,6 +217,8 @@ class ReconcileKlikQrisPayments extends Command
 
         $summary = "processed={$totals['processed']} skipped={$totals['skipped']} failed={$totals['failed']}";
         $this->line('klikqris:reconcile classes: '.$this->classSummary($classStats));
+        $stopReason = ProviderVerificationProfiles::stopReason() ?? ($totals['selected'] >= $maxPayments ? 'payment_limit' : ($pagesFetched >= $scanCap ? 'scan_limit' : 'exhausted'));
+        $this->line('klikqris:reconcile sweep: requests='.ProviderVerificationProfiles::requests().' stop_reason='.$stopReason.' carry_over='.($stopReason !== 'exhausted' ? 'yes' : 'no'));
 
         Log::info('klikqris.reconciliation.completed', [
             'environment' => $environment->value,
@@ -217,13 +229,16 @@ class ReconcileKlikQrisPayments extends Command
             'pages_fetched' => $pagesFetched,
             'cursor_scan_cap' => $scanCap,
             'max_execution_seconds' => config('services.klikqris.reconcile_max_execution_seconds', 45),
-            'budget_exhausted' => hrtime(true) >= $executionDeadline,
+            'budget_exhausted' => ProviderVerificationProfiles::stopReason() === 'deadline',
             'rotation_used' => $rotationUsed,
             'class_budgets' => $budgets,
             'class_stats' => $classStats,
             'processed' => $totals['processed'],
             'skipped' => $totals['skipped'],
             'failed' => $totals['failed'],
+            'http_attempt_count' => ProviderVerificationProfiles::requests(),
+            'stop_reason' => $stopReason,
+            'carry_over' => $stopReason !== 'exhausted',
             'duration_ms' => $this->elapsedMilliseconds($startedAt),
         ]);
 
@@ -260,7 +275,6 @@ class ReconcileKlikQrisPayments extends Command
         DateTimeInterface $releasedCutoff,
         int $chunk,
         int $scanCap,
-        int $executionDeadline,
         int &$pagesFetched,
         array &$totals,
         array &$classStats,
@@ -275,7 +289,7 @@ class ReconcileKlikQrisPayments extends Command
         $wrapped = false;
 
         while ($selected < $budget
-            && hrtime(true) < $executionDeadline
+            && ProviderVerificationProfiles::stopReason() === null
             && $pagesFetched < $scanCap) {
             $pagesFetched++;
             $pageLimit = min($chunk, $budget - $selected);
@@ -295,7 +309,7 @@ class ReconcileKlikQrisPayments extends Command
 
             $stoppedEarly = false;
             foreach ($page as $payment) {
-                if ($selected >= $budget || hrtime(true) >= $executionDeadline) {
+                if ($selected >= $budget || ProviderVerificationProfiles::stopReason() !== null) {
                     $stoppedEarly = true;
 
                     break;

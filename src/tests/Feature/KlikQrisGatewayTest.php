@@ -7,6 +7,7 @@ use App\Services\KlikQris\KlikQrisClient;
 use App\Services\KlikQris\KlikQrisCreateOutcomeUnknownException;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -25,9 +26,24 @@ class KlikQrisGatewayTest extends TestCase
         KlikQrisSandboxScenarios::configureReadySandbox();
     }
 
-    public function test_provider_adapter_is_bound_to_sandbox_client(): void
+    public function test_expired_sweep_budget_blocks_status_and_recovery_create_before_transport(): void
     {
-        $this->assertInstanceOf(KlikQrisClient::class, app(KlikQrisProviderAdapter::class));
+        $payment = KlikQrisSandboxScenarios::klikQrisPayment();
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment)));
+
+        foreach (['transactionStatus', 'createTransaction'] as $method) {
+            try {
+                ProviderVerificationProfiles::until(
+                    hrtime(true) - 1,
+                    fn () => app(KlikQrisProviderAdapter::class)->{$method}($payment),
+                );
+                $this->fail('Expired sweep must not reach the provider.');
+            } catch (RuntimeException) {
+                Http::assertNothingSent();
+            }
+        }
+        $this->assertNull(ProviderVerificationProfiles::deadline());
+        $this->assertSame('pending', $payment->fresh()->status->value);
     }
 
     public function test_explicit_production_client_never_falls_back_to_sandbox_endpoint_or_credentials(): void

@@ -3,6 +3,7 @@
 namespace App\Services\ProviderVerification;
 
 use Closure;
+use Illuminate\Http\Client\PendingRequest;
 
 /**
  * Keeps request-specific provider budgets out of provider business semantics.
@@ -12,6 +13,96 @@ use Closure;
 final class ProviderVerificationProfiles
 {
     private static ?ProviderVerificationProfile $active = null;
+
+    private static ?int $deadline = null;
+
+    private static ?int $requestLimit = null;
+
+    private static int $requests = 0;
+
+    private static ?string $stopped = null;
+
+    public static function until(int $deadline, Closure $callback, ?int $requestLimit = null): mixed
+    {
+        $previous = [self::$deadline, self::$requestLimit, self::$requests, self::$stopped];
+        self::$deadline = self::$deadline === null ? $deadline : min(self::$deadline, $deadline);
+        self::$requestLimit = $requestLimit;
+        self::$requests = 0;
+        self::$stopped = null;
+        try {
+            return $callback();
+        } finally {
+            [self::$deadline, self::$requestLimit, self::$requests, self::$stopped] = $previous;
+        }
+    }
+
+    public static function deadline(): ?int
+    {
+        return self::$deadline;
+    }
+
+    public static function requests(): int
+    {
+        return self::$requests;
+    }
+
+    public static function stopReason(): ?string
+    {
+        if (self::$stopped !== null) {
+            return self::$stopped;
+        }
+        if (self::$deadline !== null && hrtime(true) >= self::$deadline) {
+            return 'deadline';
+        }
+        if (self::$requestLimit !== null && self::$requests >= self::$requestLimit) {
+            return 'request_limit';
+        }
+
+        return null;
+    }
+
+    public static function prepareRequest(PendingRequest $request, float $timeout, float $connectTimeout): PendingRequest
+    {
+        $request->timeout($timeout)->connectTimeout($connectTimeout);
+        if (self::$deadline === null) {
+            return $request;
+        }
+
+        // Recompute at dispatch, not while building a request that may wait
+        // behind middleware. Every retry passes this boundary independently.
+        return $request->withMiddleware(static function (callable $handler): Closure {
+            return static function ($message, array $options) use ($handler) {
+                if (($reason = self::stopReason()) !== null) {
+                    throw new ProviderVerificationBudgetExhausted($reason);
+                }
+                $remaining = (self::$deadline - hrtime(true)) / 1_000_000_000;
+                // cURL rounds sub-millisecond timeouts to zero (unlimited).
+                if ($remaining < 0.001) {
+                    self::$stopped = 'deadline';
+                    throw new ProviderVerificationBudgetExhausted('deadline');
+                }
+                $options['timeout'] = min($options['timeout'], floor($remaining * 1000) / 1000);
+                $options['connect_timeout'] = min($options['connect_timeout'], $options['timeout']);
+                self::$requests++;
+
+                return $handler($message, $options);
+            };
+        });
+    }
+
+    public static function pause(int $milliseconds): void
+    {
+        if (($reason = self::stopReason()) !== null) {
+            throw new ProviderVerificationBudgetExhausted($reason);
+        }
+        if (self::$deadline !== null && hrtime(true) + ($milliseconds * 1_000_000) >= self::$deadline) {
+            self::$stopped = 'deadline';
+            throw new ProviderVerificationBudgetExhausted('deadline');
+        }
+        if ($milliseconds > 0) {
+            usleep($milliseconds * 1000);
+        }
+    }
 
     /** @template T
      * @param  Closure(): T  $callback

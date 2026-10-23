@@ -3,6 +3,7 @@
 namespace App\Services\Sakurupiah;
 
 use App\Enums\SakurupiahEnvironment;
+use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -348,11 +349,11 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
 
     private function request(): PendingRequest
     {
-        return Http::asForm()
-            ->acceptJson()
-            ->withToken($this->apiKey())
-            ->timeout($this->positiveFloatConfig('services.sakurupiah.http_timeout_seconds', 10.0))
-            ->connectTimeout($this->positiveFloatConfig('services.sakurupiah.http_connect_timeout_seconds', 3.0));
+        return ProviderVerificationProfiles::prepareRequest(
+            Http::asForm()->acceptJson()->withToken($this->apiKey()),
+            $this->positiveFloatConfig('services.sakurupiah.http_timeout_seconds', 10.0),
+            $this->positiveFloatConfig('services.sakurupiah.http_connect_timeout_seconds', 3.0),
+        );
     }
 
     private function endpoint(string $path): string
@@ -391,7 +392,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
         }
 
         $delay = min($baseDelay * (2 ** max(0, $attempt - 1)), $maxDelay);
-        usleep($delay * 1000);
+        ProviderVerificationProfiles::pause($delay);
     }
 
     private function positiveFloatConfig(string $key, float $default): float

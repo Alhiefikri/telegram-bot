@@ -360,14 +360,16 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter, KlikQris
 
     private function request(): PendingRequest
     {
-        return Http::asJson()
-            ->acceptJson()
-            ->timeout(ProviderVerificationProfiles::budget()['timeout_seconds'])
-            ->connectTimeout(ProviderVerificationProfiles::budget()['connect_timeout_seconds'])
-            ->withHeaders([
+        $budget = ProviderVerificationProfiles::budget();
+
+        return ProviderVerificationProfiles::prepareRequest(
+            Http::asJson()->acceptJson()->withHeaders([
                 'x-api-key' => $this->apiKey(),
                 'id_merchant' => $this->merchantId(),
-            ]);
+            ]),
+            $budget['timeout_seconds'],
+            $budget['connect_timeout_seconds'],
+        );
     }
 
     private function throwIfHttpFailed(Response $response, string $operation): void
@@ -513,7 +515,7 @@ final readonly class KlikQrisClient implements KlikQrisProviderAdapter, KlikQris
         }
 
         $delayMs = min($baseDelayMs * (2 ** max(0, $attempt - 1)), $budget['retry_max_delay_ms']);
-        usleep($delayMs * 1000);
+        ProviderVerificationProfiles::pause($delayMs);
     }
 
     private function endpoint(string $path): string

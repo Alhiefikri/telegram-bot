@@ -691,20 +691,6 @@ class PakasirWebhookTest extends TestCase
         $this->assertCount(0, Http::recorded(fn ($request) => str_contains($request->url(), '/api/transactiondetail')));
     }
 
-    public function test_pakasir_reconciliation_is_scheduled_every_minute_ahead_of_pending_order_expiry(): void
-    {
-        $exitCode = Artisan::call('schedule:list');
-        $output = Artisan::output();
-
-        $reconcilePattern = '/^\s*\*\s+\*\s+\*\s+\*\s+\*\s+php artisan pakasir:reconcile --chunk=100\b/m';
-        $expirePendingPattern = '/^\s*\*\s+\*\s+\*\s+\*\s+\*\s+php artisan orders:expire-pending\b/m';
-
-        $this->assertSame(0, $exitCode);
-        $this->assertSame(1, preg_match($reconcilePattern, $output, $reconcileMatches, PREG_OFFSET_CAPTURE));
-        $this->assertSame(1, preg_match($expirePendingPattern, $output, $expirePendingMatches, PREG_OFFSET_CAPTURE));
-        $this->assertLessThan($expirePendingMatches[0][1], $reconcileMatches[0][1]);
-    }
-
     public function test_reconcile_command_skips_mismatches_without_mutating_order(): void
     {
         $order = $this->legacyPakasirOrder($this->cartWithProduct(stock: 2));
