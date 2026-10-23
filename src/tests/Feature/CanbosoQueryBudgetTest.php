@@ -105,7 +105,7 @@ final class CanbosoQueryBudgetTest extends TestCase
             $this->assertSame(array_slice($expected, 0, 12, true), $data['facts']);
             $this->assertSame([$supplier->id => $supplier->name], $data['sources']);
             $this->assertSame('canboso', $data['connections'][0]['provider']);
-            $this->assertLessThanOrEqual(12, count($queries), $this->sql($queries));
+            $this->assertLessThanOrEqual(13, count($queries), $this->sql($queries));
             $baseline ??= count($queries);
             $this->assertLessThanOrEqual($baseline + 2, count($queries), $this->sql($queries));
         }

@@ -7489,6 +7489,11 @@ $productA = Product::factory()->create([
     'is_active' => true,
 ]);
 
+\App\Models\SupplierCurrencyRate::query()->create([
+    'currency' => 'USD',
+    'exchange_rate_idr' => '16000.000000',
+    'version' => 1,
+]);
 $supplier = \App\Models\Supplier::query()->create([
     'name' => 'Browser private supplier',
     'provider' => 'prodseller',

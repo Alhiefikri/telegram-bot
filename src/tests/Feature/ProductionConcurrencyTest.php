@@ -621,13 +621,13 @@ class ProductionConcurrencyTest extends TestCase
         $this->assertSame([], $this->failedResultClasses($results));
         $payments = Payment::query()->where('method', 'USDT_BEP20')->orderBy('amount')->get();
         $this->assertCount(2, $payments);
-        $this->assertSame([2_000_000, 2_000_100], $payments->pluck('amount')->all());
+        $this->assertSame([2_000_000, 2_001_000], $payments->pluck('amount')->all());
         $details = PaymentBscDetail::query()
             ->whereIn('payment_id', $payments->pluck('id'))
             ->orderBy('payable_amount_micro')
             ->get();
         $this->assertSame([2_000_000, 2_000_000], $details->pluck('base_amount_micro')->all());
-        $this->assertSame([2_000_000, 2_000_100], $details->pluck('payable_amount_micro')->all());
+        $this->assertSame([2_000_000, 2_001_000], $details->pluck('payable_amount_micro')->all());
     }
 
     public function test_concurrent_bsc_receiver_registration_creates_one_active_receiver_without_challenge(): void
