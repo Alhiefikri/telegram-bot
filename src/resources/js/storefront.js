@@ -135,17 +135,6 @@ function initVerifiedPurchaseActivity() {
   const live = container?.querySelector("[data-activity-live]");
   if (!container || !endpoint || !message) return;
 
-  const stickyAction = document.querySelector(
-    "[data-family-quick-buy], [data-product-sticky-action]"
-  );
-  if (stickyAction && typeof ResizeObserver === "function") {
-    const stickyObserver = new ResizeObserver(([entry]) => {
-      const height = entry.target.getBoundingClientRect().height;
-      container.style.setProperty("--sf-sticky-height", `${height}px`);
-    });
-    stickyObserver.observe(stickyAction);
-  }
-
   const DISPLAY_MS = 4_500;
   const TRANSITION_MS = 300;
   const NEXT_GAP_MS = 700;
@@ -180,13 +169,8 @@ function initVerifiedPurchaseActivity() {
     if (container.dataset.activityState !== "visible") return;
     container.dataset.activityState = "hidden";
     container.setAttribute("aria-hidden", "true");
-    container.classList.add(
-      "opacity-0",
-      "translate-x-6",
-      "pointer-events-none"
-    );
+    container.classList.add("opacity-0", "pointer-events-none");
     nextTimer = window.setTimeout(() => {
-      container.classList.add("hidden");
       nextTimer = null;
       if (!paused && !reducedMotion && items.length > 1) {
         position = (position + 1) % items.length;
@@ -209,11 +193,7 @@ function initVerifiedPurchaseActivity() {
     container.classList.remove("hidden");
     render(item, announce);
     window.requestAnimationFrame(() => {
-      container.classList.remove(
-        "opacity-0",
-        "translate-x-6",
-        "pointer-events-none"
-      );
+      container.classList.remove("opacity-0", "pointer-events-none");
     });
     scheduleHide();
   };
@@ -237,12 +217,7 @@ function initVerifiedPurchaseActivity() {
         clearTimers();
         container.dataset.activityState = "hidden";
         container.setAttribute("aria-hidden", "true");
-        container.classList.add(
-          "hidden",
-          "opacity-0",
-          "translate-x-6",
-          "pointer-events-none"
-        );
+        container.classList.add("hidden", "opacity-0", "pointer-events-none");
         return;
       }
       show(newItem !== null);

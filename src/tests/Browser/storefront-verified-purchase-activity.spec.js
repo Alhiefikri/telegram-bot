@@ -54,7 +54,7 @@ test.afterAll(async () => {
   if (dbPath) rmSync(path.dirname(dbPath), { recursive: true, force: true });
 });
 
-test("shows verified activity as a temporary toast and pauses exit during inspection", async ({
+test("rotates verified activity and pauses changes during inspection", async ({
   page,
 }) => {
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
@@ -398,6 +398,53 @@ test("family image stays contained and preview closes with Escape", async ({
       path: testInfo.outputPath(`family-${width}.png`),
       fullPage: true,
     });
+  }
+});
+
+test("purchase activity stays in page flow without covering catalog or checkout", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const width of [354, 768, 1440]) {
+    await page.setViewportSize({ width, height: 923 });
+    for (const pathname of ["/", "/shop", "/pilihan/preview-family"]) {
+      await page.goto(`${baseUrl}${pathname}`, {
+        waitUntil: "domcontentloaded",
+      });
+      const activity = page.locator("#verified-purchase-activity");
+      await expect(activity).toBeVisible();
+      const layout = await activity.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        const following = (
+          document.querySelector("#products") ??
+          document.querySelector(".family-layout")
+        ).getBoundingClientRect();
+        const banner = document
+          .querySelector(".storefront-hero-card")
+          ?.getBoundingClientRect();
+        return {
+          bottom: box.bottom,
+          followingTop: following.top,
+          top: box.top,
+          bannerBottom: banner?.bottom,
+          right: box.right,
+          viewport: innerWidth,
+          overflow: document.documentElement.scrollWidth - innerWidth,
+          position: getComputedStyle(node).position,
+        };
+      });
+      expect(layout.position).toBe("static");
+      expect(layout.bottom).toBeLessThanOrEqual(layout.followingTop);
+      if (layout.bannerBottom !== undefined) {
+        expect(layout.top).toBeGreaterThanOrEqual(layout.bannerBottom);
+      }
+      expect(layout.right).toBeLessThanOrEqual(layout.viewport);
+      expect(layout.overflow).toBeLessThanOrEqual(0);
+      const initial = await activity.boundingBox();
+      await page.evaluate(() => scrollTo(0, 700));
+      const scrolled = await activity.boundingBox();
+      expect(scrolled.y).toBeLessThan(initial.y);
+    }
   }
 });
 

@@ -10,6 +10,7 @@
 
         <main class="family-content flex-grow pb-20 pt-8 sm:pt-10">
             @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
+            @include('storefront.partials.verified-purchase-activity')
             @php
                 $firstAvailableMember = $members->first(fn ($member): bool => $member->presentation->isAvailable);
                 $firstAvailableMemberId = $firstAvailableMember?->presentation->id;
@@ -201,7 +202,6 @@
         </main>
 
         @include('storefront.partials.image-preview', ['previewImage' => $family->imageUrl, 'previewName' => $family->name])
-        @include('storefront.partials.verified-purchase-activity')
         @include('storefront.partials.footer')
     </div>
 </body>

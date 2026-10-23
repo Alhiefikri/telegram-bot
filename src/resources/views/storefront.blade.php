@@ -14,8 +14,8 @@
                 @include('storefront.partials.shop.checkout-error')
             @endif
             @include('storefront.partials.hero')
-            @include('storefront.partials.catalog')
             @include('storefront.partials.verified-purchase-activity')
+            @include('storefront.partials.catalog')
             @include('storefront.partials.purchase-flow')
             @include('storefront.partials.faq')
             @include('storefront.partials.support')

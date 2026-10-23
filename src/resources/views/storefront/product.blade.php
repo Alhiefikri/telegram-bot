@@ -10,6 +10,7 @@
             @include('storefront.partials.checkout-maintenance', ['maintenance' => $checkoutMaintenance])
         <main class="storefront-product-content flex-grow pt-12">
             @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
+            @include('storefront.partials.verified-purchase-activity')
             <section class="mx-auto max-w-5xl px-5 sm:px-6">
                 <a href="{{ $returnUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
                     <span aria-hidden="true">&larr;</span> Kembali ke katalog
@@ -159,7 +160,6 @@
 
         @include('storefront.partials.image-preview', ['previewImage' => $presentation->cover->imageUrl, 'previewName' => $presentation->name])
         @include('storefront.partials.footer')
-        @include('storefront.partials.verified-purchase-activity')
     </div>
 </body>
 </html>

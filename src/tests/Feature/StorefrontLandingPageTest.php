@@ -205,7 +205,6 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertStringNotContainsString('id="featured-offer"', $html);
         $this->assertStringNotContainsString('id="features"', $html);
         $this->assertStringNotContainsString('neo-marquee', $html);
-        $this->assertStringContainsString('storefront-purchase-toast', $activityHtml);
         $this->assertStringContainsString('data-endpoint="'.route('storefront.verified-purchase-activity').'"', $activityHtml);
         $this->assertStringContainsString('Lihat ringkasan checkout dan akses ulang', $html);
         $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout.', $html);
@@ -519,7 +518,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('value="chat"', false)
             ->getContent();
 
-        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<aside id="verified-purchase-activity"');
+        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="cara-beli"');
 
         $this->assertStringContainsString('Chat GPT Plus', $catalogHtml);
         $this->assertStringNotContainsString('Canva Pro', $catalogHtml);
