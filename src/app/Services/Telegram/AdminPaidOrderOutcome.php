@@ -48,6 +48,7 @@ final class AdminPaidOrderOutcome
         $resolved = $order->orderItems->isNotEmpty();
         $intervention = $review || $unknown || $failed;
         $lines = [];
+        $order->orderItems->loadCount('stockItems');
         foreach ($order->orderItems as $item) {
             $f = $fulfillments->get($item->id);
             $supplierResolved = true;
@@ -71,7 +72,7 @@ final class AdminPaidOrderOutcome
                 $purchases[] = 'belum terkonfirmasi; jangan beli ulang';
             }
             $handoff = (int) ($f?->manualHandoffs->sum('quantity') ?? 0);
-            $allocated = (int) $item->stockItems()->count();
+            $allocated = (int) $item->stock_items_count;
             $delivered = $complete ? $allocated : 0;
             $refunded = (int) ($f?->refunded_quantity ?? 0);
             $buyerResolved = ($complete && $delivered + $refunded === (int) $item->quantity)

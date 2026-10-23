@@ -28,6 +28,7 @@ final readonly class TelegramReceiptPlan
         private array $guides = [],
         private bool $documentDelivery = false,
         private bool $copyableCredentials = true,
+        private ?TelegramDocumentPayload $document = null,
     ) {
         if ($this->photoUnits === [] || $this->textUnits === []) {
             throw new InvalidArgumentException('Telegram receipt plan must contain deliverable units.');
@@ -53,6 +54,11 @@ final readonly class TelegramReceiptPlan
     public function usesDocument(): bool
     {
         return $this->documentDelivery;
+    }
+
+    public function documentPayload(): TelegramDocumentPayload
+    {
+        return $this->document ?? throw new LogicException('Telegram receipt document is unavailable.');
     }
 
     public function usesCopyableCredentials(): bool

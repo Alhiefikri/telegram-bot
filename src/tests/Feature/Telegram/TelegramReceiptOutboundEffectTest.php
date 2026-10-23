@@ -31,6 +31,7 @@ use App\Services\OrderStateMachine;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Telegram\AdminPaidOrderOutcome;
 use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramBotClient;
@@ -1205,6 +1206,54 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $effects = TelegramOutboundEffect::query()->where('effect_group_key', TelegramOutboundEffectService::receiptEffectGroupKey((string) $order->id))->get();
         $this->assertCount(2, $effects);
         $this->assertTrue($effects->every(fn ($effect): bool => $effect->state === TelegramOutboundEffectState::Sent));
+    }
+
+    public function test_document_continuation_rechecks_credentials_after_the_summary_attempt(): void
+    {
+        Queue::fake();
+        $order = $this->multiProductStructuredReceiptOrder();
+        $first = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $next = TelegramOutboundEffect::query()
+            ->where('effect_group_key', $first->effect_group_key)
+            ->where('sequence', 2)
+            ->sole();
+        $this->fakeTelegramHttp();
+        app(ReceiptDeliveryPipeline::class)->deliver($first, dispatchNext: false);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $first->fresh()->state);
+
+        $order->orderItems()->firstOrFail()->stockItems()->firstOrFail()->update(['retired_at' => now()]);
+        app(ReceiptDeliveryPipeline::class)->deliver($next, dispatchNext: false);
+
+        $this->assertSame(TelegramOutboundEffectState::Failed, $next->fresh()->state);
+        $this->assertNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
+    }
+
+    public function test_admin_outcome_uses_current_allocations_without_changing_the_unresolved_deadline(): void
+    {
+        Queue::fake();
+        $this->freezeTime();
+        $order = $this->multiProductStructuredReceiptOrder();
+        $order->load('orderItems.stockItems');
+        $reader = app(AdminPaidOrderOutcome::class);
+        $this->assertFalse($reader->read($order)['ready']);
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/sendDocument' => Http::response(['ok' => true, 'result' => ['message_id' => 820003]]),
+        ]);
+        app(TelegramReceiptNotifier::class)->send($order);
+        $this->assertTrue($reader->read($order)['resolved']);
+
+        $item = $order->orderItems->first();
+        $item->stockItems->first()->update(['order_item_id' => null]);
+        $this->travel(119)->seconds();
+        $outcome = $reader->read($order);
+        $this->assertFalse($outcome['resolved']);
+        $this->assertFalse($outcome['ready']);
+        $this->assertStringContainsString('1/2 unit terkirim', $outcome['lines'][0]);
+        $this->travel(1)->seconds();
+        $outcome = $reader->read($order);
+        $this->assertFalse($outcome['resolved']);
+        $this->assertTrue($outcome['ready']);
     }
 
     public function test_queued_overflow_receipt_dispatches_its_next_strict_chunk_after_photo_success(): void

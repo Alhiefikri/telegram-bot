@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\Telegram;
 
+use App\Services\Telegram\TelegramDocumentPayload;
 use App\Services\Telegram\TelegramMessageUnit;
 use App\Services\Telegram\TelegramReceiptPlan;
 use InvalidArgumentException;
@@ -52,15 +53,20 @@ final class TelegramReceiptPlanTest extends TestCase
     public function test_debug_and_serialization_do_not_expose_plan_content(): void
     {
         $secret = 'plan-secret@example.test';
+        $documentSecret = 'document-secret@example.test';
         $plan = new TelegramReceiptPlan(
             photoUnits: [new TelegramMessageUnit($secret)],
             textUnits: [new TelegramMessageUnit($secret)],
             productCount: 1,
             accountCount: 1,
+            documentDelivery: true,
+            document: new TelegramDocumentPayload($documentSecret, 'receipt.txt'),
         );
 
         $this->assertArrayNotHasKey('text', $plan->__debugInfo());
         $this->assertStringNotContainsString($secret, json_encode($plan->__debugInfo(), JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString($documentSecret, json_encode($plan->__debugInfo(), JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString($documentSecret, json_encode($plan, JSON_THROW_ON_ERROR));
 
         $this->expectException(LogicException::class);
         serialize($plan);

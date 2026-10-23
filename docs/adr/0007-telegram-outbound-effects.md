@@ -203,6 +203,18 @@ revalidate and write the new acknowledged resend version inside the transaction.
 Planning/render failures retain the existing safe failed-effect and text
 fallback behavior.
 
+Issue #655 keeps the validated automatic TXT export on the memory-only
+`TelegramReceiptPlan` and reuses that exact `TelegramDocumentPayload` when the
+same `sendEffect()` attempt sends its document unit. Plans and payloads reject
+serialization and expose only counts/lengths in debug output; the existing
+1 MiB document limit remains authoritative. There is no service-level memo,
+cross-job reuse or new cache/queue payload. Each continuation/retry reloads and
+reauthorizes credentials before making a fresh plan. Preparation and delivery
+still render separate PNGs: carrying image bytes across their durable handoff
+would violate this boundary. [Local query/render evidence](../telegram-receipt-work-evidence.md)
+records the measured reduction and the deliberately unchanged image work.
+
+
 ### Deferred Store Balance receipt materialization
 
 A successful Store Balance settlement changes authoritative top-up and ledger

@@ -144,7 +144,8 @@ class TelegramReceiptNotifier
                     throw new \InvalidArgumentException('Telegram receipt document requires a private Customer chat.');
                 }
                 // Validate the complete export before materializing a durable plan.
-                if (app(TelegramPaidOrderTxtExporter::class)->export($order, $customer) === null) {
+                $document = app(TelegramPaidOrderTxtExporter::class)->export($order, $customer);
+                if ($document === null) {
                     throw new \InvalidArgumentException('Telegram receipt document is unavailable.');
                 }
                 $payment = $this->canonicalPaidPayment($order);
@@ -170,6 +171,7 @@ class TelegramReceiptNotifier
                     guides: $delivery->usageGuides(),
                     documentDelivery: true,
                     copyableCredentials: $copyableCredentials,
+                    document: $document,
                 );
             }
             if ($delivery->isEmpty()) {
@@ -462,7 +464,7 @@ class TelegramReceiptNotifier
             $unit = $plan->photoUnit((int) $effect->sequence);
 
             if ($plan->usesDocument() && (int) $effect->sequence === 2) {
-                return $this->sendReceiptDocument($order, $customer, $unit);
+                return $this->sendReceiptDocument($plan->documentPayload(), $customer, $unit);
             }
 
             if ((int) $effect->sequence === 1) {
@@ -495,7 +497,7 @@ class TelegramReceiptNotifier
             $this->assertReceiptPlanMatchesEffect($plan, $effect, textFallback: true);
             $unit = $plan->textUnit((int) $effect->sequence);
             if ($plan->usesDocument() && (int) $effect->sequence === 2) {
-                return $this->sendReceiptDocument($order, $customer, $unit);
+                return $this->sendReceiptDocument($plan->documentPayload(), $customer, $unit);
             }
 
             return $this->bot->sendMessage(
@@ -841,13 +843,8 @@ class TelegramReceiptNotifier
         );
     }
 
-    private function sendReceiptDocument(Order $order, Customer $customer, TelegramMessageUnit $unit): array
+    private function sendReceiptDocument(TelegramDocumentPayload $payload, Customer $customer, TelegramMessageUnit $unit): array
     {
-        $payload = app(TelegramPaidOrderTxtExporter::class)->export($order, $customer);
-        if ($payload === null) {
-            throw new TelegramOutboundPreSendException('Telegram receipt document is unavailable.');
-        }
-
         return $this->bot->sendDocument(
             $customer->telegram_id,
             $payload->documentContents(),

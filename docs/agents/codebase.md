@@ -898,6 +898,16 @@ fulfillment uses the manual service's fallback handoff. The
 `telegram:recover-outbound` source scan materializes a missing receipt effect
 from the committed paid Order if the after-commit dispatch was lost.
 
+Issue #655 reuses an automatic TXT export only inside the current
+`TelegramReceiptPlan`/`sendEffect()` attempt; a continuation or retry still builds
+a new authorized plan. The payload stays memory-only, bounded to 1 MiB and
+excluded from serialization/debug content. No PNG or plan crosses a job/cache
+boundary. `AdminPaidOrderOutcome` refreshes stock allocation counts with one
+collection `loadCount('stockItems')`, rather than one query per Order Item;
+it does not hydrate secrets or trust stale loaded stock collections/counts.
+Completion/intervention readiness and the 120-second threshold are unchanged.
+See [measured query/render work and limits](../telegram-receipt-work-evidence.md).
+
 
 `ReceiptDeliveryPipeline` marks only the first successful receipt unit whose transient presentation contains credentials, then enqueues `PinTelegramCredentialReceipt` on `telegram-pins` after the `sent` transition; `TelegramCredentialPinService` re-checks pin eligibility and writes one canonical pointer under an atomic claim. The pin never gates the successor or admin wakeup. Pin state is stored on `Order` for idempotency; the outbound-effect recovery command retries only the safe pin side effect and never re-sends credentials. `TelegramOrderIntents` presents up to ten customer-owned successful paid orders (`processing`/`completed`) at a time with deterministic newest-first keyset pagination and compact invoice/status buttons; each selected invoice still resolves through the customer-owned detail query. `/status` adds a bounded latest-item preview, payment/order guidance and deadline, a signed invoice payment link for an unexpired pending order, and current/previous-calendar-month paid spending (Order creation month in the application timezone; refunded Orders excluded). Its month buttons open customer-owned lists of all Order states with ten rows per page; compact `om:YYYYMM` cursors retain the month across adjacent older/newer pages and stay within Telegram’s 64-byte callback limit.
 Untuk KlikQRIS, `delivery_outcome=retry_notice_sent` tidak dianggap selesai: ketika customer menekan Check Payment atau reconciliation menemukan Payment yang sama sudah kembali payable, service mematerialisasi effect sequence 2 dan dispatcher mengantrekan ulang QR melalui Payment yang sama. Effect ini hanya dibuat untuk order/payment yang masih pending dan tidak menduplikasi effect awal `qris_sent`.
