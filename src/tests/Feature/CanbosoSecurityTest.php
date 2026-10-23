@@ -7,6 +7,7 @@ use App\Models\AuditLog;
 use App\Models\OrderItem;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPurchase;
 use App\Models\User;
@@ -38,6 +39,13 @@ final class CanbosoSecurityTest extends NonTransactionalDatabaseTestCase
         \Illuminate\Support\Facades\RateLimiter::swap(new RateLimiter(Cache::store('array')));
         Http::swap(new Factory);
         Http::preventStrayRequests();
+        foreach (['USD' => '16000.000000', 'VND' => '0.650001'] as $currency => $rate) {
+            SupplierCurrencyRate::query()->create([
+                'currency' => $currency,
+                'exchange_rate_idr' => $rate,
+                'version' => 1,
+            ]);
+        }
     }
 
     #[DataProvider('duplicateAccounts')]
@@ -691,12 +699,12 @@ final class CanbosoSecurityTest extends NonTransactionalDatabaseTestCase
 
     private function supplier(): Supplier
     {
-        return (new Supplier)->forceFill($this->connectionInput(['id' => 123, 'version' => 1]));
+        return (new Supplier)->forceFill($this->connectionInput(['id' => 123, 'version' => 1, 'exchange_rate_idr' => '16000.000000']));
     }
 
     private function storedSupplier(array $changes = []): Supplier
     {
-        $supplier = (new Supplier)->forceFill($this->connectionInput(array_replace(['version' => 1, 'reserved_balance_micros' => 0], $changes)));
+        $supplier = (new Supplier)->forceFill($this->connectionInput(array_replace(['version' => 1, 'reserved_balance_micros' => 0, 'exchange_rate_idr' => '16000.000000'], $changes)));
         $supplier->save();
 
         return $supplier;
@@ -719,7 +727,7 @@ final class CanbosoSecurityTest extends NonTransactionalDatabaseTestCase
 
     private function connectionInput(array $changes = []): array
     {
-        return array_replace(['name' => 'Canboso synthetic connection', 'provider' => 'canboso', 'api_key' => self::KEY, 'currency' => 'USD', 'currency_confirmed' => true, 'exchange_rate_idr' => 16000, 'is_active' => true, 'low_balance_threshold_micros' => 0], $changes);
+        return array_replace(['name' => 'Canboso synthetic connection', 'provider' => 'canboso', 'api_key' => self::KEY, 'currency' => 'USD', 'currency_confirmed' => true, 'is_active' => true, 'low_balance_threshold_micros' => 0], $changes);
     }
 
     private function owner(): void

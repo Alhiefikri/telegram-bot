@@ -5,29 +5,8 @@ const decimalFormat = new Intl.NumberFormat("id-ID", {
   maximumFractionDigits: 6,
 });
 
-function idrAmount(value) {
-  return `Rp${amountFormat.format(value)}`;
-}
-
-function idrRate(value) {
-  return `Rp${decimalFormat.format(value)}`;
-}
-
 function decimal(value) {
   return decimalFormat.format(value);
-}
-
-function outsideBand(rate, band) {
-  if (!band) return false;
-
-  return rate < Number(band.min) || rate > Number(band.max);
-}
-
-/** ceil(unit x rate) in whole rupiah, computed from integer micros like the server does. */
-function unitCostIdr(unit, rateMicros) {
-  const micros = Math.round(Number(unit) * rateMicros);
-
-  return Number.isSafeInteger(micros) ? Math.ceil(micros / 1_000_000) : null;
 }
 
 /** Accepts "24000", "24.000" (thousands) or "2,87" (decimal comma); null unless positive. */
@@ -47,9 +26,9 @@ function positiveDecimal(value) {
  * actually knows: what one USDT of funding costs in rupiah, and how much of the
  * supplier currency that one USDT credits. `IDR per USDT / units per USDT`.
  *
- * Rounded up to the six decimals a connection stores, so the derived unit cost
- * can never be understated. It is a suggestion only: nothing is written into the
- * stored rate until the operator asks for it.
+ * Rounded up to the six decimals a rate stores, so the derived unit cost can
+ * never be understated. It is a suggestion only: nothing is written into the
+ * global rate until the operator asks for it.
  */
 export function rateFromDeposit(idrPerUsdt, unitsPerUsdt) {
   const idr = positiveDecimal(idrPerUsdt);
@@ -71,136 +50,58 @@ export default function supplierConnectionForm(
   provider,
   providers,
   confirmationUrl,
-  sample = null
+  sample = null,
+  rates = {},
+  selectedCurrency = null
 ) {
   return {
     provider,
     providers,
     sample,
+    rates,
+    accountCurrency: selectedCurrency ?? providers[provider]?.currency ?? "USD",
     saving: false,
     confirming: false,
     error: "",
     confirmationPassword: "",
     confirmationError: "",
-    rateDerivation: "",
-    sampleDerivation: "",
-    rateWarning: "",
-    calcIdrPerUsdt: "",
-    calcVndPerUsdt: "",
-    calcSuggestion: "",
-    calcSample: "",
-    calcCost: "",
-    calcWarning: "",
-    calcError: "",
 
     init() {
       this.$watch("provider", (next, previous) => {
         if (next === previous) return;
-        if (
-          this.providers[next].currency !== this.providers[previous].currency ||
-          this.providers[next].confirm ||
-          this.providers[previous].confirm
-        ) {
-          this.clearExchangeRate();
-        }
-        this.refreshRateCalculator();
+        this.accountCurrency = this.providers[next]?.currency ?? "USD";
       });
-      this.refreshRateDerivation();
     },
 
-    clearExchangeRate() {
-      this.$refs.exchangeRate.value = "";
-      this.refreshRateDerivation();
-    },
-
-    /**
-     * Shows what the typed rate means: the IDR value of one supplier currency
-     * unit and, when the connection has catalog rows, the derived cost of its
-     * most expensive SKU. A rupiah-per-USDT figure is visibly absurd here.
-     */
-    refreshRateDerivation() {
+    get currency() {
       const settings = this.providers[this.provider];
-      const currency = settings?.currency ?? "";
-      const raw = String(this.$refs.exchangeRate?.value ?? "").trim();
-      const rate = raw === "" ? Number.NaN : Number(raw);
-      if (!Number.isFinite(rate) || rate <= 0) {
-        this.rateDerivation = "";
-        this.sampleDerivation = "";
-        this.rateWarning = "";
 
-        return;
-      }
-      this.rateDerivation = `1 ${currency} ≈ ${idrRate(rate)}`;
-      this.rateWarning = outsideBand(rate, settings?.band)
-        ? `Kurs di luar rentang wajar. Nilai rupiah untuk 1 ${currency} harus antara ${idrRate(Number(settings.band.min))} dan ${idrRate(Number(settings.band.max))}. Kalau angka ini biaya per USDT, bagi dengan jumlah ${currency} yang diterima per USDT (contoh: Rp18.000 ÷ 26.000 ${currency} = Rp0,692308). Server menolak kurs di luar rentang ini.`
-        : "";
-      const unit =
-        this.sample && this.sample.currency === currency
-          ? Number(this.sample.unit)
-          : Number.NaN;
-      const cost =
-        Number.isFinite(unit) && unit > 0
-          ? unitCostIdr(unit, Math.round(rate * 1_000_000))
-          : null;
-      this.sampleDerivation =
-        cost === null
-          ? ""
-          : `SKU ${decimal(unit)} ${currency} ≈ ${idrAmount(cost)}`;
+      return settings?.confirm
+        ? this.accountCurrency
+        : (settings?.currency ?? "USD");
     },
 
-    /**
-     * Optional helper that only suggests a rate from the two numbers an operator
-     * really knows: what one USDT of funding costs, and how much VND that one
-     * USDT credits. The suggestion is never written into the stored rate by
-     * itself, so a stale or mistyped deposit figure cannot be saved unnoticed.
-     */
-    refreshRateCalculator() {
-      const inputs = [this.calcIdrPerUsdt, this.calcVndPerUsdt];
-      if (inputs.some((value) => String(value ?? "").trim() === "")) {
-        this.resetRateCalculator();
-
-        return;
-      }
-      try {
-        const rate = rateFromDeposit(...inputs);
-        const currency = this.providers[this.provider]?.currency ?? "";
-        const unit =
-          this.sample && this.sample.currency === currency
-            ? Number(this.sample.unit)
-            : Number.NaN;
-        const cost =
-          Number.isFinite(unit) && unit > 0
-            ? unitCostIdr(unit, Math.round(Number(rate) * 1_000_000))
-            : null;
-        this.calcSuggestion = rate;
-        this.calcSample =
-          cost === null ? "" : `SKU ${decimal(unit)} ${currency}`;
-        this.calcCost = cost === null ? "" : idrAmount(cost);
-        this.calcWarning = outsideBand(
-          Number(rate),
-          this.providers[this.provider]?.band
-        )
-          ? "Saran kurs ini di luar rentang wajar. Periksa lagi biaya per USDT dan jumlah unit yang didapat."
-          : "";
-        this.calcError = "";
-      } catch (error) {
-        this.resetRateCalculator();
-        this.calcError = error.message;
-      }
+    get rateText() {
+      const rate = this.rates[this.currency];
+      return rate ? `Rp${decimal(Number(rate))}` : "belum diatur";
     },
 
-    resetRateCalculator() {
-      this.calcSuggestion = "";
-      this.calcSample = "";
-      this.calcCost = "";
-      this.calcWarning = "";
-      this.calcError = "";
-    },
+    get sampleText() {
+      if (!this.sample || this.sample.currency !== this.currency) return "";
+      const unit = Number(this.sample.unit);
+      const rawCost = this.sample.cost_idr;
+      const cost = Number(rawCost);
+      if (
+        !Number.isFinite(unit) ||
+        unit <= 0 ||
+        rawCost === null ||
+        rawCost === undefined ||
+        !Number.isFinite(cost)
+      ) {
+        return "";
+      }
 
-    applyRateSuggestion() {
-      if (this.calcSuggestion === "") return;
-      this.$refs.exchangeRate.value = this.calcSuggestion;
-      this.refreshRateDerivation();
+      return `SKU ${decimal(unit)} ${this.sample.currency} ≈ Rp${amountFormat.format(cost)}`;
     },
 
     async save() {
@@ -225,9 +126,9 @@ export default function supplierConnectionForm(
           window.location.assign(result.redirect_url);
         } else {
           this.error =
-            result.errors?.exchange_rate_idr?.[0] ||
             result.errors?.currency?.[0] ||
             result.errors?.currency_confirmed?.[0] ||
+            result.errors?.api_key?.[0] ||
             result.message ||
             "Supplier belum tersimpan. Periksa isian lalu coba lagi.";
         }
@@ -244,6 +145,7 @@ export default function supplierConnectionForm(
       if (!this.confirmationPassword) {
         this.confirmationError = "Isi password admin terlebih dahulu.";
         this.$refs.confirmationPassword.focus();
+
         return;
       }
       this.confirming = true;

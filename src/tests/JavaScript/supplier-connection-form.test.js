@@ -5,23 +5,28 @@ import supplierConnectionForm, {
 } from "../../resources/js/supplier-connection-form.js";
 
 const providers = {
-  prodseller: { currency: "USDT", confirm: false, band: null },
-  nastele: {
-    currency: "VND",
-    confirm: false,
-    band: { min: "0.1", max: "0.999999" },
-  },
-  csxstore: { currency: "USD", confirm: false, band: null },
-  canboso: { currency: "USD", confirm: false, band: null },
-  arrs: { currency: "USD", confirm: true, band: null },
+  prodseller: { currency: "USDT", confirm: false },
+  nastele: { currency: "VND", confirm: false },
+  csxstore: { currency: "USD", confirm: false },
+  canboso: { currency: "USD", confirm: false },
+  arrs: { currency: "USD", confirm: true },
 };
 
-function fixture(provider, rate, sample = null) {
-  const form = supplierConnectionForm(provider, providers, "/confirm", sample);
+const rates = { USDT: "16000", USD: "17000", VND: "0.650001" };
+
+function fixture(provider, overrides = {}) {
+  const form = supplierConnectionForm(
+    provider,
+    providers,
+    "/confirm",
+    overrides.sample ?? null,
+    overrides.rates ?? rates,
+    overrides.currency ?? null
+  );
   const watchers = new Map();
-  form.$refs = { exchangeRate: { value: rate } };
   form.$watch = (key, callback) => watchers.set(key, callback);
   form.init?.();
+
   return {
     form,
     select(next) {
@@ -32,107 +37,66 @@ function fixture(provider, rate, sample = null) {
   };
 }
 
-test("a new connection is never prefilled with a dollar rate", () => {
-  const { form } = fixture("nastele", "");
+test("a fixed-currency connection shows the one global rate for its currency", () => {
+  const { form } = fixture("nastele");
 
-  assert.equal(form.$refs.exchangeRate.value, "");
-  assert.equal(form.rateDerivation, "");
-  assert.equal(form.sampleDerivation, "");
-  assert.equal(form.rateWarning, "");
+  assert.equal(form.currency, "VND");
+  assert.equal(form.rateText, "Rp0,650001");
 });
 
-test("a USDT rate cannot carry into the Nastele VND wallet or back", () => {
-  const { form, select } = fixture("prodseller", "18000");
+test("USD and USDT are separate global rates", () => {
+  assert.equal(fixture("csxstore").form.currency, "USD");
+  assert.equal(fixture("csxstore").form.rateText, "Rp17.000");
+  assert.equal(fixture("prodseller").form.currency, "USDT");
+  assert.equal(fixture("prodseller").form.rateText, "Rp16.000");
+});
+
+test("a fixed-currency connection ignores a submitted account currency", () => {
+  const { form } = fixture("nastele", { currency: "USD" });
+
+  assert.equal(form.currency, "VND");
+  assert.equal(form.rateText, "Rp0,650001");
+});
+
+test("an account-selected provider uses the chosen currency rate", () => {
+  const { form } = fixture("arrs");
+
+  assert.equal(form.currency, "USD");
+  assert.equal(form.rateText, "Rp17.000");
+  form.accountCurrency = "USDT";
+  assert.equal(form.currency, "USDT");
+  assert.equal(form.rateText, "Rp16.000");
+});
+
+test("changing provider resets the account currency to that provider default", () => {
+  const { form, select } = fixture("prodseller");
   select("nastele");
-  assert.equal(form.$refs.exchangeRate.value, "");
-  form.$refs.exchangeRate.value = "0.75";
-  select("prodseller");
-  assert.equal(form.$refs.exchangeRate.value, "");
+
+  assert.equal(form.currency, "VND");
+  assert.equal(form.rateText, "Rp0,650001");
 });
 
-test("opening an existing fractional rate preserves it until its unit changes", () => {
-  const { form, select } = fixture("nastele", "0.750000", {
-    unit: "69000",
-    currency: "VND",
+test("a missing global rate is visible before saving", () => {
+  const { form } = fixture("nastele", { rates: {} });
+
+  assert.equal(form.rateText, "belum diatur");
+});
+
+test("the sample cost is shown only when the server sample belongs to this currency", () => {
+  const { form } = fixture("nastele", {
+    sample: { unit: "69000", currency: "VND", cost_idr: 44851 },
   });
-  assert.equal(form.$refs.exchangeRate.value, "0.750000");
-  assert.equal(form.rateDerivation, "1 VND ≈ Rp0,75");
-  assert.equal(form.sampleDerivation, "SKU 69.000 VND ≈ Rp51.750");
-  select("nastele");
-  assert.equal(form.$refs.exchangeRate.value, "0.750000");
-});
+  assert.equal(form.sampleText, "SKU 69.000 VND ≈ Rp44.851");
 
-test("same fixed currency retains its rate but account-selected currency requires re-entry", () => {
-  const { form, select } = fixture("csxstore", "18000");
-  select("canboso");
-  assert.equal(form.$refs.exchangeRate.value, "18000");
-  select("arrs");
-  assert.equal(form.$refs.exchangeRate.value, "");
-});
-
-test("the form derives the IDR value of one VND and of the most expensive mapped SKU", () => {
-  const { form } = fixture("nastele", "0.692308", {
-    unit: "69000",
-    currency: "VND",
+  const mismatch = fixture("nastele", {
+    sample: { unit: "69000", currency: "USD", cost_idr: 44851 },
   });
+  assert.equal(mismatch.form.sampleText, "");
 
-  assert.equal(form.rateDerivation, "1 VND ≈ Rp0,692308");
-  assert.equal(form.sampleDerivation, "SKU 69.000 VND ≈ Rp47.770");
-  assert.equal(form.rateWarning, "");
-});
-
-test("a rupiah-per-USDT rate is shown as implausible before the server rejects it", () => {
-  const { form } = fixture("nastele", "18000", {
-    unit: "69000",
-    currency: "VND",
+  const missingCost = fixture("nastele", {
+    sample: { unit: "69000", currency: "VND", cost_idr: null },
   });
-
-  assert.equal(form.rateDerivation, "1 VND ≈ Rp18.000");
-  assert.equal(form.sampleDerivation, "SKU 69.000 VND ≈ Rp1.242.000.000");
-  assert.match(form.rateWarning, /luar rentang wajar/);
-  assert.match(form.rateWarning, /Rp0,999999/);
-});
-
-test("both edges of the plausibility band are warned about", () => {
-  for (const rate of ["0.05", "1"]) {
-    const { form } = fixture("nastele", rate);
-    assert.match(form.rateWarning, /luar rentang wajar/, rate);
-  }
-  const { form } = fixture("nastele", "0.1");
-  assert.equal(form.rateWarning, "");
-  assert.equal(form.rateDerivation, "1 VND ≈ Rp0,1");
-});
-
-test("a wallet without a band is never warned about", () => {
-  const { form } = fixture("csxstore", "0.692308");
-
-  assert.equal(form.rateWarning, "");
-  assert.equal(form.rateDerivation, "1 USD ≈ Rp0,692308");
-  assert.equal(form.sampleDerivation, "");
-});
-
-test("the derivation follows the wallet when the connection changes currency", () => {
-  const { form, select } = fixture("nastele", "0.692308", {
-    unit: "69000",
-    currency: "VND",
-  });
-  select("prodseller");
-
-  assert.equal(form.rateDerivation, "");
-  assert.equal(form.sampleDerivation, "");
-  form.$refs.exchangeRate.value = "16000";
-  form.refreshRateDerivation();
-  assert.equal(form.rateDerivation, "1 USDT ≈ Rp16.000");
-  assert.equal(form.rateWarning, "");
-});
-
-test("a saved sample from another currency is never shown for the typed wallet", () => {
-  const { form } = fixture("nastele", "0.692308", {
-    unit: "69000",
-    currency: "USD",
-  });
-
-  assert.equal(form.sampleDerivation, "");
+  assert.equal(missingCost.form.sampleText, "");
 });
 
 test("the deposit helper turns what one USDT costs and credits into a rate", () => {
@@ -155,48 +119,4 @@ test("the deposit helper refuses incomplete or nonsensical input", () => {
   ]) {
     assert.throws(() => rateFromDeposit(...args), /lebih dari nol/);
   }
-});
-
-test("the calculator never fills the rate on its own and applies only on request", () => {
-  const { form } = fixture("nastele", "", { unit: "69000", currency: "VND" });
-
-  assert.equal(form.$refs.exchangeRate.value, "");
-  form.calcIdrPerUsdt = "18.000";
-  form.calcVndPerUsdt = "24.000";
-  form.refreshRateCalculator();
-
-  assert.equal(form.calcSuggestion, "0.75");
-  assert.equal(form.calcSample, "SKU 69.000 VND");
-  assert.equal(form.calcCost, "Rp51.750");
-  assert.equal(form.calcWarning, "");
-  assert.equal(form.calcError, "");
-  assert.equal(
-    form.$refs.exchangeRate.value,
-    "",
-    "typing into the helper must never prefill the stored rate"
-  );
-
-  form.applyRateSuggestion();
-  assert.equal(form.$refs.exchangeRate.value, "0.75");
-  assert.equal(form.rateDerivation, "1 VND ≈ Rp0,75");
-  assert.equal(form.sampleDerivation, "SKU 69.000 VND ≈ Rp51.750");
-});
-
-test("the calculator clears itself when a field is emptied and flags an out-of-band result", () => {
-  const { form } = fixture("nastele", "", { unit: "69000", currency: "VND" });
-  form.calcIdrPerUsdt = "18000";
-  form.calcVndPerUsdt = "1000";
-  form.refreshRateCalculator();
-
-  assert.equal(form.calcSuggestion, "18");
-  assert.match(form.calcWarning, /luar rentang wajar/);
-
-  form.calcVndPerUsdt = "";
-  form.refreshRateCalculator();
-
-  assert.equal(form.calcSuggestion, "");
-  assert.equal(form.calcSample, "");
-  assert.equal(form.calcCost, "");
-  assert.equal(form.calcWarning, "");
-  assert.equal(form.calcError, "");
 });

@@ -14,13 +14,76 @@
         </div>
     </x-admin-dashboard.card>
 
+    @php($currencyRates = $suppliersTab['currencyRates'] ?? [])
+    @php($rateBands = collect($currencyRates)->mapWithKeys(fn (array $rate): array => [$rate['currency'] => $rate['band']])->all())
+    <x-admin-dashboard.card as="section" padding="none" shadow="sm" aria-labelledby="supplier-currency-rates-title">
+        <header class="border-b border-admin-line bg-admin-surface-muted p-5 sm:p-6">
+            <p class="text-xs font-medium text-admin-muted">Kurs global</p>
+            <h2 id="supplier-currency-rates-title" class="mt-1 text-lg font-semibold text-admin-ink">Satu kurs USD/USDT, satu kurs VND</h2>
+            <p class="mt-1 max-w-3xl text-sm leading-6 text-admin-muted">USD dan USDT memakai satu kurs dolar yang sama; semua koneksi keduanya mengikuti angka ini. VND punya kurs sendiri. Mengubah kurs menghitung ulang harga otomatis dan kapasitas setiap produk yang memakai mata uang tersebut.</p>
+        </header>
+        <div class="p-5 sm:p-6">
+            <form method="POST" action="{{ route('admin.suppliers.currency-rates.update') }}" class="grid gap-4" x-data="supplierCurrencyRates(@js(route('admin.password.confirm.store')), @js($rateBands))" x-ref="rateForm" x-on:submit.prevent="save()">
+                @csrf
+                <div class="grid gap-4 md:grid-cols-2">
+                    @foreach($currencyRates as $rate)
+                        <div class="grid content-start gap-2">
+                            <label class="grid gap-2 text-sm font-medium text-admin-ink">1 {{ $rate['label'] ?? $rate['currency'] }} = rupiah
+                                <x-admin-dashboard.input name="rates[{{ $rate['currency'] }}][exchange_rate_idr]" type="number" inputmode="decimal" min="0.000001" max="1000000" step="0.000001" required value="{{ $rate['exchange_rate_idr'] }}" />
+                                <input type="hidden" name="rates[{{ $rate['currency'] }}][version]" value="{{ $rate['version'] }}">
+                                <small class="text-sm font-normal text-admin-muted">Dipakai {{ $rate['used_by'] }} koneksi @if($rate['updated_at']) · diperbarui {{ $rate['updated_at'] }} @endif</small>
+                                @if($rate['band'])
+                                    <small class="text-sm font-normal text-admin-muted">Rentang wajar {{ $rate['currency'] }}: Rp{{ $rate['band']['min'] }}–Rp{{ $rate['band']['max'] }}. Contoh 0,692308 = Rp18.000 ÷ 26.000 VND.</small>
+                                @endif
+                            </label>
+                            @if($rate['exchange_rate_idr'] === '' && $rate['used_by'] > 0)
+                                <x-admin-dashboard.notice tone="warning" role="status">Masih ada koneksi {{ $rate['label'] ?? $rate['currency'] }} tanpa kurs global. Isi nilainya sebelum sinkron atau membeli.</x-admin-dashboard.notice>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+                <details class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">
+                    <summary class="min-h-11 cursor-pointer text-sm font-medium text-admin-ink">Bantu isi kurs VND dari deposit (opsional)</summary>
+                    <p class="mt-2 text-sm text-admin-muted">Kalau wallet VND diisi memakai USDT, isi dua angka yang benar-benar Anda bayar dan terima. Contoh: 1 USDT biayanya Rp18.000 dan deposit 1 USDT mendapat 24.000 VND → kurs Rp0,75 per VND. Ini bukan kurs pasar.</p>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                        <label class="grid gap-1.5 text-sm font-medium text-admin-ink">1 USDT deposit dapat berapa VND?<x-admin-dashboard.input x-model="calcVndPerUsdt" inputmode="decimal" autocomplete="off" x-on:input="refreshCalculator()" /><span class="text-sm font-normal text-admin-muted">Lihat halaman deposit supplier; titik ribuan boleh (24.000).</span></label>
+                        <label class="grid gap-1.5 text-sm font-medium text-admin-ink">Biaya rupiah untuk 1 USDT<x-admin-dashboard.input x-model="calcIdrPerUsdt" inputmode="decimal" autocomplete="off" x-on:input="refreshCalculator()" /><span class="text-sm font-normal text-admin-muted">Biaya funding nyata termasuk fee.</span></label>
+                    </div>
+                    <div class="mt-3 flex flex-wrap items-center gap-3">
+                        <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-bind:disabled="calcSuggestion === ''" x-on:click="applyVndSuggestion()">Isi kolom kurs VND</x-admin-dashboard.button>
+                        <p class="text-sm text-admin-muted" x-show="calcSuggestion" x-cloak>Kurs yang disarankan: <strong class="font-semibold text-admin-ink" x-text="calcSuggestion"></strong></p>
+                    </div>
+                    <x-admin-dashboard.notice tone="warning" class="mt-3" role="status" x-show="calcWarning" x-cloak><span x-text="calcWarning"></span></x-admin-dashboard.notice>
+                    <x-admin-dashboard.notice tone="danger" class="mt-3" role="status" x-show="calcError" x-cloak><span x-text="calcError"></span></x-admin-dashboard.notice>
+                </details>
+                <x-admin-dashboard.field-error role="alert" x-show="error" x-text="error" x-cloak />
+                <div class="flex flex-wrap gap-3">
+                    <x-admin-dashboard.button type="submit" variant="primary" x-ref="saveButton" x-bind:disabled="saving || confirming"><span x-show="saving" x-cloak>Menyimpan...</span><span x-show="!saving">Simpan kurs</span></x-admin-dashboard.button>
+                    <span class="self-center text-sm text-admin-muted">Perubahan kurs dicatat di audit log dan meminta konfirmasi password.</span>
+                </div>
+                <dialog x-ref="passwordDialog" class="m-auto w-[calc(100%_-_2rem)] max-w-md rounded-xl border border-admin-line bg-admin-surface p-5 text-admin-ink shadow-admin-lg backdrop:bg-black/40" aria-labelledby="currency-rate-password-title" aria-describedby="currency-rate-password-help" x-on:cancel.prevent="cancelConfirmation()">
+                    <h2 id="currency-rate-password-title" class="text-xl font-semibold text-admin-ink">Konfirmasi password</h2>
+                    <p id="currency-rate-password-help" class="mt-2 text-sm text-admin-muted">Masukkan password admin untuk menyimpan kurs. Isian kurs tetap ada.</p>
+                    <label class="mt-4 grid gap-2 text-sm font-medium text-admin-ink" for="currency-rate-password">Password admin
+                        <x-admin-dashboard.input id="currency-rate-password" type="password" autocomplete="current-password" x-ref="confirmationPassword" x-model="confirmationPassword" x-bind:disabled="confirming" x-on:keydown.enter.prevent="confirmPassword()" />
+                    </label>
+                    <x-admin-dashboard.field-error role="alert" x-show="confirmationError" x-text="confirmationError" x-cloak />
+                    <div class="mt-4 flex flex-wrap gap-3">
+                        <x-admin-dashboard.button type="button" variant="primary" size="sm" x-bind:disabled="confirming" x-on:click="confirmPassword()">Konfirmasi dan simpan</x-admin-dashboard.button>
+                        <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-bind:disabled="confirming" x-on:click="cancelConfirmation()">Batal</x-admin-dashboard.button>
+                    </div>
+                </dialog>
+            </form>
+        </div>
+    </x-admin-dashboard.card>
+
     <div class="flex flex-wrap items-end justify-between gap-3">
         <div><p class="text-xs font-medium text-admin-muted">Koneksi supplier</p><h2 class="mt-1 text-lg font-semibold text-admin-ink">Sumber stok eksternal</h2></div>
         <x-admin-dashboard.badge>{{ $suppliersTab['connections']->total() }} koneksi</x-admin-dashboard.badge>
     </div>
     <x-admin-dashboard.card as="details" padding="none" shadow="sm">
         <summary class="min-h-11 cursor-pointer p-5 text-sm font-medium text-admin-ink">Tambah supplier</summary>
-        <div class="mx-5 mb-5 rounded-lg border border-admin-line bg-admin-surface-muted p-3">@include('admin.suppliers.connection-form', ['connection' => []])</div>
+        <div class="mx-5 mb-5 rounded-lg border border-admin-line bg-admin-surface-muted p-3">@include('admin.suppliers.connection-form', ['connection' => [], 'currencyRates' => $currencyRates])</div>
     </x-admin-dashboard.card>
 
     <div class="grid min-w-0 gap-5 lg:grid-cols-2">
@@ -66,7 +129,7 @@
                         </div>
                     </div>
                 </div>
-                <details class="border-t border-admin-line"><summary class="min-h-11 cursor-pointer px-5 py-3 text-sm font-medium text-admin-ink">Edit koneksi</summary><div class="px-5 pb-5"><div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">@include('admin.suppliers.connection-form')</div></div></details>
+                <details class="border-t border-admin-line"><summary class="min-h-11 cursor-pointer px-5 py-3 text-sm font-medium text-admin-ink">Edit koneksi</summary><div class="px-5 pb-5"><div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">@include('admin.suppliers.connection-form', ['currencyRates' => $currencyRates])</div></div></details>
             </x-admin-dashboard.card>
         @empty
             <x-admin-dashboard.card padding="compact" shadow="sm" class="text-center lg:col-span-2"><h3 class="text-lg font-semibold text-admin-ink">Belum ada koneksi supplier</h3><p class="mt-1 text-sm leading-6 text-admin-muted">Buka Tambah supplier untuk menghubungkan akun, lalu sinkronkan katalog dan saldo.</p></x-admin-dashboard.card>

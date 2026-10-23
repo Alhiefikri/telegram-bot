@@ -2,6 +2,7 @@
 
 use App\Enums\UserRole;
 use App\Models\Supplier;
+use App\Models\SupplierCurrencyRate;
 use App\Models\User;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Artisan;
@@ -55,6 +56,9 @@ if (($argv[1] ?? null) === 'state') {
         'sessions_contain_key' => $sessionsContainKey,
     ], JSON_THROW_ON_ERROR);
     exit;
+}
+foreach (['USD' => '16000.000000', 'VND' => '0.650001'] as $currency => $rate) {
+    SupplierCurrencyRate::query()->create(['currency' => $currency, 'exchange_rate_idr' => $rate, 'version' => 1]);
 }
 Supplier::forceCreate(['name' => 'Private source', 'provider' => 'prodseller', 'api_key' => 'synthetic-test-key', 'currency' => 'USDT', 'exchange_rate_idr' => 16000, 'currency_confirmed' => true, 'is_active' => false]);
 User::factory()->create(['name' => 'Supplier Browser Owner', 'email' => 'supplier-browser@example.test', 'password' => 'synthetic-browser-password', 'role' => UserRole::Owner]);

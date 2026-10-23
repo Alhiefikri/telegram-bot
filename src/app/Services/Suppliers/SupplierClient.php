@@ -33,13 +33,16 @@ final class SupplierClient
     {
         $provider = $this->ready($supplier);
         $deadline = hrtime(true) + 40_000_000_000;
-        $account = $this->read($supplier, in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::Canboso, SupplierProvider::Nastele], true) ? '/balance' : '/me', $deadline);
-        $catalog = $this->read($supplier, '/products', $deadline);
+        $account = $this->read($supplier, in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::Canboso, SupplierProvider::Nastele, SupplierProvider::MiraiApi], true) ? '/balance' : '/me', $deadline);
+        $catalog = $this->read($supplier, $provider === SupplierProvider::MiraiApi ? '/packages' : '/products', $deadline);
         if ($provider === SupplierProvider::Canboso) {
             return $this->canbosoSnapshot($supplier, $account, $catalog);
         }
         if ($provider === SupplierProvider::Nastele) {
             return $this->nasteleSnapshot($supplier, $account, $catalog);
+        }
+        if ($provider === SupplierProvider::MiraiApi) {
+            return $this->miraiSnapshot($account, $catalog);
         }
         $this->currency($supplier, $account);
         $this->currency($supplier, $catalog);
@@ -121,10 +124,11 @@ final class SupplierClient
                 SupplierProvider::ToolOrax => ['product_id' => (int) $id, 'quantity' => $quantity],
                 SupplierProvider::Nastele => ['productId' => (int) $id, 'qty' => $quantity],
                 SupplierProvider::Canboso => ['key' => $supplier->api_key, 'product_id' => $id, 'quantity' => $quantity],
+                SupplierProvider::MiraiApi => ['package_code' => $id, 'quantity' => $quantity, 'external_order_id' => $reference],
                 default => ['service_id' => $id, 'quantity' => $quantity],
             };
             $headers = [];
-            if (in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::NyStore, SupplierProvider::Canboso], true)) {
+            if (in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::NyStore, SupplierProvider::Canboso, SupplierProvider::MiraiApi], true)) {
                 $headers['Idempotency-Key'] = $reference;
             }
             if ($provider === SupplierProvider::NyStore) {
@@ -136,7 +140,7 @@ final class SupplierClient
                 $body['external_order_id'] = $reference;
             }
             $path = match ($provider) {
-                SupplierProvider::ProdSeller, SupplierProvider::ToolOrax, SupplierProvider::Nastele => '/orders',
+                SupplierProvider::ProdSeller, SupplierProvider::ToolOrax, SupplierProvider::Nastele, SupplierProvider::MiraiApi => '/orders',
                 SupplierProvider::Canboso => '/purchase',
                 default => '/order',
             };
@@ -172,6 +176,9 @@ final class SupplierClient
             }
             if ($provider === SupplierProvider::Nastele) {
                 return $this->nasteleResult($this->payload($response, $supplier->api_key), $quantity, null);
+            }
+            if ($provider === SupplierProvider::MiraiApi) {
+                return $this->miraiResult($this->payload($response, $supplier->api_key), $quantity, null, $id, $reference, $item->unit_price_micros);
             }
             $result = $this->result($supplier, $this->payload($response, $supplier->api_key), $quantity, null, $id, $reference);
         } catch (SupplierUnavailable) {
@@ -224,12 +231,15 @@ final class SupplierClient
             return new SupplierOrderResult('ambiguous', $orderId, errorCode: 'delivery_unavailable', identityTrusted: true);
         }
         $path = match ($provider) {
-            SupplierProvider::ProdSeller, SupplierProvider::ToolOrax, SupplierProvider::Nastele => '/orders/',
+            SupplierProvider::ProdSeller, SupplierProvider::ToolOrax, SupplierProvider::Nastele, SupplierProvider::MiraiApi => '/orders/',
             default => '/order/',
         };
         $payload = $this->read($supplier, $path.rawurlencode($orderId), allowInactive: true);
         if ($provider === SupplierProvider::Nastele) {
             return $this->nasteleResult($payload, null, $orderId);
+        }
+        if ($provider === SupplierProvider::MiraiApi) {
+            return $this->miraiResult($payload, null, $orderId, $productId, $reference);
         }
 
         return $this->result($supplier, $payload, null, $orderId, $productId, $reference);
@@ -404,7 +414,7 @@ final class SupplierClient
         if (! $allowInactive && ! $supplier->is_active) {
             throw new SupplierUnavailable('inactive');
         }
-        $accountCurrencies = $provider === SupplierProvider::Nastele ? ['VND'] : ['USD', 'USDT'];
+        $accountCurrencies = in_array($provider, [SupplierProvider::Nastele, SupplierProvider::MiraiApi], true) ? ['VND'] : ['USD', 'USDT'];
         if (! in_array($supplier->currency, $accountCurrencies, true)
             || ($provider->requiresCurrencyConfirmation() && ! $supplier->currency_confirmed)
             || (! $provider->requiresCurrencyConfirmation() && $supplier->currency !== $provider->defaultCurrency())) {
@@ -527,6 +537,7 @@ final class SupplierClient
         $authentication = match ($supplier->provider) {
             SupplierProvider::ToolOrax->value => ['X-Shop-API-Key' => $supplier->api_key],
             SupplierProvider::Canboso->value => [],
+            SupplierProvider::MiraiApi->value => ['Authorization' => 'Bearer '.$supplier->api_key],
             default => ['X-API-Key' => $supplier->api_key],
         };
 
@@ -594,7 +605,7 @@ final class SupplierClient
             // ShopBot publishes no rate-limit contract; stay deliberately small.
             SupplierProvider::ToolOrax => [30, 60, 20],
             SupplierProvider::Canboso => [30, 60, 20],
-            SupplierProvider::Nastele => [60, 60, 45],
+            SupplierProvider::Nastele, SupplierProvider::MiraiApi => [60, 60, 45],
         };
         // A shared provider bucket is deliberately conservative: all configured
         // accounts on this application may share the same outbound IP.
@@ -769,6 +780,155 @@ final class SupplierClient
         } catch (\InvalidArgumentException) {
             return new SupplierOrderResult('ambiguous', $id, errorCode: 'invalid_payload', identityTrusted: true);
         }
+    }
+
+    private function miraiSnapshot(array $account, array $catalog): SupplierCatalogSnapshot
+    {
+        if (($account['success'] ?? null) !== true || ($catalog['success'] ?? null) !== true
+            || ! is_array($account['data'] ?? null) || ! is_array($catalog['data'] ?? null)
+            || ! array_is_list($catalog['data'])) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $rows = $catalog['data'];
+        if (count($rows) > self::MAX_PRODUCTS) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $balance = $this->money($account['data']['balance_vnd'] ?? null, roundUp: false);
+        $products = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $id = $this->identifier($row['code'] ?? null);
+            if (isset($seen[$id])) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $seen[$id] = true;
+            $name = $this->text($row['name'] ?? null, 500);
+            $minimum = $this->integer($row['min_quantity'] ?? null, 1, self::MAX_QUANTITY);
+            $maximum = $this->integer($row['max_quantity'] ?? null, $minimum, self::MAX_QUANTITY);
+            $unlimited = $this->boolean($row, 'unlimited', false);
+            $remaining = $this->integer($row['remaining_today'] ?? null, 0, 1_000_000_000);
+            $price = $this->money($row['reseller_price_vnd'] ?? null);
+            $stock = $unlimited ? $maximum : min($remaining, $maximum);
+            $products[] = new SupplierProductData(
+                $id,
+                $name,
+                null,
+                $price,
+                $stock,
+                $price > 0 && ($unlimited || $remaining > 0),
+                false,
+            );
+        }
+
+        return new SupplierCatalogSnapshot($balance, 'VND', $products);
+    }
+
+    /**
+     * Mirai offers a wallet in VND and one redeem code per ordered unit. A
+     * legacy merged order retains a single code, so a quantity above one can
+     * never be treated as complete from that response.
+     */
+    private function miraiResult(array $payload, ?int $expectedQuantity, ?string $expectedOrderId, ?string $expectedProductId = null, ?string $reference = null, ?int $fallbackUnitPriceMicros = null): SupplierOrderResult
+    {
+        if (($payload['success'] ?? null) !== true) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $row = $payload['data'] ?? $payload;
+        if (! is_array($row) || array_is_list($row)) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        if (isset($row['order']) && is_array($row['order']) && ! array_is_list($row['order'])) {
+            // Preserve envelope-level reference/status fields when the order
+            // object itself omits them.
+            $row = $row['order'] + $row;
+        }
+        $rawId = $row['order_id'] ?? $row['orderId'] ?? $row['id'] ?? $row['order_code'] ?? $row['orderCode'] ?? $row['order_no'] ?? $row['orderNo'] ?? null;
+        $id = $rawId === null ? null : $this->identifier($rawId);
+        $external = $row['external_order_id'] ?? $row['externalOrderId'] ?? $payload['external_order_id'] ?? null;
+        if ($external !== null && ! is_string($external)) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $package = $row['package_code'] ?? $row['packageCode'] ?? $payload['package_code'] ?? null;
+        if ($package !== null && ! is_string($package)) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $quantity = null;
+        foreach (['quantity', 'qty'] as $quantityKey) {
+            if (isset($row[$quantityKey])) {
+                $quantity = $this->integer($row[$quantityKey], 1, self::MAX_QUANTITY);
+                break;
+            }
+        }
+        $rawCost = $row['total_vnd'] ?? $row['total_amount_vnd'] ?? $row['charged_vnd'] ?? $row['amount_vnd']
+            ?? $row['total_price_vnd'] ?? $row['total_price'] ?? $row['total'] ?? $row['amount'] ?? $row['total_amount'] ?? $row['charged_amount']
+            ?? $payload['total_vnd'] ?? $payload['total_amount_vnd'] ?? $payload['charged_vnd'] ?? $payload['amount_vnd']
+            ?? $payload['total_price_vnd'] ?? $payload['total_price'] ?? $payload['total'] ?? $payload['amount'] ?? $payload['total_amount']
+            ?? $payload['charged_amount'] ?? null;
+        $cost = $rawCost === null ? null : $this->money($rawCost);
+        if ($cost === null && $fallbackUnitPriceMicros !== null) {
+            $fallbackQuantity = $expectedQuantity ?? $quantity;
+            if ($fallbackQuantity !== null) {
+                try {
+                    $cost = SupplierMoney::checkedMultiply($fallbackUnitPriceMicros, $fallbackQuantity);
+                } catch (Throwable) {
+                    $cost = null;
+                }
+            }
+        }
+        $single = $row['redeem_code'] ?? $payload['redeem_code'] ?? null;
+        $rawCodes = $row['redeem_codes'] ?? $payload['redeem_codes'] ?? null;
+        if ($rawCodes === null || $rawCodes === []) {
+            $rawCodes = $single === null ? [] : [$single];
+        }
+        if (! is_array($rawCodes) || ! array_is_list($rawCodes) || count($rawCodes) > self::MAX_QUANTITY) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $deliveries = [];
+        foreach ($rawCodes as $code) {
+            $deliveries[] = $this->text($code, 16_000);
+        }
+        if ($single !== null && ($deliveries === [] || $single !== $deliveries[0])) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'payload_mismatch', identityTrusted: $id !== null);
+        }
+        $status = $row['status'] ?? $payload['status'] ?? null;
+        if ($status !== null && ! is_string($status)) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $mismatch = ($expectedOrderId !== null && $id !== $expectedOrderId)
+            || ($expectedProductId !== null && $package !== null && $package !== $expectedProductId)
+            || ($reference !== null && $external !== null && $external !== $reference)
+            || ($expectedQuantity !== null && $quantity !== null && $quantity !== $expectedQuantity)
+            || ($quantity !== null && count($deliveries) > $quantity);
+        if ($mismatch || $id === null) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'payload_mismatch');
+        }
+        $fulfilled = in_array($status, ['fulfilled', 'completed', 'delivered', 'success'], true);
+        $pending = in_array($status, ['pending', 'processing', 'paid', 'queued', 'awaiting_delivery', 'in_progress'], true);
+        if (! $fulfilled && ! $pending) {
+            return new SupplierOrderResult('ambiguous', $id, errorCode: 'invalid_order_status', identityTrusted: true);
+        }
+        if (! $fulfilled) {
+            return new SupplierOrderResult('pending', $id, $quantity, $cost, $deliveries, identityTrusted: true);
+        }
+        if (count(array_unique($deliveries, SORT_STRING)) !== count($deliveries)) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'duplicate_delivery', identityTrusted: true);
+        }
+        $count = $quantity ?? $expectedQuantity;
+        $complete = $deliveries !== [] && ($count === null || count($deliveries) === $count);
+
+        return new SupplierOrderResult(
+            $complete ? 'delivered' : 'ambiguous',
+            $id,
+            $quantity,
+            $cost,
+            $deliveries,
+            $complete ? null : 'incomplete_delivery',
+            identityTrusted: true,
+            deliveryTrusted: $complete,
+        );
     }
 
     private function canbosoSnapshot(Supplier $supplier, array $account, array $catalog): SupplierCatalogSnapshot
@@ -1037,6 +1197,23 @@ final class SupplierClient
                 && in_array($payload['message'] ?? $payload['error'] ?? null, [
                     'Insufficient stock', 'Insufficient flash sale quantity', 'Product price changed',
                 ], true);
+        }
+        if ($provider === SupplierProvider::MiraiApi) {
+            if (in_array($response->status(), [400, 401, 402, 403, 404, 422, 429], true)) {
+                return true;
+            }
+            if ($response->status() !== 409) {
+                return false;
+            }
+            try {
+                $message = $this->payload($response)['message'] ?? null;
+            } catch (SupplierUnavailable) {
+                return false;
+            }
+
+            return is_string($message) && in_array($message, [
+                'insufficient wallet balance', 'insufficient balance', 'package is not available', 'package not found',
+            ], true);
         }
         if ($provider === SupplierProvider::Canboso) {
             return in_array($response->status(), [400, 401, 404, 429], true);

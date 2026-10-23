@@ -9,15 +9,51 @@ use JsonException;
 /**
  * Plausible IDR value of one supplier currency unit.
  *
- * `suppliers.exchange_rate_idr` is the IDR value of one unit of the supplier's
- * wallet currency. One VND is worth well under one rupiah, so a rupiah-per-USDT
- * figure (the 18.000 that broke a live Nastele connection) is not a currency
- * conversion at all and silently produced a hundredfold unit cost. The band is
- * deliberately wide: it rejects order-of-magnitude mistakes without freezing a
- * legitimate funding-cost move. Currencies without a band are not restricted.
+ * `supplier_currency_rates.exchange_rate_idr` is the authoritative global value;
+ * `suppliers.exchange_rate_idr` is the synchronized connection cache read by
+ * pricing and checkout snapshots. One VND is worth well under one rupiah, so a
+ * rupiah-per-USDT figure (the 18.000 that broke a live Nastele connection) is not
+ * a currency conversion at all and silently produced a hundredfold unit cost. The
+ * band is deliberately wide: it rejects order-of-magnitude mistakes without
+ * freezing a legitimate funding-cost move. Currencies without a band are only
+ * checked for a positive, bounded decimal by `isStorable()`.
  */
 final class SupplierExchangeRate
 {
+    /**
+     * Wallet currencies reported by supplier contracts. USD and USDT share one
+     * editable rate because they are funded from the same dollar budget; the
+     * separate connection caches are still keyed by their exact currency so
+     * checkout and purchase snapshots stay explicit.
+     *
+     * @var list<string>
+     */
+    public const CURRENCIES = ['USD', 'USDT', 'VND'];
+
+    /** Editable global rate rows. USD covers both USD and USDT connections. */
+    public const RATE_KEYS = ['USD', 'VND'];
+
+    /** Resolve a supplier currency to the row that owns its editable rate. */
+    public static function rateKey(?string $currency): ?string
+    {
+        return match ($currency) {
+            'USD', 'USDT' => 'USD',
+            'VND' => 'VND',
+            default => $currency,
+        };
+    }
+
+    /** @return list<string> supplier currencies served by one rate row */
+    public static function currenciesForRateKey(string $key): array
+    {
+        return $key === 'USD' ? ['USD', 'USDT'] : [$key];
+    }
+
+    public static function rateLabel(string $key): string
+    {
+        return $key === 'USD' ? 'USD / USDT' : $key;
+    }
+
     /** @var array<string, array{min: string, max: string}> */
     private const BANDS = [
         // 0.692308 = Rp18.000 per USDT ÷ 26.000 VND per USDT.
@@ -41,6 +77,21 @@ final class SupplierExchangeRate
         return $decimal !== null
             && $decimal->compareTo(BigDecimal::of($band['min'])) >= 0
             && $decimal->compareTo(BigDecimal::of($band['max'])) <= 0;
+    }
+
+    /**
+     * True when the value can be persisted as one currency's IDR rate: a
+     * positive six-place decimal within the configured connection ceiling, and
+     * inside the currency's plausible band when one exists.
+     */
+    public static function isStorable(string $currency, int|float|string|null $rate): bool
+    {
+        $decimal = self::decimal($rate);
+
+        return $decimal !== null
+            && $decimal->compareTo(BigDecimal::of('0')) > 0
+            && $decimal->compareTo(BigDecimal::of('1000000')) <= 0
+            && self::isPlausible($currency, $rate);
     }
 
     /** True when two stored decimal tokens describe the same rate value. */

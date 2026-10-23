@@ -11,6 +11,7 @@ use App\Models\ProductSupplierSource;
 use App\Models\StockNotificationEvent;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
@@ -145,19 +146,22 @@ final class SupplierRateAuditCommandTest extends NonTransactionalDatabaseTestCas
         $this->assertSame($single, $many);
     }
 
-    public function test_a_connection_with_an_open_commitment_is_reported_but_left_unchanged(): void
+    public function test_a_connection_with_an_open_commitment_can_still_correct_its_global_rate(): void
     {
         $supplier = $this->connection('18000', ['reserved_balance_micros' => 5_000_000]);
         $this->mappedProduct($this->sku($supplier));
 
+        // Checkout and purchase rows carry their own immutable rate snapshot, so a
+        // later global correction cannot reprice the open obligation.
         $this->artisan('suppliers:rate-audit', ['--fix' => true, '--to' => '0.692308', '--force' => true])
             ->expectsOutputToContain('Koneksi #'.$supplier->id.' nastele VND: kurs 18000.000000 di luar rentang wajar.')
-            ->assertExitCode(Command::FAILURE);
+            ->assertExitCode(Command::SUCCESS);
 
         $stored = $supplier->fresh();
-        $this->assertSame('18000.000000', $stored->exchange_rate_idr);
-        $this->assertSame(1, (int) $stored->version);
-        $this->assertSame(0, AuditLog::query()->count());
+        $this->assertSame('0.692308', $stored->exchange_rate_idr);
+        $this->assertSame(2, (int) $stored->version);
+        $this->assertSame(5_000_000, (int) $stored->reserved_balance_micros);
+        $this->assertSame(1, AuditLog::query()->count());
     }
 
     public function test_the_audit_actor_must_be_an_existing_positive_integer_id(): void
@@ -266,7 +270,9 @@ final class SupplierRateAuditCommandTest extends NonTransactionalDatabaseTestCas
 
     private function measuredFixQueryCount(Supplier $supplier): int
     {
-        // Every measured run starts from the broken stored rate and its original version.
+        // Every measured run starts from the broken stored rate, its original
+        // version, and no global rate row.
+        SupplierCurrencyRate::query()->whereKey($supplier->currency)->delete();
         $supplier->newQuery()->whereKey($supplier->id)->update(['exchange_rate_idr' => '18000', 'version' => 1]);
 
         DB::flushQueryLog();

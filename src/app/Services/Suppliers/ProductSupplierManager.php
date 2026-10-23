@@ -244,24 +244,41 @@ final class ProductSupplierManager
         return $policy;
     }
 
-    public function preview(Product $product, SupplierCatalogItem $item, array $input): array
+    public function preview(Product $product, SupplierCatalogItem $item, array $input, int $quantity = 1): array
     {
-        $micros = $this->pricing->costMicros($item, 1);
+        if ($quantity < 1 || $quantity > 10000) {
+            return ['quantity' => $quantity, 'cost_idr' => null, 'retail_idr' => null, 'profit_idr' => null,
+                'cost_unit_idr' => null, 'retail_unit_idr' => null, 'profit_unit_idr' => null, 'currency' => null];
+        }
+        $micros = $this->pricing->costMicros($item, $quantity);
         if ($micros === null) {
-            return ['cost_idr' => null, 'retail_idr' => null, 'profit_idr' => null];
+            return ['quantity' => $quantity, 'cost_idr' => null, 'retail_idr' => null, 'profit_idr' => null,
+                'cost_unit_idr' => null, 'retail_unit_idr' => null, 'profit_unit_idr' => null, 'currency' => null];
         }
         $supplier = Supplier::query()->findOrFail($item->supplier_id);
-        $cost = SupplierMoney::costIdr($micros, $supplier->exchange_rate_idr);
+        $totalCost = SupplierMoney::costIdr($micros, $supplier->exchange_rate_idr);
+        // The policy's retail price is per unit. Use a whole-rupiah ceiling so a
+        // fractional total cost can never understate the unit purchase price.
+        $unitCost = intdiv($totalCost + $quantity - 1, $quantity);
         $policy = new SupplierPricePolicy;
-        $policy->forceFill($input);
+        $policy->forceFill(array_intersect_key($input, array_flip(['mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'rounding_idr'])));
 
-        $retail = $input['mode'] === 'manual' ? (int) $product->price_amount : $this->pricing->retailPrice($policy, $cost);
-        $profit = $retail === null ? null : $retail - $cost;
+        $quote = app(ProductQuantityPricing::class)->quote($product, $quantity);
+        $retailUnit = $input['mode'] === 'manual' || $quote->appliedTierMinimum !== null
+            ? $quote->effectiveIdrUnitAmount
+            : $this->pricing->retailPrice($policy, $unitCost);
+        $totalRetail = $retailUnit * $quantity;
+        $profit = $totalRetail - $totalCost;
 
         return [
-            'cost_idr' => $cost,
-            'retail_idr' => $retail,
+            'quantity' => $quantity,
+            'cost_idr' => $totalCost,
+            'retail_idr' => $totalRetail,
             'profit_idr' => $profit,
+            'cost_unit_idr' => $unitCost,
+            'retail_unit_idr' => $retailUnit,
+            'profit_unit_idr' => intdiv($profit, $quantity),
+            'currency' => $supplier->currency,
         ];
     }
 

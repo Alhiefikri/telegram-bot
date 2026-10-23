@@ -6,6 +6,7 @@ use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\SupplierAdminRequest;
+use App\Http\Requests\Admin\SupplierCurrencyRateRequest;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
@@ -18,6 +19,7 @@ use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\Admin\SupplierOperationConfirmation;
 use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierCatalogSync;
+use App\Services\Suppliers\SupplierCurrencyRateManager;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierManager;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
@@ -28,6 +30,21 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 
 final class AdminSupplierController extends Controller
 {
+    public function currencyRates(SupplierCurrencyRateRequest $request, SupplierCurrencyRateManager $manager)
+    {
+        app(SupplierOperationConfirmation::class)->requireRecent($request);
+        try {
+            $changed = $manager->save($request->validated('rates'), $request->attributes->get('adminUser'), $request->ip());
+        } catch (ValidationException $exception) {
+            return response()->json([
+                'message' => 'Kurs berubah di tempat lain. Muat ulang sebelum menyimpan.',
+                'errors' => $exception->errors(),
+            ], 422);
+        }
+
+        return $this->saved($changed === 0 ? 'Kurs mata uang tidak berubah.' : 'Kurs mata uang supplier disimpan dan kapasitas produk dihitung ulang.');
+    }
+
     public function store(SupplierAdminRequest $request, SupplierManager $manager)
     {
         app(SupplierOperationConfirmation::class)->requireRecent($request);
@@ -140,7 +157,7 @@ final class AdminSupplierController extends Controller
         abort_unless(ProductSupplierSource::query()->where('product_id', $product->id)->where('supplier_catalog_item_id', $item->id)->exists(), 422);
 
         $input = $request->validated();
-        $pricePreview = $manager->preview($product, $item, $input);
+        $pricePreview = $manager->preview($product, $item, $input, max(1, min(10000, (int) ($input['quantity'] ?? 1))));
         if ($request->expectsJson()) {
             return response()->json($pricePreview);
         }

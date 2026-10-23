@@ -2,6 +2,7 @@ import Alpine from "alpinejs";
 import adminDashboard, { salesFilter, salesChart } from "./admin-dashboard";
 import initTheme from "./theme";
 import supplierConnectionForm from "./supplier-connection-form";
+import supplierCurrencyRates from "./supplier-currency-rates";
 import dashboardNavigation from "./admin-dashboard/navigation";
 import modalFocus from "./admin-dashboard/modal-focus";
 import productWorkspace, { workspaceStock } from "./product-workspace.js";
@@ -27,6 +28,7 @@ Alpine.data("dashboardNavigation", () => ({
 Alpine.data("salesFilter", salesFilter);
 Alpine.data("salesChart", salesChart);
 Alpine.data("supplierConnectionForm", supplierConnectionForm);
+Alpine.data("supplierCurrencyRates", supplierCurrencyRates);
 Alpine.data("passwordReveal", () => ({
   showPassword: false,
   get buttonText() {

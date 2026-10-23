@@ -82,10 +82,28 @@ final class SupplierPricingClarityTest extends TestCase
 
         if ($json) {
             $this->postJson(route('admin.products.supplier-pricing.preview', $product), $input)
-                ->assertOk()->assertExactJson(['cost_idr' => 8000, 'retail_idr' => 11000, 'profit_idr' => 3000]);
+                ->assertOk()->assertExactJson([
+                    'quantity' => 1,
+                    'cost_idr' => 8000,
+                    'retail_idr' => 11000,
+                    'profit_idr' => 3000,
+                    'cost_unit_idr' => 8000,
+                    'retail_unit_idr' => 11000,
+                    'profit_unit_idr' => 3000,
+                    'currency' => 'USDT',
+                ]);
         } else {
             $this->post(route('admin.products.supplier-pricing.preview', $product), $input)->assertOk()
-                ->assertViewHas('workspace', fn (array $workspace): bool => $workspace['price_preview'] === ['cost_idr' => 8000, 'retail_idr' => 11000, 'profit_idr' => 3000]
+                ->assertViewHas('workspace', fn (array $workspace): bool => $workspace['price_preview'] === [
+                    'quantity' => 1,
+                    'cost_idr' => 8000,
+                    'retail_idr' => 11000,
+                    'profit_idr' => 3000,
+                    'cost_unit_idr' => 8000,
+                    'retail_unit_idr' => 11000,
+                    'profit_unit_idr' => 3000,
+                    'currency' => 'USDT',
+                ]
                     && $workspace['preview_catalog_item_id'] === $backup->supplier_catalog_item_id
                     && $workspace['policy']['mode'] === 'hybrid'
                 );

@@ -15,6 +15,7 @@ use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
@@ -445,6 +446,10 @@ final class CanbosoPostgresConcurrencyTest extends TestCase
 
     private function fixture(int $balance = 10_000_000, int $stock = 10): array
     {
+        SupplierCurrencyRate::query()->firstOrCreate(
+            ['currency' => 'USD'],
+            ['exchange_rate_idr' => '1000.000000', 'version' => 1],
+        );
         $supplier = Supplier::forceCreate([
             'name' => 'Synthetic Canboso', 'provider' => 'canboso',
             'api_key' => 'synthetic-canboso-buyer-key', 'currency' => 'USD',

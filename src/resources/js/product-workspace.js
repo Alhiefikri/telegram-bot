@@ -129,6 +129,7 @@ export default function productWorkspace(
     preview: initialPayload.price_preview ?? null,
     previewLoading: false,
     previewCatalogId: initialPayload.preview_catalog_item_id ?? "",
+    previewQuantity: 1,
     previewSequence: 0,
     init() {
       const requested = new URL(
@@ -143,6 +144,7 @@ export default function productWorkspace(
       globalThis.window?.addEventListener("beforeunload", this.beforeUnload);
       this.$watch?.("draft.policy", () => this.invalidatePreview());
       this.$watch?.("previewCatalogId", () => this.invalidatePreview());
+      this.$watch?.("previewQuantity", () => this.invalidatePreview());
       this.$watch?.("catalogQuery", () => this.invalidateCatalog());
       this.$watch?.("catalogSupplier", () => this.invalidateCatalog());
     },
@@ -720,6 +722,7 @@ export default function productWorkspace(
       const inputs = JSON.stringify([
         this.draft.policy,
         this.previewCatalogId,
+        this.previewQuantity,
         this.workspace.policy.version,
       ]);
       const id = ++this.previewSequence;
@@ -733,6 +736,10 @@ export default function productWorkspace(
             this.draft.policy.markup_percent
           ),
           catalog_item_id: this.previewCatalogId,
+          quantity: Math.max(
+            1,
+            Math.min(10000, Math.trunc(Number(this.previewQuantity) || 1))
+          ),
           version: this.workspace.policy.version,
         };
         delete body.markup_percent;
@@ -746,6 +753,7 @@ export default function productWorkspace(
             JSON.stringify([
               this.draft.policy,
               this.previewCatalogId,
+              this.previewQuantity,
               this.workspace.policy.version,
             ])
         )
@@ -758,6 +766,7 @@ export default function productWorkspace(
             JSON.stringify([
               this.draft.policy,
               this.previewCatalogId,
+              this.previewQuantity,
               this.workspace.policy.version,
             ])
         )

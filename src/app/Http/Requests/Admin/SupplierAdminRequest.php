@@ -3,7 +3,6 @@
 namespace App\Http\Requests\Admin;
 
 use App\Enums\SupplierProvider;
-use App\Services\Suppliers\SupplierExchangeRate;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -49,7 +48,6 @@ final class SupplierAdminRequest extends FormRequest
                 'api_key' => [$action === 'store' ? 'required' : 'nullable', 'string', 'max:2048', 'not_regex:/[\x00-\x20\x7F]/'],
                 'currency' => ['required', Rule::in(['USD', 'USDT', 'IDR', 'VND'])],
                 'currency_confirmed' => ['required', 'boolean'],
-                'exchange_rate_idr' => ['required', 'numeric', 'regex:/\A(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?\z/D', 'min:0.000001', 'max:1000000'],
                 'is_active' => ['required', 'boolean'],
                 'low_balance_threshold_micros' => ['required', 'integer', 'min:0', 'max:1000000000000'],
                 'version' => [$action === 'store' ? 'nullable' : 'required', 'integer', 'min:0'],
@@ -93,6 +91,7 @@ final class SupplierAdminRequest extends FormRequest
                 'minimum_profit_idr' => ['required', 'integer', 'min:0', 'max:1000000000'],
                 'rounding_idr' => ['required', Rule::in([1, 100, 500, 1000])],
                 'catalog_item_id' => [$action === 'preview' ? 'required' : 'nullable', 'integer', 'exists:supplier_catalog_items,id'],
+                'quantity' => ['nullable', 'integer', 'min:1', 'max:10000'],
             ],
             'operate' => [
                 'action' => ['required', Rule::in(['retry', 'recover', 'manual', 'no_debit', 'debit_confirmed', 'history', 'history_confirm'])],
@@ -123,14 +122,6 @@ final class SupplierAdminRequest extends FormRequest
             if (in_array($this->input('provider'), ['arrs', 'warzone'], true) && ! $this->boolean('currency_confirmed')) {
                 $validator->errors()->add('currency_confirmed', 'Konfirmasi mata uang supplier diperlukan.');
             }
-            // A rate outside the plausible band of the connection currency is a
-            // configuration error, not a price: reject it however the request arrived.
-            $rate = $this->input('exchange_rate_idr');
-            if ($selected !== null && ! $validator->errors()->has('exchange_rate_idr')
-                && (is_string($rate) || is_int($rate) || is_float($rate))
-                && ! SupplierExchangeRate::isPlausible($selected->defaultCurrency(), $rate)) {
-                $validator->errors()->add('exchange_rate_idr', (string) SupplierExchangeRate::requirement($selected->label(), $selected->defaultCurrency()));
-            }
         }];
     }
 
@@ -140,10 +131,6 @@ final class SupplierAdminRequest extends FormRequest
         return match ($field) {
             'currency' => ['Mata uang harus sesuai provider.'],
             'currency_confirmed' => ['Konfirmasi mata uang supplier diperlukan.'],
-            'exchange_rate_idr' => array_values(array_filter(array_map(
-                fn (SupplierProvider $provider): ?string => SupplierExchangeRate::requirement($provider->label(), $provider->defaultCurrency()),
-                SupplierProvider::cases(),
-            ))),
             default => [],
         };
     }

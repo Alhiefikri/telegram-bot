@@ -116,7 +116,7 @@ test("supplier creation confirms password without losing the unsaved API key", a
   const form = page.locator('form[action$="/admin/suppliers"]').first();
   await form.locator('[name="api_key"]').fill(apiKey);
   await form.getByLabel("Pilih supplier").selectOption("prodseller");
-  await form.locator('[name="exchange_rate_idr"]').fill("18000");
+  await expect(form).toContainText("Kurs global");
   await form
     .getByRole("button", { name: "Buat supplier", exact: true })
     .click();
@@ -137,7 +137,7 @@ test("supplier creation confirms password without losing the unsaved API key", a
   await dialog.getByRole("button", { name: "Batal", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(form.locator('[name="api_key"]')).toHaveValue(apiKey);
-  await expect(form.locator('[name="exchange_rate_idr"]')).toHaveValue("18000");
+  await expect(form).toContainText("Rp16.000");
   expect(supplierState(keys).suppliers).toEqual(initial.suppliers);
   await expectNoSecretLeak(page, keys, responses);
   await form

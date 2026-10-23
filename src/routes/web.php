@@ -257,6 +257,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::post('telegram-welcome-banner', AdminTelegramWelcomeBannerController::class)->name('telegram-welcome-banner.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');
             Route::prefix('suppliers')->name('suppliers.')->group(function (): void {
+                Route::post('currency-rates', [AdminSupplierController::class, 'currencyRates'])->name('currency-rates.update');
                 Route::post('/', [AdminSupplierController::class, 'store'])->name('store');
                 Route::patch('{supplier}', [AdminSupplierController::class, 'update'])->name('update');
                 Route::delete('{supplier}', [AdminSupplierController::class, 'destroy'])->name('destroy');

@@ -7,6 +7,7 @@ use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierAccountUnit;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierDeposit;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPurchase;
@@ -21,19 +22,26 @@ use RuntimeException;
 
 final class SupplierManager
 {
-    public function __construct(private readonly AuditLogger $audit, private readonly SupplierAvailability $availability) {}
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly SupplierAvailability $availability,
+        private readonly SupplierCurrencyRateManager $currencyRates,
+    ) {}
 
     public function save(?Supplier $supplier, array $attributes, User $actor, ?string $ip): Supplier
     {
         abort_unless($actor->role?->canManageStoreOperations() === true, 403);
         [$saved, $ids] = DB::transaction(function () use ($supplier, $attributes, $actor, $ip): array {
             $ids = $supplier ? $this->productIds((int) $supplier->id) : [];
+            // The global currency row is the source of truth and is locked before
+            // Product rows so a concurrent rate update cannot leave a stale cache.
+            $currencyRate = $this->currencyRates->lockedRateFor((string) $attributes['currency']);
             $products = Product::query()->whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get();
             $connection = $supplier ? Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail() : new Supplier;
             if ($supplier && ((int) $connection->version !== (int) $attributes['version'] || array_diff($this->productIds((int) $connection->id), $ids))) {
                 throw ValidationException::withMessages(['version' => 'Konfigurasi berubah. Muat ulang sebelum menyimpan.']);
             }
-            $fields = ['name', 'provider', 'currency', 'currency_confirmed', 'exchange_rate_idr', 'is_active', 'low_balance_threshold_micros'];
+            $fields = ['name', 'provider', 'currency', 'currency_confirmed', 'is_active', 'low_balance_threshold_micros'];
             $changed = [];
             foreach ($fields as $field) {
                 $value = $attributes[$field];
@@ -47,12 +55,16 @@ final class SupplierManager
                 $connection->api_key = $key;
                 $changed[] = 'credential';
             }
+            if (! SupplierExchangeRate::equals($connection->getAttribute('exchange_rate_idr'), $currencyRate->exchange_rate_idr)) {
+                $connection->exchange_rate_idr = $currencyRate->exchange_rate_idr;
+                $changed[] = 'exchange_rate_idr';
+            }
             $created = ! $connection->exists;
-            if (! $created && array_intersect($changed, ['provider', 'currency', 'exchange_rate_idr'])
+            if (! $created && array_intersect($changed, ['provider', 'currency'])
                 && SupplierAccountUnit::query()->where('supplier_id', $connection->id)->exists()) {
                 throw ValidationException::withMessages(['connection' => 'Riwayat akun terikat pada koneksi ini. Buat koneksi baru untuk akun atau provider lain.']);
             }
-            $protectedChanges = ['credential', 'provider', 'currency', 'currency_confirmed', 'exchange_rate_idr'];
+            $protectedChanges = ['credential', 'provider', 'currency', 'currency_confirmed'];
             $this->guardOpenCommitments($connection, $changed, $protectedChanges, $created);
             if (! $created && $changed === []) {
                 return [$connection, []];
@@ -143,53 +155,30 @@ final class SupplierManager
     }
 
     /**
-     * Explicit operator correction of a stored conversion rate (`suppliers:rate-audit --fix`).
-     * It reuses the connection commitment guards, the ascending Product -> Supplier lock
-     * order and the optimistic version of save(); historical supplier_purchases snapshots
-     * are never rewritten and the still valid provider observation is kept.
+     * Operator correction used by `suppliers:rate-audit --fix`. The correction
+     * applies to the connection currency's global rate so every connection of
+     * that currency shares the same source. Historical purchase snapshots are
+     * never rewritten.
      *
-     * @return bool true when the stored rate actually changed
+     * @return bool true when the global rate actually changed
      *
      * @throws InvalidArgumentException when the replacement is outside the currency band
-     * @throws RuntimeException when the connection moved concurrently or still holds commitments
+     * @throws RuntimeException when the rate changed concurrently
      */
     public function correctRate(Supplier $supplier, string $rate, ?User $actor, ?string $ip): bool
     {
-        if (! SupplierExchangeRate::isPlausible($supplier->currency, $rate)) {
+        $rateKey = SupplierExchangeRate::rateKey($supplier->currency);
+        if ($rateKey === null || ! SupplierExchangeRate::isStorable($rateKey, $rate)) {
             throw new InvalidArgumentException('Kurs pengganti berada di luar rentang wajar untuk mata uang koneksi ini.');
         }
-        [$corrected, $ids] = DB::transaction(function () use ($supplier, $rate, $actor, $ip): array {
-            $ids = $this->productIds((int) $supplier->id);
-            // Product rows first, then the connection: the documented lock order of
-            // save() and of every availability refresh.
-            Product::query()->whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get();
-            $connection = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
-            if ((int) $connection->version !== (int) $supplier->version || $this->productIds((int) $connection->id) !== $ids) {
-                throw new RuntimeException('Koneksi supplier berubah selama audit. Jalankan ulang perintah.');
-            }
-            try {
-                $this->guardOpenCommitments($connection, ['exchange_rate_idr'], ['exchange_rate_idr'], false);
-            } catch (ValidationException $exception) {
-                throw new RuntimeException((string) $exception->validator->errors()->first(), previous: $exception);
-            }
-            $previous = (string) $connection->exchange_rate_idr;
-            if (SupplierExchangeRate::equals($previous, $rate)) {
-                return [false, []];
-            }
-            $connection->exchange_rate_idr = $rate;
-            $connection->sync_token = null;
-            $connection->last_error = null;
-            $connection->version = (int) $connection->version + 1;
-            $connection->save();
-            $this->audit->log('supplier.rate_corrected', $connection, ['exchange_rate_idr' => $previous], ['exchange_rate_idr' => (string) $connection->exchange_rate_idr, 'version' => $connection->version, 'command' => 'suppliers:rate-audit'], $actor, $ip);
-
-            return [true, $ids];
-        }, 5);
-        if ($ids !== []) {
-            $this->availability->refreshProducts($ids);
+        $current = SupplierCurrencyRate::query()->find($rateKey);
+        try {
+            return $this->currencyRates->save([
+                $rateKey => ['exchange_rate_idr' => $rate, 'version' => $current?->version ?? 0],
+            ], $actor, $ip, 'suppliers:rate-audit') > 0;
+        } catch (ValidationException $exception) {
+            throw new RuntimeException((string) $exception->validator->errors()->first(), previous: $exception);
         }
-
-        return $corrected;
     }
 
     /**

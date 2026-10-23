@@ -7,8 +7,10 @@ use App\Enums\SupplierProvider;
 use App\Models\Product;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierFulfillment;
 use App\Services\Suppliers\SupplierCatalogSync;
+use App\Services\Suppliers\SupplierExchangeRate;
 use App\Services\Suppliers\SupplierMoney;
 use Carbon\CarbonImmutable;
 
@@ -40,6 +42,14 @@ final class AdminSupplierDashboardData
         $connections->setCollection($connections->getCollection()->map(function (Supplier $supplier) use ($sampleUnits, $pendingPaymentHolds): array {
             $available = $supplier->balance_micros === null ? null : max(0, (int) $supplier->balance_micros - (int) $supplier->reserved_balance_micros);
             $sampleUnit = $sampleUnits->get($supplier->id);
+            $sampleCost = null;
+            if ($sampleUnit !== null && SupplierExchangeRate::isStorable($supplier->currency, $supplier->exchange_rate_idr)) {
+                try {
+                    $sampleCost = SupplierMoney::costIdr((int) $sampleUnit, $supplier->exchange_rate_idr);
+                } catch (\InvalidArgumentException) {
+                    $sampleCost = null;
+                }
+            }
             $pendingPayment = $pendingPaymentHolds->get($supplier->id) ?? collect();
             $pendingPaymentHold = (int) $pendingPayment->sum('reserved_cost_micros');
             $pendingPaymentReleaseAt = $pendingPayment->max('expires_at');
@@ -47,6 +57,7 @@ final class AdminSupplierDashboardData
             return [
                 ...$supplier->only(['id', 'name', 'provider', 'currency', 'currency_confirmed', 'exchange_rate_idr', 'is_active', 'version', 'low_balance_threshold_micros']),
                 'sample_unit' => $sampleUnit === null ? null : rtrim(rtrim(SupplierMoney::decimal((int) $sampleUnit), '0'), '.'),
+                'sample_cost_idr' => $sampleCost,
                 'balance' => $supplier->balance_micros === null ? 'Belum diketahui' : SupplierMoney::balanceDecimal((int) $supplier->balance_micros),
                 'held_balance' => SupplierMoney::decimal((int) $supplier->reserved_balance_micros),
                 'available_balance' => $available === null ? 'Belum diketahui' : SupplierMoney::decimal($available),
@@ -112,6 +123,7 @@ final class AdminSupplierDashboardData
             ->get(['id', 'name']);
 
         return [
+            'currencyRates' => $this->currencyRates(),
             'connections' => $connections->appends(['tab' => 'suppliers']),
             'products' => $products,
             'productFilters' => [
@@ -121,6 +133,31 @@ final class AdminSupplierDashboardData
                 'sourceOptions' => $sourceOptions,
             ],
         ];
+    }
+
+    /** @return list<array{currency: string, label: string, currencies: list<string>, exchange_rate_idr: string, version: int, updated_at: ?string, band: ?array, used_by: int}> */
+    private function currencyRates(): array
+    {
+        $stored = SupplierCurrencyRate::query()->get()->keyBy('currency');
+        $usedBy = Supplier::query()->selectRaw('currency, COUNT(*) AS aggregate')
+            ->groupBy('currency')->pluck('aggregate', 'currency');
+
+        return array_map(function (string $rateKey) use ($stored, $usedBy): array {
+            $row = $stored->get($rateKey);
+            $rate = $row === null ? '' : (string) $row->exchange_rate_idr;
+            $currencies = SupplierExchangeRate::currenciesForRateKey($rateKey);
+
+            return [
+                'currency' => $rateKey,
+                'label' => SupplierExchangeRate::rateLabel($rateKey),
+                'currencies' => $currencies,
+                'exchange_rate_idr' => $rate === '' ? '' : (rtrim(rtrim($rate, '0'), '.') ?: '0'),
+                'version' => $row?->version ?? 0,
+                'updated_at' => $row?->updated_at?->timezone(config('app.timezone'))->format('d M Y H:i'),
+                'band' => SupplierExchangeRate::band($rateKey),
+                'used_by' => array_sum(array_map(fn (string $currency): int => (int) ($usedBy[$currency] ?? 0), $currencies)),
+            ];
+        }, SupplierExchangeRate::RATE_KEYS);
     }
 
     public function syncFailureMessage(Supplier $supplier): string

@@ -113,15 +113,18 @@
                     <div class="workspace-fieldset">
                         <h4>Simulasi harga per SKU</h4>
                         <p class="workspace-muted">Memakai draf kebijakan dan data server tanpa menyimpan atau membeli. Mode manual memakai harga jual tersimpan.</p>
-                        <div class="workspace-actions"><label>SKU untuk simulasi<select x-model="previewCatalogId"><option value="">Pilih sumber supplier</option><template x-for="source in workspace.sources" :key="source.id"><option x-bind:value="source.catalog_item_id" x-text="source.supplier.name + ' · ' + source.catalog.name"></option></template></select></label><button type="button" class="workspace-button" x-on:click="previewPrice()" x-bind:disabled="previewLoading || !previewCatalogId" x-text="previewLoading ? 'Menghitung…' : 'Hitung simulasi'"></button></div>
+                        <div class="workspace-actions"><label>SKU untuk simulasi<select x-model="previewCatalogId"><option value="">Pilih sumber supplier</option><template x-for="source in workspace.sources" :key="source.id"><option x-bind:value="source.catalog_item_id" x-text="source.supplier.name + ' · ' + source.catalog.name"></option></template></select></label><label>Jumlah simulasi<input type="number" min="1" max="10000" step="1" x-model.number="previewQuantity"></label><button type="button" class="workspace-button" x-on:click="previewPrice()" x-bind:disabled="previewLoading || !previewCatalogId" x-text="previewLoading ? 'Menghitung…' : 'Hitung simulasi'"></button></div>
                         <div class="workspace-info" x-show="preview" role="status" aria-live="polite">
                             <dl class="workspace-preview-prices">
-                                <div><dt>Harga beli / unit</dt><dd x-text="money(preview?.cost_idr)"></dd></div>
-                                <div><dt>Harga jual simulasi</dt><dd x-text="money(preview?.retail_idr)"></dd></div>
-                                <div><dt>Keuntungan / unit</dt><dd x-text="money(preview?.profit_idr)"></dd></div>
+                                <div><dt>Harga beli total (<span x-text="preview?.quantity"></span> unit)</dt><dd x-text="money(preview?.cost_idr)"></dd></div>
+                                <div><dt>Harga jual total</dt><dd x-text="money(preview?.retail_idr)"></dd></div>
+                                <div><dt>Profit bersih</dt><dd x-text="money(preview?.profit_idr)"></dd></div>
                             </dl>
-                            <p class="workspace-muted">Keuntungan = harga jual − harga beli, belum memperhitungkan biaya aktual lain atau diskon jumlah.</p>
+                            <p class="workspace-muted">Per unit: beli <span x-text="money(preview?.cost_unit_idr)"></span> · jual <span x-text="money(preview?.retail_unit_idr)"></span> · profit <span x-text="money(preview?.profit_unit_idr)"></span>.</p>
+                            <p class="workspace-muted">Profit bersih = total harga jual − total harga beli supplier. Simulasi memakai harga grosir/diskon jumlah supplier, harga bertingkat produk, dan jumlah unit yang diisi; biaya di luar supplier belum termasuk.</p>
                             <p x-show="preview && preview.retail_idr === null">Belum dapat dihitung. Perbarui katalog supplier lalu coba lagi.</p>
+                            <p class="workspace-warning" x-show="preview && preview.profit_idr < 0" x-cloak>Profit bersih negatif pada jumlah ini. Naikkan harga jual, ubah kebijakan, atau pilih SKU supplier yang lebih murah.</p>
+                            <p class="workspace-warning" x-show="preview && preview.profit_unit_idr < Number(draft.policy.minimum_profit_idr || 0)" x-cloak>Profit per unit berada di bawah keuntungan minimum. Pembelian supplier akan ditolak sampai harga jual atau kebijakan diperbaiki.</p>
                             <p class="workspace-warning" x-show="workspace.sources.some((source) => source.cost && source.cost.implausible)" x-cloak>Ada koneksi supplier dengan kurs di luar rentang wajar. Simulasi ini memakai kurs tersimpan yang salah, jadi jangan pakai angkanya sebelum kurs diperbaiki di dashboard Supplier Reseller.</p>
                         </div>
                         <p class="workspace-field-error" x-text="feedback.preview" role="alert"></p>

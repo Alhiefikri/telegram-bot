@@ -86,7 +86,7 @@ final class SupplierAvailability
 
                 continue;
             }
-            if (! SupplierExchangeRate::isPlausible($supplier->currency, $supplier->exchange_rate_idr)) {
+            if (! SupplierExchangeRate::isStorable($supplier->currency, $supplier->exchange_rate_idr)) {
                 $reasons[] = SupplierExchangeRate::reason($supplier->currency) ?? 'Kurs supplier tidak wajar untuk koneksi ini.';
 
                 continue;
@@ -182,7 +182,7 @@ final class SupplierAvailability
                 if ($policy === null || ! $source->is_active || $supplier === null || ! $supplier->is_active
                     || SupplierProvider::tryFrom($supplier->provider) === null
                     || ! $supplier->currency_confirmed
-                    || ! SupplierExchangeRate::isPlausible($supplier->currency, $supplier->exchange_rate_idr)
+                    || ! SupplierExchangeRate::isStorable($supplier->currency, $supplier->exchange_rate_idr)
                     || ($item->currency !== null && $item->currency !== $supplier->currency) || ! $item->orderable || $item->requires_input) {
                     continue;
                 }

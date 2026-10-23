@@ -23,7 +23,7 @@ Daftar Produk menyediakan pencarian nama produk, pilihan, dan family lintas hala
 Form Detail produk tidak lagi menampilkan Spesifikasi tambahan & dukungan (jenis produk, durasi akses, region, jenis akun, batas perangkat, yang termasuk, batasan penggunaan, estimasi pemenuhan, dan kebijakan dukungan). Penyimpanan detail tidak mengirim ulang field tersebut; nilai lama tetap tersimpan, tanpa penghapusan data atau perubahan tampilan Web Storefront yang memakai metadata lama.
 
 1. Open **Admin → Supplier Reseller** and fill the connection form. Clicking **Buat/Simpan supplier** opens an inline password dialog if recent confirmation is missing; successful confirmation resumes saving automatically. Incorrect passwords or cancelling retain the API key and other inputs in the current browser form. No secret is flashed to server session or persisted to browser storage. Operational recovery still requires recent confirmation.
-2. Add a connection: supported provider, API key, IDR conversion rate (up to six decimal places), active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; Nastele uses VND. The rate is the IDR value of **one** unit of that currency and is validated against the plausible band recorded for it (Nastele VND: `0.1`–`0.999999`); an implausible value is rejected server-side with an Indonesian explanation however the request arrived and must be corrected explicitly, see `suppliers:rate-audit`. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
+2. Set the **global** conversion rate first in **Kurs mata uang supplier**: one row for USD/USDT and one for VND. Each value is the IDR cost of **one** unit (VND may be below Rp1), up to six decimals. Then add a connection: supported provider, API key, active flag and low-balance threshold. The Dashboard derives the private name and configured currency from the provider: ProdSeller uses USDT; CSxStore, AI Vault, NyStore Official, ToolOraX (ShopBot) and Canboso use USD; Nastele and MiraiAPI use VND. The connection form shows the one global rate for its currency and does not save a per-supplier rate. VND must stay inside `0.1`–`0.999999`; an implausible value is rejected server-side with an Indonesian explanation however the request arrived, see `suppliers:rate-audit`. Only ARRS/Warzone expose account-currency selection and explicit confirmation. Fixed-provider currency overrides are rejected by request validation. The configured USD for NyStore/ToolOraX is not production account-currency sign-off; see **Credential, currency and threshold sign-off**.
 3. Do not put supplier API keys in ENV. The database stores encrypted credentials using the application's encryption key; saved keys are not displayed back. Keep APP_KEY and encrypted database backups together under the existing backup policy. Losing the key makes those credentials unreadable.
 4. For ARRS/Warzone, confirm the actual account currency with the supplier. Also obtain authoritative currency evidence for the actual NyStore/ToolOraX accounts before activation or spend. Dollar-like presentation and USDT funding are not wallet-currency evidence. A mismatch must block activation and receive contract review, not a forced dropdown/ENV override.
 5. Activate the connection and click **Sinkron katalog dan saldo**. The local button is a CSRF-protected POST, but provider catalog/balance requests are GET-only. Read-only catalog fetching must not buy anything.
@@ -34,6 +34,36 @@ Form Detail produk tidak lagi menampilkan Spesifikasi tambahan & dukungan (jenis
 10. Top up the external supplier account through that supplier's own supported payment flow. This application does not create a supplier funding transaction. Sync after funding to update availability.
 
 An account supports multiple SKUs with one credential. Adding another SKU from an implemented provider is an Admin operation, not a code change. A new provider contract or an unsupported fulfillment/input type still needs implementation and qualification.
+
+### Kurs mata uang global (2026-10-24)
+
+Dua kurs, bukan satu per koneksi. Kartu **Kurs mata uang supplier** hanya
+menyediakan dua baris:
+
+- **USD / USDT** untuk CSxStore, AI Vault, NyStore, ToolOraX, Canboso, ProdSeller, dan ARRS/Warzone. Satu angka dolar berlaku untuk wallet USD maupun USDT.
+- **VND** untuk Nastele dan MiraiAPI.
+
+Isi biaya rupiah nyata untuk **satu** unit, maksimal enam desimal. VND wajib berada di `0.1`–`0.999999`. Perubahan kurs meminta konfirmasi password, menulis audit `supplier.rate_corrected`, memperbarui semua koneksi USD/USDT atau VND, dan menghitung ulang harga otomatis serta kapasitas produk. Order dan purchase yang sedang berjalan menyimpan snapshot kursnya sendiri, jadi perubahan kurs tidak mengubah biaya atau batas refund order lama.
+
+Kartu ini juga menyediakan kalkulator VND: isi biaya rupiah per USDT dan jumlah VND yang benar-benar dikreditkan per USDT. Contoh Rp18.000 ÷ 24.000 VND = **0.75** per VND. Tekan **Isi kolom kurs VND**; angka tidak tersimpan sampai form disimpan.
+
+Migrasi `2026_10_23_000003_create_supplier_currency_rates` membuat tabel
+`supplier_currency_rates`; migrasi `2026_10_24_000001_merge_usd_usdt_supplier_currency_rates`
+menggabungkan baris USD dan USDT menjadi satu baris **USD** dan menghapus baris
+USDT. Bila beberapa koneksi lama memakai angka berbeda, nilai **tertinggi** dipilih
+agar biaya tidak turun diam-diam, lalu semua koneksi USD dan USDT diselaraskan.
+`suppliers.exchange_rate_idr` tetap ada sebagai cache yang dibaca pricing dan
+snapshot checkout; service global adalah satu-satunya penulis produksi kolom itu.
+Koneksi baru selalu menyalin kurs global dan ditolak bila kurs mata uangnya belum
+diatur. Rollback migrasi merge sengaja ditolak karena nilai USD dan USDT lama
+tidak dapat dipisahkan lagi tanpa kehilangan bukti; pulihkan backup pra-merge bila
+benar-benar perlu kembali.
+
+Di workspace produk, **Simulasi harga per SKU** sekarang menerima **Jumlah
+simulasi** dan menampilkan harga beli total, harga jual total, profit bersih,
+serta angka per unit. Simulasi memakai tier grosir/diskon jumlah supplier dan
+harga bertingkat produk, sehingga profit bersih pada jumlah grosir dapat diperiksa
+sebelum menyimpan kebijakan atau membeli.
 
 ### Menghapus koneksi duplikat atau tidak terpakai
 
@@ -62,19 +92,21 @@ migrasi schema untuk fitur ini. Cakupan regresi berada di `SupplierAdminTest`.
 ### Nastele
 
 Select **Nastele** in the existing Supplier Reseller connection form and enter a
-replacement API key, actual IDR funding cost for **one VND**, and a low-balance
-threshold in micro-VND (`1 VND = 1000000` micros). The rate may be below Rp1.
-The application does not fetch an FX rate or infer one from the supplier name.
-Migration `2026_10_15_000002_add_nastele_supplier_support` widens connection and
-purchase-snapshot rates to exact six-place decimals. Final IDR cost rounds up;
-existing integer-rate snapshots retain their economic value. Rollback refuses
-VND connections or fractional history rather than truncating financial evidence.
+replacement API key and a low-balance threshold in micro-VND (`1 VND = 1000000`
+micros). The connection no longer carries its own rate: it inherits the single
+**VND** rate from **Kurs mata uang supplier**. The rate may be below Rp1. The
+application does not fetch an FX rate or infer one from the supplier name.
+Migration `2026_10_15_000002_add_nastele_supplier_support` widened connection and
+purchase-snapshot rates to exact six-place decimals; migration
+`2026_10_23_000003_create_supplier_currency_rates` moved the editable source to
+the global currency rate. Final IDR cost rounds up; existing integer-rate
+snapshots retain their economic value.
 
 When funding in USDT, calculate `IDR per VND = actual IDR per USDT / VND credited
 per USDT`, including funding fees in the actual cost. Work from what the deposit
 page actually credits and from what one SKU actually costs: an observed 2.87 USDT
 for a 69,000 VND SKU implies about 24,000 VND per USDT, so at Rp18,000/USDT the
-correct entry is **0.75**, not `18000` — and that 69,000 VND SKU costs
+correct entry in the global **VND** row is **0.75**, not `18000` — and that 69,000 VND SKU costs
 **Rp51,750** (= ceiling of 69,000 × 0.75), not Rp47,770. The optimistic 26,000
 VND/USDT estimate would understate the unit cost by roughly eight percent and
 invite selling below cost. Fewer VND per USDT means a higher, more conservative
@@ -85,48 +117,52 @@ and the USDT actually spent per SKU from the supplier's own pages; the supplier'
 estimated USDT quote is not a live FX feed or an exact SKU price.
 
 A rate is only accepted inside the plausible band for its currency:
-`0.1 ≤ IDR per 1 VND ≤ 0.999999`. `SupplierAdminRequest` enforces that band on
-both `store` and `update`, so a rupiah-per-USDT figure is rejected with an
-Indonesian explanation even when the request is sent outside the browser form,
-and nothing is written. Other providers keep their existing contract (ProdSeller
-16000); `SupplierPricing::isEligible()`,
-`SupplierAvailability::refreshLocked()` and `ProductSupplierManager` also refuse
-an out-of-band stored rate, so it can never authorize a purchase, a capacity
-projection or an automatic retail price. New connections no longer prefill a
-dollar rate. Changing the currency clears the rate and requires re-entry;
-opening an existing connection preserves its saved rate.
+`0.1 ≤ IDR per 1 VND ≤ 0.999999`. `SupplierCurrencyRateRequest` enforces that
+band, so a rupiah-per-USDT figure is rejected with an Indonesian explanation
+even when the request is sent outside the browser form, and nothing is written.
+`SupplierPricing::isEligible()`, `SupplierAvailability::refreshLocked()` and
+`ProductSupplierManager` also refuse an out-of-band cached rate, so it can never
+authorize a purchase, a capacity projection or an automatic retail price.
+Changing a connection's currency makes it inherit the new currency's global rate;
+missing global rates block connection creation.
 
-The connection form shows the live derivation of what was typed (`1 VND ≈
-Rp0,692308 ⇒ SKU 69.000 VND ≈ Rp47.770` from the mapped catalog's most expensive
-SKU) and warns before saving when the number is outside the band. The product
-workspace card **Harga beli / unit** marks a cost computed from an out-of-band
-rate as unusable, and `SupplierAvailability::explainZeroCapacity()` names the
-out-of-band rate as the reason for a zero safe capacity.
+The connection form shows the global rate and the last observed sample SKU cost
+in IDR. The product workspace **Simulasi harga per SKU** shows the typed quantity,
+total purchase cost, total retail, net profit, and per-unit figures; it uses the
+supplier's wholesale tiers and the product's quantity tiers. A cost from an
+out-of-band cached rate remains marked unusable, and
+`SupplierAvailability::explainZeroCapacity()` still names the reason for a zero
+safe capacity.
 
 #### Correcting a stored rate
 
-Existing incorrect rows are corrected explicitly, never silently:
+Existing incorrect rows are corrected explicitly, never silently. Corrections
+now target the global rate of one currency:
 
 ```
-php artisan suppliers:rate-audit                                     # read-only report
-php artisan suppliers:rate-audit --fix --to=0.692308 --force         # apply one explicit rate
-php artisan suppliers:rate-audit --fix --to=0.692308 --actor=1       # interactive confirmation + audit actor
+php artisan suppliers:rate-audit                                          # read-only report
+php artisan suppliers:rate-audit --fix --currency=VND --to=0.692308 --force
+php artisan suppliers:rate-audit --fix --currency=VND --to=0.692308 --actor=1
 ```
 
-The report lists every connection whose stored rate is outside the band of its
-currency with its affected product count, and changes nothing. `--fix` requires
-an explicit `--to`, refuses a value the band rejects, and asks
-`Terapkan kurs <to> ke seluruh koneksi di atas?` before writing unless `--force`
-is given. Each change writes one `supplier.rate_corrected` audit row with the old
-and new rate and bumps the connection `version`, keeps the still valid provider
-observation (a rate does not invalidate catalog, wallet or stock evidence),
-refreshes the availability projection for the mapped products so capacity follows
-the wallet, SKU stock and profit guard again, and never rewrites
-`supplier_purchases` cost snapshots. Re-running the same command is a no-op once
-every row is inside the band. A connection with an unfinished deposit or reserved
-commitment is reported and left unchanged; resolve it first.
+The report lists every connection whose cached rate is outside the storable band
+of its currency with its affected product count, and changes nothing. `--fix`
+requires an explicit `--to`. When flagged connections span more than one
+currency, include `--currency=USD`, `--currency=USDT`, or `--currency=VND`; the
+command refuses to apply one number to several currencies. Each change writes one
+`supplier.rate_corrected` audit row with the old and new global rate, updates every
+connection of that currency, keeps the still valid provider observation, refreshes
+the availability projection for mapped products, and never rewrites
+`supplier_purchases` cost snapshots. Re-running the command is a no-op once the
+global row and every cached connection are aligned. Open orders do not block a
+rate change: checkout and purchase rows already carry their own immutable rate
+snapshot.
 
 #### Change record — 2026-10-15
+
+> The per-connection rate entry described in this historical record was
+> superseded on 2026-10-23 by the single **Kurs mata uang supplier** card. The
+> band, the audit action and the immutable purchase snapshots still apply.
 
 A live Nastele connection stored `18000` — the rupiah price of one USDT — as the
 rupiah price of one VND. A 69,000 VND SKU then reported **Rp1,242,000,000** per
@@ -219,6 +255,50 @@ assertions on disposable PostgreSQL 16, including the two Nastele races. These
 are local results, not a production deployment, CI run, or exactly-once guarantee
 from Nastele's server.
 
+### MiraiAPI
+
+Select **MiraiAPI** in the Supplier Reseller connection form. The connection is
+fixed to a **VND** wallet; enter the API key and the low-balance threshold in
+micro-VND (`1 VND = 1000000` micros). The connection inherits the one **VND**
+rate from **Kurs mata uang supplier**; it has no rate field of its own. The rate
+uses the same plausible VND band as Nastele and is not fetched or inferred by the
+application. Migration `2026_10_23_000002_add_miraiapi_supplier_support` extends
+the PostgreSQL money guard so MiraiAPI may hold a VND connection without
+weakening the Nastele-only currency rule for other providers; migration
+`2026_10_23_000003_create_supplier_currency_rates` owns the editable rate.
+
+The contract uses the fixed HTTPS origin `https://api.miraiapi.com/api/reseller/v1`
+with `Authorization: Bearer <reseller key>`. Sync reads `GET /balance` and
+`GET /packages` only. Package `code` is the external SKU, `reseller_price_vnd` is
+the unit cost, and `max_quantity` bounds one order. When `unlimited` is false,
+`remaining_today` bounds available quantity; when true, the package is orderable
+up to `max_quantity`. Redirects are disabled and the shared payload, credential
+echo and rate-budget guards apply (60 requests/minute, at most 45 reads).
+
+Purchases use `POST /orders` with `{package_code, quantity, external_order_id}`
+and the same reference in the `Idempotency-Key` header. Retries reuse that exact
+reference and payload. Recovery reads `GET /orders/{order_id}`. A fulfilled
+response must contain `redeem_codes` with one distinct code per ordered unit;
+`redeem_code` is only the first alias. A legacy merged order keeps a single code,
+so quantity above one remains incomplete and goes to review rather than being
+delivered. Pending, unknown-status, mismatched quantity/cost/package/reference
+and incomplete or duplicate lists never authorize delivery.
+
+`HTTP 409 insufficient wallet balance` and `409 package is not available` are
+documented pre-purchase rejections; other conflicts remain ambiguous. A 400
+validation response, 401/403 authentication failure and 429 also prove no
+purchase. Authentication failures, transport errors and 5xx responses preserve
+the durable hold for recovery. Never place the reseller key or redeem codes in
+ENV, logs or the repository; enter the key through Admin, where it remains
+encrypted and hidden.
+
+Read-only qualification on 23 October 2026 parsed the live VND balance (**0**) and
+15 live packages through the PHP adapter. No purchase was sent because the
+wallet is unfunded; the zero-balance POST probe returned the documented 409
+without creating an order, and its response body was not logged. Fund the
+supplier wallet from MiraiAPI's own deposit flow before expecting automatic
+fulfillment.
+
 ### Canboso
 
 Canboso memakai origin tetap `https://canboso.com/api/v2/telegram-buyer` sesuai [Buyer API](https://canboso.com/api/swagger/). Adapter membaca `/balance` dan `/products` dengan buyer key, lalu membeli melalui `/purchase` dengan `Idempotency-Key` dan reference purchase yang sama. API key tetap terenkripsi di database.
@@ -228,7 +308,7 @@ Canboso memakai origin tetap `https://canboso.com/api/v2/telegram-buyer` sesuai 
 - Harga katalog menjadi estimasi konservatif tanpa mengandalkan diskon promosi. Bonus atau jumlah delivery yang berbeda dari quantity pesanan masuk review; adapter tidak membuang atau mengalokasikan bonus secara diam-diam.
 - GET `/orders?orderCode=...` tidak mengembalikan kredensial. Status `completed` di history tidak mengizinkan delivery; operator perlu memulihkan bukti privat melalui monitor existing. Timeout tanpa order ID mengikuti bounded same-reference replay existing, bukan purchase baru.
 - Limiter berbagi budget konservatif 30 request/menit, maksimal 20 read/menit, dan menghormati `Retry-After` sampai enam jam. Tidak ada retry HTTP dalam loop.
-- Top-up wallet dilakukan di Canboso. Sesudah top-up, sinkronkan saldo dan pastikan kurs IDR/USD sesuai biaya funding sebelum mapping/publikasi produk.
+- Top-up wallet dilakukan di Canboso. Sesudah top-up, sinkronkan saldo dan pastikan kurs global USD sesuai biaya funding sebelum mapping/publikasi produk.
 
 Regresi: `CanbosoSupplierTest` mencakup exact money, input-only SKU, currency mismatch, korelasi purchase, delivery yang tidak lengkap/bonus, history tanpa credential, dan cooldown enam jam.
 
@@ -276,14 +356,14 @@ Bukti lokal 14 Oktober 2026:
 ## Pricing and availability
 
 - Manual retail price is never overwritten by sync.
-- Automatic policy updates base IDR price using configured supplier conversion rate; existing quantity tiers must remain valid and their actual retail totals are checked against the purchase profit floor.
+- Automatic policy updates base IDR price using the global currency conversion rate; existing quantity tiers must remain valid and their actual retail totals are checked against the purchase profit floor.
 - Basis harga otomatis tersimpan adalah supplier aktif dan layak pertama menurut urutan: **Urutan 1 diprioritaskan**, lalu source berikutnya jika Urutan 1 tidak memenuhi syarat basis harga. Ini bukan pemilihan harga termurah atau janji bahwa kartu Urutan 1 selalu dipakai. Filter canonical tetap milik Supplier Availability/Pricing: mapping/koneksi aktif dan tidak dijeda, currency terkonfirmasi dan sesuai, SKU orderable tanpa input tambahan, observasi segar, serta harga dan jadwal tier valid. Kelayakan basis harga tidak menjamin stock/wallet cukup saat checkout; perhitungan harga dilakukan sebelum pemeriksaan kapasitas pembelian.
 - **Hitung simulasi berdasarkan SKU** hanya menghitung SKU terpilih dengan pengaturan form yang belum disimpan, termasuk SKU cadangan. Preview tidak menyimpan policy/retail, mengubah urutan mapping, atau memilih source basis harga tersimpan. **Simpan pengaturan harga** menyimpan kebijakan; SKU pada dropdown simulasi bukan source selector. Mode manual tetap memakai harga dari halaman Produk, dan tanpa mapping tidak ada source untuk harga otomatis atau simulasi. Pesanan yang sudah dibuat tetap memakai snapshot komersialnya.
 - Hasil simulasi menampilkan harga beli, harga jual, dan keuntungan per unit (`retail_idr - cost_idr`). Nilai negatif tetap ditampilkan sebagai kerugian, nol sebagai impas, dan biaya yang tidak tersedia tidak dianggap nol. Ini bukan laba bersih final: biaya aktual lain dan diskon jumlah belum dimasukkan. Perubahan draf kebijakan/SKU membatalkan hasil lama di UI tanpa menyimpan data.
 - Percentage markup is calculated from converted supplier cost: `ceil(cost_IDR × basis_points / 10000)`. `100` means 1%; `1000` means 10%. Fixed mode uses `profit_idr` and ignores a previously saved percentage. Hybrid uses the larger of the percentage amount and `profit_idr`, not their sum.
 - Automatic retail is supplier cost + selected markup/profit, rounded upward to the configured IDR multiple. `minimum_profit_idr` is a separate purchasing guard, not another markup: every external unit must retain that minimum after supplier cost. A computed price below that guard does not authorize a purchase.
 - Cadangan biaya dihapus dari form, kontrak preview, perhitungan harga, dan batas biaya pembelian. Migration `2026_10_15_000001_remove_supplier_price_policy_buffer` menghapus kolom lama dan menaikkan versi policy agar form sebelum migrasi ditolak sebagai konflik. Harga Product tersimpan serta snapshot harga/batas biaya Order lama tidak ditulis ulang; mode otomatis memakai rumus baru pada perhitungan ulang berikutnya. Rollback schema membuat kolom lama bernilai nol, bukan memulihkan nilai cadangan yang telah dihapus.
-- Configured conversion rate should reflect actual cost of funding the supplier, not an assumed live exchange rate. Pending/paid Order Items keep their immutable retail snapshots and source cost ceiling.
+- The global currency rate should reflect the actual cost of funding the supplier, not an assumed live exchange rate. Pending/paid Order Items keep their immutable retail snapshots and source cost ceiling.
 - Stale observations cannot authorize checkout. Failed reads preserve the last observed data rather than inventing zero stock. A stale last observation is not a promise that purchases remain possible.
 - Local stock is used first; external units cover the remainder when a safe source is eligible. Unresolved commitments reserve supplier balance and SKU capacity for existing orders.
 - While any supplier purchase has an unresolved, uncommitted debit, sync retains the existing wallet observation: the provider may already have charged that purchase. Catalog freshness still updates, but local finalization must not subtract the same debit from an already-reduced wallet.

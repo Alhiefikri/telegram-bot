@@ -528,7 +528,7 @@ class SupplierFulfillmentTest extends TestCase
     public static function bulkSuppliers(): array
     {
         return array_map(static fn (string $provider): array => [$provider], [
-            'prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'nystore', 'toolorax', 'canboso', 'nastele',
+            'prodseller', 'csxstore', 'arrs', 'warzone', 'aivault', 'nystore', 'toolorax', 'canboso', 'nastele', 'miraiapi',
         ]);
     }
 
@@ -545,6 +545,10 @@ class SupplierFulfillmentTest extends TestCase
             $product->update(['price_amount' => 50000]);
             $supplier->forceFill(['currency' => 'VND', 'exchange_rate_idr' => '0.650001', 'balance_micros' => $initialBalance])->save();
             $sku->update(['currency' => 'VND', 'unit_price_micros' => 30_000_000_000]);
+            app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        } elseif ($provider === 'miraiapi') {
+            $supplier->forceFill(['currency' => 'VND', 'exchange_rate_idr' => '0.650001'])->save();
+            $sku->update(['currency' => 'VND']);
             app(SupplierAvailability::class)->refreshProducts([$product->id]);
         }
         $order = $this->checkout($cart);
@@ -682,6 +686,7 @@ class SupplierFulfillmentTest extends TestCase
                 'delivery' => ['accounts' => array_map(static fn (int $i): array => ['user' => "bulk-{$i}@example.test", 'password' => "synthetic-password-{$i}"], range(1, 10))],
             ],
             'nastele' => ['success' => true, 'data' => ['orderId' => 2244, 'status' => 'completed', 'totalAmount' => 300000, 'items' => [['quantity' => 10, 'unitPrice' => 30000, 'accounts' => $credentials]]]],
+            'miraiapi' => ['success' => true, 'data' => ['order_id' => 'bulk-order', 'external_order_id' => $reference, 'package_code' => 'fixture-sku', 'quantity' => 10, 'status' => 'fulfilled', 'total_vnd' => 10, 'redeem_codes' => $credentials, 'redeem_code' => $credentials[0]]],
             default => ['success' => true, 'status' => 'delivered', 'order_id' => 'bulk-order', 'service_id' => 'fixture-sku', 'quantity' => 10, 'total_cost' => '10', 'products' => $credentials]
                 + ($provider === 'aivault' && $reference !== null ? ['external_order_id' => $reference] : []),
         };
@@ -1425,7 +1430,8 @@ class SupplierFulfillmentTest extends TestCase
     protected function fixture(int $local = 0, int $quantity = 1, string $provider = 'prodseller'): array
     {
         $product = Product::factory()->create(['stock' => $local, 'reserved_stock' => 0, 'price_amount' => 5000]);
-        $supplier = Supplier::forceCreate(['name' => 'Private connection', 'provider' => $provider, 'api_key' => 'fixture-secret', 'currency' => $provider === 'prodseller' ? 'USDT' : 'USD', 'currency_confirmed' => true, 'exchange_rate_idr' => 1000, 'balance_micros' => 10_000_000, 'is_active' => true, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5)]);
+        $vnd = in_array($provider, ['nastele', 'miraiapi'], true);
+        $supplier = Supplier::forceCreate(['name' => 'Private connection', 'provider' => $provider, 'api_key' => 'fixture-secret', 'currency' => $provider === 'prodseller' ? 'USDT' : ($vnd ? 'VND' : 'USD'), 'currency_confirmed' => true, 'exchange_rate_idr' => $vnd ? '0.650001' : 1000, 'balance_micros' => 10_000_000, 'is_active' => true, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5)]);
         $sku = SupplierCatalogItem::create(['supplier_id' => $supplier->id, 'external_id' => 'fixture-sku', 'name' => 'Private supplier SKU', 'unit_price_micros' => 1_000_000, 'stock' => 10, 'orderable' => true, 'requires_input' => false, 'synced_at' => now(), 'price_tiers' => [], 'bulk_discounts' => []]);
         SupplierPricePolicy::create(['product_id' => $product->id, 'mode' => 'manual', 'minimum_profit_idr' => 500, 'rounding_idr' => 1]);
         ProductSupplierSource::create(['product_id' => $product->id, 'supplier_catalog_item_id' => $sku->id, 'is_active' => true, 'priority' => 0]);

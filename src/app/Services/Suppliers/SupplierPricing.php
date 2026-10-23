@@ -81,7 +81,7 @@ final class SupplierPricing
     public function isEligible(Product $product, Supplier $supplier, SupplierCatalogItem $item, SupplierPricePolicy $policy, int $quantity, int $retailSubtotal): bool
     {
         if (SupplierProvider::tryFrom($supplier->provider) === null || $quantity < 1 || $quantity > 10000 || ! $supplier->is_active || ! $supplier->currency_confirmed
-            || $supplier->exchange_rate_idr <= 0 || ! SupplierExchangeRate::isPlausible($supplier->currency, $supplier->exchange_rate_idr)
+            || ! SupplierExchangeRate::isStorable($supplier->currency, $supplier->exchange_rate_idr)
             || $supplier->synced_at === null
             || $supplier->sync_expires_at === null || ! $supplier->sync_expires_at->isFuture()
             || $item->supplier_id !== $supplier->id || $item->synced_at === null

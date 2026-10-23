@@ -13,6 +13,7 @@ enum SupplierProvider: string
     case ToolOrax = 'toolorax';
     case Canboso = 'canboso';
     case Nastele = 'nastele';
+    case MiraiApi = 'miraiapi';
 
     public function baseUrl(): string
     {
@@ -26,6 +27,7 @@ enum SupplierProvider: string
             self::ToolOrax => 'https://shopbot.00969600.xyz/shop-api/v1',
             self::Canboso => 'https://canboso.com/api/v2/telegram-buyer',
             self::Nastele => 'https://nastele.online/api/partner',
+            self::MiraiApi => 'https://api.miraiapi.com/api/reseller/v1',
         };
     }
 
@@ -41,19 +43,20 @@ enum SupplierProvider: string
             self::ToolOrax => 'ToolOraX (ShopBot)',
             self::Canboso => 'Canboso',
             self::Nastele => 'Nastele',
+            self::MiraiApi => 'MiraiAPI',
         };
     }
 
     public function supportsIdempotency(): bool
     {
-        return in_array($this, [self::ProdSeller, self::AiVault, self::NyStore, self::Canboso], true);
+        return in_array($this, [self::ProdSeller, self::AiVault, self::NyStore, self::Canboso, self::MiraiApi], true);
     }
 
     public function defaultCurrency(): string
     {
         return match ($this) {
             self::ProdSeller => 'USDT',
-            self::Nastele => 'VND',
+            self::Nastele, self::MiraiApi => 'VND',
             default => 'USD',
         };
     }

@@ -13,16 +13,18 @@ use InvalidArgumentException;
 use RuntimeException;
 
 /**
- * Read-only audit of supplier conversion rates that fell outside the plausible band
- * (e.g. a rupiah-per-USDT 18.000 stored for a VND wallet), with an explicit operator
- * opt-in to replace them. Corrections reuse SupplierManager::correctRate(), so the
- * commitment guards, the lock order and the availability refresh stay in one place.
+ * Audit of supplier conversion rates that fell outside the storable band (for
+ * example a rupiah-per-USDT 18.000 stored for a VND wallet), with an explicit
+ * operator opt-in to replace them. Corrections reuse
+ * SupplierManager::correctRate(), which updates the currency's one global rate,
+ * propagates it to every connection of that currency and refreshes product
+ * capacity. Purchase and fulfillment rate snapshots are never rewritten.
  */
 final class AuditSupplierRates extends Command
 {
-    protected $signature = 'suppliers:rate-audit {--fix} {--to= : Nilai rupiah pengganti untuk 1 unit mata uang supplier} {--force : Lewati konfirmasi interaktif} {--actor= : ID user admin untuk jejak audit} {--limit=200 : Maksimum koneksi yang diaudit (1-500)}';
+    protected $signature = 'suppliers:rate-audit {--fix} {--to= : Nilai rupiah pengganti untuk 1 unit mata uang supplier} {--currency= : Batasi audit ke satu mata uang (USD, USDT, VND)} {--force : Lewati konfirmasi interaktif} {--actor= : ID user admin untuk jejak audit} {--limit=200 : Maksimum koneksi yang diaudit (1-500)}';
 
-    protected $description = 'Audit koneksi supplier yang kurs rupiahnya di luar rentang wajar, dan perbaiki hanya bila diminta';
+    protected $description = 'Audit kurs global mata uang supplier dan koneksi yang nilainya di luar rentang wajar, lalu perbaiki hanya bila diminta';
 
     public function handle(SupplierManager $manager): int
     {
@@ -49,6 +51,14 @@ final class AuditSupplierRates extends Command
             }
         }
 
+        $currencyOption = $this->option('currency');
+        $currency = is_string($currencyOption) && trim($currencyOption) !== '' ? strtoupper(trim($currencyOption)) : null;
+        if ($currency !== null && ! in_array($currency, SupplierExchangeRate::CURRENCIES, true)) {
+            $this->error('Mata uang audit harus salah satu dari USD, USDT, atau VND.');
+
+            return self::INVALID;
+        }
+
         $fix = (bool) $this->option('fix');
         $replacement = $this->option('to');
         $replacement = is_string($replacement) && trim($replacement) !== '' ? trim($replacement) : null;
@@ -58,9 +68,11 @@ final class AuditSupplierRates extends Command
             return self::INVALID;
         }
 
-        $scanned = Supplier::query()->orderBy('id')->limit($limit)->get();
+        $scanned = Supplier::query()
+            ->when($currency !== null, fn ($query) => $query->where('currency', $currency))
+            ->orderBy('id')->limit($limit)->get();
         $connections = $scanned->filter(
-            static fn (Supplier $connection): bool => ! SupplierExchangeRate::isPlausible($connection->currency, $connection->exchange_rate_idr),
+            static fn (Supplier $connection): bool => ! SupplierExchangeRate::isStorable($connection->currency, $connection->exchange_rate_idr),
         )->values();
         // One query gathers the mapped products of every flagged connection: the audit
         // must never grow a query per supplier, and never a query per product.
@@ -81,7 +93,7 @@ final class AuditSupplierRates extends Command
         $applicable = [];
         if ($fix) {
             foreach ($connections as $connection) {
-                if (SupplierExchangeRate::isPlausible($connection->currency, $replacement)) {
+                if (SupplierExchangeRate::isStorable($connection->currency, $replacement)) {
                     $applicable[] = $connection;
 
                     continue;
@@ -97,6 +109,14 @@ final class AuditSupplierRates extends Command
         }
 
         if ($fix && $applicable !== []) {
+            $rateKeys = collect($applicable)
+                ->map(fn (Supplier $connection): ?string => SupplierExchangeRate::rateKey((string) $connection->currency))
+                ->unique();
+            if ($rateKeys->count() > 1) {
+                $this->error('Koneksi yang bermasalah mencakup USD/USDT dan VND. Jalankan ulang dengan --currency=USD atau --currency=VND.');
+
+                return self::INVALID;
+            }
             if (! $this->option('force') && ! $this->confirm(sprintf('Terapkan kurs %s ke seluruh koneksi di atas?', $replacement))) {
                 $this->line('Tidak ada perubahan.');
 

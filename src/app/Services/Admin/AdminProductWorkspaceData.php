@@ -144,7 +144,7 @@ final class AdminProductWorkspaceData
             'idr' => $idr,
             // A rate outside the plausible band (e.g. rupiah per USDT on a VND wallet)
             // still prints its arithmetic, but the card must not present it as usable cost.
-            'implausible' => ! SupplierExchangeRate::isPlausible($item->supplier->currency, $item->supplier->exchange_rate_idr),
+            'implausible' => ! SupplierExchangeRate::isStorable($item->supplier->currency, $item->supplier->exchange_rate_idr),
         ];
     }
 
