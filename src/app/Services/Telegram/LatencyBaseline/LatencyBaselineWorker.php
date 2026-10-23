@@ -33,7 +33,7 @@ final class LatencyBaselineWorker
     {
         $command = [
             PHP_BINARY,
-            base_path('artisan'),
+            __DIR__.'/worker.php',
             'queue:work',
             'redis',
             '--queue='.$this->topology['queue'],
@@ -41,6 +41,7 @@ final class LatencyBaselineWorker
             '--tries='.$this->topology['tries'],
             '--timeout='.$this->topology['timeout'],
             '--max-time='.$this->topology['max_time'],
+            '--quiet',
         ];
 
         // proc_open replaces the child environment when an array is supplied;

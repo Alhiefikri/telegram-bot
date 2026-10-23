@@ -8,6 +8,9 @@ production monitor, not a production worker-count claim, and not a production SL
 Observed local evidence (command, environment, dataset, cold/warm tables and
 counts): [telegram-latency-baseline-evidence.md](telegram-latency-baseline-evidence.md).
 
+Final integrated gate (#656), including retained raw samples and rollout limits:
+[telegram-latency-gate-evidence.md](telegram-latency-gate-evidence.md).
+
 
 The paid receipt path previously recorded queue wait only when a dispatch site
 happened to pass an enqueue timestamp. The initial paid handoff passed only the
@@ -96,25 +99,25 @@ boundary. No second observability system, table or queue is added.
 Correlations are keyed HMAC digests. Credentials, tokens, chat identifiers and
 message payloads are never logged.
 
-Framework behavior was checked against the Laravel 13 queue documentation for
-[`queue:work`, worker signals and `--max-time`](https://laravel.com/docs/13.x/queues#the-queue-work-command)
-and [clearing jobs](https://laravel.com/docs/13.x/queues#clearing-jobs-from-queues),
-and the logging documentation for
-[channels and listeners](https://laravel.com/docs/13.x/logging#writing-log-messages)
-(the Context7 MCP endpoint was not mounted in this environment).
+For #656, live Context7 queries checked Laravel 13
+[after-commit queues and unique jobs](https://github.com/laravel/docs/blob/13.x/queues.md)
+and [HTTP fakes / `preventStrayRequests`](https://github.com/laravel/docs/blob/13.x/http-client.md).
+Queue uniqueness remains an optimization; PostgreSQL settlement/effect claims
+remain authoritative when Redis and its locks disappear.
 
 ## Local baseline runner
 
 Prerequisites: Docker with the application image (the same image used for a
 local/production-equivalent run) and no production credentials in the shell.
-The script starts disposable PostgreSQL 16 and Redis 7 containers, applies all
-migrations, mounts the current `src/` working tree and removes the containers on
-exit. The application image must already exist:
+The script starts disposable PostgreSQL 16 and Redis 7 containers on an internal
+Docker network, applies migrations and removes the containers/network on exit.
+It uses `APP_ENV=testing`, synthetic credentials and no external network access.
+The application image must already exist:
 
 ```bash
 docker build -t telegram-bot:local .
 LATENCY_BASELINE_IMAGE=telegram-bot:local \
-  scripts/telegram-latency-baseline.sh --batches=3 --samples=5 --warmup-batches=1
+  scripts/telegram-latency-baseline.sh --batches=3 --samples=7 --warmup-batches=1
 ```
 
 The same runner can be called inside an already isolated stack:
@@ -123,10 +126,41 @@ The same runner can be called inside an already isolated stack:
 php artisan telegram:latency-baseline \
   --confirm-disposable \
   --scenario=all \
-  --batches=3 --samples=5 --warmup-batches=1 \
+  --batches=3 --samples=7 --warmup-batches=1 \
   --worker-topology=split \
   --output=/artifacts/run
 ```
+
+### Comparing source revisions (#656)
+
+```bash
+scripts/telegram-latency-compare.sh --scenario=all \
+  --batches=3 --samples=7 --warmup-batches=1 \
+  --interval-ms=250 --worker-sleep=1 --timeout-seconds=90 --backlog=20
+```
+
+This runs sequentially, not concurrently. The default baseline is `ca408381`
+(#649, before tuning); override with `LATENCY_BASELINE_REVISION`. The baseline
+comes from `git archive`; the integration source is a private working-tree
+snapshot excluding ENV files, vendor/node_modules and generated caches/logs.
+Both use the same read-only installed vendor directory and application image.
+The temporary snapshots are removed on exit.
+
+Only the `LatencyBaseline/` measurement directory, its command and the
+`QueueTopology` name list are overlaid on the historical source. The baseline's
+checkout, provider selection, settlement, receipt, pin, recovery and notification
+owners are not replaced. The wrapper records source revisions, dirty file names,
+harness hashes, image ID and a manifest of the integration PHP/config/schema
+source. It runs the historical shared topology and the integrated split topology.
+These controlled local workers are not a production capacity simulation.
+
+Each batch seeds its own measured Orders, starts fresh workers, waits, records
+results and stops those workers before the next batch. Warm-up batches remain
+separate. The callback burst uses the actual HTTP kernel/route in testing mode,
+which dispatches immediately rather than accumulating process-termination hooks.
+The same-chat Home result is measured separately from its callback ACK and from
+the provider's delayed verification.
+
 
 ### Guards
 
@@ -137,13 +171,16 @@ The command refuses to run unless all of these hold:
   `baseline` or `test`;
 - the queue connection and cache store are Redis;
 - `DOGFOOD_TIMING_ENABLED=true`;
-- the fake Telegram transport is enabled (`DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`);
+- fixture mode is enabled (`DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true`); the runner
+  binds the real `TelegramBotClient` to bounded local HTTP fakes;
 - a synthetic numeric admin chat target and Telegram token exist;
 - `--confirm-disposable` is passed.
 
-The script also blanks provider credentials from the container environment, so a
-local `.env` cannot trigger real provider calls. Provider and Telegram transports
-are local fixtures; no real payment or customer message is created.
+The script blanks provider credentials. Parent and worker processes install
+`Http::preventStrayRequests()`; only synthetic Telegram requests are faked, and
+the provider fixture implements the existing adapter contract without HTTP.
+The internal Docker network also blocks non-Laravel stray traffic. Burst probes
+require `APP_ENV=testing`. No real payment or customer message is created.
 
 ### Scenarios
 
@@ -155,48 +192,55 @@ in-process call.
 
 | Scenario | Dataset / seed | Delay fixture | Worker |
 | --- | --- | --- | --- |
-| `idle` | One local-stock order per sample | none beyond the fixture provider | Redis, queue `notifications`, sleep 3 s, 3 tries, 60 s job timeout |
-| `backlog-expired` | `--backlog` older KlikQRIS payments whose deadline already passed; they stay first in the active-class cursor, so the measured payment is observed after at least one full backlog sweep | none | same |
-| `slow-notification` | One expired admin notification job ahead of the measured orders | fake Telegram latency ≥ 500 ms on the notification worker only, so the unrelated notification holds that worker | split: receipts and notifications; combined: one shared worker |
+| `idle` | One local-stock Order per sample, one allocated synthetic credential | healthy fixture | Redis, selected topology; CLI-recorded sleep/tries/timeout |
+| `backlog-expired` | `--backlog` terminal Expired Orders/Payments plus active targets | history returns `PENDING`; real reconcile command uses ten requests/sweep | same |
+| `slow-notification` | One unrelated expired admin notification ahead of measured Orders | ≥ 500 ms for admin-chat HTTP only, on both revisions; buyer transport stays healthy | split: receipt and notification workers; combined: shared |
 | `slow-payment` | One local payment-queue probe followed by one real `/start` Telegram update; measured orders run in parallel | probe occupies the payments queue for 3 s, no provider call | split: default and payments are separate; combined: one `payments,default` worker |
 | `slow-provider` | Same order dataset | KlikQRIS fixture status delay ≥ 500 ms | same as receipt topology |
 | `slow-telegram` | Same order dataset | fake Telegram latency ≥ 500 ms | same as receipt topology |
 | `pin-normal` | Same order dataset; the run waits for the pin event as well as the admin acknowledgement | none | split: `telegram-pins` has its own worker |
-| `pin-slow` | Same order dataset | fake `pinChatMessage` delay `--pin-latency-ms` (default 3000 ms), only on the pin worker | same as `pin-normal` |
+| `pin-slow` | Ten allocated credentials per Order, photo + TXT delivery | fake `pinChatMessage` delay `--pin-latency-ms` (default 3000 ms) | same as `pin-normal` |
 | `pin-failed` | Same order dataset | fake `pinChatMessage` returns HTTP 400; the receipt and admin paths keep their normal fixture cost | same as `pin-normal` |
-| `pin-recovery` | Same as `pin-failed`, then the runner stops the workers and calls `telegram:recover-outbound` twice with the failure disabled | first recovery pins; second recovery must make zero calls and leave the pointer unchanged | same as `pin-normal` |
+| `pin-recovery` | Same as `pin-failed`, then stop workers and run bounded `telegram:recover-outbound` pages until all measured pins recover (at most ten sweeps), followed by one replay | healthy recovery; replay must make zero calls and leave the pointer unchanged; sweep count is recorded | same as `pin-normal` |
+| `burst-interactions` | Ten credentials per Order; two Check callbacks followed by Home on the same Customer chat | actual status-refresh owner reaches a 3 s provider fixture before Home is enqueued | split payments/default; combined payments/default |
+| `failed-provider` | Provider outage, unchanged pending state, then authoritative recovery on the same Payment | two ≥ 500 ms status attempts, first throws a connection exception | same receipt topology |
+| `failed-telegram` | Definite rejection of the first credential-bearing request, then healthy transport | HTTP 400; existing receipt fallback/retry policy is unchanged | same |
+| `ambiguous-telegram` | Accepted credential send whose ACK is lost; bounded recovery is replayed | connection exception after fixture acceptance; `unknown` must block blind resend | same |
+| `redis-loss` | Commit paid sources with workers stopped; flush queue/cache Redis DBs; invoke existing recovery and start workers | lost wakeups and cache locks, not lost PostgreSQL | same |
 
 Worker topology is selected with `--worker-topology=split|combined`:
 
-- `split` starts one worker per queue: `telegram-receipts`, `telegram-pins`,
-  `notifications`, `default` and `payments` (the latter two only when the
-  scenario has an interaction probe). This is the runtime topology used by the
-  application.
-- `combined` reproduces the pre-cutover head-of-line blocking by serving
-  `notifications,telegram-receipts,telegram-pins` in one worker and
-  `payments,default` in another. It exists only for comparison and is not a
-  supported runtime topology.
+- `split` starts separate `telegram-receipts`, `telegram-pins`, `notifications`
+  and `telegram-outbound` workers, plus `default` and `payments` for interaction
+  scenarios. Queue ownership matches the runtime; the CLI sleep is a controlled
+  measurement setting, not a claim that all supervised workers use that sleep.
+- `combined` shares receipts/notifications/pins, and payments/default where
+  needed; outbound stays separate. On historical source the receipt queue
+  constant still resolves to `notifications`. This is comparison-only.
 
-The default provider fixture reports `SUCCESS` for a synthetic order with a
-recorded `paid_at` two seconds before observation. In `backlog-expired`, older
-synthetic backlog reports `PENDING` and consumes the command's `max-payments`
-budget first (`--backlog` rows on sweep 1, one candidate on later sweeps), so the
-`provider_observation_ms` boundary includes the real bounded backlog sweep; all
-per-class cursors are reset once per sample and the fixture never calls the
-network. Credentials are synthetic structured accounts. The report records
-`provider_status_delay_ms`, `telegram_latency_ms`, backlog size, worker
-queue/sleep/tries/timeout, dataset shape, and `provider_paid_at` /
-`observation_started_at` / `observation_finished_at`; it never records
-credentials, tokens, chat payloads or real delivery.
+The provider reports synthetic `SUCCESS` with `paid_at` two seconds before
+the status call. Observation and paid commit remain separate. Older terminal
+history reports `PENDING`; future measured targets stay pending until their
+own observation. Every sweep has the same ten-request cap. Cursors persist
+between samples in a batch, so the report can show history progress as well
+as active-target sweep count. Cache/cursors reset at the next batch.
+
+Healthy direct observations are replayed through the same lifecycle processor
+without another provider request, checking idempotent settlement and stock.
+The report includes main-process status requests, history reads/distinct rows
+and separate worker verification reads. Structured credentials are synthetic.
+Telegram inspection checks email/password-to-Customer recipient binding in memory,
+including admin traffic; only booleans, counts and digests enter timing events.
+Automatic receipt attempts are distinguished from authorized detail responses.
 
 ### Bounds
 
 `--batches` 1–10, `--samples` 1–25, `--warmup-batches` 0–3,
 `--interval-ms` 0–10000, `--timeout-seconds` 5–300, `--worker-sleep` 0–5,
 `--backlog` 0–50, `--pin-latency-ms` 100–10000. `--worker-topology` is `split`
-or `combined`. The worker exits by `--max-time`, the runner stops it at the
-end of every scenario, and the script removes containers/network. No cron,
-scheduler or long-running monitor is installed.
+or `combined`. Workers exit by `--max-time` and are stopped after every batch.
+The script removes its containers/network. No cron, scheduler or persistent
+monitor is installed.
 
 ## Report
 
@@ -207,16 +251,25 @@ Artifacts are written next to the command's `--output` (the shell script uses
 - `report.json` — summaries plus scenario dataset/worker/fixture metadata;
 - `raw-samples.json` — sanitized per-sample boundaries.
 
-`raw-samples.json` contains correlation digests, boundary durations, enqueue
-stage/reason, effect-state counts, order status, failed-job counts and missing
-boundary names. It never contains an Order ID, customer ID, chat ID, credential,
-token, message body or document content.
+`raw-samples.json` contains HMAC correlations, boundary timestamps/durations,
+enqueue stage/reason, per-unit states/attempts, stock/settlement counts,
+failed-job counts and missing boundaries. Each batch retains interaction ACK,
+queue/handler/completion measurements, resource observations, history progress
+and recovery outcomes. It contains no Order/Customer/chat IDs, credentials,
+tokens, message bodies or document content.
 
-Percentiles are nearest-rank over available samples. Missing values are counted
-as `unknown`, not zero. Warm-up batches are reported as cold start and excluded
-from the warmed percentiles. The runner exits non-zero when a warmed sample has
-an incomplete boundary set; a failed measurement is not silently converted into
-a passing one.
+Nearest-rank p50/max use the declared known sample count; p95 is withheld below
+20 known samples, and p99 is never emitted. Missing values count as `unknown`,
+not zero. Warm-up batches are excluded from warmed summaries. Successor pickups
+are not retries; retries come from effect attempt counts.
+
+An ambiguous delivery intentionally has missing ACK/completion boundaries.
+`complete` stays false; only a proven one-attempt `unknown` barrier can be
+`expected_blocked`. Other missing warm boundaries, unobserved requested faults
+or failed correctness/interaction/recovery invariants make the command fail.
+After all scenarios, `final_audit` rechecks every measured Order against the
+ledger and transport events, including any later Redis-loss recovery. This
+prevents a later blind resend from escaping an earlier scenario's snapshot.
 
 ## Limits
 
@@ -228,9 +281,9 @@ a passing one.
 - A Telegram Bot API acknowledgement is not a read receipt.
 - The fixture provider is not custody/provider qualification; it only exercises
   the application owners with bounded latency and deterministic status.
-- The runner does not test webhook ingress ACK latency; it measures the payment
-  observation → receipt → admin-notice chain. Button ACK remains separated in
-  the existing webhook/handler events.
+- Callback ACK timings are HTTP-kernel response timings in a local process, not
+  internet/web-server round trips. Handler completion and the resulting Home
+  state are separate measurements.
 - Worker peak RSS is sampled from local `queue:work` processes and includes
   shared mappings and synthetic invoice rendering; it is not `memory.current`
   and not proof of production cgroup headroom.

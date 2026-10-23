@@ -6,7 +6,9 @@ use App\Enums\KlikQrisEnvironment;
 use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisProviderAdapter;
 use App\Services\KlikQris\KlikQrisTransaction;
+use App\Support\DogfoodTiming;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
 
 /**
  * Bounded local provider fixture for the latency baseline.
@@ -24,6 +26,17 @@ final class KlikQrisLatencyFixtureProvider implements KlikQrisProviderAdapter
     /** @var list<string> */
     public array $pendingMerchantRefs = [];
 
+    public bool $failStatus = false;
+
+    public bool $alwaysPending = false;
+
+    public int $statusRequests = 0;
+
+    public int $historyRequests = 0;
+
+    /** @var array<string, true> */
+    public array $observedHistory = [];
+
     public function __construct(
         private readonly string $signature = 'baseline-fixture-signature',
     ) {}
@@ -38,7 +51,23 @@ final class KlikQrisLatencyFixtureProvider implements KlikQrisProviderAdapter
 
     public function transactionStatus(Payment $payment): KlikQrisTransaction
     {
+        DogfoodTiming::log('dogfood.telegram.baseline_provider_started', [
+            'correlation_id' => DogfoodTiming::correlation($payment->id),
+            'started_at' => now()->toISOString(),
+        ]);
         $this->delay();
+        $this->statusRequests++;
+        if (str_starts_with((string) $payment->merchant_ref, 'LATENCY-HISTORY-PAY-')) {
+            $this->historyRequests++;
+            $this->observedHistory[(string) $payment->merchant_ref] = true;
+        }
+        if ($this->failStatus) {
+            throw new ConnectionException('Synthetic bounded provider outage');
+        }
+        DogfoodTiming::log('dogfood.telegram.baseline_provider_finished', [
+            'correlation_id' => DogfoodTiming::correlation($payment->id),
+            'finished_at' => now()->toISOString(),
+        ]);
 
         return KlikQrisTransaction::fromStatusPayload(
             $this->payload($payment, $this->statusFor($payment)),
@@ -48,7 +77,7 @@ final class KlikQrisLatencyFixtureProvider implements KlikQrisProviderAdapter
 
     private function statusFor(Payment $payment): string
     {
-        return in_array((string) $payment->merchant_ref, $this->pendingMerchantRefs, true)
+        return $this->alwaysPending || in_array((string) $payment->merchant_ref, $this->pendingMerchantRefs, true)
             ? 'PENDING'
             : 'SUCCESS';
     }

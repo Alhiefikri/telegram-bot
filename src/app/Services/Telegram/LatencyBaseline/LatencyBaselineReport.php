@@ -53,7 +53,7 @@ final class LatencyBaselineReport
                 'samples' => count($values),
                 'unknown' => $unknown,
                 'p50_ms' => $this->percentile($values, 50),
-                'p95_ms' => $this->percentile($values, 95),
+                'p95_ms' => count($values) >= 20 ? $this->percentile($values, 95) : null,
                 'max_ms' => $values === [] ? null : round(max($values), 2),
             ];
         }
@@ -73,8 +73,13 @@ final class LatencyBaselineReport
                 'incomplete' => count(array_filter($samples, static fn (array $sample): bool => ($sample['complete'] ?? false) !== true)),
                 'queue_wait_unknown' => count(array_filter($samples, static fn (array $sample): bool => ($sample['queue_wait_ms'] ?? null) === null)),
                 'failed_jobs' => array_sum(array_map(static fn (array $sample): int => (int) ($sample['failed_jobs'] ?? 0), $samples)),
-                'retried_samples' => count(array_filter($samples, static fn (array $sample): bool => (int) ($sample['receipt_pickups'] ?? 0) > 1)),
+                'retried_samples' => count(array_filter($samples, static fn (array $sample): bool => (int) ($sample['receipt_retry_attempts'] ?? 0) > 0)),
                 'duplicate_samples' => count(array_filter($samples, static fn (array $sample): bool => (int) ($sample['duplicate_acknowledgements'] ?? 0) > 0)),
+                'expected_blocked' => count(array_filter($samples, static fn (array $sample): bool => ($sample['expected_blocked'] ?? false) === true)),
+                'correctness_failed' => count(array_filter($samples, static fn (array $sample): bool => ($sample['correctness_pass'] ?? true) === false)),
+                'provider_failures' => array_sum(array_column($samples, 'provider_failures')),
+                'transport_rejections' => array_sum(array_column($samples, 'credential_transport_rejections')),
+                'unknown_credential_effects' => array_sum(array_column($samples, 'unknown_credential_effects')),
             ],
             'effect_states' => $effectStates,
         ];
@@ -116,7 +121,7 @@ final class LatencyBaselineReport
                 'samples' => count($values),
                 'unknown' => $unknown,
                 'p50_ms' => $this->percentile($values, 50),
-                'p95_ms' => $this->percentile($values, 95),
+                'p95_ms' => count($values) >= 20 ? $this->percentile($values, 95) : null,
                 'max_ms' => $values === [] ? null : round(max($values), 2),
             ];
         }

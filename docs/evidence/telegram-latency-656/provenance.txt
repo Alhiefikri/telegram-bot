@@ -1,0 +1,38 @@
+baseline_revision=ca408381d127be1181f471e213f0c0087fbf9115
+integration_revision=f0b0b6f2e41e1bf9e0cca22e870c791cfa27401c
+image=telegram-bot:php-security-8.4.27
+measurement_overlay=LatencyBaseline directory, RunTelegramLatencyBaseline, QueueTopology name list
+integration_worktree_changes:
+docs/agents/codebase.md
+docs/telegram-latency-baseline.md
+scripts/telegram-latency-baseline.sh
+src/app/Console/Commands/RunTelegramLatencyBaseline.php
+src/app/Services/Telegram/LatencyBaseline/KlikQrisLatencyFixtureProvider.php
+src/app/Services/Telegram/LatencyBaseline/LatencyBaselineEventCollector.php
+src/app/Services/Telegram/LatencyBaseline/LatencyBaselineReport.php
+src/app/Services/Telegram/LatencyBaseline/LatencyBaselineWorker.php
+src/app/Services/Telegram/LatencyBaseline/TelegramLatencyBaseline.php
+src/resources/css/storefront-enhancements.css
+src/resources/js/storefront.js
+src/resources/views/storefront.blade.php
+src/resources/views/storefront/family.blade.php
+src/resources/views/storefront/partials/verified-purchase-activity.blade.php
+src/resources/views/storefront/product.blade.php
+src/resources/views/storefront/shop.blade.php
+src/tests/Browser/storefront-verified-purchase-activity.spec.js
+src/tests/Feature/StorefrontLandingPageTest.php
+src/tests/Unit/TelegramLatencyBaselineReportTest.php
+harness_sha256:
+9e22048856678f6485f6a7a0d6ab95c96cfa689e506f2952fc08a109deabe5a8  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/KlikQrisLatencyFixtureProvider.php
+f00449ed3e98c430a41eee87c99d3f9eebae45e370e2a4cad336ec670492cc50  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/LatencyBaselineEventCollector.php
+389736e675de00b159423d61785003d48324f46df9e521134327001175b0d538  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/LatencyBaselineInteractions.php
+0a1941ea4f4121f664a90ef3b3e9c173c6f46d636d5d9e6467b065fc08f4e242  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/LatencyBaselineReport.php
+540d04bb4314c5eebf2105e1ba1fdf1bb2986b8b0486c3a79c4f7d266508d57d  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/LatencyBaselineTransport.php
+707b0c2596e009af6f59a3bb8b9353aebcf298963576187ce39a72d31d15a839  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/LatencyBaselineWorker.php
+eb53dfa356f9b6a40f3bb9d3a60e035d7b0a4dd89e25281cee8f99369882d283  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/SlowPaymentVerificationProbe.php
+8521c49ff67759f608c210044e332457d9c8e2e66b75f3951f8e23f69fee439c  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/TelegramLatencyBaseline.php
+232a453587084670eb61b670508389aa5c55a27bc523925425e0ec2254e2f635  /home/alhiefikri/telegram-bot/src/app/Services/Telegram/LatencyBaseline/worker.php
+88ec2382a9fa2f08cbb7f1b6765d5f9a7b5996852abd1669ac637d53c6c140bd  /home/alhiefikri/telegram-bot/src/app/Console/Commands/RunTelegramLatencyBaseline.php
+db9dcc1b3fe401979416ef2890910cc4f1e345166a60401ad8695908988feebe  /home/alhiefikri/telegram-bot/scripts/telegram-latency-baseline.sh
+image_id=sha256:dd317783b9d9a16690f805aa75e326aec9f1719f1a2dffa41e3db3f3324f4de5
+Linux 6.18.48-1-cachyos-lts x86_64 GNU/Linux

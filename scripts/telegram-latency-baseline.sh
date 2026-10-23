@@ -4,6 +4,8 @@ umask 077
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
+SOURCE_ROOT="${LATENCY_BASELINE_SOURCE_ROOT:-${ROOT_DIR}/src}"
+SOURCE_REVISION="${LATENCY_BASELINE_SOURCE_REVISION:-$(git -C "$ROOT_DIR" rev-parse HEAD)}"
 IMAGE="${LATENCY_BASELINE_IMAGE:-telegram-bot:local}"
 POSTGRES_IMAGE="${LATENCY_BASELINE_POSTGRES_IMAGE:-postgres:16-alpine}"
 REDIS_IMAGE="${LATENCY_BASELINE_REDIS_IMAGE:-redis:7-alpine}"
@@ -74,7 +76,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker network create "$NETWORK" >/dev/null
+docker network create --internal "$NETWORK" >/dev/null
 
 printf 'Starting disposable PostgreSQL and Redis for run %s...\n' "$RUN_ID" >&2
 docker run --detach \
@@ -111,7 +113,7 @@ APP_KEY="base64:$(openssl rand -base64 32)"
 
 common_env=(
     --env APP_NAME=LHIE-Store-Latency-Baseline
-    --env APP_ENV=local
+    --env APP_ENV=testing
     --env APP_DEBUG=false
     --env "APP_KEY=${APP_KEY}"
     --env APP_URL=http://localhost
@@ -120,6 +122,7 @@ common_env=(
     --env APP_MAINTENANCE_DRIVER=file
     --env APP_AUTO_MIGRATE=false
     --env "LATENCY_BASELINE_IMAGE=${IMAGE}"
+    --env "LATENCY_BASELINE_SOURCE_REVISION=${SOURCE_REVISION}"
     --env DB_CONNECTION=pgsql
     --env DB_URL=
     --env "DB_HOST=${POSTGRES_CONTAINER}"
@@ -168,7 +171,8 @@ common_env=(
 
 run_app() {
     docker run --rm --network "$NETWORK" \
-        -v "${ROOT_DIR}/src:/var/www/html" \
+        -v "${SOURCE_ROOT}:/var/www/html" \
+        -v "${ROOT_DIR}/src/vendor:/var/www/html/vendor:ro" \
         -v "${ARTIFACT_DIR}:/artifacts" \
         -w /var/www/html \
         --entrypoint php \

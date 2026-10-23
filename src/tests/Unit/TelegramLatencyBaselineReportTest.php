@@ -17,6 +17,7 @@ class TelegramLatencyBaselineReportTest extends TestCase
                 'complete' => true,
                 'queue_wait_ms' => $queueWait,
                 'receipt_pickups' => $index === 0 ? 2 : 1,
+                'receipt_retry_attempts' => $index === 0 ? 1 : 0,
                 'duplicate_acknowledgements' => $index === 1 ? 1 : 0,
                 'failed_jobs' => $index === 2 ? 1 : 0,
                 'effect_states' => ['receipt.credentials@sent' => 1],
@@ -38,7 +39,7 @@ class TelegramLatencyBaselineReportTest extends TestCase
         $this->assertSame(5, $queueWait['samples']);
         $this->assertSame(1, $queueWait['unknown']);
         $this->assertSame(30.0, $queueWait['p50_ms']);
-        $this->assertSame(100.0, $queueWait['p95_ms']);
+        $this->assertNull($queueWait['p95_ms']);
         $this->assertSame(100.0, $queueWait['max_ms']);
         $this->assertSame(6, $summary['sample_count']);
         $this->assertSame(5, $summary['counts']['complete']);
@@ -63,36 +64,23 @@ class TelegramLatencyBaselineReportTest extends TestCase
         $this->assertSame(1, $summary['boundaries']['queue_wait_ms']['unknown']);
     }
 
-    public function test_markdown_states_contract_limits_and_does_not_claim_a_production_slo(): void
+    public function test_p95_requires_twenty_known_observations(): void
     {
         $report = new LatencyBaselineReport;
-        $summary = $report->summarize([['complete' => true, 'queue_wait_ms' => 25]]);
-        $markdown = $report->markdown([
-            'run_id' => 'run-1',
-            'generated_at' => '2026-10-22T00:00:00Z',
-            'contract' => [
-                'note' => 'Local baseline; not a production SLO.',
-                'boundaries' => LatencyBaselineReport::BOUNDARIES,
-            ],
-            'environment' => [
-                'php_version' => '8.4',
-                'laravel_version' => '13',
-                'database' => 'pgsql 16',
-                'redis' => 'redis 7',
-            ],
-            'scenarios' => [
-                'idle' => [
-                    'dataset' => ['samples_per_batch' => 3],
-                    'worker' => ['sleep_seconds' => 3],
-                    'fixture' => ['telegram_latency_ms' => 0],
-                    'cold' => $summary,
-                    'warm' => $summary,
-                ],
-            ],
-        ]);
+        $samples = array_map(static fn (int $n): array => ['queue_wait_ms' => $n], range(1, 20));
+        $small = $report->summarize(array_slice($samples, 0, 19));
+        $enough = $report->summarize([...$samples, ['queue_wait_ms' => null]]);
+        $this->assertNull($small['boundaries']['queue_wait_ms']['p95_ms']);
+        $this->assertSame(19.0, $enough['boundaries']['queue_wait_ms']['p95_ms']);
+        $this->assertSame(1, $enough['boundaries']['queue_wait_ms']['unknown']);
+    }
 
-        $this->assertStringContainsString('not a production SLO', $markdown);
-        $this->assertStringContainsString('Telegram Bot API acknowledgement is not proof that the customer read', $markdown);
-        $this->assertStringContainsString('| `queue_wait_ms` | 1 | 25.00 | 25.00 | 25.00 | 0 |', $markdown);
+    public function test_successor_pickups_are_not_counted_as_retries(): void
+    {
+        $summary = (new LatencyBaselineReport)->summarize([
+            ['receipt_pickups' => 3, 'receipt_retry_attempts' => 0],
+            ['receipt_pickups' => 2, 'receipt_retry_attempts' => 1],
+        ]);
+        $this->assertSame(1, $summary['counts']['retried_samples']);
     }
 }

@@ -12,7 +12,7 @@ use Throwable;
 final class RunTelegramLatencyBaseline extends Command
 {
     protected $signature = 'telegram:latency-baseline
-        {--scenario=idle : idle, backlog-expired, slow-notification, slow-payment, slow-provider, slow-telegram, pin-normal, pin-slow, pin-failed, pin-recovery, or all}
+        {--scenario=idle : Scenario name, comma-separated names, or all (see docs/telegram-latency-baseline.md)}
         {--batches=1 : Measured batches per scenario (1-10)}
         {--samples=3 : Orders per batch (1-25)}
         {--warmup-batches=1 : Batches reported separately as cold start (0-3)}
@@ -54,7 +54,7 @@ final class RunTelegramLatencyBaseline extends Command
             }
 
             foreach ($result['scenarios'] as $scenario => $scenarioResult) {
-                if ((int) ($scenarioResult['warm']['counts']['incomplete'] ?? 0) > 0) {
+                if (array_any($scenarioResult['samples'], static fn (array $sample): bool => ! $sample['cold'] && ! $sample['complete'] && ! ($sample['expected_blocked'] ?? false))) {
                     $this->warn('Incomplete warm samples in '.$scenario.'; the run captured missing boundaries instead of zero-filling them.');
 
                     return self::FAILURE;
@@ -65,6 +65,45 @@ final class RunTelegramLatencyBaseline extends Command
 
                     return self::FAILURE;
                 }
+                if (array_any($scenarioResult['samples'], static fn (array $sample): bool => ! ($sample['correctness_pass'] ?? false))) {
+                    $this->warn('Correctness invariant failed in '.$scenario);
+
+                    return self::FAILURE;
+                }
+                foreach ($scenarioResult['samples'] as $sample) {
+                    if (($scenario === 'failed-provider' && ($sample['provider_failures'] !== 1 || ! $sample['pending_after_outage']))
+                        || ($scenario === 'failed-telegram' && $sample['credential_transport_rejections'] !== 1)
+                        || (in_array($scenario, ['pin-failed', 'pin-recovery'], true) && $sample['pin_failed_attempts'] < 1)) {
+                        $this->warn('The requested failure fixture was not observed in '.$scenario);
+
+                        return self::FAILURE;
+                    }
+                }
+                foreach ($scenarioResult['batches'] as $batch) {
+                    if (($batch['interaction_probe']['complete'] ?? true) === false
+                        || array_any($batch['interactions'], static fn (array $p): bool => ! $p['callback_ack_valid'] || ! $p['processed'] || ! $p['home_rendered'] || $p['terminal_failed'])
+                        || ($scenario === 'backlog-expired' && $batch['history']['distinct_history_observed'] === 0)
+                        || ($scenario === 'redis-loss' && ($batch['redis_recovery']['queued_before_loss'] === 0
+                            || $batch['redis_recovery']['queued_after_loss'] !== 0
+                            || $batch['redis_recovery']['queued_after_recovery'] === 0))) {
+                        $this->warn('Batch interaction/recovery invariant failed in '.$scenario);
+
+                        return self::FAILURE;
+                    }
+                    if ($scenario === 'pin-recovery'
+                        && ($batch['pin_recovery']['pinned_after_first_recovery'] !== $batch['pin_recovery']['orders']
+                            || $batch['pin_recovery']['attempts_second_recovery'] !== 0
+                            || ! $batch['pin_recovery']['pointer_unchanged_on_replay'])) {
+                        $this->warn('Pin recovery replay invariant failed.');
+
+                        return self::FAILURE;
+                    }
+                }
+            }
+            if (array_any($result['final_audit'], static fn (array $audit): bool => ! $audit['correctness_pass'])) {
+                $this->warn('Final cross-scenario audit failed after recovery and Redis loss.');
+
+                return self::FAILURE;
             }
 
             return self::SUCCESS;
@@ -159,6 +198,7 @@ final class RunTelegramLatencyBaseline extends Command
             'generated_at' => $result['generated_at'],
             'contract' => $result['contract'],
             'environment' => $result['environment'],
+            'final_audit' => $result['final_audit'],
             'scenarios' => array_map(static fn (array $scenario): array => [
                 'dataset' => $scenario['dataset'],
                 'worker' => $scenario['worker'],
@@ -167,6 +207,7 @@ final class RunTelegramLatencyBaseline extends Command
                 'pin' => $scenario['pin'] ?? null,
                 'pin_recovery' => $scenario['pin_recovery'] ?? null,
                 'fixture' => $scenario['fixture'],
+                'batches' => $scenario['batches'] ?? [],
                 'samples' => $scenario['samples'],
             ], $result['scenarios']),
         ];

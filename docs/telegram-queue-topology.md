@@ -9,7 +9,7 @@ observation. It is not a production capacity guarantee or a production SLO.
 | Queue | Producer | Supervised worker | Settings |
 | --- | --- | --- | --- |
 | `default` | `ProcessTelegramUpdate` from the webhook/recovery ingress | `laravel-update-worker` | sleep 1 s, tries 3, timeout 60 s |
-| `payments` | KlikQRIS webhook wakeup and customer-cancellation reconciliation | `laravel-payment-verification-worker` | sleep 1 s, tries 3, timeout 60 s |
+| `payments` | KlikQRIS webhook wakeup, customer-cancellation reconciliation, unique `VerifyProviderPaymentStatus` for KlikQRIS/historical Pakasir Check (#653) | `laravel-payment-verification-worker` | sleep 1 s, tries 3, timeout 60 s |
 | `telegram-receipts` | Paid receipt units, successors, text fallback, TXT download, action panel | `laravel-receipt-worker` | sleep 1 s, tries 3, timeout 60 s |
 | `telegram-pins` | Optional credential pin after a receipt was confirmed sent | `laravel-pin-worker` | sleep 3 s, tries 3, timeout 60 s |
 | `notifications` | Credential email, admin Order/review notices, payment proofs, Sales Proof, Store Balance notices, cleanup jobs | `laravel-notification-worker` | sleep 3 s, tries 3, timeout 60 s |
@@ -122,6 +122,11 @@ not merge receipts back into `notifications` or payments back into `default`;
 deploy the receipt worker in a separate bounded container or raise the app
 memory cap after measuring the peak. This change adds no production monitoring
 or deployment action.
+
+The [integrated #656 gate](telegram-latency-gate-evidence.md) retains raw samples,
+baseline/integration source manifests and worker RSS from the completed tuning.
+It does not establish cgroup headroom or authorize the cutover steps above.
+
 
 ## Verification
 

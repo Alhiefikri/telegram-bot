@@ -1821,21 +1821,28 @@ pipeline logs its own Telegram acknowledgement. Button webhook ACK stays in
 `dogfood.telegram.webhook_ack` (`ack_kind`, `action_state`) and is separate from
 the queued action result (`dogfood.telegram.handler_finished`).
 
-`App\Services\Telegram\LatencyBaseline\TelegramLatencyBaseline` is the
-repeatable local baseline. It runs the real checkout, order lifecycle, receipt
-pipeline and admin notice owners against disposable PostgreSQL/Redis with a real
-Redis `queue:work notifications` process, a bounded provider fixture
-(`KlikQrisLatencyFixtureProvider`) and the fake Telegram transport. Scenarios are
-`idle`, `backlog-expired`, `slow-notification`, `slow-provider` and
-`slow-telegram`; each records its dataset, worker topology and delay fixtures.
-`LatencyBaselineReport` emits nearest-rank p50/p95/max with sample and unknown
-counts, failed/retry/duplicate counts and sanitized raw samples; cold-start
-warm-up batches are separate from warmed runs. The command
-`telegram:latency-baseline` fails closed outside local/testing, non-PostgreSQL,
-non-Redis, real-Telegram or non-disposable databases, and
-`scripts/telegram-latency-baseline.sh` starts/removes the disposable containers.
-It installs no cron, scheduler, monitor or production probe. Full contract and
-limits: [telegram-latency-baseline.md](../../docs/telegram-latency-baseline.md).
+`App\Services\Telegram\LatencyBaseline\TelegramLatencyBaseline` runs actual
+checkout, authoritative paid lifecycle, receipt/admin pipelines and Redis workers
+against disposable PostgreSQL/Redis. Issue #656 extends #649 with separate bounded
+batches, same-chat callback/provider bursts, provider outage, definite/ambiguous
+Telegram failures, pin failure/replay and lost-Redis-wakeup recovery. The worker
+bootstrap installs bounded HTTP fakes and blocks stray HTTP; no production
+service binding changes. Receipt transport auditing checks recipient ownership
+without retaining content; a final cross-scenario ledger/transport audit catches
+later duplicate sends, settlement or stock mutations after recovery.
+
+`LatencyBaselineReport` keeps sample/unknown/failure/retry counts and raw stage
+timestamps; it withholds p95 below 20 known samples and emits no p99. Ordered
+successor pickups are not counted as retries. Expected ambiguous delivery remains
+`unknown` with missing ACK/completion boundaries, not a fabricated zero latency.
+The `telegram:latency-baseline` command fails on other missing boundaries or
+correctness failures. `scripts/telegram-latency-baseline.sh` uses an internal
+disposable network; `scripts/telegram-latency-compare.sh` snapshots baseline and
+integration source and overlays measurement code only, preserving historical
+business owners. Neither script installs a scheduler or persistent monitor.
+Contract and limits: [telegram-latency-baseline.md](../../docs/telegram-latency-baseline.md).
+Integrated evidence and rollout recommendation:
+[telegram-latency-gate-evidence.md](../../docs/telegram-latency-gate-evidence.md).
 Verification entry points: `tests/Feature/Telegram/TelegramReceiptLatencyTimingTest.php`,
 `tests/Feature/TelegramLatencyBaselineCommandTest.php` and
 `tests/Unit/TelegramLatencyBaselineReportTest.php`.

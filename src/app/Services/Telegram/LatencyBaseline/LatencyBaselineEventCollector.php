@@ -83,4 +83,17 @@ final class LatencyBaselineEventCollector
     {
         return $this->matching($event, $orderCorrelation)[0] ?? null;
     }
+
+    /** @return list<array<string, mixed>> */
+    public function transportFor(string $recipientCorrelation): array
+    {
+        return array_values(array_filter($this->events, static fn (array $event): bool => $event['event'] === 'dogfood.telegram.baseline_transport'
+            && ($event['context']['recipient_correlation_id'] ?? null) === $recipientCorrelation));
+    }
+
+    public function wrongRecipientCount(): int
+    {
+        return count(array_filter($this->events, static fn (array $event): bool => $event['event'] === 'dogfood.telegram.baseline_transport'
+            && ($event['context']['wrong_recipient'] ?? false) === true));
+    }
 }
