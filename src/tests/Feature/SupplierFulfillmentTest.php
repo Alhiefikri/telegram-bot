@@ -101,9 +101,9 @@ class SupplierFulfillmentTest extends TestCase
         }
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
         Http::assertSent(fn ($request) => str_contains($request->body(), 'manual-account@example.test'));
-        $sentCount = Http::recorded()->count();
+        $sentCount = $this->deliveryRequestCount();
         $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
-        $this->assertSame($sentCount, Http::recorded()->count());
+        $this->assertSame($sentCount, $this->deliveryRequestCount());
         $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
         app(SupplierFulfillmentService::class)->confirmOwnerNoDebit($f->id, $owner, SupplierPurchase::sole()->id);
         $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
@@ -520,9 +520,9 @@ class SupplierFulfillmentTest extends TestCase
         foreach ($credentials as $credential) {
             Http::assertSent(fn ($request) => str_contains($request->body(), $credential));
         }
-        $sentCount = Http::recorded()->count();
+        $sentCount = $this->deliveryRequestCount();
         $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
-        $this->assertSame($sentCount, Http::recorded()->count());
+        $this->assertSame($sentCount, $this->deliveryRequestCount());
     }
 
     public static function bulkSuppliers(): array
@@ -687,6 +687,18 @@ class SupplierFulfillmentTest extends TestCase
         };
     }
 
+    /**
+     * Credential pinning is deferred off the receipt critical path, so the
+     * recovery sweep may pin a delivered receipt. Only message sends prove a
+     * receipt was (or was not) delivered twice.
+     */
+    private function deliveryRequestCount(): int
+    {
+        return Http::recorded()
+            ->reject(static fn ($pair): bool => str_ends_with($pair[0]->url(), '/pinChatMessage'))
+            ->count();
+    }
+
     private function deliverBulkReceipt(Order $order, array $credentials): void
     {
         config()->set('services.telegram.token', 'test-token');
@@ -715,9 +727,9 @@ class SupplierFulfillmentTest extends TestCase
                 $this->assertStringContainsString($part, $receiptContents);
             }
         }
-        $sentCount = Http::recorded()->count();
+        $sentCount = $this->deliveryRequestCount();
         $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
-        $this->assertSame($sentCount, Http::recorded()->count());
+        $this->assertSame($sentCount, $this->deliveryRequestCount());
     }
 
     public function test_toolorax_bulk_transport_loss_keeps_the_hold_without_another_purchase(): void
