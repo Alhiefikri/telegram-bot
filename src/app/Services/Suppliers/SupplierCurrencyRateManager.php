@@ -2,6 +2,7 @@
 
 namespace App\Services\Suppliers;
 
+use App\Exceptions\SupplierRateMappingChanged;
 use App\Models\Product;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
@@ -58,16 +59,57 @@ final class SupplierCurrencyRateManager
             }
         }
 
-        $productIds = [];
-        $touched = 0;
-        DB::transaction(function () use ($rateKeys, $rates, $actor, $ip, $source, &$productIds, &$touched): void {
-            $rows = SupplierCurrencyRate::query()->whereIn('currency', $rateKeys)
-                ->orderBy('currency')->lockForUpdate()->get()->keyBy('currency');
+        for ($attempt = 1; $attempt <= 5; $attempt++) {
+            try {
+                [$productIds, $touched] = $this->saveLocked($rateKeys, $rates, $actor, $ip, $source);
+                break;
+            } catch (SupplierRateMappingChanged) {
+                // Release every lock before expanding the Product lock set.
+                if ($attempt === 5) {
+                    throw ValidationException::withMessages([
+                        'rates' => 'Pemetaan supplier berubah di tempat lain. Muat ulang sebelum menyimpan.',
+                    ]);
+                }
+            }
+        }
+
+        if ($productIds !== []) {
+            $this->availability->refreshProducts($productIds);
+        }
+
+        return $touched;
+    }
+
+    /**
+     * @param  list<string>  $rateKeys
+     * @param  array<string, array{exchange_rate_idr: string|int|float, version: int}>  $rates
+     * @return array{list<int>, int}
+     */
+    private function saveLocked(array $rateKeys, array $rates, ?User $actor, ?string $ip, string $source): array
+    {
+        return DB::transaction(function () use ($rateKeys, $rates, $actor, $ip, $source): array {
+            $productIds = [];
+            $touched = 0;
+            $rows = collect();
+            foreach ($rateKeys as $rateKey) {
+                $stored = SupplierCurrencyRate::query()->whereKey($rateKey)->lockForUpdate()->first();
+                if ($stored === null) {
+                    SupplierCurrencyRate::query()->insertOrIgnore([
+                        'currency' => $rateKey,
+                        'exchange_rate_idr' => $rates[$rateKey]['exchange_rate_idr'],
+                        'version' => 0,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                    $stored = SupplierCurrencyRate::query()->whereKey($rateKey)->lockForUpdate()->firstOrFail();
+                }
+                $rows->put($rateKey, $stored);
+            }
 
             foreach ($rateKeys as $rateKey) {
                 $stored = $rows->get($rateKey);
                 $expected = (int) ($rates[$rateKey]['version'] ?? 0);
-                if (($stored === null ? 0 : (int) $stored->version) !== $expected) {
+                if ((int) $stored->version !== $expected) {
                     throw ValidationException::withMessages(['rates' => 'Kurs berubah di tempat lain. Muat ulang sebelum menyimpan.']);
                 }
             }
@@ -84,7 +126,7 @@ final class SupplierCurrencyRateManager
             foreach ($rateKeys as $rateKey) {
                 $stored = $rows->get($rateKey);
                 $target = (string) $rates[$rateKey]['exchange_rate_idr'];
-                $globalChange = $stored === null || ! SupplierExchangeRate::equals($stored->exchange_rate_idr, $target);
+                $globalChange = (int) $stored->version === 0 || ! SupplierExchangeRate::equals($stored->exchange_rate_idr, $target);
                 $drift = $preRead->whereIn('currency', SupplierExchangeRate::currenciesForRateKey($rateKey))
                     ->contains(fn (Supplier $supplier): bool => ! SupplierExchangeRate::equals($supplier->exchange_rate_idr, $target));
                 if ($globalChange || $drift) {
@@ -92,7 +134,7 @@ final class SupplierCurrencyRateManager
                 }
             }
             if ($affected === []) {
-                return;
+                return [[], 0];
             }
 
             $affectedCurrencies = collect($affected)
@@ -104,11 +146,14 @@ final class SupplierCurrencyRateManager
                 Product::withTrashed()->whereIn('id', $productIds)->orderBy('id')->lockForUpdate()->get();
             }
             $suppliers = Supplier::query()->whereIn('id', $supplierIds)->orderBy('id')->lockForUpdate()->get();
+            if (array_diff($this->productIds($supplierIds), $productIds) !== []) {
+                throw new SupplierRateMappingChanged;
+            }
 
             foreach ($affected as $rateKey) {
                 $stored = $rows->get($rateKey);
                 $target = (string) $rates[$rateKey]['exchange_rate_idr'];
-                $globalChange = $stored === null || ! SupplierExchangeRate::equals($stored->exchange_rate_idr, $target);
+                $globalChange = (int) $stored->version === 0 || ! SupplierExchangeRate::equals($stored->exchange_rate_idr, $target);
                 $rateCurrencies = SupplierExchangeRate::currenciesForRateKey($rateKey);
                 $rateSuppliers = $suppliers->whereIn('currency', $rateCurrencies);
                 $drifted = $rateSuppliers->filter(
@@ -118,14 +163,14 @@ final class SupplierCurrencyRateManager
                     continue;
                 }
 
-                $previous = $globalChange && $stored !== null
+                $previous = $globalChange && (int) $stored->version > 0
                     ? (string) $stored->exchange_rate_idr
                     : ($drifted->first()?->getOriginal('exchange_rate_idr') !== null
                         ? (string) $drifted->first()->getOriginal('exchange_rate_idr')
                         : null);
 
                 if ($globalChange) {
-                    $rate = $stored ?? new SupplierCurrencyRate(['currency' => $rateKey, 'version' => 0]);
+                    $rate = $stored;
                     $rate->exchange_rate_idr = $target;
                     $rate->version = (int) $rate->version + 1;
                     $rate->save();
@@ -150,13 +195,9 @@ final class SupplierCurrencyRateManager
                 ], $actor, $ip);
                 $touched++;
             }
+
+            return [$productIds, $touched];
         }, 5);
-
-        if ($productIds !== []) {
-            $this->availability->refreshProducts($productIds);
-        }
-
-        return $touched;
     }
 
     /**

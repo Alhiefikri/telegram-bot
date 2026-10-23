@@ -6,6 +6,7 @@ use App\Models\Cart;
 use App\Models\Order;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\Suppliers\SupplierCurrencyRateCutover;
 use App\Services\Telegram\TelegramBotApiRequestFactory;
 use App\Services\Telegram\TelegramBotIdentity;
 use App\Support\PakasirCheckoutFlow;
@@ -15,6 +16,7 @@ use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 
 abstract class TestCase extends BaseTestCase
 {
@@ -30,6 +32,12 @@ abstract class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Legacy suites deliberately inject per-connection rate fixtures. Tests
+        // exercising the production writer fence reinstall it through migration up().
+        if (Schema::hasTable('supplier_currency_rates')) {
+            SupplierCurrencyRateCutover::dropFence();
+        }
 
         Cache::flush();
         Http::preventStrayRequests();

@@ -51,6 +51,12 @@
             <file>tests/Feature/SupplierAdminTest.php</file>
             <file>tests/Feature/SupplierAvailabilityTest.php</file>
             <file>tests/Feature/SupplierPricingClarityTest.php</file>
+            <file>tests/Feature/SupplierCurrencyRateAdminTest.php</file>
+            <file>tests/Feature/SupplierCurrencyRateMigrationTest.php</file>
+            <file>tests/Feature/SupplierCurrencyRatePostgresConcurrencyTest.php</file>
+            <file>tests/Feature/SupplierRateAuditCommandTest.php</file>
+            <file>tests/Feature/MiraiSupplierTest.php</file>
+            <file>tests/Feature/MiraiFulfillmentIntegrityTest.php</file>
             <file>tests/Feature/SupplierHealthTest.php</file>
             <file>tests/Feature/SupplierHealthPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SupplierFulfillmentTest.php</file>

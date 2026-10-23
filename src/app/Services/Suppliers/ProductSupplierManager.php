@@ -263,10 +263,19 @@ final class ProductSupplierManager
         $policy = new SupplierPricePolicy;
         $policy->forceFill(array_intersect_key($input, array_flip(['mode', 'markup_basis_points', 'profit_idr', 'minimum_profit_idr', 'rounding_idr'])));
 
-        $quote = app(ProductQuantityPricing::class)->quote($product, $quantity);
-        $retailUnit = $input['mode'] === 'manual' || $quote->appliedTierMinimum !== null
-            ? $quote->effectiveIdrUnitAmount
-            : $this->pricing->retailPrice($policy, $unitCost);
+        $previewProduct = clone $product;
+        if ($input['mode'] !== 'manual') {
+            $baseMicros = $this->pricing->costMicros($item, 1);
+            if ($baseMicros === null) {
+                return ['quantity' => $quantity, 'cost_idr' => null, 'retail_idr' => null, 'profit_idr' => null,
+                    'cost_unit_idr' => null, 'retail_unit_idr' => null, 'profit_unit_idr' => null, 'currency' => null];
+            }
+            $previewProduct->price_amount = $this->pricing->retailPrice(
+                $policy, SupplierMoney::costIdr($baseMicros, $supplier->exchange_rate_idr),
+            );
+        }
+        $quote = app(ProductQuantityPricing::class)->quote($previewProduct, $quantity);
+        $retailUnit = $quote->effectiveIdrUnitAmount;
         $totalRetail = $retailUnit * $quantity;
         $profit = $totalRetail - $totalCost;
 

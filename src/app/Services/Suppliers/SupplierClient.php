@@ -178,7 +178,7 @@ final class SupplierClient
                 return $this->nasteleResult($this->payload($response, $supplier->api_key), $quantity, null);
             }
             if ($provider === SupplierProvider::MiraiApi) {
-                return $this->miraiResult($this->payload($response, $supplier->api_key), $quantity, null, $id, $reference, $item->unit_price_micros);
+                return $this->miraiResult($this->payload($response, $supplier->api_key), $quantity, null, $id, $reference);
             }
             $result = $this->result($supplier, $this->payload($response, $supplier->api_key), $quantity, null, $id, $reference);
         } catch (SupplierUnavailable) {
@@ -811,14 +811,15 @@ final class SupplierClient
             $unlimited = $this->boolean($row, 'unlimited', false);
             $remaining = $this->integer($row['remaining_today'] ?? null, 0, 1_000_000_000);
             $price = $this->money($row['reseller_price_vnd'] ?? null);
-            $stock = $unlimited ? $maximum : min($remaining, $maximum);
+            // Capacity represents every quantity from one through stock.
+            $stock = $minimum === 1 ? ($unlimited ? $maximum : min($remaining, $maximum)) : 0;
             $products[] = new SupplierProductData(
                 $id,
                 $name,
                 null,
                 $price,
                 $stock,
-                $price > 0 && ($unlimited || $remaining > 0),
+                $minimum === 1 && $price > 0 && ($unlimited || $remaining > 0),
                 false,
             );
         }
@@ -831,7 +832,7 @@ final class SupplierClient
      * legacy merged order retains a single code, so a quantity above one can
      * never be treated as complete from that response.
      */
-    private function miraiResult(array $payload, ?int $expectedQuantity, ?string $expectedOrderId, ?string $expectedProductId = null, ?string $reference = null, ?int $fallbackUnitPriceMicros = null): SupplierOrderResult
+    private function miraiResult(array $payload, ?int $expectedQuantity, ?string $expectedOrderId, ?string $expectedProductId = null, ?string $reference = null): SupplierOrderResult
     {
         if (($payload['success'] ?? null) !== true) {
             throw new SupplierUnavailable('invalid_payload');
@@ -868,16 +869,6 @@ final class SupplierClient
             ?? $payload['total_price_vnd'] ?? $payload['total_price'] ?? $payload['total'] ?? $payload['amount'] ?? $payload['total_amount']
             ?? $payload['charged_amount'] ?? null;
         $cost = $rawCost === null ? null : $this->money($rawCost);
-        if ($cost === null && $fallbackUnitPriceMicros !== null) {
-            $fallbackQuantity = $expectedQuantity ?? $quantity;
-            if ($fallbackQuantity !== null) {
-                try {
-                    $cost = SupplierMoney::checkedMultiply($fallbackUnitPriceMicros, $fallbackQuantity);
-                } catch (Throwable) {
-                    $cost = null;
-                }
-            }
-        }
         $single = $row['redeem_code'] ?? $payload['redeem_code'] ?? null;
         $rawCodes = $row['redeem_codes'] ?? $payload['redeem_codes'] ?? null;
         if ($rawCodes === null || $rawCodes === []) {
@@ -890,9 +881,6 @@ final class SupplierClient
         foreach ($rawCodes as $code) {
             $deliveries[] = $this->text($code, 16_000);
         }
-        if ($single !== null && ($deliveries === [] || $single !== $deliveries[0])) {
-            return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'payload_mismatch', identityTrusted: $id !== null);
-        }
         $status = $row['status'] ?? $payload['status'] ?? null;
         if ($status !== null && ! is_string($status)) {
             throw new SupplierUnavailable('invalid_payload');
@@ -904,6 +892,9 @@ final class SupplierClient
             || ($quantity !== null && count($deliveries) > $quantity);
         if ($mismatch || $id === null) {
             return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'payload_mismatch');
+        }
+        if ($single !== null && ($deliveries === [] || $single !== $deliveries[0])) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'payload_mismatch', identityTrusted: $id !== null);
         }
         $fulfilled = in_array($status, ['fulfilled', 'completed', 'delivered', 'success'], true);
         $pending = in_array($status, ['pending', 'processing', 'paid', 'queued', 'awaiting_delivery', 'in_progress'], true);
@@ -1199,7 +1190,7 @@ final class SupplierClient
                 ], true);
         }
         if ($provider === SupplierProvider::MiraiApi) {
-            if (in_array($response->status(), [400, 401, 402, 403, 404, 422, 429], true)) {
+            if (in_array($response->status(), [400, 401, 403, 404, 422, 429], true)) {
                 return true;
             }
             if ($response->status() !== 409) {
@@ -1212,7 +1203,7 @@ final class SupplierClient
             }
 
             return is_string($message) && in_array($message, [
-                'insufficient wallet balance', 'insufficient balance', 'package is not available', 'package not found',
+                'insufficient wallet balance', 'package is not available',
             ], true);
         }
         if ($provider === SupplierProvider::Canboso) {

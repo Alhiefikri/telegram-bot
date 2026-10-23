@@ -59,11 +59,63 @@ diatur. Rollback migrasi merge sengaja ditolak karena nilai USD dan USDT lama
 tidak dapat dipisahkan lagi tanpa kehilangan bukti; pulihkan backup pra-merge bila
 benar-benar perlu kembali.
 
+#### Cutover fence and recovery (#657)
+
+The backfill and USD/USDT merge now reconcile mapped Product prices and capacity
+inside the migration transaction. PostgreSQL takes table locks in rate → Product
+→ Supplier → catalog/mapping order, including inserts, before choosing rates.
+The new `2026_10_24_000002_fence_supplier_currency_rate_caches` migration repairs
+installations that already ran the earlier migrations.
+
+A persistent database trigger rejects Supplier inserts or rate/currency updates
+unless the cache equals its authoritative rate. It remains active after expand
+migrations commit, so an old-image request cannot save a divergent per-connection
+rate even after reading the new Supplier version. Missing authority also fails
+closed. Ordinary metadata updates remain available. The current application
+updates the global source before caches within one transaction.
+
+Use the existing release workflow only when deployment is authorized. Do not
+disable the trigger to keep an old per-connection rate form working. If cutover
+fails, leave mutations closed, inspect the migration error and authoritative
+currency rows, and retry the transactional reconciliation after correcting the
+identified prerequisite through a qualified recovery procedure. Do not run blind
+cache updates. Reconciliation can be repeated without rewriting Order Item,
+fulfillment or purchase snapshots. Expired observations retain no external
+checkout authority until a fresh sync can reprice them. Downgrade to legacy
+per-connection rate editing requires a qualified pre-cutover backup; rollback
+does not remove the persistent fence.
+
+First-time concurrent rate setup now yields one winner and a normal stale-version
+validation response. Mapping expansion during propagation restarts with the full
+Product lock set before any Supplier lock; repeated topology churn is bounded to
+five attempts and asks the operator to reload.
+
+Local PostgreSQL 16 synthetic smoke for #657 used 20 Suppliers and 200 mapped
+Products: global save returned all 200 prices/capacities coherent in 6.14 seconds;
+repeat cutover reconciliation took 0.96 seconds. The same bootstrap smoke retained
+the Mirai hold with no credentials when charged total was absent, then completed
+one settlement/two credentials through exact-order GET recovery; repeated process
+calls made no extra purchase. These are disposable-local measurements, not
+production lock-duration sizing or funded Mirai qualification. Rehearse at actual
+deployment cardinality before scheduling a production cutover.
+
+Verification for #657: focused and adjacent SQLite suites passed 262 distinct
+tests; the PostgreSQL-only blocked-writer test was skipped there and exercised
+in PostgreSQL. The PostgreSQL rate/setup/mapping/cutover, Mirai finalizer and
+existing Supplier/Canboso concurrency suites passed 61 tests / 1,023 assertions.
+The migration fixture explicitly force-fills its guarded reservation counter;
+the earlier failing capacity assertions were rerun successfully after that
+fixture correction. Changed PHP files passed Pint or were corrected by Pint.
+No CI/CD, production access or live supplier purchase was performed.
+
 Di workspace produk, **Simulasi harga per SKU** sekarang menerima **Jumlah
 simulasi** dan menampilkan harga beli total, harga jual total, profit bersih,
 serta angka per unit. Simulasi memakai tier grosir/diskon jumlah supplier dan
 harga bertingkat produk, sehingga profit bersih pada jumlah grosir dapat diperiksa
 sebelum menyimpan kebijakan atau membeli.
+Automatic base retail uses the quantity-one supplier cost, matching saved-policy
+refresh; supplier quantity discounts affect total purchase cost and profit, not
+that base. Product retail tiers apply afterward.
 
 ### Menghapus koneksi duplikat atau tidak terpakai
 
@@ -157,6 +209,8 @@ the availability projection for mapped products, and never rewrites
 global row and every cached connection are aligned. Open orders do not block a
 rate change: checkout and purchase rows already carry their own immutable rate
 snapshot.
+Corrections are deduplicated by global rate key, including the shared USD/USDT
+key. The success count reports corrected global currency groups, not connections.
 
 #### Change record — 2026-10-15
 
@@ -270,10 +324,14 @@ weakening the Nastele-only currency rule for other providers; migration
 The contract uses the fixed HTTPS origin `https://api.miraiapi.com/api/reseller/v1`
 with `Authorization: Bearer <reseller key>`. Sync reads `GET /balance` and
 `GET /packages` only. Package `code` is the external SKU, `reseller_price_vnd` is
-the unit cost, and `max_quantity` bounds one order. When `unlimited` is false,
-`remaining_today` bounds available quantity; when true, the package is orderable
-up to `max_quantity`. Redirects are disabled and the shared payload, credential
-echo and rate-budget guards apply (60 requests/minute, at most 45 reads).
+the unit cost, and `max_quantity` bounds one order. Packages with `min_quantity`
+above one are persisted as non-orderable with zero external stock: the current
+capacity contract supports only a contiguous range starting at one. This also
+blocks undersized external remainders in mixed local/external Orders. Local-only
+checkout remains available. For minimum one, `remaining_today` bounds quantity
+unless `unlimited` is true; `max_quantity` always applies. Redirects are disabled
+and the shared payload, credential echo and rate-budget guards apply
+(60 requests/minute, at most 45 reads).
 
 Purchases use `POST /orders` with `{package_code, quantity, external_order_id}`
 and the same reference in the `Idempotency-Key` header. Retries reuse that exact
@@ -283,14 +341,20 @@ response must contain `redeem_codes` with one distinct code per ordered unit;
 so quantity above one remains incomplete and goes to review rather than being
 delivered. Pending, unknown-status, mismatched quantity/cost/package/reference
 and incomplete or duplicate lists never authorize delivery.
+Package, reference, quantity and exact-order identity are correlated before any
+redeem-code alias mismatch can be trusted. A complete code list without an
+authoritative charged total retains the financial hold and cannot authorize
+customer delivery. Catalog price × quantity is an estimate, never debit evidence.
+Recover the same known order by GET; a valid total can settle and deliver once.
 
 `HTTP 409 insufficient wallet balance` and `409 package is not available` are
-documented pre-purchase rejections; other conflicts remain ambiguous. A 400
-validation response, 401/403 authentication failure and 429 also prove no
-purchase. Authentication failures, transport errors and 5xx responses preserve
-the durable hold for recovery. Never place the reseller key or redeem codes in
-ENV, logs or the repository; enter the key through Admin, where it remains
-encrypted and hidden.
+documented pre-purchase rejections, as are 400/401/403/404/422/429 responses.
+HTTP 402 and 409 messages `insufficient balance` / `package not found` are not
+documented no-purchase evidence: they retain the original hold and cannot
+authorize a fallback POST. Authentication failures, transport errors and 5xx
+responses retain their existing recovery policy. Never place the reseller key
+or redeem codes in ENV, logs or the repository; enter the key through Admin,
+where it remains encrypted and hidden.
 
 Read-only qualification on 23 October 2026 parsed the live VND balance (**0**) and
 15 live packages through the PHP adapter. No purchase was sent because the

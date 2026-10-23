@@ -2,6 +2,7 @@
 
 namespace Tests\Support;
 
+use App\Services\Suppliers\SupplierCurrencyRateCutover;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -30,10 +31,14 @@ final class PostgresTestDatabase
 
         DB::statement('DROP EXTENSION IF EXISTS pg_stat_statements');
 
-        return Artisan::call('migrate:fresh', [
+        $status = Artisan::call('migrate:fresh', [
             '--force' => true,
             '--drop-views' => true,
             '--drop-types' => true,
         ]);
+        // Legacy fixtures bypass application writers; migration tests reinstall it.
+        SupplierCurrencyRateCutover::dropFence();
+
+        return $status;
     }
 }

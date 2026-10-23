@@ -146,6 +146,19 @@ final class SupplierRateAuditCommandTest extends NonTransactionalDatabaseTestCas
         $this->assertSame($single, $many);
     }
 
+    public function test_global_correction_queries_do_not_grow_with_flagged_supplier_count(): void
+    {
+        $supplier = $this->connection();
+        $single = $this->measuredFixQueryCount($supplier, selectOnly: true);
+        for ($index = 0; $index < 4; $index++) {
+            $this->connection();
+        }
+        $many = $this->measuredFixQueryCount($supplier, selectOnly: true);
+
+        $this->assertSame($single, $many);
+        $this->assertSame(5, Supplier::query()->where('exchange_rate_idr', '0.692308')->count());
+    }
+
     public function test_a_connection_with_an_open_commitment_can_still_correct_its_global_rate(): void
     {
         $supplier = $this->connection('18000', ['reserved_balance_micros' => 5_000_000]);
@@ -268,7 +281,7 @@ final class SupplierRateAuditCommandTest extends NonTransactionalDatabaseTestCas
         ]);
     }
 
-    private function measuredFixQueryCount(Supplier $supplier): int
+    private function measuredFixQueryCount(Supplier $supplier, bool $selectOnly = false): int
     {
         // Every measured run starts from the broken stored rate, its original
         // version, and no global rate row.
@@ -279,7 +292,10 @@ final class SupplierRateAuditCommandTest extends NonTransactionalDatabaseTestCas
         DB::enableQueryLog();
         try {
             $exitCode = Artisan::call('suppliers:rate-audit', ['--fix' => true, '--to' => '0.692308', '--force' => true]);
-            $count = count(DB::getQueryLog());
+            $queries = DB::getQueryLog();
+            $count = $selectOnly
+                ? count(array_filter($queries, static fn (array $query): bool => str_starts_with(strtolower(ltrim($query['query'])), 'select')))
+                : count($queries);
         } finally {
             DB::disableQueryLog();
             DB::flushQueryLog();

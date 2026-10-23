@@ -124,7 +124,9 @@ final class AuditSupplierRates extends Command
             }
 
             $corrected = 0;
-            foreach ($applicable as $connection) {
+            foreach (collect($applicable)->unique(
+                fn (Supplier $connection): ?string => SupplierExchangeRate::rateKey((string) $connection->currency),
+            ) as $connection) {
                 try {
                     $corrected += $manager->correctRate($connection, $replacement, $actor, null) ? 1 : 0;
                 } catch (InvalidArgumentException|RuntimeException $exception) {
@@ -132,7 +134,7 @@ final class AuditSupplierRates extends Command
                     $this->error(sprintf('Koneksi #%d: %s', $connection->id, $exception->getMessage()));
                 }
             }
-            $this->line(sprintf('Kurs diperbaiki pada %d koneksi.', $corrected));
+            $this->line(sprintf('Kurs diperbaiki pada %d kelompok mata uang global.', $corrected));
         }
 
         $this->line(sprintf(

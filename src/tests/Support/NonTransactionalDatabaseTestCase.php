@@ -2,6 +2,7 @@
 
 namespace Tests\Support;
 
+use App\Services\Suppliers\SupplierCurrencyRateCutover;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -28,5 +29,8 @@ abstract class NonTransactionalDatabaseTestCase extends TestCase
         }
 
         $this->assertSame(0, Artisan::call('migrate:fresh', ['--force' => true]));
+        // These suites inject legacy/out-of-band cache states directly. Cutover
+        // regressions explicitly reinstall the production fence via migration up().
+        SupplierCurrencyRateCutover::dropFence();
     }
 }

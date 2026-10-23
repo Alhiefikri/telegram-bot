@@ -11,6 +11,8 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
 use App\Models\User;
+use App\Services\Pricing\ProductQuantityPricing;
+use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierAvailability;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -129,6 +131,45 @@ final class SupplierPricingClarityTest extends TestCase
             'manual browser preview' => ['manual', false],
             'manual JSON preview' => ['manual', true],
         ];
+    }
+
+    #[DataProvider('automaticPreviewPolicies')]
+    public function test_automatic_preview_matches_saved_base_and_quantity_quote(string $mode, bool $wholesale, bool $retailTier): void
+    {
+        $this->freezeTime();
+        $product = Product::factory()->create(['price_amount' => 45000, 'stock' => 0, 'usdt_price_amount' => null]);
+        $source = $this->source($product, 'Preview parity', 1000000, 10);
+        $item = $source->catalogItem;
+        if ($wholesale) {
+            $item->forceFill([
+                'price_tiers' => [['min' => 10, 'max' => null, 'unit_price_micros' => 900000]],
+                'bulk_discounts' => [['min' => 10, 'percent_basis_points' => 1000]],
+            ])->save();
+        }
+        if ($retailTier) {
+            $product->quantityPriceTiers()->create(['minimum_quantity' => 10, 'price_amount' => 19000, 'usdt_price_amount' => null]);
+        }
+        $input = ['mode' => $mode, 'markup_basis_points' => 2500, 'profit_idr' => 5000, 'minimum_profit_idr' => 0, 'rounding_idr' => 1];
+        $preview = app(ProductSupplierManager::class)->preview($product, $item, $input, 10);
+        SupplierPricePolicy::forceCreate(['product_id' => $product->id, ...$input]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $quote = app(ProductQuantityPricing::class)->quote($product->fresh(), 10);
+
+        $this->assertSame($mode === 'percent' ? 20000 : 21000, $product->fresh()->price_amount);
+        $this->assertSame($quote->idrSubtotal, $preview['retail_idr']);
+        $this->assertSame($wholesale ? 129600 : 160000, $preview['cost_idr']);
+        $this->assertSame($quote->idrSubtotal - $preview['cost_idr'], $preview['profit_idr']);
+    }
+
+    public static function automaticPreviewPolicies(): iterable
+    {
+        foreach (['percent', 'fixed', 'hybrid'] as $mode) {
+            foreach ([false, true] as $wholesale) {
+                foreach ([false, true] as $retailTier) {
+                    yield $mode.' wholesale='.(int) $wholesale.' tier='.(int) $retailTier => [$mode, $wholesale, $retailTier];
+                }
+            }
+        }
     }
 
     private function policy(Product $product, string $mode): SupplierPricePolicy

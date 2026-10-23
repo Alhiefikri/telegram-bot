@@ -79,6 +79,7 @@ final class MiraiSupplierTest extends TestCase
                 ['code' => 'GPT_10M', 'name' => 'GPT 10M tokens · 1D', 'reseller_price_vnd' => 6300, 'min_quantity' => 1, 'max_quantity' => 10000, 'remaining_today' => 0, 'unlimited' => true],
                 ['code' => 'TAU_50M', 'name' => 'Trung Quốc 50M tokens · 2D', 'reseller_price_vnd' => 18000, 'min_quantity' => 1, 'max_quantity' => 10, 'remaining_today' => 3, 'unlimited' => false],
                 ['code' => 'SOON', 'name' => 'Sold out package', 'reseller_price_vnd' => 1000, 'min_quantity' => 1, 'max_quantity' => 5, 'remaining_today' => 0, 'unlimited' => false],
+                ['code' => 'BULK_ONLY', 'name' => 'Minimum five', 'reseller_price_vnd' => 1000, 'min_quantity' => 5, 'max_quantity' => 10, 'remaining_today' => 10, 'unlimited' => false],
             ], 'success' => true]);
         });
 
@@ -86,7 +87,7 @@ final class MiraiSupplierTest extends TestCase
 
         $this->assertSame(100_000_000_000, $snapshot->balanceMicros);
         $this->assertSame('VND', $snapshot->currency);
-        $this->assertCount(3, $snapshot->products);
+        $this->assertCount(4, $snapshot->products);
         $this->assertSame('GPT_10M', $snapshot->products[0]->externalId);
         $this->assertSame(6_300_000_000, $snapshot->products[0]->unitPriceMicros);
         $this->assertSame(10000, $snapshot->products[0]->stock);
@@ -96,6 +97,8 @@ final class MiraiSupplierTest extends TestCase
         $this->assertTrue($snapshot->products[1]->orderable);
         $this->assertSame(0, $snapshot->products[2]->stock);
         $this->assertFalse($snapshot->products[2]->orderable);
+        $this->assertSame(0, $snapshot->products[3]->stock);
+        $this->assertFalse($snapshot->products[3]->orderable);
         $this->assertTrue(SupplierExchangeRate::isPlausible('VND', '0.650001'));
         Http::assertSentCount(2);
     }
@@ -223,12 +226,54 @@ final class MiraiSupplierTest extends TestCase
         $this->assertFalse($wrong->deliveryTrusted);
     }
 
+    public function test_alias_mismatch_does_not_bypass_package_reference_or_exact_order_correlation(): void
+    {
+        foreach ([
+            'package' => ['package_code' => 'OTHER'],
+            'reference' => ['external_order_id' => 'other-reference'],
+            'order' => ['order_id' => 'other-order'],
+        ] as $case => $overrides) {
+            Cache::flush();
+            Http::swap(new Factory);
+            Http::fake(fn () => Http::response($this->orderPayload($overrides + ['redeem_code' => 'other-code'])));
+            $client = app(SupplierClient::class);
+            $result = $case === 'order'
+                ? $client->order($this->supplier(), 'ord-321', 'GPT_10M', 'reference-321')
+                : $client->purchase($this->supplier(), $this->item(), 2, 'reference-321');
+
+            $this->assertSame('ambiguous', $result->outcome, $case);
+            $this->assertFalse($result->identityTrusted, $case);
+            $this->assertFalse($result->deliveryTrusted, $case);
+        }
+    }
+
+    public function test_complete_delivery_without_charged_total_does_not_use_catalogue_cost(): void
+    {
+        $payload = $this->orderPayload();
+        unset($payload['data']['total_vnd']);
+        Http::fake(fn () => Http::response($payload));
+
+        $result = app(SupplierClient::class)->purchase($this->supplier(), $this->item(), 2, 'reference-321');
+
+        $this->assertTrue($result->identityTrusted);
+        $this->assertTrue($result->deliveryTrusted);
+        $this->assertNull($result->costMicros);
+    }
+
     public function test_documented_rejections_are_safe_and_unknown_conflicts_are_ambiguous(): void
     {
         foreach ([
             [400, ['message' => 'external_order_id, package_code and Idempotency-Key are required', 'success' => false], 'rejected'],
             [409, ['message' => 'insufficient wallet balance', 'success' => false], 'rejected'],
             [409, ['message' => 'package is not available', 'success' => false], 'rejected'],
+            [401, [], 'rejected'],
+            [403, [], 'rejected'],
+            [404, [], 'rejected'],
+            [422, [], 'rejected'],
+            [429, [], 'rejected'],
+            [402, ['message' => 'insufficient wallet balance', 'success' => false], 'ambiguous'],
+            [409, ['message' => 'insufficient balance', 'success' => false], 'ambiguous'],
+            [409, ['message' => 'package not found', 'success' => false], 'ambiguous'],
             [409, ['message' => 'unexpected idempotency conflict', 'success' => false], 'ambiguous'],
             [500, [], 'ambiguous'],
         ] as [$status, $body, $outcome]) {
