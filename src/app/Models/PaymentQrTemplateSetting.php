@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 
 #[Fillable([
     'singleton_key',
+    'enabled',
     'image_path',
     'qr_x',
     'qr_y',
@@ -21,6 +22,7 @@ class PaymentQrTemplateSetting extends Model
     protected function casts(): array
     {
         return [
+            'enabled' => 'boolean',
             'qr_x' => 'integer',
             'qr_y' => 'integer',
             'qr_width' => 'integer',

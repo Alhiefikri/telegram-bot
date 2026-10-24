@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 /**
- * Resolves the configured QR template once per request.
+ * Resolves the current template for each presentation, including retained queue rails.
  *
  * A missing row, missing file, unreadable image, or out-of-bounds geometry
  * resolves to null, which keeps the payment QR exactly as the provider or the
@@ -15,25 +15,10 @@ use Throwable;
  */
 final class QrTemplatePlacementStore
 {
-    private bool $loaded = false;
-
-    private ?QrTemplatePlacement $placement = null;
-
     public function current(): ?QrTemplatePlacement
     {
-        if ($this->loaded) {
-            return $this->placement;
-        }
-
-        $this->loaded = true;
-
-        return $this->placement = $this->resolve();
-    }
-
-    private function resolve(): ?QrTemplatePlacement
-    {
         $setting = PaymentQrTemplateSetting::current();
-        if ($setting === null || ! $setting->isConfigured()) {
+        if ($setting === null || ! $setting->enabled || ! $setting->isConfigured()) {
             return null;
         }
 

@@ -326,16 +326,16 @@
                         </div>
                         <div class="flex h-28 w-32 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-admin-line bg-admin-surface">
                             @if ($qrTemplate['is_configured'] && $qrTemplate['image_url'])
-                                <img src="{{ $qrTemplate['image_url'] }}" alt="Preview template QR pembayaran aktif" class="h-full w-full object-contain" loading="lazy" decoding="async">
+                                <img src="{{ $qrTemplate['image_url'] }}" alt="Preview template QR pembayaran tersimpan" class="h-full w-full object-contain" loading="lazy" decoding="async">
                             @else
-                                <span class="px-3 text-center text-xs leading-5 text-admin-muted">Belum aktif</span>
+                                <span class="px-3 text-center text-xs leading-5 text-admin-muted">Belum ada template</span>
                             @endif
                         </div>
                     </div>
 
                     <div class="mt-3 flex flex-wrap items-center gap-2">
-                        <x-admin-dashboard.badge :tone="$qrTemplate['is_configured'] ? 'emerald' : 'amber'">
-                            {{ $qrTemplate['is_configured'] ? 'Aktif · v'.$qrTemplate['version'] : 'Nonaktif' }}
+                        <x-admin-dashboard.badge :tone="$qrTemplate['enabled'] && $qrTemplate['is_configured'] ? 'emerald' : 'amber'">
+                            {{ $qrTemplate['enabled'] && $qrTemplate['is_configured'] ? 'ON · v'.$qrTemplate['version'] : 'OFF' }}
                         </x-admin-dashboard.badge>
                         @if ($qrTemplate['is_configured'])
                             <x-admin-dashboard.badge>
@@ -345,7 +345,18 @@
                     </div>
 
                     @if ($qrTemplate['can_manage'])
-                        <form method="POST" action="{{ $qrTemplate['update_url'] }}" enctype="multipart/form-data" x-data="{ fileName: '{{ $qrTemplate['is_configured'] ? 'Gambar aktif dipertahankan' : 'Belum ada file yang dipilih' }}' }" class="mt-4 space-y-3 rounded-lg border border-dashed border-admin-line bg-admin-surface-muted p-3">
+                        <form method="POST" action="{{ $qrTemplate['status_url'] }}" class="mt-4 space-y-2">
+                            @csrf
+                            <input type="hidden" name="enabled" value="{{ $qrTemplate['enabled'] ? '0' : '1' }}">
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full" :disabled="! $qrTemplate['enabled'] && ! $qrTemplate['is_configured']">
+                                {{ $qrTemplate['enabled'] ? 'Nonaktifkan template QR' : 'Aktifkan template QR' }}
+                            </x-admin-dashboard.button>
+                            <p class="text-xs leading-5 text-admin-muted">OFF memakai QR asli tanpa bingkai. Gambar dan koordinat tetap tersimpan. Perubahan berlaku pada pengiriman atau render berikutnya, bukan foto yang sudah dikirim.</p>
+                            @error('enabled', 'qrTemplate')
+                                <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                            @enderror
+                        </form>
+                        <form method="POST" action="{{ $qrTemplate['update_url'] }}" enctype="multipart/form-data" x-data="{ fileName: '{{ $qrTemplate['is_configured'] ? 'Gambar tersimpan dipertahankan' : 'Belum ada file yang dipilih' }}' }" class="mt-4 space-y-3 rounded-lg border border-dashed border-admin-line bg-admin-surface-muted p-3">
                             @csrf
                             <div>
                                 <x-admin-dashboard.field-label for="payment-qr-template-image">Gambar template</x-admin-dashboard.field-label>
@@ -354,10 +365,10 @@
                                     name="image"
                                     label="Pilih template QR"
                                     feedback-expression="fileName"
-                                    empty-feedback="{{ $qrTemplate['is_configured'] ? 'Gambar aktif dipertahankan' : 'Belum ada file yang dipilih' }}"
-                                    x-on:change="fileName = $event.target.files[0]?.name ?? '{{ $qrTemplate['is_configured'] ? 'Gambar aktif dipertahankan' : 'Belum ada file yang dipilih' }}'"
+                                    empty-feedback="{{ $qrTemplate['is_configured'] ? 'Gambar tersimpan dipertahankan' : 'Belum ada file yang dipilih' }}"
+                                    x-on:change="fileName = $event.target.files[0]?.name ?? '{{ $qrTemplate['is_configured'] ? 'Gambar tersimpan dipertahankan' : 'Belum ada file yang dipilih' }}'"
                                 />
-                                <p class="mt-2 text-xs text-admin-muted">JPG, PNG, atau WebP. Maksimal 8 MB dan 1600 x 1600 px; gambar disimpan apa adanya agar koordinat tetap akurat. Kosongkan untuk mempertahankan gambar aktif.</p>
+                                <p class="mt-2 text-xs text-admin-muted">JPG, PNG, atau WebP. Maksimal 8 MB dan 1600 x 1600 px; gambar disimpan apa adanya agar koordinat tetap akurat. Kosongkan untuk mempertahankan gambar tersimpan. Menyimpan gambar tidak mengubah status ON/OFF.</p>
                             </div>
 
                             <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -391,7 +402,7 @@
                         @if ($qrTemplate['is_configured'])
                             <form method="POST" action="{{ $qrTemplate['destroy_url'] }}" class="mt-2">
                                 @csrf
-                                <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full">Nonaktifkan template QR</x-admin-dashboard.button>
+                                <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full">Hapus gambar dan koordinat template QR</x-admin-dashboard.button>
                             </form>
                         @endif
                     @else

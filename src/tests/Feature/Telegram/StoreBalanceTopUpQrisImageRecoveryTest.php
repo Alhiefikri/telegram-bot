@@ -100,6 +100,7 @@ final class StoreBalanceTopUpQrisImageRecoveryTest extends TelegramBotTestSuppor
         PaymentQrTemplateSetting::query()->updateOrCreate(
             ['singleton_key' => PaymentQrTemplateSetting::SINGLETON_KEY],
             [
+                'enabled' => true,
                 'image_path' => 'payment-qr-templates/template.webp',
                 'qr_x' => 250,
                 'qr_y' => 250,

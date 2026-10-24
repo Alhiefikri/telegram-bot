@@ -214,6 +214,8 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
             Route::post('payment-qr-template', [AdminPaymentQrTemplateController::class, 'update'])
                 ->name('payment-qr-template.update');
+            Route::post('payment-qr-template/status', [AdminPaymentQrTemplateController::class, 'status'])
+                ->name('payment-qr-template.status');
             Route::post('payment-qr-template/remove', [AdminPaymentQrTemplateController::class, 'destroy'])
                 ->name('payment-qr-template.destroy');
             // BSC controllers persist validated pending mutations because password redirects cannot replay POST bodies.

@@ -1381,14 +1381,39 @@ silently move the reserved area. [`QrTemplateInspector`](../../src/app/Services/
 rejects a reserved area that is smaller than 240 px or not at least 90% white
 before it can be saved.
 
+The DB-backed `enabled` flag defaults to **OFF**, including existing rows when
+the additive enablement migration is applied. Uploading/replacing a template
+does not turn it on. Owner/Admin use the explicit ON/OFF action in the same
+card (`admin.payment-qr-template.status`): OFF retains the image and geometry
+and bypasses composition for provider bytes/local payloads. ON requires a saved
+template file. Status changes serialize under the row lock, increment `version`
+only on an actual transition and append `payment.qr_template.enabled|disabled`
+audit events; repeating the same requested state is idempotent.
+The separate delete action explicitly removes the image/coordinates and resets
+the flag to OFF. The switch affects subsequent presentations in Telegram and
+the storefront, not photos already sent or cached by a client. Deploy/migrate
+first, restart workers for the new code, then upload/configure and explicitly
+enable from Admin; later ON/OFF changes need no worker restart or rebuild.
+
+Updates validate the image outside the transaction, then compare the observed
+setting version and path under the row lock. A concurrent change rejects the
+stale request through the `qrTemplate` error bag and cleans its unused upload.
+Replacement/removal cleanup and audit snapshots use the actual locked row.
+
 At runtime [`QrTemplatePlacementStore`](../../src/app/Services/Payments/QrTemplatePlacementStore.php)
-resolves the placement once per request and
+reads the current placement for every presentation, including consecutive jobs
+using the singleton top-up resolver; activation, replacement and removal do not
+require a worker restart.
 [`QrTemplateCompositor`](../../src/app/Services/Payments/QrTemplateCompositor.php)
 paints the reserved square white, enlarges the QR only by a whole-number factor
 with nearest-neighbour resampling, and centres it. Any missing file, unreadable
-image, out-of-bounds area, non-square QR, or QR larger than the reserved square
+image, out-of-bounds area, non-square QR, image exceeding 1600 px on either axis,
+or QR larger than the reserved square
 returns the original bytes, so decoration never blocks a payment, and a
 non-square reserved area uses a centred square without stretching the QR.
+Both provider and template dimensions are checked before GD decoding, bounding
+each decoded input to 2,560,000 pixels. Invalid QR input returns immediately
+without decoding the template.
 
 Call sites: `TelegramCheckoutIntents` (KlikQRIS and Sakurupiah checkout photos),
 `KlikQrisStoreBalanceTopUpLifecycle` and `SakurupiahStoreBalanceTopUpLifecycle`
@@ -1398,6 +1423,30 @@ historical renderings are intentionally unchanged. Coverage lives in
 `tests/Unit/Services/Payments/QrTemplateCompositorTest.php`,
 `tests/Feature/AdminPaymentQrTemplateTest.php`, and
 `tests/Feature/Telegram/PaymentQrTemplateDeliveryTest.php`.
+
+Fix verification (2026-10-24): the six focused QR/admin/storage/delivery suites
+passed 50 tests / 359 assertions, including deterministic request interleavings
+and activation/removal through a retained top-up rail. An isolated controller
+smoke rejected a stale geometry update while preserving the winning image and
+version. A 4000 x 4000 provider-shaped PNG (53,794 encoded bytes) returned
+unchanged before GD allocation (observed RSS delta 300 KiB).
+Live `LhieStoreTestBot` messages 1365/1366 exercised provider-image presentation
+and locally rendered top-up attachments: both downloaded 1000 x 1000 JPEGs
+decoded to the exact original fixture payload. The smoke used an in-memory DB,
+zero Orders/Payments and no real transfer; it does not qualify bank-app scanning,
+provider settlement or multiprocess PostgreSQL locking.
+
+Enablement verification (2026-10-24): the focused suites passed 54 tests /
+430 assertions. Real isolated Admin browser interaction covered upload while
+OFF, ON, keyboard OFF, reactivation without re-upload, and explicit deletion;
+the empty state disables activation. Desktop/light and 390px mobile/dark were
+inspected with no horizontal overflow, 44px buttons, visible keyboard focus and
+no browser errors. The switch contrast measured 5.18:1 in light and 8.67:1 in
+dark. Persistent testing ON/OFF/ON through the same presentation/top-up instances
+preserved the exact image and geometry. Live `LhieStoreTestBot` messages 1369
+(OFF, 285px original) and 1370 (ON, 1254px supplied artwork) downloaded and
+decoded to the same fixture payload; no payment was created. Testing was left
+ON after the smoke. Production was not modified.
 
 ## 6. Order lifecycle dan inventory invariant
 

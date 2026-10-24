@@ -417,6 +417,7 @@ final class AdminDashboardStatsData
 
         return [
             'is_configured' => (bool) $setting?->isConfigured(),
+            'enabled' => (bool) $setting?->enabled,
             'image_path' => $path,
             'image_url' => $path ? '/storage/'.$path : null,
             'image_width' => $dimensions[0] ?? null,
@@ -428,6 +429,7 @@ final class AdminDashboardStatsData
             'version' => (int) ($setting->version ?? 0),
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
             'update_url' => route('admin.payment-qr-template.update'),
+            'status_url' => route('admin.payment-qr-template.status'),
             'destroy_url' => route('admin.payment-qr-template.destroy'),
         ];
     }

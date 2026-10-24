@@ -17,6 +17,7 @@ use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\StoreBalance\TopUp\SakurupiahStoreBalanceTopUpLifecycle;
+use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResolver;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPayable;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -245,6 +246,7 @@ final class PaymentQrTemplateDeliveryTest extends TelegramBotTestSupport
         PaymentQrTemplateSetting::query()->updateOrCreate(
             ['singleton_key' => PaymentQrTemplateSetting::SINGLETON_KEY],
             [
+                'enabled' => true,
                 'image_path' => 'payment-qr-templates/missing.webp',
                 'qr_x' => 250,
                 'qr_y' => 250,
@@ -309,6 +311,30 @@ final class PaymentQrTemplateDeliveryTest extends TelegramBotTestSupport
         $this->assertSame(self::DIRECT_QRIS, $this->decoded($photo));
     }
 
+    public function test_retained_top_up_rail_observes_template_activation_and_removal(): void
+    {
+        $rail = app(StoreBalanceTopUpLifecycleResolver::class)
+            ->resolve('sakurupiah');
+        $topUp = new StoreBalanceTopUp(['provider_qris_payload' => self::DIRECT_QRIS]);
+        $payable = new StoreBalanceTopUpPayable(5_000, 450, 5_450, now()->addMinutes(10)->toImmutable());
+        $original = $rail->instructionAttachment($topUp, $payable)->photoContents();
+
+        $this->configureTemplate();
+        $framed = $rail->instructionAttachment($topUp, $payable)->photoContents();
+        $this->assertSame([1000, 1000], $this->dimensions($framed));
+        $this->assertSame(self::DIRECT_QRIS, $this->decoded($framed));
+        $setting = PaymentQrTemplateSetting::current();
+        $setting->forceFill(['enabled' => false])->save();
+        $this->assertSame($original, $rail->instructionAttachment($topUp, $payable)->photoContents());
+        $this->assertTrue(Storage::disk('public')->exists($setting->image_path));
+        $setting->forceFill(['enabled' => true])->save();
+        $this->assertSame($framed, $rail->instructionAttachment($topUp, $payable)->photoContents());
+
+        PaymentQrTemplateSetting::current()->forceFill(['image_path' => null])->save();
+        Storage::disk('public')->delete('payment-qr-templates/template.webp');
+        $this->assertSame($original, $rail->instructionAttachment($topUp, $payable)->photoContents());
+    }
+
     private function configureTemplate(): void
     {
         Storage::fake('public');
@@ -317,6 +343,7 @@ final class PaymentQrTemplateDeliveryTest extends TelegramBotTestSupport
         PaymentQrTemplateSetting::query()->updateOrCreate(
             ['singleton_key' => PaymentQrTemplateSetting::SINGLETON_KEY],
             [
+                'enabled' => true,
                 'image_path' => 'payment-qr-templates/template.webp',
                 'qr_x' => 250,
                 'qr_y' => 250,

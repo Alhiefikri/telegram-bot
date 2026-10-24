@@ -226,6 +226,21 @@ class QrTemplateCompositorTest extends TestCase
         $this->assertSame($this->decodedPayload($qr), $this->decodedPayload($output));
     }
 
+    public function test_oversized_template_falls_back_without_compositing(): void
+    {
+        $image = imagecreatetruecolor(1601, 1601);
+        imagefilledrectangle($image, 0, 0, 1600, 1600, imagecolorallocate($image, 255, 255, 255));
+        ob_start();
+        imagepng($image);
+        $template = (string) ob_get_clean();
+        $qr = $this->fixture('provider-qr-285.png');
+
+        $this->assertSame($qr, (new QrTemplateCompositor)->compose(
+            $qr,
+            new QrTemplatePlacement($template, 250, 250, 520, 520),
+        ));
+    }
+
     private function fixture(string $name): string
     {
         $contents = file_get_contents(__DIR__.'/../../../Fixtures/qr/'.$name);

@@ -13,17 +13,23 @@ namespace App\Services\Payments;
  */
 final class QrTemplateCompositor
 {
+    private const MAX_IMAGE_SIDE = 1600;
+
     public function compose(string $qrContents, QrTemplatePlacement $placement): string
     {
         $qr = $this->create($qrContents);
-        $template = $this->create($placement->templateContents);
 
-        if ($qr === null || $template === null) {
+        if ($qr === null) {
             return $qrContents;
         }
 
         $qrSide = imagesx($qr);
         if ($qrSide < 1 || imagesy($qr) !== $qrSide) {
+            return $qrContents;
+        }
+
+        $template = $this->create($placement->templateContents);
+        if ($template === null) {
             return $qrContents;
         }
 
@@ -83,7 +89,12 @@ final class QrTemplateCompositor
      */
     private function create(string $contents)
     {
-        if ($contents === '') {
+        $size = $contents === '' ? false : @getimagesizefromstring($contents);
+        if (! is_array($size)
+            || $size[0] < 1
+            || $size[1] < 1
+            || $size[0] > self::MAX_IMAGE_SIDE
+            || $size[1] > self::MAX_IMAGE_SIDE) {
             return null;
         }
 

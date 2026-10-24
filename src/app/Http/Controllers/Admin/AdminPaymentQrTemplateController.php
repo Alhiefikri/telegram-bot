@@ -30,13 +30,15 @@ final class AdminPaymentQrTemplateController extends Controller
         $user = $request->attributes->get('adminUser');
         $validated = $request->validated();
 
-        $setting = PaymentQrTemplateSetting::current()
-            ?? new PaymentQrTemplateSetting(['singleton_key' => PaymentQrTemplateSetting::SINGLETON_KEY]);
-        $oldPath = $setting->image_path;
+        $setting = PaymentQrTemplateSetting::query()
+            ->where('singleton_key', PaymentQrTemplateSetting::SINGLETON_KEY)
+            ->firstOrFail();
+        $expectedVersion = $setting->version;
+        $expectedPath = $setting->image_path;
         $newPath = $request->hasFile('image')
             ? $templates->store($request->file('image'))
             : null;
-        $candidatePath = $newPath ?? $oldPath;
+        $candidatePath = $newPath ?? $expectedPath;
 
         $failure = $this->validateCandidate(
             $inspector,
@@ -56,19 +58,24 @@ final class AdminPaymentQrTemplateController extends Controller
         }
 
         try {
-            [$setting, $oldValues] = DB::transaction(function () use ($validated, $candidatePath): array {
+            $result = DB::transaction(function () use ($validated, $candidatePath, $expectedVersion, $expectedPath): ?array {
                 $locked = PaymentQrTemplateSetting::query()
                     ->where('singleton_key', PaymentQrTemplateSetting::SINGLETON_KEY)
                     ->lockForUpdate()
-                    ->first() ?? new PaymentQrTemplateSetting(['singleton_key' => PaymentQrTemplateSetting::SINGLETON_KEY]);
-                $oldValues = $locked->exists ? $locked->only([
+                    ->firstOrFail();
+
+                if ($locked->version !== $expectedVersion || $locked->image_path !== $expectedPath) {
+                    return null;
+                }
+
+                $oldValues = $locked->only([
                     'image_path',
                     'qr_x',
                     'qr_y',
                     'qr_width',
                     'qr_height',
                     'version',
-                ]) : [];
+                ]);
 
                 $locked->fill([
                     'image_path' => $candidatePath,
@@ -89,6 +96,18 @@ final class AdminPaymentQrTemplateController extends Controller
             throw $exception;
         }
 
+        if ($result === null) {
+            if ($newPath !== null) {
+                $templates->delete($newPath);
+            }
+
+            return $redirector->paymentQrTemplate()->withErrors([
+                'image' => 'Template QR telah diubah oleh permintaan lain. Muat ulang halaman lalu coba lagi.',
+            ], 'qrTemplate');
+        }
+
+        [$setting, $oldValues] = $result;
+
         $auditLogger->log(
             'payment.qr_template.updated',
             $setting,
@@ -98,11 +117,71 @@ final class AdminPaymentQrTemplateController extends Controller
             $request->ip(),
         );
 
+        $oldPath = $oldValues['image_path'];
         if ($oldPath !== null && $oldPath !== $candidatePath) {
             $templates->delete($oldPath);
         }
 
         return $redirector->paymentQrTemplate()->with('status', 'Template QR pembayaran berhasil disimpan.');
+    }
+
+    public function status(
+        Request $request,
+        AuditLogger $auditLogger,
+        AdminDashboardRedirector $redirector,
+    ): RedirectResponse {
+        $user = $request->attributes->get('adminUser');
+        if (! $user?->role?->canManagePaymentSettings()) {
+            abort(403);
+        }
+
+        $validator = validator($request->all(), ['enabled' => ['required', 'boolean']]);
+        if ($validator->fails()) {
+            return $redirector->paymentQrTemplate()->withErrors($validator, 'qrTemplate');
+        }
+        $enabled = $request->boolean('enabled');
+
+        $result = DB::transaction(function () use ($enabled): ?array {
+            $locked = PaymentQrTemplateSetting::query()
+                ->where('singleton_key', PaymentQrTemplateSetting::SINGLETON_KEY)
+                ->lockForUpdate()
+                ->firstOrFail();
+            if ($enabled && (! $locked->isConfigured() || ! Storage::disk('public')->exists($locked->image_path))) {
+                return null;
+            }
+
+            $oldValues = $locked->only(['enabled', 'version']);
+            if ($locked->enabled !== $enabled) {
+                $locked->forceFill([
+                    'enabled' => $enabled,
+                    'version' => $locked->version + 1,
+                ])->save();
+            }
+
+            return [$locked, $oldValues];
+        }, 5);
+
+        if ($result === null) {
+            return $redirector->paymentQrTemplate()->withErrors([
+                'enabled' => 'Simpan gambar dan area QR yang valid sebelum mengaktifkan template.',
+            ], 'qrTemplate');
+        }
+
+        [$setting, $oldValues] = $result;
+        if ($oldValues['enabled'] !== $setting->enabled) {
+            $auditLogger->log(
+                $enabled ? 'payment.qr_template.enabled' : 'payment.qr_template.disabled',
+                $setting,
+                $oldValues,
+                $setting->only(['enabled', 'version']),
+                $user instanceof User ? $user : null,
+                $request->ip(),
+            );
+        }
+
+        return $redirector->paymentQrTemplate()->with('status', $enabled
+            ? 'Template QR diaktifkan untuk pengiriman berikutnya.'
+            : 'Template QR dinonaktifkan. QR asli digunakan; gambar dan koordinat tetap tersimpan.');
     }
 
     public function destroy(
@@ -116,25 +195,20 @@ final class AdminPaymentQrTemplateController extends Controller
             abort(403);
         }
 
-        $setting = PaymentQrTemplateSetting::current();
-        if ($setting === null) {
-            return $redirector->paymentQrTemplate()->with('status', 'Template QR pembayaran sudah nonaktif.');
-        }
-
-        $oldPath = $setting->image_path;
-        $oldValues = $setting->only(['image_path', 'qr_x', 'qr_y', 'qr_width', 'qr_height', 'version']);
-
-        DB::transaction(function () use ($setting): void {
+        $result = DB::transaction(function (): ?array {
             $locked = PaymentQrTemplateSetting::query()
-                ->whereKey($setting->getKey())
+                ->where('singleton_key', PaymentQrTemplateSetting::SINGLETON_KEY)
                 ->lockForUpdate()
                 ->first();
 
             if ($locked === null) {
-                return;
+                return null;
             }
 
+            $oldValues = $locked->only(['image_path', 'qr_x', 'qr_y', 'qr_width', 'qr_height', 'version']);
+
             $locked->forceFill([
+                'enabled' => false,
                 'image_path' => null,
                 'qr_x' => null,
                 'qr_y' => null,
@@ -142,9 +216,15 @@ final class AdminPaymentQrTemplateController extends Controller
                 'qr_height' => null,
                 'version' => ((int) $locked->version) + 1,
             ])->save();
+
+            return [$locked, $oldValues];
         }, 5);
 
-        $setting->refresh();
+        if ($result === null) {
+            return $redirector->paymentQrTemplate()->with('status', 'Template QR pembayaran sudah nonaktif.');
+        }
+
+        [$setting, $oldValues] = $result;
 
         $auditLogger->log(
             'payment.qr_template.removed',
@@ -155,6 +235,7 @@ final class AdminPaymentQrTemplateController extends Controller
             $request->ip(),
         );
 
+        $oldPath = $oldValues['image_path'];
         if ($oldPath !== null) {
             $templates->delete($oldPath);
         }
