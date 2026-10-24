@@ -1029,7 +1029,7 @@ final class SupplierClient
             }
             $requiresInput = $requiresInput || ! in_array($row['delivery']['type'], ['instant', 'key', 'account', 'link'], true);
         }
-        $tiers = $this->tiers($row['price_tiers'] ?? $row['pricing_tiers'] ?? []);
+        $tiers = $this->tiers($row['price_tiers'] ?? $row['pricing_tiers'] ?? [], $provider);
         $discounts = $this->discounts($row['bulk_discounts'] ?? []);
         $price = isset($row['price']) ? $this->money($row['price']) : null;
         if ($price === null) {
@@ -1051,7 +1051,7 @@ final class SupplierClient
         return new SupplierProductData($id, $name, $description, $price, $stock, $orderable, $requiresInput, $tiers, $discounts);
     }
 
-    private function tiers(mixed $rows): array
+    private function tiers(mixed $rows, SupplierProvider $provider): array
     {
         if ($rows === null) {
             return [];
@@ -1070,15 +1070,28 @@ final class SupplierClient
             $tiers[] = ['min' => $minimum, 'max' => $maximum, 'unit_price_micros' => $this->money($row['price'] ?? $row['unit_price'] ?? null)];
         }
         usort($tiers, static fn ($a, $b) => $a['min'] <=> $b['min']);
-        $previous = 0;
+        $normalized = [];
+        $previousMaximum = 0;
         foreach ($tiers as $tier) {
-            if ($tier['min'] <= $previous) {
-                throw new SupplierUnavailable('invalid_payload');
+            if ($tier['min'] <= $previousMaximum) {
+                // AiVault applies the first inclusive slab containing the
+                // quantity. Live catalogs publish overlapping boundaries
+                // (1-3, 4-7, 7-1000) where a quote at 7 still uses 4-7, so
+                // later slabs are shifted past the previous inclusive maximum.
+                // Other providers retain the published no-overlap contract.
+                if ($provider !== SupplierProvider::AiVault) {
+                    throw new SupplierUnavailable('invalid_payload');
+                }
+                if ($previousMaximum === PHP_INT_MAX || ($tier['max'] !== null && $tier['max'] <= $previousMaximum)) {
+                    continue;
+                }
+                $tier['min'] = $previousMaximum + 1;
             }
-            $previous = $tier['max'] ?? PHP_INT_MAX;
+            $normalized[] = $tier;
+            $previousMaximum = $tier['max'] ?? PHP_INT_MAX;
         }
 
-        return $tiers;
+        return $normalized;
     }
 
     private function discounts(mixed $rows): array

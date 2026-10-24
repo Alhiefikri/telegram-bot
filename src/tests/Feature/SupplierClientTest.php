@@ -6,6 +6,7 @@ use App\Enums\SupplierProvider;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Services\Suppliers\SupplierClient;
+use App\Services\Suppliers\SupplierPricing;
 use App\Services\Suppliers\SupplierUnavailable;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Cache\RateLimiter;
@@ -873,12 +874,12 @@ class SupplierClientTest extends TestCase
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sku-6') || $request->method() !== 'GET');
     }
 
-    public function test_exponent_economic_input_and_conflicting_tiers_are_rejected(): void
+    public function test_exponent_economic_input_and_invalid_tiers_are_rejected(): void
     {
         $supplier = $this->supplier('aivault');
         foreach ([
             '{"products":[{"service_id":"sku-1","name":"License","price":1e-3,"stock":2}]}',
-            '{"products":[{"service_id":"sku-1","name":"License","stock":2,"pricing_tiers":[{"min":1,"max":10,"price":1},{"min":10,"max":20,"price":0.9}]}]}',
+            '{"products":[{"service_id":"sku-1","name":"License","stock":2,"pricing_tiers":[{"min":10,"max":5,"price":1}]}]}',
             '{"currency":"USDT","products":[]}',
         ] as $catalog) {
             Cache::flush();
@@ -890,6 +891,70 @@ class SupplierClientTest extends TestCase
                 $this->assertContains($exception->errorCode, ['invalid_payload', 'currency_mismatch']);
             }
         }
+    }
+
+    public function test_aivault_live_overlapping_tier_boundary_matches_supplier_first_match_semantics(): void
+    {
+        $supplier = $this->supplier('aivault');
+        $catalog = ['currency' => 'USD', 'products' => [[
+            'service_id' => 'service_1790855554',
+            'name' => 'ChatGPT Plus UPI (24H)',
+            'stock' => 10,
+            'custom_pricing' => false,
+            'pricing_tiers' => [
+                ['min' => 1, 'max' => 3, 'price' => 5.0],
+                ['min' => 4, 'max' => 7, 'price' => 4.6],
+                ['min' => 7, 'max' => 1000, 'price' => 4.2],
+            ],
+            'bulk_discounts' => [],
+        ]]];
+        $this->fake(fn ($request) => Http::response(str_ends_with($request->url(), '/me')
+            ? ['chat_id' => 1, 'balance' => 0.0, 'currency' => 'USD']
+            : $catalog));
+
+        $snapshot = app(SupplierClient::class)->snapshot($supplier);
+        $product = $snapshot->products[0];
+        $this->assertSame([
+            ['min' => 1, 'max' => 3, 'unit_price_micros' => 5_000_000],
+            ['min' => 4, 'max' => 7, 'unit_price_micros' => 4_600_000],
+            ['min' => 8, 'max' => 1000, 'unit_price_micros' => 4_200_000],
+        ], $product->priceTiers);
+
+        $item = $this->item($supplier, [
+            'external_id' => 'service_1790855554',
+            'unit_price_micros' => 5_000_000,
+            'stock' => 10,
+            'price_tiers' => $product->priceTiers,
+            'bulk_discounts' => [],
+        ]);
+        $pricing = app(SupplierPricing::class);
+        // Supplier quote: 7 units use the 4-7 slab (4.6), 8 units use 7-1000 (4.2).
+        $this->assertSame(32_200_000, $pricing->costMicros($item, 7));
+        $this->assertSame(33_600_000, $pricing->costMicros($item, 8));
+    }
+
+    public function test_aivault_fully_shadowed_tiers_are_dropped_without_overflow(): void
+    {
+        $supplier = $this->supplier('aivault');
+        $catalog = ['currency' => 'USD', 'products' => [[
+            'service_id' => 'service_shadowed',
+            'name' => 'Shadowed tiers',
+            'stock' => 10,
+            'pricing_tiers' => [
+                ['min' => 1, 'max' => null, 'price' => 1.0],
+                ['min' => 10, 'max' => null, 'price' => 0.5],
+            ],
+            'bulk_discounts' => [],
+        ]]];
+        $this->fake(fn ($request) => Http::response(str_ends_with($request->url(), '/me')
+            ? ['balance' => 0.0, 'currency' => 'USD']
+            : $catalog));
+
+        $tiers = app(SupplierClient::class)->snapshot($supplier)->products[0]->priceTiers;
+
+        $this->assertSame([
+            ['min' => 1, 'max' => null, 'unit_price_micros' => 1_000_000],
+        ], $tiers);
     }
 
     public function test_known_order_recovery_survives_disabled_connection_and_nested_delivery_variants(): void
