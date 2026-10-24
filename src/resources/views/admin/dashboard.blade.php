@@ -26,6 +26,7 @@
             $balanceOperations = $settings['balanceOperations'] ?? [];
             $checkoutMaintenance = $settings['checkoutMaintenance'] ?? $statsTab['checkoutMaintenance'] ?? [];
             $customerApiAvailability = $settings['customerApiAvailability'] ?? [];
+            $qrTemplate = $settings['qrTemplate'] ?? [];
             $canManageProducts = $productsTab['canManage'];
             $productPlaceholder = $productsTab['placeholder'] ?? [];
             $products = $productsTab['products'];

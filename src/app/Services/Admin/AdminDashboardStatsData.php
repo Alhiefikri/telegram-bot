@@ -9,6 +9,7 @@ use App\Models\AuditLog;
 use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\ManualPaymentSetting;
 use App\Models\Payment;
+use App\Models\PaymentQrTemplateSetting;
 use App\Models\User;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CustomerApi\CustomerApiAvailability;
@@ -22,6 +23,8 @@ use App\Services\UsdtFunding\CustomerUsdtFundingPolicyManager;
 use App\Support\Money;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 final class AdminDashboardStatsData
 {
@@ -69,6 +72,7 @@ final class AdminDashboardStatsData
                 'paymentControl' => $this->paymentControl($user),
                 'checkoutMaintenance' => $this->checkoutMaintenance($user),
                 'customerApiAvailability' => $this->customerApiAvailability($user),
+                'qrTemplate' => $this->qrTemplate($user),
             ],
         };
     }
@@ -392,6 +396,40 @@ final class AdminDashboardStatsData
                 ];
             })
             ->all();
+    }
+
+    /** @return array<string, mixed> */
+    private function qrTemplate(User $user): array
+    {
+        $setting = PaymentQrTemplateSetting::current();
+        $path = $setting?->image_path;
+        $dimensions = null;
+
+        if (is_string($path) && $path !== '') {
+            try {
+                $absolute = Storage::disk('public')->path($path);
+                $size = @getimagesize($absolute);
+                $dimensions = is_array($size) ? [(int) $size[0], (int) $size[1]] : null;
+            } catch (Throwable) {
+                $dimensions = null;
+            }
+        }
+
+        return [
+            'is_configured' => (bool) $setting?->isConfigured(),
+            'image_path' => $path,
+            'image_url' => $path ? '/storage/'.$path : null,
+            'image_width' => $dimensions[0] ?? null,
+            'image_height' => $dimensions[1] ?? null,
+            'x' => (int) ($setting->qr_x ?? 0),
+            'y' => (int) ($setting->qr_y ?? 0),
+            'width' => (int) ($setting->qr_width ?? 0),
+            'height' => (int) ($setting->qr_height ?? 0),
+            'version' => (int) ($setting->version ?? 0),
+            'can_manage' => (bool) $user->role?->canManagePaymentSettings(),
+            'update_url' => route('admin.payment-qr-template.update'),
+            'destroy_url' => route('admin.payment-qr-template.destroy'),
+        ];
     }
 
     private function whatsappSupportFallbackUrl(): ?string

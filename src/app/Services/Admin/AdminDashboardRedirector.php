@@ -89,6 +89,11 @@ class AdminDashboardRedirector
         return $this->dashboard(self::TAB_SETTINGS, 'admin-payment-settings', ['section' => 'pembayaran']);
     }
 
+    public function paymentQrTemplate(): RedirectResponse
+    {
+        return $this->dashboard(self::TAB_SETTINGS, 'admin-payment-qr-template', ['section' => 'pembayaran']);
+    }
+
     public function bscSettings(): RedirectResponse
     {
         return $this->dashboard(self::TAB_SETTINGS, 'admin-bsc-settings', ['section' => 'pembayaran']);

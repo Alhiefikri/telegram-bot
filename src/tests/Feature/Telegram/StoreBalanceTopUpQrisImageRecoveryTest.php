@@ -4,6 +4,7 @@ namespace Tests\Feature\Telegram;
 
 use App\Jobs\ProcessTelegramUpdate;
 use App\Models\Customer;
+use App\Models\PaymentQrTemplateSetting;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramNavigationRoot;
@@ -11,8 +12,10 @@ use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
 use App\Services\Telegram\BalanceTopUpInstructionDeliveryPipeline;
 use App\Services\Telegram\TelegramUpdateProcessor;
+use chillerlan\QRCode\QRCode;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 use Tests\Support\KlikQrisSandboxScenarios;
 use Tests\Support\TelegramBotTestSupport;
@@ -86,6 +89,66 @@ final class StoreBalanceTopUpQrisImageRecoveryTest extends TelegramBotTestSuppor
         $this->assertTrue($effect->next_attempt_at->isFuture());
     }
 
+    public function test_delivered_top_up_photo_is_composited_into_the_template(): void
+    {
+        $this->travelTo('2026-07-28 10:10:00 UTC');
+        Storage::fake('public');
+        Storage::disk('public')->put(
+            'payment-qr-templates/template.webp',
+            $this->qrFixture('template-square-box.webp'),
+        );
+        PaymentQrTemplateSetting::query()->updateOrCreate(
+            ['singleton_key' => PaymentQrTemplateSetting::SINGLETON_KEY],
+            [
+                'image_path' => 'payment-qr-templates/template.webp',
+                'qr_x' => 250,
+                'qr_y' => 250,
+                'qr_width' => 520,
+                'qr_height' => 520,
+                'version' => 1,
+            ],
+        );
+
+        [$topUp, $effect] = $this->openConfirmedTopUp(
+            46931,
+            fn (Request $request) => Http::response(['data' => [
+                'order_id' => basename($request->url()),
+                'amount' => 5000,
+                'total_amount' => 5163,
+                'status' => 'PENDING',
+                'qris_url' => self::QRIS_URL,
+                'signature' => 'top-up-signature',
+                'expired_at' => self::PROVIDER_EXPIRES_AT,
+            ]]),
+            $this->qrFixture('provider-qr-285.png'),
+        );
+
+        $thrown = $this->deliverTopUp($topUp, $effect);
+
+        $this->assertNull($thrown, 'Compositing must not break top-up delivery.');
+        $photos = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto')
+            && str_contains((string) $this->telegramRequestField($request, 'caption'), 'Balance credit after payment confirmation'));
+        $this->assertCount(1, $photos);
+
+        $photo = $this->telegramRequestField($photos->first()[0], 'photo');
+        $this->assertIsString($photo);
+        $size = getimagesizefromstring($photo);
+        $this->assertIsArray($size);
+        $this->assertSame([1000, 1000], [(int) $size[0], (int) $size[1]]);
+        $this->assertSame(
+            $this->qrFixture('provider-payload.txt'),
+            (new QRCode)->readFromBlob($photo)->data,
+        );
+    }
+
+    private function qrFixture(string $name): string
+    {
+        $contents = file_get_contents(base_path('tests/Fixtures/qr/'.$name));
+        $this->assertIsString($contents);
+
+        return $contents;
+    }
+
     private function deliverTopUp(StoreBalanceTopUp $topUp, TelegramOutboundEffect $effect): ?Throwable
     {
         try {
@@ -108,7 +171,7 @@ final class StoreBalanceTopUpQrisImageRecoveryTest extends TelegramBotTestSuppor
     /**
      * @return array{0: StoreBalanceTopUp, 1: TelegramOutboundEffect}
      */
-    private function openConfirmedTopUp(int $chatId, callable $statusResponder): array
+    private function openConfirmedTopUp(int $chatId, callable $statusResponder, ?string $qrisImageContents = null): array
     {
         KlikQrisSandboxScenarios::configureReadyProduction();
         KlikQrisSandboxScenarios::selectKlikQrisProvider();
@@ -125,7 +188,7 @@ final class StoreBalanceTopUpQrisImageRecoveryTest extends TelegramBotTestSuppor
                 'expired_at' => self::PROVIDER_EXPIRES_AT,
             ]]),
             'https://api.klikqris.example/qris/status/*' => $statusResponder,
-            self::QRIS_URL => Http::response('not-a-png-body', 200, ['Content-Type' => 'image/png']),
+            self::QRIS_URL => Http::response($qrisImageContents ?? 'not-a-png-body', 200, ['Content-Type' => 'image/png']),
         ]);
 
         Customer::factory()->create(['telegram_id' => $chatId, 'locale' => 'en']);

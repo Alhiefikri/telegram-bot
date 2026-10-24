@@ -9,12 +9,12 @@ class TelegramQrCodeRenderer
 {
     private const OUTPUT_TYPE_PNG = 'png';
 
-    public function png(string $content): string
+    public function png(string $content, int $scale = 8): string
     {
         $options = new QROptions([
             'outputType' => self::OUTPUT_TYPE_PNG,
             'outputBase64' => false,
-            'scale' => 8,
+            'scale' => max(1, $scale),
         ]);
 
         return (new QRCode($options))->render($content);

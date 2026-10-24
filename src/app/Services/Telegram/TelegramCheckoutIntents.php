@@ -17,6 +17,7 @@ use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\Pakasir\PakasirQrisTransaction;
+use App\Services\Payments\QrPresentation;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahQrisImage;
@@ -41,6 +42,7 @@ class TelegramCheckoutIntents
         private SakurupiahQrisImage $sakurupiahImages,
         private PaymentProviderResolver $providerResolver,
         private BscReadiness $bscReadiness,
+        private QrPresentation $qrPresentation,
     ) {}
 
     public function sendPaymentInstructions(string $chatId, Order $order): array
@@ -133,7 +135,7 @@ class TelegramCheckoutIntents
             $this->paymentInstructions->klikQris(
                 $order,
                 $payable,
-                $imageContents,
+                $this->qrPresentation->image($imageContents),
                 $locale,
             ),
         );
@@ -168,7 +170,7 @@ class TelegramCheckoutIntents
 
                 return $this->sendPaymentInstruction(
                     $chatId,
-                    $this->paymentInstructions->sakurupiahQrisImage($order, $payable, $imageContents, $locale),
+                    $this->paymentInstructions->sakurupiahQrisImage($order, $payable, $this->qrPresentation->image($imageContents), $locale),
                 );
             } catch (Throwable) {
                 if (! $payable->isHosted()) {
@@ -194,7 +196,12 @@ class TelegramCheckoutIntents
 
         return $this->sendPaymentInstruction(
             $chatId,
-            $this->paymentInstructions->sakurupiah($order, $payable, $locale),
+            $this->paymentInstructions->sakurupiah(
+                $order,
+                $payable,
+                $locale,
+                $this->qrPresentation->payload((string) $payable->qrisPayload()),
+            ),
         );
     }
 

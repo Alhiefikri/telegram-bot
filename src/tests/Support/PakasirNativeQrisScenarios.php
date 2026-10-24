@@ -65,7 +65,7 @@ trait PakasirNativeQrisScenarios
     {
         $this->app->instance(TelegramQrCodeRenderer::class, new class extends TelegramQrCodeRenderer
         {
-            public function png(string $content): string
+            public function png(string $content, int $scale = 8): string
             {
                 return 'png-for:'.$content;
             }

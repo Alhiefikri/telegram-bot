@@ -15,6 +15,7 @@ use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\KlikQris\KlikQrisTopUpLifecycleResult;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
+use App\Services\Payments\QrPresentation;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -37,6 +38,7 @@ final class KlikQrisStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifec
         private readonly KlikQrisQrisImage $images,
         private readonly StoreBalanceTopUpEventLogger $events,
         private readonly StoreBalanceTopUpReviewMarker $reviews,
+        private readonly QrPresentation $qrPresentation,
     ) {}
 
     public function provider(): string
@@ -177,7 +179,7 @@ final class KlikQrisStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifec
         }
 
         return new StoreBalanceTopUpInstructionAttachment(
-            $contents,
+            $this->qrPresentation->image($contents),
         );
     }
 

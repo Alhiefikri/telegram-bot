@@ -311,7 +311,7 @@ class TelegramPaymentInstructionRenderer
         );
     }
 
-    public function sakurupiah(Order $order, SakurupiahPayableInvoice $payable, string $locale = 'id'): TelegramPaymentInstruction
+    public function sakurupiah(Order $order, SakurupiahPayableInvoice $payable, string $locale = 'id', ?string $photoContents = null): TelegramPaymentInstruction
     {
         $qrContent = $payable->qrisPayload();
         if ($qrContent === null || ! $payable->isDirectQris()) {
@@ -319,7 +319,7 @@ class TelegramPaymentInstructionRenderer
         }
 
         return new TelegramPaymentInstruction(
-            photoContents: $this->qrCodes->png($qrContent),
+            photoContents: $photoContents ?? $this->qrCodes->png($qrContent),
             filename: 'sakurupiah-'.$order->invoice_number.'.png',
             captionLines: $this->sakurupiahLines($order, $payable, $locale),
             replyMarkup: $this->sakurupiahPaymentActions($order, null, $locale),

@@ -1364,6 +1364,41 @@ exposes the sanitized payment/event summary and a manual reconcile action
 writes the `payment.manually_reconciled` audit. The operational runbook is
 [`docs/runbook-sakurupiah-payment.md`](../../docs/runbook-sakurupiah-payment.md).
 
+### 5.8 Payment QR template presentation
+
+Every customer-facing payment QR passes through
+[`QrPresentation`](../../src/app/Services/Payments/QrPresentation.php).
+`image()` handles provider QR images (KlikQRIS and Sakurupiah both deliver
+PNG bytes over an allowlisted URL), while `payload()` renders a locally known
+EMV payload at the largest whole-number scale that fits the template.
+
+The template is owner-managed presentation data, not environment configuration:
+one row in `payment_qr_template_settings` plus the uploaded PNG/JPEG/WebP file
+under `payment-qr-templates/` on the public disk (maximum 1600 x 1600 px),
+uploaded from Admin Settings → Pembayaran. The file is stored verbatim, so the
+configured coordinates keep pointing at the same pixels; no resize step can
+silently move the reserved area. [`QrTemplateInspector`](../../src/app/Services/Payments/QrTemplateInspector.php)
+rejects a reserved area that is smaller than 240 px or not at least 90% white
+before it can be saved.
+
+At runtime [`QrTemplatePlacementStore`](../../src/app/Services/Payments/QrTemplatePlacementStore.php)
+resolves the placement once per request and
+[`QrTemplateCompositor`](../../src/app/Services/Payments/QrTemplateCompositor.php)
+paints the reserved square white, enlarges the QR only by a whole-number factor
+with nearest-neighbour resampling, and centres it. Any missing file, unreadable
+image, out-of-bounds area, non-square QR, or QR larger than the reserved square
+returns the original bytes, so decoration never blocks a payment, and a
+non-square reserved area uses a centred square without stretching the QR.
+
+Call sites: `TelegramCheckoutIntents` (KlikQRIS and Sakurupiah checkout photos),
+`KlikQrisStoreBalanceTopUpLifecycle` and `SakurupiahStoreBalanceTopUpLifecycle`
+(top-up attachments), and `StorefrontShopOrderQrisController`
+(`GET /orders/{order}/qris`). Manual `/payment` proof photos and Pakasir
+historical renderings are intentionally unchanged. Coverage lives in
+`tests/Unit/Services/Payments/QrTemplateCompositorTest.php`,
+`tests/Feature/AdminPaymentQrTemplateTest.php`, and
+`tests/Feature/Telegram/PaymentQrTemplateDeliveryTest.php`.
+
 ## 6. Order lifecycle dan inventory invariant
 
 Flow normal:

@@ -22,6 +22,7 @@ use App\Http\Controllers\Admin\AdminOrderManualCompleteController;
 use App\Http\Controllers\Admin\AdminOrderManualRejectController;
 use App\Http\Controllers\Admin\AdminPasswordConfirmationController;
 use App\Http\Controllers\Admin\AdminPaymentModeController;
+use App\Http\Controllers\Admin\AdminPaymentQrTemplateController;
 use App\Http\Controllers\Admin\AdminPaymentReconcileController;
 use App\Http\Controllers\Admin\AdminProductAccountStockController;
 use App\Http\Controllers\Admin\AdminProductCardsController;
@@ -211,6 +212,10 @@ Route::middleware('admin.no-cache')->group(function (): void {
                     ->name('proof');
             });
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
+            Route::post('payment-qr-template', [AdminPaymentQrTemplateController::class, 'update'])
+                ->name('payment-qr-template.update');
+            Route::post('payment-qr-template/remove', [AdminPaymentQrTemplateController::class, 'destroy'])
+                ->name('payment-qr-template.destroy');
             // BSC controllers persist validated pending mutations because password redirects cannot replay POST bodies.
             Route::prefix('bsc')->name('bsc.')->middleware('admin.bsc-owner')->group(function (): void {
                 Route::post('receivers', [AdminBscReceiverController::class, 'store'])->name('receivers.store');

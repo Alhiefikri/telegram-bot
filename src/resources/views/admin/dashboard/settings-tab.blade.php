@@ -310,6 +310,96 @@
                 </x-admin-dashboard.card>
 
                 <x-admin-dashboard.card
+                    id="admin-payment-qr-template"
+                    data-admin-return-target
+                    tabindex="-1"
+                    as="section"
+                    padding="compact"
+                    shadow="sm"
+                    aria-labelledby="admin-payment-qr-template-title"
+                >
+                    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div class="min-w-0">
+                            <p class="text-xs font-medium text-admin-muted">Template QR pembayaran</p>
+                            <h2 id="admin-payment-qr-template-title" class="mt-1 text-lg font-semibold text-admin-ink">Bingkai QR KlikQRIS &amp; Sakurupiah</h2>
+                            <p class="mt-2 max-w-2xl text-sm leading-6 text-admin-muted">QR dari provider ditempel ke area putih template sebelum dikirim ke pelanggan. Tanpa template aktif, QR tampil seperti sebelumnya. QR tidak pernah dikecilkan atau diregangkan.</p>
+                        </div>
+                        <div class="flex h-28 w-32 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-admin-line bg-admin-surface">
+                            @if ($qrTemplate['is_configured'] && $qrTemplate['image_url'])
+                                <img src="{{ $qrTemplate['image_url'] }}" alt="Preview template QR pembayaran aktif" class="h-full w-full object-contain" loading="lazy" decoding="async">
+                            @else
+                                <span class="px-3 text-center text-xs leading-5 text-admin-muted">Belum aktif</span>
+                            @endif
+                        </div>
+                    </div>
+
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <x-admin-dashboard.badge :tone="$qrTemplate['is_configured'] ? 'emerald' : 'amber'">
+                            {{ $qrTemplate['is_configured'] ? 'Aktif · v'.$qrTemplate['version'] : 'Nonaktif' }}
+                        </x-admin-dashboard.badge>
+                        @if ($qrTemplate['is_configured'])
+                            <x-admin-dashboard.badge>
+                                Area {{ $qrTemplate['width'] }} x {{ $qrTemplate['height'] }} px di ({{ $qrTemplate['x'] }}, {{ $qrTemplate['y'] }})
+                            </x-admin-dashboard.badge>
+                        @endif
+                    </div>
+
+                    @if ($qrTemplate['can_manage'])
+                        <form method="POST" action="{{ $qrTemplate['update_url'] }}" enctype="multipart/form-data" x-data="{ fileName: '{{ $qrTemplate['is_configured'] ? 'Gambar aktif dipertahankan' : 'Belum ada file yang dipilih' }}' }" class="mt-4 space-y-3 rounded-lg border border-dashed border-admin-line bg-admin-surface-muted p-3">
+                            @csrf
+                            <div>
+                                <x-admin-dashboard.field-label for="payment-qr-template-image">Gambar template</x-admin-dashboard.field-label>
+                                <x-admin-dashboard.file-upload
+                                    id="payment-qr-template-image"
+                                    name="image"
+                                    label="Pilih template QR"
+                                    feedback-expression="fileName"
+                                    empty-feedback="{{ $qrTemplate['is_configured'] ? 'Gambar aktif dipertahankan' : 'Belum ada file yang dipilih' }}"
+                                    x-on:change="fileName = $event.target.files[0]?.name ?? '{{ $qrTemplate['is_configured'] ? 'Gambar aktif dipertahankan' : 'Belum ada file yang dipilih' }}'"
+                                />
+                                <p class="mt-2 text-xs text-admin-muted">JPG, PNG, atau WebP. Maksimal 8 MB dan 1600 x 1600 px; gambar disimpan apa adanya agar koordinat tetap akurat. Kosongkan untuk mempertahankan gambar aktif.</p>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                <label class="block text-xs font-medium text-admin-ink">
+                                    X area QR
+                                    <x-admin-dashboard.input type="number" name="qr_x" min="0" max="1599" :value="old('qr_x', $qrTemplate['x'])" required />
+                                </label>
+                                <label class="block text-xs font-medium text-admin-ink">
+                                    Y area QR
+                                    <x-admin-dashboard.input type="number" name="qr_y" min="0" max="1599" :value="old('qr_y', $qrTemplate['y'])" required />
+                                </label>
+                                <label class="block text-xs font-medium text-admin-ink">
+                                    Lebar area
+                                    <x-admin-dashboard.input type="number" name="qr_width" min="240" max="1600" :value="old('qr_width', $qrTemplate['width'] ?: 240)" required />
+                                </label>
+                                <label class="block text-xs font-medium text-admin-ink">
+                                    Tinggi area
+                                    <x-admin-dashboard.input type="number" name="qr_height" min="240" max="1600" :value="old('qr_height', $qrTemplate['height'] ?: 240)" required />
+                                </label>
+                            </div>
+                            @foreach (['image', 'qr_x', 'qr_y', 'qr_width', 'qr_height'] as $qrTemplateField)
+                                @error($qrTemplateField, 'qrTemplate')
+                                    <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            @endforeach
+                            <p class="text-xs leading-5 text-admin-muted">Isi kotak putih polos tempat QR ditempel. Minimal 240 px per sisi dan minimal 90% putih. QR berbentuk persegi dan diletakkan di tengah area.</p>
+
+                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" class="w-full">Simpan template QR</x-admin-dashboard.button>
+                        </form>
+
+                        @if ($qrTemplate['is_configured'])
+                            <form method="POST" action="{{ $qrTemplate['destroy_url'] }}" class="mt-2">
+                                @csrf
+                                <x-admin-dashboard.button type="submit" variant="neutral" size="sm" class="w-full">Nonaktifkan template QR</x-admin-dashboard.button>
+                            </form>
+                        @endif
+                    @else
+                        <x-admin-dashboard.notice tone="neutral" class="mt-4 text-xs">Role ini hanya bisa melihat template QR. Owner/Admin dapat mengubahnya dari sini.</x-admin-dashboard.notice>
+                    @endif
+                </x-admin-dashboard.card>
+
+                <x-admin-dashboard.card
                     id="admin-bsc-settings"
                     data-admin-return-target
                     tabindex="-1"

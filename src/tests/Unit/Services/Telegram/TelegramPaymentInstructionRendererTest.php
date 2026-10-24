@@ -774,7 +774,7 @@ final class RecordingQrCodeRenderer extends TelegramQrCodeRenderer
     /** @var list<string> */
     public array $renderedContents = [];
 
-    public function png(string $content): string
+    public function png(string $content, int $scale = 8): string
     {
         $this->renderedContents[] = $content;
 

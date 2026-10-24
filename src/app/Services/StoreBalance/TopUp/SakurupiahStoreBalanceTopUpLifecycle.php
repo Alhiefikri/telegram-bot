@@ -7,6 +7,7 @@ use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\ManualPaymentSetting;
 use App\Models\StoreBalanceTopUp;
+use App\Services\Payments\QrPresentation;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahCreatePreRequestException;
 use App\Services\Sakurupiah\SakurupiahInvoice;
@@ -14,7 +15,6 @@ use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahStatusUnavailableException;
-use App\Services\Telegram\TelegramQrCodeRenderer;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -47,7 +47,7 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
         private readonly SakurupiahProviderReadiness $readiness,
         private readonly StoreBalanceTopUpDecisionRecorder $events,
         private readonly StoreBalanceTopUpReviewMarker $reviews,
-        private readonly TelegramQrCodeRenderer $qrCodes,
+        private readonly QrPresentation $qrPresentation,
     ) {}
 
     public function provider(): string
@@ -233,7 +233,7 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
             throw new RuntimeException('Sakurupiah Store Balance top-up has no QRIS payload.');
         }
 
-        return new StoreBalanceTopUpInstructionAttachment($this->qrCodes->png($payload));
+        return new StoreBalanceTopUpInstructionAttachment($this->qrPresentation->payload($payload));
     }
 
     private function createInvoice(StoreBalanceTopUp $topUp): SakurupiahCreateInvoice

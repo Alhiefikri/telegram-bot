@@ -7,9 +7,9 @@ use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisQrisImage;
+use App\Services\Payments\QrPresentation;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahQrisImage;
-use App\Services\Telegram\TelegramQrCodeRenderer;
 use App\Support\PaymentProvider;
 use Illuminate\Http\Response;
 use InvalidArgumentException;
@@ -22,7 +22,7 @@ class StorefrontShopOrderQrisController extends Controller
         KlikQrisQrisImage $images,
         SakurupiahInvoiceLifecycleService $sakurupiah,
         SakurupiahQrisImage $sakurupiahImages,
-        TelegramQrCodeRenderer $qrCodes,
+        QrPresentation $qrPresentation,
     ): Response {
         $payment = $order->payments()->latest('created_at')->first();
 
@@ -47,7 +47,7 @@ class StorefrontShopOrderQrisController extends Controller
                 $contents = $images->contents($recoveredPayable, preferFallback: true);
             }
 
-            return $this->imageResponse($contents);
+            return $this->imageResponse($qrPresentation->image($contents));
         }
 
         if (strtolower((string) $payment?->provider) === PaymentProvider::SAKURUPIAH) {
@@ -56,7 +56,7 @@ class StorefrontShopOrderQrisController extends Controller
 
             if ($payable->isDirectQris()) {
                 try {
-                    return $this->imageResponse($qrCodes->png((string) $payable->qrisPayload()));
+                    return $this->imageResponse($qrPresentation->payload((string) $payable->qrisPayload()));
                 } catch (InvalidArgumentException) {
                     abort(404);
                 }
@@ -64,7 +64,7 @@ class StorefrontShopOrderQrisController extends Controller
 
             if ($payable->isQrisImage()) {
                 try {
-                    return $this->imageResponse($sakurupiahImages->contents($payable));
+                    return $this->imageResponse($qrPresentation->image($sakurupiahImages->contents($payable)));
                 } catch (InvalidArgumentException) {
                     abort(404);
                 }
