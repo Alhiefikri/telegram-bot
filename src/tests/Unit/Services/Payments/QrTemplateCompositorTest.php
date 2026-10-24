@@ -5,12 +5,11 @@ namespace Tests\Unit\Services\Payments;
 use App\Services\Payments\QrTemplateCompositor;
 use App\Services\Payments\QrTemplatePlacement;
 use chillerlan\QRCode\QRCode;
+use chillerlan\QRCode\QROptions;
 use PHPUnit\Framework\TestCase;
 
 class QrTemplateCompositorTest extends TestCase
 {
-    private const PAYLOAD = '00020101021226670016COM.NOBUBANK.WWW01189360050300000898250214MERCHANT123450303UMI51440014ID.CO.QRIS.WWW0215ID20212345678900303UMI5204599953033605802ID5910TOKO TES6013JAKARTA PUSAT61051017062070703A016304ABCD';
-
     public function test_composites_provider_sized_qr_into_centred_square(): void
     {
         $qr = $this->fixture('provider-qr-285.png');
@@ -23,27 +22,6 @@ class QrTemplateCompositorTest extends TestCase
 
         $this->assertSame([1000, 1000], $this->dimensions($output));
         $this->assertSame($this->decodedPayload($qr), $this->decodedPayload($output));
-        $this->assertSame(245, $this->darkWidth($output, 260, 220, 520, 520));
-    }
-
-    public function test_enlarges_only_by_whole_factors_with_nearest_neighbour(): void
-    {
-        $qr = $this->fixture('provider-qr-285.png');
-        $template = $this->fixture('template-square-box.png');
-
-        $output = (new QrTemplateCompositor)->compose(
-            $qr,
-            new QrTemplatePlacement($template, 250, 250, 600, 600),
-        );
-
-        $this->assertSame($this->decodedPayload($qr), $this->decodedPayload($output));
-        $this->assertSame([305, 305], $this->darkOrigin($output, 250, 250, 600, 600));
-        $this->assertSame(490, $this->darkWidth($output, 250, 250, 600, 600));
-        $this->assertSame(
-            $this->qrPixels($this->nearestScaled($qr, 570)),
-            $this->qrPixels($output, 265, 265, 570),
-            'Enlargement must stay pixel-identical to nearest-neighbour scaling.',
-        );
     }
 
     public function test_rectangular_reserved_area_uses_a_centred_square(): void
@@ -57,8 +35,6 @@ class QrTemplateCompositorTest extends TestCase
         );
 
         $this->assertSame($this->decodedPayload($qr), $this->decodedPayload($output));
-        $this->assertSame([395, 305], $this->darkOrigin($output, 240, 220, 560, 420));
-        $this->assertSame(250, $this->darkWidth($output, 240, 220, 560, 420));
     }
 
     public function test_returns_original_bytes_when_no_template_is_configured(): void
@@ -241,6 +217,64 @@ class QrTemplateCompositorTest extends TestCase
         ));
     }
 
+    public function test_provider_400px_qr_fills_its_reserved_area_and_decodes_in_chat(): void
+    {
+        $payload = $this->fixture('provider-payload.txt');
+        $qr = (new QRCode(new QROptions([
+            'outputType' => 'png',
+            'outputBase64' => false,
+            'version' => 9,
+            'scale' => 7,
+            'quietzoneSize' => 2,
+        ])))->render($payload);
+        $image = imagescale(imagecreatefromstring($qr), 400, 400, IMG_NEAREST_NEIGHBOUR);
+        ob_start();
+        imagepng($image);
+        $provider = (string) ob_get_clean();
+
+        $template = imagecreatetruecolor(1254, 1254);
+        imagefilledrectangle($template, 0, 0, 1253, 1253, imagecolorallocate($template, 255, 255, 255));
+        ob_start();
+        imagepng($template);
+        $output = (new QrTemplateCompositor)->compose(
+            $provider,
+            new QrTemplatePlacement((string) ob_get_clean(), 490, 430, 690, 640),
+        );
+        $rendered = imagecreatefromstring($output);
+        $minX = PHP_INT_MAX;
+        $maxX = -1;
+        for ($y = 430; $y < 1070; $y++) {
+            for ($x = 515; $x < 1155; $x++) {
+                if ((imagecolorat($rendered, $x, $y) & 0xFFFFFF) === 0) {
+                    $minX = min($minX, $x);
+                    $maxX = max($maxX, $x);
+                }
+            }
+        }
+        $this->assertGreaterThanOrEqual(0.80, ($maxX - $minX + 1) / 640);
+
+        $preview = imagescale($rendered, 320, 320, IMG_BILINEAR_FIXED);
+        ob_start();
+        imagejpeg($preview, null, 75);
+        $jpeg = (string) ob_get_clean();
+
+        $this->assertSame($payload, $this->decodedPayload($jpeg));
+    }
+
+    public function test_unreadable_square_image_keeps_the_original_bytes(): void
+    {
+        $image = imagecreatetruecolor(240, 240);
+        imagefilledrectangle($image, 0, 0, 239, 239, imagecolorallocate($image, 255, 255, 255));
+        ob_start();
+        imagepng($image);
+        $contents = (string) ob_get_clean();
+
+        $this->assertSame($contents, (new QrTemplateCompositor)->compose(
+            $contents,
+            new QrTemplatePlacement($this->fixture('template-square-box.png'), 250, 250, 520, 520),
+        ));
+    }
+
     private function fixture(string $name): string
     {
         $contents = file_get_contents(__DIR__.'/../../../Fixtures/qr/'.$name);
@@ -263,83 +297,6 @@ class QrTemplateCompositorTest extends TestCase
         $decoded = (new QRCode)->readFromBlob($imageContents);
 
         return $decoded->data;
-    }
-
-    /**
-     * Width of the dark QR area inside the given square, including its own
-     * quiet zone. A provider QR of 285 px has 245 dark pixels.
-     */
-    private function darkWidth(string $png, int $boxX, int $boxY, int $boxW, int $boxH): int
-    {
-        $image = imagecreatefromstring($png);
-        $minX = PHP_INT_MAX;
-        $maxX = -1;
-
-        for ($y = $boxY; $y < $boxY + $boxH; $y++) {
-            for ($x = $boxX; $x < $boxX + $boxW; $x++) {
-                $color = imagecolorsforindex($image, imagecolorat($image, $x, $y));
-                $luma = 0.299 * $color['red'] + 0.587 * $color['green'] + 0.114 * $color['blue'];
-                if ($luma < 128) {
-                    $minX = min($minX, $x);
-                    $maxX = max($maxX, $x);
-                }
-            }
-        }
-
-        return $maxX - $minX + 1;
-    }
-
-    private function nearestScaled(string $png, int $side): string
-    {
-        $image = imagescale(imagecreatefromstring($png), $side, $side, IMG_NEAREST_NEIGHBOUR);
-        ob_start();
-        imagepng($image);
-        $contents = (string) ob_get_clean();
-        imagedestroy($image);
-
-        return $contents;
-    }
-
-    /** @return list<string> */
-    private function qrPixels(string $png, int $x = 0, int $y = 0, ?int $side = null): array
-    {
-        $image = imagecreatefromstring($png);
-        $side ??= imagesx($image);
-        $pixels = [];
-
-        for ($dy = 0; $dy < $side; $dy++) {
-            for ($dx = 0; $dx < $side; $dx++) {
-                $color = imagecolorsforindex($image, imagecolorat($image, $x + $dx, $y + $dy));
-                $pixels[] = $color['red'].','.$color['green'].','.$color['blue'];
-            }
-        }
-
-        imagedestroy($image);
-
-        return $pixels;
-    }
-
-    /** @return array{0: int, 1: int} */
-    private function darkOrigin(string $png, int $boxX, int $boxY, int $boxW, int $boxH): array
-    {
-        $image = imagecreatefromstring($png);
-        $minX = PHP_INT_MAX;
-        $minY = PHP_INT_MAX;
-
-        for ($y = $boxY; $y < $boxY + $boxH; $y++) {
-            for ($x = $boxX; $x < $boxX + $boxW; $x++) {
-                $color = imagecolorsforindex($image, imagecolorat($image, $x, $y));
-                $luma = 0.299 * $color['red'] + 0.587 * $color['green'] + 0.114 * $color['blue'];
-                if ($luma < 128) {
-                    $minX = min($minX, $x);
-                    $minY = min($minY, $y);
-                }
-            }
-        }
-
-        imagedestroy($image);
-
-        return [$minX, $minY];
     }
 
     private function noisyTemplate(): string

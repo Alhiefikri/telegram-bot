@@ -1405,12 +1405,14 @@ reads the current placement for every presentation, including consecutive jobs
 using the singleton top-up resolver; activation, replacement and removal do not
 require a worker restart.
 [`QrTemplateCompositor`](../../src/app/Services/Payments/QrTemplateCompositor.php)
-paints the reserved square white, enlarges the QR only by a whole-number factor
-with nearest-neighbour resampling, and centres it. Any missing file, unreadable
-image, out-of-bounds area, non-square QR, image exceeding 1600 px on either axis,
-or QR larger than the reserved square
-returns the original bytes, so decoration never blocks a payment, and a
-non-square reserved area uses a centred square without stretching the QR.
+paints the reserved square white, decodes the source QR and reconstructs its
+module matrix with the same codewords, version, ECC and mask (not a payload
+re-encode). It adds a four-module quiet zone and renders at the largest integer
+**module** scale that fits, then centres the QR. This avoids underfilling when a
+400px provider raster fits a 640px area only once as a whole image. Any missing
+file, unreadable/undecodable image, out-of-bounds area, non-square QR, image
+exceeding 1600 px on either axis, or source QR larger than the reserved square
+returns the original bytes; a rectangular reserved area uses a centred square.
 Both provider and template dimensions are checked before GD decoding, bounding
 each decoded input to 2,560,000 pixels. Invalid QR input returns immediately
 without decoding the template.
@@ -1447,6 +1449,23 @@ preserved the exact image and geometry. Live `LhieStoreTestBot` messages 1369
 (OFF, 285px original) and 1370 (ON, 1254px supplied artwork) downloaded and
 decoded to the same fixture payload; no payment was created. Testing was left
 ON after the smoke. Production was not modified.
+
+Module-fit audit/fix verification (2026-10-24): approved read-only production
+inspection of `1edc0de2` found the supplied 1254px template at (490,430), area
+690x640, already OFF. Three latest KlikQRIS checkout images and two top-up
+images were all 400x400 with a 371px dark grid. The old whole-raster factor was
+1, yielding about 127px of dark QR in a 430px chat preview. Local normalization
+of one actual sample produced a 530px grid (about 182px in that preview), with
+exact-payload JPEG q75 decoding at 1254/430/320px. The six focused suites passed
+55 tests / 427 assertions, covering a 400px, version-9 synthetic source filling
+at least 80% of the reserved width and decoding in a 320px chat preview.
+Test-bot message 1371 used synthetic data with the same source geometry, not
+production payment content; its downloaded JPEG also decoded at all three
+sizes. Local five-run median composition cost on the supplied artwork was
+806ms versus 480ms for the old pixel-fit operation; module decoding adds CPU
+work, and these are not production throughput measurements. Production data,
+template status, services and deployment were not changed. Bank-app scanning
+and production load qualification remain unverified.
 
 ## 6. Order lifecycle dan inventory invariant
 
