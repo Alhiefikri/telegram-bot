@@ -1,0 +1,41 @@
+{
+    "new_paths": {
+        "16": {
+            "image_path": "product-families/8e1e2007-5e70-4988-b628-53da3d2f63b2.webp",
+            "telegram_image_path": "telegram-product-families/98ce7eec-8e3b-430a-9609-37f4853b37bc.webp"
+        },
+        "17": {
+            "image_path": "product-families/2432b81d-bb8f-4a78-a92c-f81c02ca05d1.webp",
+            "telegram_image_path": "telegram-product-families/3ee03502-26a2-4f65-8635-74f49a2855ca.webp"
+        },
+        "18": {
+            "image_path": "product-families/e391ca6b-e45d-4d24-ae0a-2de6e4a05bfc.webp",
+            "telegram_image_path": "telegram-product-families/1089aa17-b55d-49a0-a371-9ed2e3945ccd.webp"
+        }
+    },
+    "unchanged_members": [
+        36,
+        37,
+        38,
+        39,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50
+    ],
+    "supplier_mapping_unchanged": true,
+    "other_families_unchanged": true,
+    "cache_before": {
+        "storefront": "848934",
+        "telegram_catalog": "848881"
+    },
+    "cache_after": {
+        "storefront": "848937",
+        "telegram_catalog": "848884"
+    },
+    "timestamp": "2026-10-24T15:50:55+07:00",
+    "rollback_snapshot": "/var/www/html/storage/app/private/family-cover-review-20261024-paper-ink-v1/before.json"
+}

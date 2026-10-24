@@ -1,0 +1,111 @@
+[
+  {
+    "label": "homepage",
+    "url": "https://lhiestore.web.id/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 116738,
+    "expected_family_asset_present": null,
+    "family_assets_present": {
+      "16": true,
+      "17": true,
+      "18": true
+    }
+  },
+  {
+    "label": "family-16",
+    "url": "https://lhiestore.web.id/pilihan/gpt-api",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 73949,
+    "expected_family_asset_present": true
+  },
+  {
+    "label": "family-17",
+    "url": "https://lhiestore.web.id/pilihan/gpt-claude-api",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 74668,
+    "expected_family_asset_present": true
+  },
+  {
+    "label": "family-18",
+    "url": "https://lhiestore.web.id/pilihan/china-models-api",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 66605,
+    "expected_family_asset_present": true
+  },
+  {
+    "label": "product-36",
+    "url": "https://lhiestore.web.id/produk/36",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 46179,
+    "expected_family_asset_present": false
+  },
+  {
+    "label": "product-44",
+    "url": "https://lhiestore.web.id/produk/44",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 46389,
+    "expected_family_asset_present": false
+  },
+  {
+    "label": "product-48",
+    "url": "https://lhiestore.web.id/produk/48",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 46370,
+    "expected_family_asset_present": false
+  },
+  {
+    "label": "asset-16-image_path",
+    "url": "https://lhiestore.web.id/storage/product-families/8e1e2007-5e70-4988-b628-53da3d2f63b2.webp",
+    "status": 200,
+    "content_type": "image/webp",
+    "bytes": 51604,
+    "sha256": "a734d921531e3062e8f43ad680ac8d721c5d6d12f751328b23e2c112e1fd0b7d"
+  },
+  {
+    "label": "asset-16-telegram_image_path",
+    "url": "https://lhiestore.web.id/storage/telegram-product-families/98ce7eec-8e3b-430a-9609-37f4853b37bc.webp",
+    "status": 200,
+    "content_type": "image/webp",
+    "bytes": 51604,
+    "sha256": "a734d921531e3062e8f43ad680ac8d721c5d6d12f751328b23e2c112e1fd0b7d"
+  },
+  {
+    "label": "asset-17-image_path",
+    "url": "https://lhiestore.web.id/storage/product-families/2432b81d-bb8f-4a78-a92c-f81c02ca05d1.webp",
+    "status": 200,
+    "content_type": "image/webp",
+    "bytes": 91780,
+    "sha256": "906c8d6aa2a7d99df9ec363d7450c37301faf5cf2ff0828bd46167c2bc2aef8d"
+  },
+  {
+    "label": "asset-17-telegram_image_path",
+    "url": "https://lhiestore.web.id/storage/telegram-product-families/3ee03502-26a2-4f65-8635-74f49a2855ca.webp",
+    "status": 200,
+    "content_type": "image/webp",
+    "bytes": 91780,
+    "sha256": "906c8d6aa2a7d99df9ec363d7450c37301faf5cf2ff0828bd46167c2bc2aef8d"
+  },
+  {
+    "label": "asset-18-image_path",
+    "url": "https://lhiestore.web.id/storage/product-families/e391ca6b-e45d-4d24-ae0a-2de6e4a05bfc.webp",
+    "status": 200,
+    "content_type": "image/webp",
+    "bytes": 112090,
+    "sha256": "6679c9d0f8bdf6ada34570239ddf1de3e64dd0e320a7e4ed2bf87cecb40431fd"
+  },
+  {
+    "label": "asset-18-telegram_image_path",
+    "url": "https://lhiestore.web.id/storage/telegram-product-families/1089aa17-b55d-49a0-a371-9ed2e3945ccd.webp",
+    "status": 200,
+    "content_type": "image/webp",
+    "bytes": 112090,
+    "sha256": "6679c9d0f8bdf6ada34570239ddf1de3e64dd0e320a7e4ed2bf87cecb40431fd"
+  }
+]

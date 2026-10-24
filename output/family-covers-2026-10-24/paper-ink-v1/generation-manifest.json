@@ -1,0 +1,42 @@
+{
+  "tool": "image_gen.imagegen",
+  "backend_model": "not exposed by tool",
+  "transparent_background": false,
+  "production_uploaded": false,
+  "preview_approved": false,
+  "assets": [
+    {
+      "family_id": 16,
+      "slug": "gpt-api",
+      "path": "output/family-covers-2026-10-24/paper-ink-v1/gpt-api.png",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "9ca2fdb0128d8004d52cdfdcc1ff31eaaf886c9edc7128c917328a76da2c7d7c",
+      "prompt": "Use case: ads-marketing\nAsset type: one square raster Product Family cover for Lhie Store, also used as a Telegram Store Channel notification photo.\nCreate a finished 1024x1024 or larger square editorial illustration. Warm paper background #fffdf8, near-black ink #0b1220, electric blue #005cff, restrained yellow #ffe45c accents. Bold geometric sans-serif display lettering with open counters and generous spacing, in the spirit of Space Grotesk. Clean silhouettes, short crisp offset ink shadows, subtle printed-paper character. No enclosing UI card or interface controls.\nMain motif: three thick index sheets arranged as a compact ascending staircase, clearly belonging to one blue collection. Each sheet has a broad solid tab and a simple blank face; no code, no tiny labels. Use an oblique top view so the three separate sheets remain recognizable at thumbnail size. A small yellow tab gives a single focal accent. Keep the motif in the lower central half, the large title above it, and a small store signature below.\nText verbatim: “GPT API”. Set on two spacious lines “GPT” and “API”, dominant and instantly readable at small size. Only additional text: “Lhie Store”, as a discreet signature. Render exact spelling. The artwork represents the GPT family broadly; never rename it Codex.\nKeep all text and essential motif inside the central 76% of width and height, with at least 12% safe margin on every edge. Strong contrast, generous negative space, clear at 160x160. Background is opaque. This must feel like playful paper-and-ink storefront artwork, not an admin dashboard.\nDo not include corporate logos, partnership badges, supplier names or domains, endpoints, keys, prices, quotas, durations, dates, restock wording, official API claims, guarantees, refunds, endorsements, robots, brains, glowing spheres, generic chips, fake terminals, random code, blue-purple gradients, neon, glass effects, flags, decorative Chinese text, or generic promotional slogans."
+    },
+    {
+      "family_id": 17,
+      "slug": "gpt-claude-api",
+      "path": "output/family-covers-2026-10-24/paper-ink-v1/gpt-claude-api.png",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "82344c1ef2efd779efcb44aea11711513ec254092e8a716074c5eb0eb44032d8",
+      "prompt": "Use case: ads-marketing\nAsset type: one square raster Product Family cover for Lhie Store, also used as a Telegram Store Channel notification photo.\nCreate a finished 1024x1024 or larger square editorial illustration. Match a paper-and-ink series: warm paper #fffdf8, near-black ink #0b1220 outlines, electric blue #005cff, yellow #ffe45c, short crisp offset ink shadows and subtle paper character. Bold geometric sans-serif display typography with open counters, in the spirit of Space Grotesk. No enclosing UI card or interface controls.\nMain motif: a single open paper organizer containing two clearly separate upright folios. One folio is blue with a broad rectangular tab; the other is yellow with a curved cutout tab. Both are equal in scale, separated by visible paper-colored space and sharing only the organizer. Use a frontal three-quarter view. The organizer signifies one access point for two model groups. Never fuse the folios, interlock symbols, form a handshake, or suggest an official partnership. Keep this motif in the lower central half.\nText verbatim: “GPT + Claude API”. Use a large two-line title, first line “GPT + Claude”, second line “API”. Keep every word clearly readable with ample spacing; adjust size to fit safely. Only additional text: “Lhie Store”, a discreet signature below the motif. No text on the folios.\nKeep all text and essential motif inside the central 76% of width and height, at least 12% safe margin on every edge. Strong contrast, generous negative space, readable at 160x160. Opaque background. Different composition from an ascending stack: two upright folios and one shared organizer.\nDo not include corporate logos, joint logos, partnership badges, supplier names or domains, endpoints, keys, prices, quotas, durations, dates, restock wording, official API claims, guarantees, refunds, endorsements, robots, brains, glowing spheres, generic chips, fake terminals, random code, blue-purple gradients, neon, glass effects, flags, decorative Chinese text, or generic promotional slogans."
+    },
+    {
+      "family_id": 18,
+      "slug": "china-models-api",
+      "path": "output/family-covers-2026-10-24/paper-ink-v1/china-models-api.png",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "35a9c5190d0642d41cf5acdcdc5b7c9adc489ba01613918cd8e03bb73a761276",
+      "prompt": "Use case: ads-marketing\nAsset type: one square raster Product Family cover for Lhie Store, also used as a Telegram Store Channel notification photo.\nCreate a finished 1024x1024 or larger square editorial illustration in a coherent paper-and-ink storefront series. Warm paper #fffdf8, near-black ink #0b1220, electric blue #005cff, yellow #ffe45c, and a small muted mint accent. Bold geometric sans-serif display lettering with open counters and generous spacing, in the spirit of Space Grotesk. Crisp ink outlines, short offset shadows, restrained printed-paper texture. No enclosing UI card or interface controls.\nMain motif: a short freestanding horizontal display shelf carrying four independent abstract paper volumes. Each volume has its own clearly different spine silhouette: stepped, rounded, notched, and straight. Keep four clean, large shapes with breathing room, using blue, yellow, paper white, and mint. Show the shelf from an almost frontal view with slight depth. The independent volumes represent a selection of distinct model families such as Kimi, Qwen, DeepSeek and GLM, not one company; do not write these names or draw their logos. No organizer enclosing all four, no merging or corporate emblem. Place the shelf across the lower central half.\nText verbatim: “China Models API”. Set on three strong lines “China”, “Models”, “API”, with a clear readable hierarchy above the shelf. Only additional text: “Lhie Store”, as a discreet signature below. Keep exact spelling.\nKeep all text and essential motif inside the central 76% of width and height, with at least 12% safe margin on every edge. Strong contrast, generous negative space, readable at 160x160. Opaque background. Make the horizontal four-volume rhythm distinct from a stepped sheet stack and a two-folio organizer.\nDo not include flags, maps, national symbols, cultural stereotypes, decorative Chinese characters, corporate logos, partnership badges, supplier names or domains, endpoints, keys, prices, quotas, durations, dates, restock wording, official API claims, guarantees, refunds, endorsements, robots, brains, glowing spheres, generic chips, fake terminals, random code, blue-purple gradients, neon, glass effects, or generic promotional slogans."
+    }
+  ]
+}
