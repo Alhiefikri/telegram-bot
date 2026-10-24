@@ -1,13 +1,20 @@
 @php($connection = $connection ?? [])
 @php($currencyRates = $currencyRates ?? [])
 @php($rateMap = collect($currencyRates)->flatMap(fn (array $rate): array => collect($rate['currencies'] ?? [$rate['currency']])->mapWithKeys(fn (string $currency): array => [$currency => $rate['exchange_rate_idr']])->all())->all())
-@php($providerSettings = collect(\App\Enums\SupplierProvider::cases())->mapWithKeys(fn ($provider) => [$provider->value => ['currency' => $provider->defaultCurrency(), 'confirm' => $provider->requiresCurrencyConfirmation()]])->all())
+@php($providerSettings = collect(\App\Enums\SupplierProvider::cases())->mapWithKeys(fn ($provider) => [$provider->value => ['currency' => $provider->defaultCurrency(), 'confirm' => $provider->requiresCurrencyConfirmation(), 'label' => $provider->label()]])->all())
 @php($sample = isset($connection['sample_unit'], $connection['currency']) ? ['unit' => $connection['sample_unit'], 'currency' => $connection['currency'], 'cost_idr' => $connection['sample_cost_idr'] ?? null] : null)
-<form method="POST" action="{{ isset($connection['id']) ? route('admin.suppliers.update', $connection['id']) : route('admin.suppliers.store') }}" class="grid gap-3 sm:grid-cols-2" x-data="supplierConnectionForm(@js($connection['provider'] ?? 'prodseller'), @js($providerSettings), @js(route('admin.password.confirm.store')), @js($sample), @js($rateMap), @js($connection['currency'] ?? null))" x-ref="connectionForm" x-on:submit.prevent="save()">
+@php($initialName = $connection['name'] ?? (\App\Enums\SupplierProvider::tryFrom((string) ($connection['provider'] ?? 'prodseller')) ?? \App\Enums\SupplierProvider::ProdSeller)->label())
+<form method="POST" action="{{ isset($connection['id']) ? route('admin.suppliers.update', $connection['id']) : route('admin.suppliers.store') }}" class="grid gap-3 sm:grid-cols-2" x-data="supplierConnectionForm(@js($connection['provider'] ?? 'prodseller'), @js($providerSettings), @js(route('admin.password.confirm.store')), @js($sample), @js($rateMap), @js($connection['currency'] ?? null), @js($connection['name'] ?? null))" x-ref="connectionForm" x-on:submit.prevent="save()">
     @csrf
     @if(isset($connection['id'])) @method('PATCH') <input type="hidden" name="version" value="{{ $connection['version'] }}"> @endif
     <label class="grid gap-2 text-sm font-medium text-admin-ink">Pilih supplier<x-admin-dashboard.select name="provider" x-model="provider" required>@foreach(\App\Enums\SupplierProvider::cases() as $provider)<option value="{{ $provider->value }}" @selected(($connection['provider'] ?? 'prodseller') === $provider->value)>{{ $provider->label() }}</option>@endforeach</x-admin-dashboard.select></label>
-    <p class="self-center text-sm text-admin-muted">Nama dan alamat koneksi otomatis mengikuti supplier yang dipilih.</p>
+    <label class="grid gap-2 text-sm font-medium text-admin-ink">Nama supplier
+        <span class="flex items-start gap-2">
+            <x-admin-dashboard.input name="name" value="{{ $initialName }}" x-model="name" x-ref="nameInput" required maxlength="120" class="min-w-0 flex-1" />
+            <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-on:click="resetName()" aria-label="Kembalikan nama supplier ke default" title="Kembalikan ke nama default supplier">Default</x-admin-dashboard.button>
+        </span>
+    </label>
+    <p class="self-center text-sm text-admin-muted">Nama boleh diubah dan bisa dikembalikan ke default. Alamat koneksi tetap mengikuti supplier yang dipilih.</p>
     <label class="grid gap-2 text-sm font-medium text-admin-ink">API key {{ isset($connection['id']) ? '(kosong = tidak berubah)' : '' }}<x-admin-dashboard.input name="api_key" type="password" autocomplete="new-password" maxlength="2048" :required="!isset($connection['id'])" /></label>
     <p class="self-center text-sm text-admin-muted" x-show="!providers[provider].confirm">Mata uang otomatis: <strong class="font-semibold text-admin-ink" x-text="providers[provider].currency"></strong></p>
     <label class="grid gap-2 text-sm font-medium text-admin-ink" x-show="providers[provider].confirm" x-cloak>Mata uang akun supplier<x-admin-dashboard.select name="currency" x-model="accountCurrency" x-bind:disabled="!providers[provider].confirm">@foreach(['USDT', 'USD'] as $currency)<option value="{{ $currency }}" @selected(($connection['currency'] ?? 'USD') === $currency)>{{ $currency }}</option>@endforeach</x-admin-dashboard.select></label>

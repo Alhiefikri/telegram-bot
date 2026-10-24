@@ -12,6 +12,7 @@ use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPurchase;
 use App\Services\Admin\AdminProductWorkspaceData;
@@ -20,8 +21,10 @@ use App\Services\Admin\SupplierOperationConfirmation;
 use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierCurrencyRateManager;
+use App\Services\Suppliers\SupplierExchangeRate;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierManager;
+use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -90,8 +93,57 @@ final class AdminSupplierController extends Controller
         $this->authorizeManager($request);
         $items = SupplierCatalogItem::query()->where('supplier_id', $supplier->id)->with(['sources.product'])->orderBy('id')->paginate(25);
         $products = Product::query()->orderBy('name')->orderBy('id')->get(['id', 'name', 'price_amount', 'is_active']);
+        $currency = $supplier->currency;
+        $rateIdr = (string) $supplier->exchange_rate_idr;
+        $dollar = in_array($currency, ['USD', 'USDT'], true);
+        // Only a non-dollar supplier cost needs the global dollar rate. This is
+        // one query per page, never one per catalog item.
+        $usdRateIdr = $dollar ? null : SupplierCurrencyRate::query()->whereKey('USD')->value('exchange_rate_idr');
+        $conversion = [
+            'dollar' => $dollar,
+            'rate_idr' => $rateIdr,
+            'rate_storable' => SupplierExchangeRate::isStorable($currency, $rateIdr),
+            'usd_rate_idr' => $usdRateIdr,
+            'usd_rate_storable' => $usdRateIdr !== null && SupplierExchangeRate::isStorable('USD', $usdRateIdr),
+        ];
+        $unitCosts = [];
+        foreach ($items as $item) {
+            $unitCosts[$item->id] = $this->unitCosts($item->unit_price_micros, $conversion);
+        }
+        $supplierData = $supplier->only(['id', 'name', 'provider', 'currency', 'exchange_rate_idr', 'version', 'synced_at']);
+        $supplierData['usd_rate_idr'] = $usdRateIdr;
 
-        return view('admin.suppliers.catalog', ['supplier' => $supplier->only(['id', 'name', 'provider', 'currency', 'exchange_rate_idr', 'version', 'synced_at']), 'items' => $items, 'products' => $products]);
+        return view('admin.suppliers.catalog', ['supplier' => $supplierData, 'items' => $items, 'products' => $products, 'unitCosts' => $unitCosts]);
+    }
+
+    /**
+     * Display-only estimate of one supplier unit price in USD and rupiah.
+     * Pure arithmetic: the caller resolves the currency and both rates once,
+     * so rendering a page never queries the database per item.
+     *
+     * @param  array{dollar: bool, rate_idr: string, rate_storable: bool, usd_rate_idr: ?string, usd_rate_storable: bool}  $conversion
+     * @return array{idr: ?int, usd_micros: ?int}
+     */
+    private function unitCosts(?int $unit, array $conversion): array
+    {
+        if ($unit === null) {
+            return ['idr' => null, 'usd_micros' => null];
+        }
+        $usd = $conversion['dollar'] ? $unit : null;
+        $idr = null;
+        $usdRateIdr = $conversion['usd_rate_idr'];
+        if ($conversion['rate_storable']) {
+            try {
+                $idr = SupplierMoney::costIdr($unit, $conversion['rate_idr']);
+                if (! $conversion['dollar'] && $conversion['usd_rate_storable'] && $usdRateIdr !== null) {
+                    $usd = SupplierMoney::usdMicrosFromIdr($idr, $usdRateIdr);
+                }
+            } catch (InvalidArgumentException) {
+                $idr = null;
+            }
+        }
+
+        return ['idr' => $idr, 'usd_micros' => $usd];
     }
 
     public function import(SupplierAdminRequest $request, SupplierCatalogItem $catalogItem, ProductSupplierManager $manager)

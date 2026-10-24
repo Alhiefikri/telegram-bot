@@ -5,11 +5,11 @@ import supplierConnectionForm, {
 } from "../../resources/js/supplier-connection-form.js";
 
 const providers = {
-  prodseller: { currency: "USDT", confirm: false },
-  nastele: { currency: "VND", confirm: false },
-  csxstore: { currency: "USD", confirm: false },
-  canboso: { currency: "USD", confirm: false },
-  arrs: { currency: "USD", confirm: true },
+  prodseller: { currency: "USDT", confirm: false, label: "ProdSeller" },
+  nastele: { currency: "VND", confirm: false, label: "Nastele" },
+  csxstore: { currency: "USD", confirm: false, label: "CSxStore" },
+  canboso: { currency: "USD", confirm: false, label: "Canboso" },
+  arrs: { currency: "USD", confirm: true, label: "ARRS" },
 };
 
 const rates = { USDT: "16000", USD: "17000", VND: "0.650001" };
@@ -21,7 +21,8 @@ function fixture(provider, overrides = {}) {
     "/confirm",
     overrides.sample ?? null,
     overrides.rates ?? rates,
-    overrides.currency ?? null
+    overrides.currency ?? null,
+    overrides.name ?? null
   );
   const watchers = new Map();
   form.$watch = (key, callback) => watchers.set(key, callback);
@@ -74,6 +75,29 @@ test("changing provider resets the account currency to that provider default", (
 
   assert.equal(form.currency, "VND");
   assert.equal(form.rateText, "Rp0,650001");
+});
+
+test("the supplier name follows the provider until edited and can be reset", () => {
+  const { form, select } = fixture("nastele");
+  assert.equal(form.name, "Nastele");
+
+  select("prodseller");
+  assert.equal(form.name, "ProdSeller");
+
+  form.name = "Dompet VND";
+  select("nastele");
+  assert.equal(form.name, "Dompet VND");
+
+  form.resetName();
+  assert.equal(form.name, "Nastele");
+});
+
+test("an existing custom supplier name survives a provider change", () => {
+  const { form, select } = fixture("nastele", { name: "Sumber utama" });
+  assert.equal(form.name, "Sumber utama");
+
+  select("prodseller");
+  assert.equal(form.name, "Sumber utama");
 });
 
 test("a missing global rate is visible before saving", () => {

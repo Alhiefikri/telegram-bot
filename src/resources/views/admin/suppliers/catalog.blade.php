@@ -6,7 +6,7 @@
     <h2 id="supplier-catalog-title" class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">{{ $supplier['name'] }}</h2>
     <dl class="mt-3 grid gap-3 sm:grid-cols-3">
         <div><dt class="text-xs font-medium text-admin-muted">Provider</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">{{ \App\Enums\SupplierProvider::from($supplier['provider'])->label() }}</dd></div>
-        <div><dt class="text-xs font-medium text-admin-muted">Konversi biaya</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">Rp{{ rtrim(rtrim(number_format((float) $supplier['exchange_rate_idr'], 6, ',', '.'), '0'), ',') }} / {{ $supplier['currency'] }}</dd></div>
+        <div><dt class="text-xs font-medium text-admin-muted">Konversi biaya</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">Rp{{ rtrim(rtrim(number_format((float) $supplier['exchange_rate_idr'], 6, ',', '.'), '0'), ',') }} / {{ $supplier['currency'] }}@if($supplier['usd_rate_idr'] !== null && ! in_array($supplier['currency'], ['USD', 'USDT'], true)) · Rp{{ rtrim(rtrim(number_format((float) $supplier['usd_rate_idr'], 6, ',', '.'), '0'), ',') }} / USD @endif</dd></div>
         <div><dt class="text-xs font-medium text-admin-muted">Katalog supplier</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">{{ $items->total() }} produk · Versi {{ $supplier['version'] }}</dd></div>
     </dl>
     <p class="mt-3 text-sm leading-6 text-admin-muted">Deskripsi supplier hanya referensi privat, tidak pernah dipublikasikan otomatis. Impor sebagai draft produk toko atau hubungkan ke produk yang sudah ada.</p>
@@ -20,8 +20,20 @@
         <p class="font-mono text-xs break-all text-admin-muted">SKU {{ $item->external_id }}</p>
     </header>
     <div class="grid gap-4 p-5">
+        @php
+            $cost = $unitCosts[$item->id] ?? ['idr' => null, 'usd_micros' => null];
+            $usdCost = $item->unit_price_micros === null ? '—' : ($cost['usd_micros'] === null ? 'Kurs USD belum diatur' : '$'.\App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($cost['usd_micros']));
+            $idrCost = $item->unit_price_micros === null ? '—' : ($cost['idr'] === null ? 'Kurs belum diatur' : 'Rp'.number_format($cost['idr'], 0, ',', '.'));
+        @endphp
         <dl class="grid gap-3 sm:grid-cols-2">
-            <div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3 sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Harga beli · {{ $supplier['currency'] }}</dt><dd class="mt-1 text-lg font-semibold text-admin-ink">{{ $item->unit_price_micros === null ? 'Tidak diketahui' : \App\Services\Suppliers\SupplierMoney::decimal($item->unit_price_micros) }}</dd></div>
+            <div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3 sm:col-span-2">
+                <dt class="text-xs font-medium text-admin-muted">Harga beli · {{ $supplier['currency'] }}</dt>
+                <dd class="mt-1 text-lg font-semibold text-admin-ink">{{ $item->unit_price_micros === null ? 'Tidak diketahui' : \App\Services\Suppliers\SupplierMoney::decimal($item->unit_price_micros) }}</dd>
+                <dd class="mt-3 grid grid-cols-2 gap-3 border-t border-admin-line pt-3">
+                    <span class="block"><span class="block text-xs font-medium text-admin-muted">Setara USD</span><span class="mt-0.5 block break-words text-sm font-semibold text-admin-ink">{{ $usdCost }}</span></span>
+                    <span class="block"><span class="block text-xs font-medium text-admin-muted">Setara rupiah</span><span class="mt-0.5 block break-words text-sm font-semibold text-admin-ink">{{ $idrCost }}</span></span>
+                </dd>
+            </div>
             <div><dt class="text-xs font-medium text-admin-muted">Stok supplier</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">{{ $item->stock ?? 'Tidak diketahui' }}</dd></div>
             <div><dt class="text-xs font-medium text-admin-muted">Ditahan</dt><dd class="mt-0.5 text-sm font-semibold text-admin-ink">{{ $item->reserved_quantity }}</dd></div>
         </dl>

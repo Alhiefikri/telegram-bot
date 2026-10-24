@@ -52,13 +52,15 @@ export default function supplierConnectionForm(
   confirmationUrl,
   sample = null,
   rates = {},
-  selectedCurrency = null
+  selectedCurrency = null,
+  initialName = null
 ) {
   return {
     provider,
     providers,
     sample,
     rates,
+    name: initialName ?? providers[provider]?.label ?? "",
     accountCurrency: selectedCurrency ?? providers[provider]?.currency ?? "USD",
     saving: false,
     confirming: false,
@@ -69,8 +71,23 @@ export default function supplierConnectionForm(
     init() {
       this.$watch("provider", (next, previous) => {
         if (next === previous) return;
+        if (
+          !this.name ||
+          this.name === (this.providers[previous]?.label ?? "")
+        ) {
+          this.name = this.providers[next]?.label ?? this.name;
+        }
         this.accountCurrency = this.providers[next]?.currency ?? "USD";
       });
+    },
+
+    get defaultName() {
+      return this.providers[this.provider]?.label ?? "";
+    },
+
+    resetName() {
+      this.name = this.defaultName;
+      this.$refs?.nameInput?.focus();
     },
 
     get currency() {
@@ -126,6 +143,7 @@ export default function supplierConnectionForm(
           window.location.assign(result.redirect_url);
         } else {
           this.error =
+            result.errors?.name?.[0] ||
             result.errors?.currency?.[0] ||
             result.errors?.currency_confirmed?.[0] ||
             result.errors?.api_key?.[0] ||

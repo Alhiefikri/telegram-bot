@@ -71,6 +71,26 @@ class SupplierMoneyTest extends TestCase
         SupplierMoney::costIdr(PHP_INT_MAX, '1000000.000001');
     }
 
+    public function test_idr_cost_converts_to_usd_micros_rounding_up(): void
+    {
+        $this->assertSame(274_250, SupplierMoney::usdMicrosFromIdr(4_388, '16000.000000'));
+        $this->assertSame(63, SupplierMoney::usdMicrosFromIdr(1, '16000'));
+        $this->assertSame(1_000_000, SupplierMoney::usdMicrosFromIdr(16_000, '16000'));
+        $this->assertSame(0, SupplierMoney::usdMicrosFromIdr(0, '16000'));
+    }
+
+    #[DataProvider('invalidUsdRates')]
+    public function test_idr_to_usd_conversion_rejects_invalid_rates(int|string $rate): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        SupplierMoney::usdMicrosFromIdr(1, $rate);
+    }
+
+    public static function invalidUsdRates(): array
+    {
+        return [[0], [-1], ['0'], ['0.000000'], ['-1'], ['1e3'], [''], ['16000.0000001']];
+    }
+
     #[DataProvider('overflowOperations')]
     public function test_checked_arithmetic_does_not_wrap(string $operation, int $left, int $right): void
     {
@@ -83,6 +103,7 @@ class SupplierMoneyTest extends TestCase
         return [
             ['checkedAdd', PHP_INT_MAX, 1], ['checkedMultiply', PHP_INT_MAX, 2],
             ['checkedAdd', -1, 2], ['checkedMultiply', 1, -1], ['costIdr', PHP_INT_MAX, 1_000_001],
+            ['usdMicrosFromIdr', PHP_INT_MAX, 1],
         ];
     }
 }

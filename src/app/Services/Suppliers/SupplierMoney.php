@@ -111,4 +111,29 @@ final class SupplierMoney
 
         return self::checkedAdd($whole, self::checkedAdd($fractionWhole, $rounded));
     }
+
+    /**
+     * Whole rupiah converted to USD micro units with the dollar's IDR rate.
+     * Rounded up so a displayed dollar cost never understates the rupiah cost.
+     */
+    public static function usdMicrosFromIdr(int $idr, int|string $rate): int
+    {
+        if ($idr < 0) {
+            throw new InvalidArgumentException('Invalid supplier conversion.');
+        }
+        if (is_int($rate)) {
+            $rate = $rate > 0 ? (string) $rate : null;
+        }
+        if (! is_string($rate) || strlen($rate) > 32
+            || ! preg_match('/\A(0|[1-9][0-9]*)(?:\.[0-9]{1,6})?\z/D', $rate)
+            || $rate === '0' || preg_match('/\A0\.0+\z/D', $rate)) {
+            throw new InvalidArgumentException('Invalid supplier conversion.');
+        }
+        try {
+            return BigDecimal::of($idr)->multipliedBy(self::SCALE)
+                ->dividedBy($rate, 0, RoundingMode::Ceiling)->toInt();
+        } catch (MathException $exception) {
+            throw new InvalidArgumentException('Supplier conversion overflow.', previous: $exception);
+        }
+    }
 }

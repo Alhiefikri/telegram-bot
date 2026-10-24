@@ -672,6 +672,81 @@ final class SupplierAdminTest extends TestCase
         $this->assertSame('Gemini Pro', $active->refresh()->name);
     }
 
+    public function test_catalog_shows_converted_usd_then_rupiah_unit_cost(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier([
+            'name' => 'Sumber VND', 'provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.650001',
+        ]);
+        $this->item($supplier, ['unit_price_micros' => 6_750_000_000]);
+
+        $this->get(route('admin.suppliers.catalog', $supplier))
+            ->assertOk()
+            ->assertSee('Harga beli · VND')
+            ->assertSee('Rp0,650001 / VND · Rp16.000 / USD')
+            ->assertSee('Setara USD')
+            ->assertSee('$0.27425')
+            ->assertSee('Setara rupiah')
+            ->assertSee('Rp4.388');
+    }
+
+    public function test_connection_form_edits_the_supplier_name_and_restores_the_provider_default(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['name' => 'Dompet utama']);
+
+        $response = $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk();
+        $document = new \DOMDocument;
+        @$document->loadHTML($response->getContent());
+        $xpath = new \DOMXPath($document);
+        $inputs = $xpath->query('//form[@action="'.route('admin.suppliers.update', $supplier).'"]//input[@name="name"]');
+        $this->assertSame(1, $inputs->count());
+        $this->assertSame('Dompet utama', $inputs->item(0)->getAttribute('value'));
+        $defaultButtons = $xpath->query('//form[@action="'.route('admin.suppliers.update', $supplier).'"]//button[normalize-space(.)="Default"]');
+        $this->assertSame(1, $defaultButtons->count());
+
+        $this->patch(route('admin.suppliers.update', $supplier), $this->connectionInput(['name' => 'Dompet cadangan', 'api_key' => '', 'version' => 1]))->assertRedirect();
+        $this->assertSame('Dompet cadangan', $supplier->refresh()->name);
+
+        $this->patch(route('admin.suppliers.update', $supplier->refresh()), $this->connectionInput(['name' => 'ProdSeller', 'api_key' => '', 'version' => 2]))->assertRedirect();
+        $this->assertSame('ProdSeller', $supplier->refresh()->name);
+    }
+
+    public function test_dollar_catalog_uses_the_connection_rate_without_a_second_rate_query(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        $this->item($supplier, ['unit_price_micros' => 4_990_000]);
+
+        $this->get(route('admin.suppliers.catalog', $supplier))
+            ->assertOk()
+            ->assertSee('$4.99')
+            ->assertSee('Rp79.840');
+
+        $this->assertCount(0, $this->queriesForTable($this->catalogQueries($supplier), 'supplier_currency_rates'));
+    }
+
+    public function test_catalog_price_conversion_queries_rates_once_per_page_not_per_item(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['provider' => 'nastele', 'currency' => 'VND', 'exchange_rate_idr' => '0.650001']);
+        $this->item($supplier);
+        // Warm schema/auth paths so only the catalog reads are compared.
+        $this->get(route('admin.suppliers.catalog', $supplier))->assertOk();
+        $one = $this->catalogQueries($supplier);
+
+        for ($index = 2; $index <= 25; $index++) {
+            $this->item($supplier, ['external_id' => 'private-sku-'.$index]);
+        }
+        $many = $this->catalogQueries($supplier);
+
+        $this->assertCount(1, $this->queriesForTable($one, 'supplier_currency_rates'));
+        $this->assertCount(1, $this->queriesForTable($many, 'supplier_currency_rates'));
+        $this->assertCount(1, $this->queriesForTable($many, 'supplier_catalog_items', ' limit 25'));
+        $this->assertCount(1, $this->queriesForTable($many, 'product_supplier_sources'));
+        $this->assertSame(count($one), count($many), implode("\n", array_column($many, 'query')));
+    }
+
     public function test_mapping_requires_equivalence_and_cannot_activate_manual_sku(): void
     {
         $this->owner();
@@ -1078,6 +1153,29 @@ final class SupplierAdminTest extends TestCase
     private function connectionInput(array $overrides = []): array
     {
         return array_replace(['name' => 'Private Supplier', 'provider' => 'prodseller', 'api_key' => self::KEY, 'currency' => 'USDT', 'currency_confirmed' => 1, 'is_active' => 1, 'low_balance_threshold_micros' => 0], $overrides);
+    }
+
+    /** @return list<array{query: string, bindings: array, time: float}> */
+    private function catalogQueries(Supplier $supplier): array
+    {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        try {
+            $this->get(route('admin.suppliers.catalog', $supplier))->assertOk();
+
+            return DB::getQueryLog();
+        } finally {
+            DB::disableQueryLog();
+        }
+    }
+
+    /** @return list<string> */
+    private function queriesForTable(array $queries, string $table, string $suffix = ''): array
+    {
+        return array_values(array_filter(
+            array_column($queries, 'query'),
+            static fn (string $query): bool => str_contains($query, 'from "'.$table.'"') && ($suffix === '' || str_contains($query, $suffix)),
+        ));
     }
 
     private function pricingInput(array $overrides = []): array
