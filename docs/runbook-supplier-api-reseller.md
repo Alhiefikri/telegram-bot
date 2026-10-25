@@ -513,10 +513,17 @@ yang didukung; mutex tetap bukan otoritas dedupe.
 - Observasi wallet berusia **>= 15 menit** menghasilkan alert tersendiri dari
   alert transaksi, termasuk ketika katalog tetap fresh. Supplier aktif atau
   mempunyai hold/purchase unresolved tetap dimonitor. Untuk wallet yang belum
-  pernah ter-observasi, usia dihitung sejak Supplier dibuat. Alert menyebut waktu
-  observasi terakhir dan maksimal 10 purchase blocker (ID, SKU ID, hold, waktu);
-  saldo stale tidak ditampilkan sebagai saldo tersedia terkini. Episode ditutup
-  setelah observasi wallet baru, bukan hanya karena sync katalog sukses.
+  pernah ter-observasi, usia dihitung sejak Supplier dibuat. Alert hanya dibuat
+  setelah retry sync yang sudah terjadwal (`sync_next_attempt_at`, termasuk
+  cooldown 429, backoff kegagalan, atau cadence katalog ProdSeller) benar-benar
+  lewat plus grace 120 detik; retry yang masih tertunda bukan observasi overdue.
+  Pengecualian: purchase unresolved yang sengaja menahan wallet tetap memberi
+  alert meskipun retry terjadwal. Alert menyebut waktu observasi terakhir,
+  percobaan sync berikutnya, dan maksimal 10 purchase blocker (ID, SKU ID, hold,
+  waktu); bila tidak ada blocker, pesan menyatakannya eksplisit. Saldo stale
+  tidak ditampilkan sebagai saldo tersedia terkini, dan baris hitungan review
+  nol tidak lagi ditampilkan. Episode ditutup setelah observasi wallet baru,
+  bukan hanya karena sync katalog sukses.
 - Hold purchase unresolved atau reservation tanpa purchase berusia **>= 15 menit**
   mendapat satu alert sampai hold diselesaikan/dilepas; perubahan state recovery
   tidak mengulangnya. Ini sinyal operator, bukan izin melepas hold atau membeli ulang.

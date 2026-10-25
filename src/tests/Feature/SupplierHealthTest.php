@@ -652,6 +652,45 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(2, $this->effects()->count());
     }
 
+    public function test_stale_wallet_alert_waits_for_the_scheduled_retry_and_explains_an_empty_blocker_list(): void
+    {
+        $supplier = $this->supplier([
+            'balance_observed_at' => now()->subMinutes(15),
+            'sync_next_attempt_at' => now()->addMinutes(5),
+        ]);
+
+        $this->assertSame(0, $this->health()->materialize(), 'A pending provider retry is not an overdue observation.');
+        $this->assertSame(0, SupplierHealthEvent::count());
+
+        $this->travel(7)->minutes();
+        $this->assertSame(1, $this->health()->materialize());
+        $message = SupplierHealthEvent::sole()->message;
+        $this->assertStringContainsString('Observasi saldo tertahan', $message);
+        $this->assertStringContainsString('Tidak ada purchase blocker', $message);
+        $this->assertStringContainsString('Percobaan sync berikutnya: ', $message);
+        $this->assertStringNotContainsString('Maksimal 10 blocker', $message);
+        $this->assertStringNotContainsString('Review/ambigu baru', $message);
+        $this->assertSame(0, $this->health()->materialize());
+    }
+
+    public function test_stale_wallet_alert_ignores_a_pending_retry_while_a_purchase_withholds_the_wallet(): void
+    {
+        $supplier = $this->supplier([
+            'balance_observed_at' => now()->subMinutes(15),
+            'sync_next_attempt_at' => now()->addMinutes(5),
+        ]);
+        $purchase = $this->purchase($this->fulfillment($supplier), $supplier, 'awaiting_delivery');
+
+        $this->assertSame(1, $this->health()->materialize());
+        $message = SupplierHealthEvent::sole()->message;
+        $this->assertStringContainsString('Observasi saldo tertahan', $message);
+        $this->assertStringContainsString('Maksimal 10 blocker', $message);
+        $this->assertStringContainsString('Purchase #'.$purchase->id, $message);
+        $this->assertStringNotContainsString('Tidak ada purchase blocker', $message);
+        $this->assertTrue((bool) DB::table('supplier_health_states')->value('balance_stale_active'));
+        $this->assertSame(0, $this->health()->materialize(), 'The active episode stays open across the pending retry.');
+    }
+
     public function test_reserved_hold_without_purchase_is_discovered_and_cleared_on_release(): void
     {
         $supplier = $this->supplier();

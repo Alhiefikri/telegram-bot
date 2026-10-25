@@ -27,6 +27,9 @@ final class SupplierHealthService
     /** Three consecutive durable read failures ~= 6 minutes with 2-minute backoff. */
     public const TRANSIENT_FAILURE_THRESHOLD = 3;
 
+    /** Allow one scheduler tick plus the bounded sync run before a pending retry is overdue. */
+    private const SYNC_RETRY_GRACE_SECONDS = 120;
+
     private const TRANSIENT_ERRORS = ['rate_limited', 'transport'];
 
     private const ERRORS = [
@@ -148,10 +151,18 @@ final class SupplierHealthService
                 $fresh = $supplier->synced_at !== null && $supplier->sync_expires_at?->isFuture() === true;
                 $balanceFresh = $supplier->balance_observed_at?->gt(now()->subSeconds(SupplierCatalogSync::FRESHNESS_SECONDS)) === true;
                 $observed = $supplier->balance_observed_at ?? $supplier->created_at;
-                $stale = $observed?->lte(now()->subSeconds(self::OBSERVATION_ALERT_SECONDS)) === true
-                    && ($supplier->is_active || $supplier->reserved_balance_micros > 0
-                        || SupplierPurchase::where('supplier_id', $id)->whereNull('committed_at')
-                            ->whereIn('state', ['sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists());
+                $overdue = $observed?->lte(now()->subSeconds(self::OBSERVATION_ALERT_SECONDS)) === true;
+                // A provider cooldown, failure backoff or a deliberately slower
+                // catalog cadence already schedules the next read. Alert only
+                // when that retry is overdue, unless an unresolved purchase is
+                // deliberately withholding the wallet observation.
+                $blockers = $overdue && SupplierPurchase::where('supplier_id', $id)->whereNull('committed_at')
+                    ->whereIn('state', ['sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists();
+                $monitored = $overdue && ($supplier->is_active || $supplier->reserved_balance_micros > 0 || $blockers);
+                $retryScheduled = $overdue
+                    && $supplier->sync_next_attempt_at?->addSeconds(self::SYNC_RETRY_GRACE_SECONDS)->isFuture() === true;
+                $stale = $monitored
+                    && ((bool) ($state?->balance_stale_active ?? false) || ! $retryScheduled || $blockers);
                 if ($stale && ! (bool) ($state?->balance_stale_active ?? false)) {
                     // Wallet observation is its own alert, never bundled as a transaction failure.
                     $groups['balance:'.$id] = ['balance_stale' => true, 'supplier_id' => $id];
@@ -400,7 +411,14 @@ final class SupplierHealthService
                     .'; Hold: '.SupplierMoney::decimal($purchase->expected_cost_micros).' '.$this->escape($supplier->currency)
                     .'; Sejak: '.$purchase->created_at->toIso8601String()."\n";
             }
-            $text .= "Maksimal 10 blocker ditampilkan; daftar lengkap di monitor privat.\n";
+            if ($blockers->isNotEmpty()) {
+                $text .= "Maksimal 10 blocker ditampilkan; daftar lengkap di monitor privat.\n";
+            } else {
+                $text .= "Tidak ada purchase blocker; periksa jadwal sync/wallet koneksi.\n";
+            }
+            if ($supplier->sync_next_attempt_at !== null) {
+                $text .= 'Percobaan sync berikutnya: '.$supplier->sync_next_attempt_at->toIso8601String()."\n";
+            }
         }
         if (($conditions['holds'] ?? []) !== []) {
             $text .= "Hold menua >= 15 menit; jangan lepaskan tanpa bukti.\n";
@@ -415,8 +433,8 @@ final class SupplierHealthService
             $text .= self::ERRORS[$code]."\n";
         }
         $count = count($conditions['reviews'] ?? []);
-        $text .= 'Review/ambigu baru: '.$count." obligation (tanpa hitung ganda).\n";
         if ($count > 0) {
+            $text .= 'Review/ambigu baru: '.$count." obligation (tanpa hitung ganda).\n";
             $text .= "Cek exact order dan bukti debit/delivery; jangan beli ulang atau fallback. Daftar lengkap ada di monitor privat.\n";
         }
         foreach (array_merge($conditions['reviews'] ?? [], $conditions['holds'] ?? [], $conditions['reservations'] ?? []) as $context) {
