@@ -1551,11 +1551,13 @@ worker's mutex to force another sweep. Redis loss can still lose cache locks
 and cursors; financial deduplication/fencing remains owned by existing DB
 lifecycle services. The separate `outbound-recovery` service also has a 384 MiB limit
 and runs one child per minute: per-facet pages are capped at 25, PostgreSQL
-statements at 5 seconds, the recovery command at 35 seconds, and the supervisor
-signals the child at 45 seconds before escalating to SIGKILL within 2 seconds.
-It logs process age/RSS and updates its own heartbeat only after success; both
-liveness checks expire after 180 seconds. Do not add outbound recovery back to
-scheduler `runInBackground`.
+statements at 10 seconds, the recovery command at 40 seconds, and the supervisor
+signals the child at 50 seconds before escalating to SIGKILL within 2 seconds.
+Each recovery stage is isolated so one failed stage does not abort the rest of
+the sweep. It logs process age/RSS and updates its own heartbeat only after
+success; two consecutive failed sweeps open the runtime episode, and one
+successful sweep resolves it. Both liveness checks expire after 180 seconds. Do
+not add outbound recovery back to scheduler `runInBackground`.
 
 `SendDailyAdminStatsNotification` mengirim Rekap Kemarin melalui `TelegramAdminStatsIntents`. Judul diberikan sebagai teks Unicode mentah ke formatter, yang merender icon tepat sekali. Jangan memanggil `renderLegacyIcons()` lagi pada judul yang sudah dirender: fallback glyph dapat cocok dengan source icon yang sama dan menghasilkan wrapper `<tg-emoji>` bersarang. `TelegramBotClient` mengubah wrapper internal yang valid menjadi entity `custom_emoji` untuk pesan plain text, atau Unicode fallback jika Telegram menolak custom emoji; marker `data-omp-icon` tidak boleh tampil kepada admin. Perhitungan statistik dan tombol Mini App Dashboard tetap terpisah dari rendering icon.
 

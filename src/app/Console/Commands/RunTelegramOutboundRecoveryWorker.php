@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\Operations\BalanceOperationsAlertService;
+use App\Services\Telegram\TelegramOutboundRecoveryFailureTracker;
 use App\Services\Telegram\TelegramOutboundRecoveryProcessRunner;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
@@ -12,7 +13,7 @@ final class RunTelegramOutboundRecoveryWorker extends Command
 {
     private const INTERVAL_SECONDS = 60;
 
-    private const PROCESS_MAX_SECONDS = 45;
+    private const PROCESS_MAX_SECONDS = 50;
 
     protected $signature = 'telegram:recover-outbound-worker {--once : Run one bounded recovery sweep and exit.}';
 
@@ -21,12 +22,16 @@ final class RunTelegramOutboundRecoveryWorker extends Command
     public function handle(
         TelegramOutboundRecoveryProcessRunner $runner,
         BalanceOperationsAlertService $alerts,
+        TelegramOutboundRecoveryFailureTracker $failures,
     ): int {
         $heartbeatPath = storage_path('framework/telegram-outbound-recovery-heartbeat');
         $runningPath = storage_path('framework/telegram-outbound-recovery-running');
 
         if (is_file($runningPath)) {
-            $alerts->reconcileSchedulerRuntime('outbound-recovery', healthy: false, reason: 'recovery_interrupted');
+            $consecutiveFailures = $failures->recordFailure();
+            if ($consecutiveFailures >= TelegramOutboundRecoveryFailureTracker::ALERT_THRESHOLD) {
+                $alerts->reconcileSchedulerRuntime('outbound-recovery', healthy: false, reason: 'recovery_interrupted');
+            }
             File::delete($runningPath);
         }
 
@@ -41,19 +46,23 @@ final class RunTelegramOutboundRecoveryWorker extends Command
                 '--chunk=25',
                 '--queue=notifications',
                 '--max-items=25',
-                '--max-seconds=35',
+                '--max-seconds=40',
             ], base_path());
             $exitCode = $runner->run($process, self::PROCESS_MAX_SECONDS, 'telegram:recover-outbound');
 
             if ($exitCode === 0) {
+                $failures->recordSuccess();
                 $alerts->reconcileSchedulerRuntime('outbound-recovery', healthy: true);
                 File::put($heartbeatPath, now()->toIso8601String());
                 File::delete($runningPath);
             } else {
                 $reason = $exitCode === 124 ? 'recovery_timeout' : 'recovery_exit';
-                $alerts->reconcileSchedulerRuntime('outbound-recovery', healthy: false, reason: $reason);
+                $consecutiveFailures = $failures->recordFailure();
+                if ($consecutiveFailures >= TelegramOutboundRecoveryFailureTracker::ALERT_THRESHOLD) {
+                    $alerts->reconcileSchedulerRuntime('outbound-recovery', healthy: false, reason: $reason);
+                }
                 File::delete($runningPath);
-                $this->warn("telegram:recover-outbound exited with status {$exitCode}; runtime alert recorded.");
+                $this->warn("telegram:recover-outbound exited with status {$exitCode}; consecutive failures={$consecutiveFailures}.");
             }
 
             if ($this->option('once')) {

@@ -39,8 +39,10 @@ class TelegramOutboundRecoveryWorkerTest extends TestCase
 
         $heartbeatPath = storage_path('framework/telegram-outbound-recovery-heartbeat');
         $runningPath = storage_path('framework/telegram-outbound-recovery-running');
+        $failuresPath = storage_path('framework/telegram-outbound-recovery-failures');
         @unlink($heartbeatPath);
         @unlink($runningPath);
+        @unlink($failuresPath);
 
         $previousDatabaseEnvironment = [];
         foreach (['DB_CONNECTION', 'DB_DATABASE'] as $name) {
@@ -68,6 +70,7 @@ class TelegramOutboundRecoveryWorkerTest extends TestCase
 
             $this->assertFileExists($heartbeatPath);
             $this->assertFileDoesNotExist($runningPath);
+            $this->assertFileDoesNotExist($failuresPath);
         } finally {
             foreach ($previousDatabaseEnvironment as $name => $previous) {
                 $previous['process'] === false
@@ -86,6 +89,7 @@ class TelegramOutboundRecoveryWorkerTest extends TestCase
             }
             @unlink($heartbeatPath);
             @unlink($runningPath);
+            @unlink($failuresPath);
             @unlink($databasePath);
             @unlink($databasePath.'-journal');
         }

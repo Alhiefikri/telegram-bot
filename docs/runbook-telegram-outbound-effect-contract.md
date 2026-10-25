@@ -145,27 +145,29 @@ the metadata is moved back.
 The dedicated `outbound-recovery` Compose service owns this sweep; the
 scheduler does not launch it with `runInBackground`. It starts one child every
 60 seconds with `--chunk=25 --queue=notifications --max-items=25
---max-seconds=35`. `max-items` bounds each recovery facet, and each facet uses
+--max-seconds=40`. `max-items` bounds each recovery facet, and each facet uses
 a rotating keyset cursor for fairness; the cursor is only a cache hint, so a
-Redis restart cannot lose work. PostgreSQL statements have a 5-second session
-timeout. At 45 seconds the supervisor sends SIGTERM and escalates to SIGKILL
-after at most 2 seconds, keeping the child lifetime below the 60-second cadence.
-Telegram API requests retain their explicit 10-second request and 3-second connect timeouts.
+Redis restart cannot lose work. PostgreSQL statements have a 10-second session
+timeout. Each stage is isolated: a failed stage is logged and the remaining
+stages still run. At 50 seconds the supervisor sends SIGTERM and escalates to
+SIGKILL after at most 2 seconds, keeping the child lifetime below the 60-second
+cadence. Telegram API requests retain their explicit 10-second request and
+3-second connect timeouts.
 
 For an isolated one-shot run, use the bounded command:
 
 ```sh
-php artisan telegram:recover-outbound --chunk=25 --queue=notifications --max-items=25 --max-seconds=35
+php artisan telegram:recover-outbound --chunk=25 --queue=notifications --max-items=25 --max-seconds=40
 ```
 
-The command requires `pcntl` for its hard 35-second alarm. Prefer the
+The command requires `pcntl` for its hard 40-second alarm. Prefer the
 supervised container for production operation so process-age/RSS observation,
 the external deadline, heartbeat, and runtime alerts remain active.
 
 The worker writes `storage/framework/telegram-outbound-recovery-heartbeat`
 only after a successful sweep. The `ops:health --outbound-recovery-heartbeat=180`
 check fails when this heartbeat is missing or stale. Each supervised child logs
-its PID, age, and sampled/peak RSS; the supervisor sends SIGTERM at 45 seconds
+its PID, age, and sampled/peak RSS; the supervisor sends SIGTERM at 50 seconds
 and escalates to SIGKILL within 2 seconds. Do not run a second worker against
 the same storage concurrently.
 
@@ -232,9 +234,13 @@ after a successful `schedule:run`. A non-zero exit opens the durable
 `scheduler_runtime_failure` episode; recovery resolves it through the same
 Telegram Outbound Effect path. The wrapper also compares cgroup v2
 `memory.events` OOM-kill counts and reports new kills through that episode.
-The recovery container reports interrupted, failed, or timed-out child runs
-through `telegram_recovery_runtime_failure`; repeated failures dedupe within
-the open episode.
+The recovery container records every interrupted, failed, or timed-out child
+run, but opens `telegram_recovery_runtime_failure` only after two consecutive
+failures; repeated failures dedupe within the open episode and a successful
+sweep resolves it. A single transient database statement timeout therefore
+does not page the operator. Use
+`storage/framework/telegram-outbound-recovery-failures` to inspect the current
+consecutive-failure count.
 
 The production release gate verifies the recovery container's image and waits
 for its successful-sweep heartbeat before accepting a candidate. Rollback to a
