@@ -446,6 +446,7 @@ class ProductionConcurrencyTest extends TestCase
         $owner = User::factory()->create(['role' => UserRole::Owner]);
         ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::MANUAL,
+            'sakurupiah_channel' => 'QRISC',
             'payment_provider_version' => 0,
             'is_active' => true,
         ]);
