@@ -456,6 +456,48 @@ composer test -- --filter='SupplierPricingTest|SupplierMoneyTest|SupplierAvailab
 
 The normal CI suite includes these tests on PRs and pushes to `main`. `.github/workflows/supplier-pricing-regression.yml` also runs this focused suite daily at **03:00 WITA** (19:00 UTC), supports **Run workflow**, and retains a JUnit result for 14 days. Scheduled execution starts only after the workflow is present on the default branch; GitHub may delay its start. These checks use isolated SQLite and fake/blocked provider HTTP, never live supplier purchases or funding.
 
+## Notifikasi perubahan harga supplier
+
+Sinkronisasi yang berhasil membandingkan harga lama dan baru hanya untuk SKU
+yang terhubung ke Product toko. Harga dasar naik maupun turun memberi notifikasi;
+perubahan tier/diskon juga memberi notifikasi bila mengubah biaya efektif pada
+quantity checkout 1–10.000. Observasi pertama, SKU tanpa mapping, dan harga yang
+tidak berubah tidak membuat pesan. Perubahan berikutnya tetap dikabarkan,
+termasuk harga yang kembali ke nilai sebelumnya.
+
+Pesan hanya ditujukan ke private chat `TELEGRAM_ADMIN_CHAT_ID` existing.
+Target kosong, nol, atau grup tidak membuat event; perubahan selama target tidak
+valid tidak dikirim susulan. Delivery memeriksa ulang target sebelum mengirim dan
+tidak memindahkan snapshot ke target lain. Customer dan Store Channel tidak
+menerima biaya supplier atau profit ini.
+
+Ringkasan memuat identitas Product/SKU, arah dan nilai perubahan dalam mata uang
+supplier, biaya rupiah, harga retail normal quantity satu, profit quantity satu,
+minimum profit, serta ketersediaan gabungan stok lokal dan semua sumber supplier.
+Mapping nonaktif dan Product nonaktif/dihapus ditandai. Angka profit quantity satu
+bukan jaminan kelayakan semua quantity, tier retail, atau harga reseller.
+Notifikasi tidak mengubah kebijakan harga/profit; mode otomatis yang sebelumnya
+aktif tetap diterapkan oleh sinkronisasi seperti biasa.
+
+Tidak ada polling, scheduler, request supplier, ENV, atau migration tambahan.
+Baseline harga dibaca dalam satu query untuk SKU mapped di bawah lock sync
+existing; perbandingan dilakukan di memori. Perubahan dalam satu sync supplier
+digabung, dengan pemecahan pesan maksimal 3.800 byte tanpa membuang entri.
+Nama dan teks supplier di-escape sebagai HTML.
+
+Snapshot `SupplierHealthEvent` dan outbound effect disimpan dalam transaksi sync;
+pengiriman dibangunkan setelah commit lewat antrean existing. Lost wakeup dapat
+dipulihkan oleh `suppliers:notify-health` melalui `dispatchDue`; kegagalan/ambiguity
+Telegram mengikuti ledger existing, bukan mengulang sync atau pembelian supplier.
+
+Verifikasi lokal: `SupplierPriceChangeNotificationTest`, `SupplierHealthTest`,
+dan `SupplierAvailabilityTest` lulus **92 tests / 1.306 assertions**.
+Smoke bootstrap terisolasi dengan HTTP fixture membuktikan baseline → naik →
+tetap → turun menghasilkan event **0 → 1 → 1 → 2**, kapasitas **10 → 0 → 0 → 10**,
+delapan supplier GET untuk empat sync, dan dua pesan privat setelah lost-wakeup
+recovery. Semua HTTP berada di luar transaksi; replay delivery tidak mengirim
+ulang. Ini bukan bukti delivery Telegram live atau pengukuran beban produksi.
+
 ## Alert health supplier privat
 
 `suppliers:notify-health --limit=25` berjalan setiap menit melalui scheduler

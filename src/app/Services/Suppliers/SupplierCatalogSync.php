@@ -7,6 +7,7 @@ use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use App\Models\SupplierPurchase;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -83,6 +84,11 @@ final class SupplierCatalogSync
                     ->whereNull('committed_at')->whereIn('state', ['sending', 'ambiguous', 'awaiting_delivery', 'review'])->exists();
                 SupplierCatalogItem::query()->where(fn ($query) => $query->where('supplier_id', $locked->id)->orWhereIn('id', $mappedItems))
                     ->select('id')->orderBy('id')->lockForUpdate()->get();
+                $previousItems = SupplierHealthService::adminTarget() === null
+                    ? new Collection
+                    : SupplierCatalogItem::query()->where('supplier_id', $locked->id)->whereIn('id', $mappedItems)
+                        ->get(['id', 'unit_price_micros', 'price_tiers', 'bulk_discounts', 'synced_at']);
+                $previousSupplierStock = $products->mapWithKeys(fn (Product $product): array => [$product->id => $product->supplierAvailableStock()])->all();
                 $now = now();
                 $rows = [];
                 foreach ($snapshot->products as $item) {
@@ -139,6 +145,7 @@ final class SupplierCatalogSync
                 }
                 $items = SupplierCatalogItem::query()->whereIn('id', $mappedItems)->orderBy('id')->get();
                 $this->availability->refreshLocked($products, $suppliers, $items, $sources);
+                app(SupplierPriceChangeNotificationService::class)->record($locked, $products, $sources, $previousItems, $items, $previousSupplierStock);
 
                 return true;
             }, 5);

@@ -576,6 +576,8 @@ Sync failures now persist `sync_failures` / `sync_next_attempt_at` with 2–30 m
 
 Connection-error dedupe rearms only after fifteen minutes of healthy observations. A new failure or freshness gap resets the recovery clock; one successful sync cannot rearm flapping transport/rate-limit alerts. This does not suppress independent new financial review/hold or stale-wallet alerts.
 
+`SupplierPriceChangeNotificationService` compares mapped catalog price baselines captured under the existing sync locks, then snapshots both upward/downward base-price changes and effective tier/discount changes after `refreshLocked`. It records batched private `SupplierHealthEvent`/supplier-health effects in the same transaction, with after-commit queue wakeups and existing health recovery/delivery. First observations, unmapped SKUs and unchanged prices remain quiet. Messages distinguish quantity-one economics from combined local/all-source availability; existing automatic pricing is preserved. One batched baseline query, no extra supplier HTTP/scheduler/migration, and HTML-safe 3,800-byte message splitting bound the added work. `SupplierPriceChangeNotificationTest` covers quiet syncs, recurring reversals, private-target safety, margin versus local/fallback capacity, delivery recovery, rollback, effective tier changes, automatic pricing and message splitting. See [operator behavior and local evidence](../runbook-supplier-api-reseller.md#notifikasi-perubahan-harga-supplier).
+
 ### Cart
 
 `Cart` punya status `active`, `checked_out`, `abandoned`, atau `expired`. `CartService` memiliki aturan satu cart aktif/customer dan perubahan quantity. Checkout mengunci cart dan cart items; jangan membuat Order langsung dari UI/controller.
