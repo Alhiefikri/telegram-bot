@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CustomerApi\CustomerApiAvailability;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\Sakurupiah\SakurupiahChannelPolicy;
 use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
@@ -40,6 +41,7 @@ final class AdminDashboardStatsData
         private readonly AdminBalanceOperationsData $balanceOperations,
         private readonly AdminDashboardOverviewData $overview,
         private readonly CustomerApiAvailability $customerApiAvailability,
+        private readonly SakurupiahChannelSettings $sakurupiahChannels,
     ) {}
 
     /**
@@ -244,7 +246,10 @@ final class AdminDashboardStatsData
         $klikQrisReadiness = $this->klikQrisReadiness->checkout();
         $isKlikQrisConfigured = $klikQrisReadiness->isReady();
         $isKlikQrisRequested = $requestedMode === PaymentProvider::KLIKQRIS;
-        $sakurupiahReadiness = $this->sakurupiahReadiness->observe();
+        $sakurupiahChannels = $this->sakurupiahChannels->available();
+        $sakurupiahReadiness = $this->sakurupiahReadiness->observe(
+            channelReader: static fn (): array => $sakurupiahChannels['channels'],
+        );
         $isSakurupiahConfigured = $sakurupiahReadiness->isReady();
         $isSakurupiahEnabled = $requestedMode === PaymentProvider::SAKURUPIAH && $isSakurupiahConfigured;
         $isSakurupiahRequestedButUnavailable = $requestedMode === PaymentProvider::SAKURUPIAH && ! $isSakurupiahConfigured;
@@ -309,6 +314,9 @@ final class AdminDashboardStatsData
             'effective_provider_label' => $effectiveProviderLabel,
             'active_provider_label' => $requestedProviderLabel,
             'payment_provider_version' => (int) ($settings?->payment_provider_version ?? 0),
+            'sakurupiah_channel' => SakurupiahChannelPolicy::selected($settings),
+            'sakurupiah_channels' => $sakurupiahChannels,
+            'sakurupiah_channel_update_url' => route('admin.sakurupiah-channel.update'),
             'is_sakurupiah_enabled' => $isSakurupiahEnabled,
             'is_sakurupiah_configured' => $isSakurupiahConfigured,
             'can_enable_sakurupiah' => $isSakurupiahConfigured,

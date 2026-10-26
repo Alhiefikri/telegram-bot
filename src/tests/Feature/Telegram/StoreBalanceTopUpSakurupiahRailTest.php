@@ -22,13 +22,12 @@ use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Mockery;
+use Tests\Support\QrisTestPayload;
 use Tests\Support\TelegramBotTestSupport;
 
 final class StoreBalanceTopUpSakurupiahRailTest extends TelegramBotTestSupport
 {
     private const BUYER_CHAT_ID = 46701;
-
-    private const QR_PAYLOAD = '00020101021226610014ID.CO.QRIS.WWW0118936000000000000000000000000003033ID10214';
 
     protected function setUp(): void
     {
@@ -49,6 +48,7 @@ final class StoreBalanceTopUpSakurupiahRailTest extends TelegramBotTestSupport
         ]));
         ManualPaymentSetting::query()->create([
             'payment_mode' => 'sakurupiah',
+            'sakurupiah_channel' => 'QRISC',
             'is_active' => true,
             'whatsapp_support_number' => '081234567890',
         ]);
@@ -76,7 +76,7 @@ final class StoreBalanceTopUpSakurupiahRailTest extends TelegramBotTestSupport
                 'fee' => 0,
                 'date' => '2026-07-28',
                 'time' => '10:10:00',
-                'qr' => self::QR_PAYLOAD,
+                'qr' => QrisTestPayload::forAmount(5000),
                 'expired' => 24,
             ], $request));
         $this->app->instance(SakurupiahProviderAdapter::class, $adapter);
@@ -88,8 +88,8 @@ final class StoreBalanceTopUpSakurupiahRailTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUpStatus::Payable, $topUp->status);
         $this->assertSame('sakurupiah', $topUp->provider);
         $this->assertSame('TRX-TOPUP-1', $topUp->provider_reference);
-        $this->assertSame(self::QR_PAYLOAD, (string) $topUp->provider_qris_payload);
-        $this->assertStringNotContainsString(self::QR_PAYLOAD, json_encode($topUp->provider_payload, JSON_THROW_ON_ERROR));
+        $this->assertSame(QrisTestPayload::forAmount(5000), (string) $topUp->provider_qris_payload);
+        $this->assertStringNotContainsString(QrisTestPayload::forAmount(5000), json_encode($topUp->provider_payload, JSON_THROW_ON_ERROR));
 
         $effect = TelegramOutboundEffect::query()
             ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP)
@@ -118,7 +118,7 @@ final class StoreBalanceTopUpSakurupiahRailTest extends TelegramBotTestSupport
                 'fee' => 0,
                 'date' => '2026-07-28',
                 'time' => '10:10:00',
-                'qr' => self::QR_PAYLOAD,
+                'qr' => QrisTestPayload::forAmount(5000),
                 'expired' => 24,
             ], $request),
         );

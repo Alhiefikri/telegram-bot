@@ -44,8 +44,8 @@ final readonly class SakurupiahCreateInvoice
     ) {
         $this->method = self::requiredText($method, 'method', 64);
         $this->phone = self::requiredText($phone, 'phone', 32);
-        if ($this->method !== self::METHOD_QRISC) {
-            throw new InvalidArgumentException('Sakurupiah invoice method must be QRISC.');
+        if (! SakurupiahChannelPolicy::supports($this->method)) {
+            throw new InvalidArgumentException('Sakurupiah invoice method is not a supported QRIS channel.');
         }
         $this->amount = $amount instanceof SakurupiahAmount
             ? $amount

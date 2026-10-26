@@ -18,6 +18,7 @@ use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
+use App\Services\Sakurupiah\SakurupiahChannelPolicy;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpInstructionAttachment;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResolver;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResult;
@@ -77,9 +78,7 @@ final class StoreBalanceTopUpService
 
     public function createOrReuseConfirmedIntent(StoreBalanceFundingIntent $intent): StoreBalanceTopUp
     {
-        $selection = $this->providers->resolve();
-
-        return DB::transaction(function () use ($intent, $selection): StoreBalanceTopUp {
+        return DB::transaction(function () use ($intent): StoreBalanceTopUp {
             $customer = Customer::query()
                 ->whereKey($intent->customer_id)
                 ->lockForUpdate()
@@ -112,6 +111,16 @@ final class StoreBalanceTopUpService
                 return $existing->fresh(['customer', 'fundingIntent', 'navigationRoot']);
             }
 
+            $setting = ManualPaymentSetting::query()
+                ->where('is_active', true)
+                ->oldest('id')
+                ->lockForUpdate()
+                ->first();
+            $selection = $this->providers->resolve($setting);
+            $channel = $selection->provider() === PaymentProvider::SAKURUPIAH
+                ? SakurupiahChannelPolicy::selected($setting)
+                : null;
+
             try {
                 return StoreBalanceTopUp::query()->create([
                     'customer_id' => $customer->getKey(),
@@ -124,6 +133,7 @@ final class StoreBalanceTopUpService
                     'payment_setting_id' => $selection->settingId(),
                     'payment_provider_version' => $selection->providerVersion(),
                     'provider_payment_method' => $this->paymentMethodFor($selection->provider()),
+                    'sakurupiah_channel' => $channel,
                     'merchant_ref' => self::merchantReference($lockedIntent),
                     'idempotency_key' => self::idempotencyKey($lockedIntent),
                     'currency' => 'IDR',

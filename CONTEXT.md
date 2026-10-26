@@ -188,6 +188,10 @@ _Avoid_: Binance Pay ID, wallet credential, private key
 The owner-controlled store setting selects Manual, KlikQRIS, or Sakurupiah for new checkouts without changing Payments already created with another provider. A provider must pass its readiness gate before selection; Sakurupiah production requires both production credentials. Pakasir is not selectable for new checkout; historical Pakasir Payments remain on their original provider.
 _Avoid_: Customer provider choice, automatic provider fallback
 
+**Sakurupiah Channel Selection**:
+The Owner-controlled QRIS channel for new Sakurupiah checkouts and Store Balance top-ups. It defaults to `QRIS` and can select a supported, active merchant channel (`QRIS`, `QRISC`, `QRISMU`, or `QRIS2`) through the Admin Dashboard. Each transaction snapshots its channel before invoice creation; later selection changes never alter its create, recovery, callback, fee evidence, or settlement identity. Channel failure never triggers automatic fallback.
+_Avoid_: customer channel choice, automatic channel fallback, re-targeting an existing invoice
+
 **Rejected Provider Create**:
 A provider invoice create answered with the provider's own failure contract (an application status and reason, on the documented response envelope or a non-retryable HTTP failure). It proves that no provider transaction exists for the merchant reference, so the Payment stays recoverable and the same reference is created again after the cause is corrected; it is never treated as an ambiguous outcome. Distinct from an ambiguous create, where the request may already have been accepted.
 _Avoid_: failed payment, terminal create failure, duplicate invoice retry

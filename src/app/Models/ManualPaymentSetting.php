@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 #[Fillable([
     'payment_mode',
     'payment_provider_version',
+    'sakurupiah_channel',
     'admin_contact_url',
     'admin_username',
     'admin_telegram_chat_id',

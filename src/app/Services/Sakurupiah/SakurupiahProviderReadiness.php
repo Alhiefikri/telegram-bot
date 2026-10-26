@@ -16,8 +16,6 @@ use Throwable;
 
 final class SakurupiahProviderReadiness
 {
-    public const QRIS_METHOD = SakurupiahCreateInvoice::METHOD_QRISC;
-
     private const CACHE_VERSION_KEY = 'sakurupiah.readiness.version';
 
     private const CACHE_KEY_PREFIX = 'sakurupiah.readiness';
@@ -95,8 +93,10 @@ final class SakurupiahProviderReadiness
     public function observe(
         ?SakurupiahEnvironment $environment = null,
         ?callable $channelReader = null,
+        ?string $channelOverride = null,
     ): SakurupiahProviderReadinessReport {
         $environment = $this->resolveEnvironment($environment);
+        $selectedChannel = $channelOverride ?? SakurupiahChannelPolicy::selected();
         $configuration = $this->evaluateConfiguration(
             $environment,
             includeOperationalPrerequisites: $environment === SakurupiahEnvironment::Production,
@@ -109,7 +109,7 @@ final class SakurupiahProviderReadiness
             return $configuration;
         }
 
-        return $this->observeEnvironment($environment, $configuration, $channelReader);
+        return $this->observeEnvironment($environment, $configuration, $channelReader, $selectedChannel);
     }
 
     public function check(
@@ -228,6 +228,7 @@ final class SakurupiahProviderReadiness
             || $report->configurationFingerprint() !== $this->configurationFingerprint(
                 $environment,
                 includeOperational: true,
+                selectedChannel: SakurupiahChannelPolicy::selected($setting),
             )
         ) {
             throw new InvalidCheckout('Sakurupiah QRIS checkout readiness changed. Try again.');
@@ -244,6 +245,7 @@ final class SakurupiahProviderReadiness
             || $report->qrisChannel() === null
             || ! $report->qrisChannel()->isQris()
             || ! $report->qrisChannel()->isActive()
+            || $report->qrisChannel()->code !== SakurupiahChannelPolicy::selected($setting)
         ) {
             throw new InvalidCheckout('Sakurupiah QRIS channel is no longer ready. Try again.');
         }
@@ -672,8 +674,13 @@ final class SakurupiahProviderReadiness
         SakurupiahEnvironment $environment,
         SakurupiahProviderReadinessReport $configuration,
         ?callable $channelReader = null,
+        ?string $selectedChannel = null,
     ): SakurupiahProviderReadinessReport {
-        $fingerprint = $this->configurationFingerprint($environment, includeOperational: true);
+        $selectedChannel ??= SakurupiahChannelPolicy::selected();
+        if (! SakurupiahChannelPolicy::supports($selectedChannel)) {
+            throw new \InvalidArgumentException('Unsupported Sakurupiah channel.');
+        }
+        $fingerprint = $this->configurationFingerprint($environment, includeOperational: true, selectedChannel: $selectedChannel);
         $cacheKey = $this->cacheKey($environment, $fingerprint);
         $reader = $channelReader ?? $this->defaultChannelReader();
         if ($reader === null) {
@@ -685,6 +692,7 @@ final class SakurupiahProviderReadiness
             $configuration,
             $fingerprint,
             $reader,
+            $selectedChannel,
         );
 
         try {
@@ -712,6 +720,7 @@ final class SakurupiahProviderReadiness
         SakurupiahProviderReadinessReport $configuration,
         string $fingerprint,
         callable $channelReader,
+        string $selectedChannel,
     ): SakurupiahProviderReadinessReport {
         $invalid = $configuration->invalid();
         $channel = null;
@@ -727,7 +736,7 @@ final class SakurupiahProviderReadiness
 
             $qrisChannels = array_values(array_filter(
                 $channels,
-                static fn (mixed $candidate): bool => $candidate instanceof SakurupiahChannel && $candidate->isQris(),
+                static fn (mixed $candidate): bool => $candidate instanceof SakurupiahChannel && $candidate->code === $selectedChannel,
             ));
             if ($qrisChannels === []) {
                 $invalid['SAKURUPIAH_QRIS_CHANNEL'] = 'Sakurupiah QRIS channel was not returned for the target merchant.';
@@ -789,7 +798,10 @@ final class SakurupiahProviderReadiness
     private function invalidQrisContract(SakurupiahChannel $channel): array
     {
         $invalid = $this->invalidConfiguredQrisContract();
-        $expiryHours = config('services.sakurupiah.qris_contract.expiry_hours');
+        if (isset($invalid['SAKURUPIAH_QRIS_EXPIRY_CONTRACT'])) {
+            return $invalid;
+        }
+        $expiryHours = SakurupiahChannelPolicy::expiryHours($channel->code);
         if ($channel->addition?->defaultExpiredHours() !== null
             && $channel->addition->defaultExpiredHours() !== $expiryHours
         ) {
@@ -797,6 +809,14 @@ final class SakurupiahProviderReadiness
         }
 
         return $invalid;
+    }
+
+    public function channelIsSelectable(SakurupiahChannel $channel): bool
+    {
+        return $channel->isQris()
+            && $channel->isActive()
+            && in_array(strtoupper($channel->type), ['DIRECT', 'REDIRECT'], true)
+            && $this->invalidQrisContract($channel) === [];
     }
 
     private function channelObservationFailure(
@@ -1000,9 +1020,11 @@ final class SakurupiahProviderReadiness
     private function configurationFingerprint(
         SakurupiahEnvironment $environment,
         bool $includeOperational = false,
+        ?string $selectedChannel = null,
     ): string {
         $identity = [
             'environment' => $environment->value,
+            'selected_channel' => $selectedChannel,
             'enabled' => $this->value($environment, 'enabled', false),
             'api_id' => $this->secretDigest($this->value($environment, 'api_id')),
             'api_key' => $this->secretDigest($this->value($environment, 'api_key')),

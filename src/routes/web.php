@@ -40,6 +40,7 @@ use App\Http\Controllers\Admin\AdminProductStockItemUpdateController;
 use App\Http\Controllers\Admin\AdminProductUpdateController;
 use App\Http\Controllers\Admin\AdminProductVisibilityController;
 use App\Http\Controllers\Admin\AdminProductWorkspaceController;
+use App\Http\Controllers\Admin\AdminSakurupiahChannelController;
 use App\Http\Controllers\Admin\AdminSalesProofRetryController;
 use App\Http\Controllers\Admin\AdminStoreBalanceFundingPolicyController;
 use App\Http\Controllers\Admin\AdminStoreBalanceTopUpCompensationController;
@@ -212,6 +213,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                     ->name('proof');
             });
             Route::post('payment-mode', AdminPaymentModeController::class)->name('payment-mode.update');
+            Route::post('sakurupiah-channel', AdminSakurupiahChannelController::class)->name('sakurupiah-channel.update');
             Route::post('payment-qr-template', [AdminPaymentQrTemplateController::class, 'update'])
                 ->name('payment-qr-template.update');
             Route::post('payment-qr-template/status', [AdminPaymentQrTemplateController::class, 'status'])

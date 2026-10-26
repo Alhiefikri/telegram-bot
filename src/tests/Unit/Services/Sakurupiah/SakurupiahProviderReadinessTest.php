@@ -3,15 +3,25 @@
 namespace Tests\Unit\Services\Sakurupiah;
 
 use App\Enums\SakurupiahEnvironment;
+use App\Models\ManualPaymentSetting;
 use App\Services\Sakurupiah\SakurupiahChannel;
 use App\Services\Sakurupiah\SakurupiahChannelAddition;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class SakurupiahProviderReadinessTest extends TestCase
 {
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        ManualPaymentSetting::create(['payment_mode' => 'sakurupiah', 'is_active' => true, 'sakurupiah_channel' => 'QRISC']);
+    }
+
     public function test_disabled_or_incomplete_environment_is_not_ready(): void
     {
         config()->set('services.sakurupiah', [

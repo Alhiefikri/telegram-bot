@@ -19,6 +19,7 @@ final class SakurupiahReconciliationQuery
         'provider_total_payment',
         'provider_fee',
         'provider_payment_method',
+        'sakurupiah_channel',
         'provider_create_state',
         'provider_create_last_error',
         'provider_created_at',

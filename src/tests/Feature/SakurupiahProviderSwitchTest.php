@@ -25,6 +25,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
         $setting = ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::MANUAL,
             'is_active' => true,
+            'sakurupiah_channel' => 'QRISC',
         ]);
 
         $this->actingAs($owner)
@@ -56,6 +57,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
         $setting = ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::SAKURUPIAH,
             'is_active' => true,
+            'sakurupiah_channel' => 'QRISC',
         ]);
         $customer = Customer::factory()->create();
         $order = Order::factory()->for($customer, 'customer')->create([
@@ -96,6 +98,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
         $setting = ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::MANUAL,
             'is_active' => true,
+            'sakurupiah_channel' => 'QRISC',
         ]);
 
         $this->from('/admin?tab=stats')

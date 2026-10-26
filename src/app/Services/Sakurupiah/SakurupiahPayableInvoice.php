@@ -5,6 +5,7 @@ namespace App\Services\Sakurupiah;
 use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
 use App\Models\Payment;
+use App\Models\StoreBalanceTopUp;
 use App\Services\Pakasir\QrisEmvPayload;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
@@ -45,15 +46,54 @@ final readonly class SakurupiahPayableInvoice
             throw new SakurupiahInvoiceIntegrityException('payment_identity');
         }
 
-        if ($invoice->merchantRef !== (string) $payment->merchant_ref) {
+        return self::fromProviderInvoice(
+            (string) $payment->merchant_ref,
+            (int) $payment->amount,
+            SakurupiahChannelPolicy::forPayment($payment),
+            $invoice,
+            $effectiveExpiresAt,
+            $environment,
+        );
+    }
+
+    public static function fromTopUp(
+        StoreBalanceTopUp $topUp,
+        SakurupiahInvoice $invoice,
+        CarbonInterface $effectiveExpiresAt,
+        SakurupiahEnvironment $environment,
+    ): self {
+        if ($topUp->provider !== PaymentProvider::SAKURUPIAH
+            || $topUp->currency !== 'IDR') {
+            throw new SakurupiahInvoiceIntegrityException('payment_identity');
+        }
+
+        return self::fromProviderInvoice(
+            (string) $topUp->merchant_ref,
+            (int) $topUp->amount,
+            SakurupiahChannelPolicy::forTopUp($topUp),
+            $invoice,
+            $effectiveExpiresAt,
+            $environment,
+        );
+    }
+
+    private static function fromProviderInvoice(
+        string $merchantRef,
+        int $amount,
+        string $channel,
+        SakurupiahInvoice $invoice,
+        CarbonInterface $effectiveExpiresAt,
+        SakurupiahEnvironment $environment,
+    ): self {
+        if ($invoice->merchantRef !== $merchantRef) {
             throw new SakurupiahInvoiceIntegrityException('merchant_reference');
         }
 
-        if ($invoice->paymentCode !== SakurupiahCreateInvoice::METHOD_QRISC) {
+        if ($invoice->paymentCode !== $channel) {
             throw new SakurupiahInvoiceIntegrityException('payment_method');
         }
 
-        if ($invoice->amountValue() !== null && $invoice->amountValue() !== (int) $payment->amount) {
+        if ($invoice->amountValue() !== null && $invoice->amountValue() !== $amount) {
             throw new SakurupiahInvoiceIntegrityException('amount');
         }
         $merchantFee = $invoice->merchantFee();
@@ -69,7 +109,7 @@ final readonly class SakurupiahPayableInvoice
             ? SakurupiahQrisContract::customerPaysFee(SakurupiahQrisContract::configured())
             : $merchantFee === 2;
         $fee = $invoice->fee?->fixedAmount();
-        if ($fee === null || $invoice->totalValue() < (int) $payment->amount) {
+        if ($fee === null || $invoice->totalValue() < $amount) {
             throw new SakurupiahInvoiceIntegrityException('fee');
         }
 
@@ -105,7 +145,7 @@ final readonly class SakurupiahPayableInvoice
         }
 
         return new self(
-            merchantRef: (string) $payment->merchant_ref,
+            merchantRef: $merchantRef,
             providerReference: $invoice->trxId,
             paymentMethod: $invoice->paymentCode,
             totalAmount: $invoice->totalValue(),
@@ -139,7 +179,7 @@ final readonly class SakurupiahPayableInvoice
         $paymentMethod = strtoupper(trim((string) $payment->provider_payment_method));
         $fee = $payment->provider_fee;
         $total = $payment->provider_total_payment;
-        if ($merchantRef === '' || $providerReference === '' || $paymentMethod !== SakurupiahCreateInvoice::METHOD_QRISC) {
+        if ($merchantRef === '' || $providerReference === '' || $paymentMethod !== SakurupiahChannelPolicy::forPayment($payment)) {
             throw new SakurupiahInvoiceIntegrityException('payment_identity');
         }
         if ($payment->status !== PaymentStatus::Pending

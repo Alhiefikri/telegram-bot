@@ -198,6 +198,7 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         ]);
         ManualPaymentSetting::create([
             'payment_mode' => 'sakurupiah',
+            'sakurupiah_channel' => 'QRISC',
             'is_active' => true,
             'whatsapp_support_number' => '08123456789',
         ]);

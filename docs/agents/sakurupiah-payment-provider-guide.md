@@ -43,18 +43,18 @@ Implementasi baru boleh dianggap siap hanya jika semua kondisi ini terbukti:
 
 ## Keputusan scope yang direkomendasikan
 
-### V1: satu channel QRIS yang disetujui
+### Owner-selected QRIS channel
 
-Gunakan scope paling kecil yang cocok dengan arsitektur saat ini:
+Channel selection belongs to the Owner Dashboard, not the customer:
 
 - `Payment.provider = sakurupiah`.
 - `Payment.method = QRIS` sebagai identitas rail customer lokal.
-- Request provider Sakurupiah memakai `method=QRISC`, yaitu channel yang
-  dikonfirmasi aktif dan disetujui untuk merchant target.
+- Request provider memakai channel yang dipilih Owner dan disnapshot pada
+  `Payment.sakurupiah_channel` atau `StoreBalanceTopUp.sakurupiah_channel`.
 - `Payment.currency = IDR` hanya setelah merchant mengonfirmasi bahwa `amount`
   memang rupiah integer.
-- Checkout customer tetap memilih rail QRIS yang sama; jangan menambah pemilih
-  17 channel baru pada release pertama.
+- Checkout customer tetap memilih rail QRIS yang sama; hanya Owner yang
+  memilih channel `QRIS`, `QRISC`, `QRISMU`, atau `QRIS2` di Dashboard.
 - `merchant_fee = 2` (buyer bears the fee) adalah kebijakan release saat ini:
   fee channel QRIS dibebankan ke pembeli, sehingga provider menambahkan fee di
   atas nominal Order (`total = amount + fee`) dan merchant menerima penuh
@@ -62,13 +62,18 @@ Gunakan scope paling kecil yang cocok dengan arsitektur saat ini:
   `services.sakurupiah.qris_contract` (`fee_payer = customer`), bukan ENV.
   Provider meng-echo payer sebagai kata (`Merchant` atau `Pelanggan`), dan
   response `total`, `fee`, `amount_merchant` harus tetap divalidasi per sandbox.
-- Channel, fee, dan expiry bukan data katalog. Jangan menambah ENV untuk
-  label/price/channel presentation. Jika nantinya harus dapat diubah Owner,
-  simpan di setting database/Admin; credential dan deployment knobs tetap
-  server-side.
-
-QRISC dipilih karena provider target memiliki beberapa varian QRIS aktif;
-readiness harus memilih tepat QRISC dan menolak channel set yang ambigu.
+- Channel disimpan pada `manual_payment_settings.sakurupiah_channel`, default
+  `QRIS`; bukan ENV. Metadata fee, limit, dan settlement berasal dari API.
+- `SakurupiahChannelSettings` mengotorisasi Owner, memvalidasi pilihan aktif,
+  memeriksa optimistic version di bawah lock, lalu menyimpan perubahan dan audit
+  secara atomik. Provider aktif tidak ikut diubah.
+- Readiness memilih tepat channel tersimpan dan memasukkannya dalam cache
+  fingerprint; preflight yang sudah basi ditolak sebelum persist checkout.
+- Create, retry, recovery, callback, dan history harus cocok dengan snapshot
+  transaksi. Payment lama mempertahankan observed channel; transaksi lama tanpa
+  observed channel dan top-up lama tetap QRISC. Tidak ada fallback otomatis.
+- `QRISMU` memakai expiry 12 jam; channel lain memakai policy 24 jam yang
+  dikualifikasi. Metadata expiry yang tidak sesuai membuat channel tidak siap.
 
 ### Presentation contract
 
@@ -186,7 +191,7 @@ Field yang didokumentasikan:
 | Field | Rule provider | Kebijakan adapter |
 | --- | --- | --- |
 | `api_id` | Required | Ambil dari environment target |
-| `method` | Required channel code | V1 fixed `QRISC`; validasi channel runtime |
+| `method` | Required channel code | Channel snapshot transaksi; harus cocok dengan channel hasil provider |
 | `name` | Optional | Kirim buyer name bila contract/privacy mengizinkan |
 | `email` | Optional | Kirim hanya bila diperlukan; jangan log |
 | `phone` | Required; contoh `08`, `62`, `60` | Perlakukan sebagai string, normalisasi hanya setelah dikonfirmasi |
@@ -336,7 +341,8 @@ Gunakan existing fields terlebih dahulu; migration baru hanya jika evidence memb
 | `merchant_ref` | local generated reference | Idempotency/correlation key |
 | `provider_reference` | `trx_id` | Required before status lookup |
 | `method` | `QRIS` | Customer rail identity |
-| `provider_payment_method` | `QRISC` from `payment_kode` | Preserve exact approved provider code |
+| `provider_payment_method` | Observed `payment_kode` | Must match the immutable `sakurupiah_channel` snapshot |
+| `sakurupiah_channel` | Selected channel before create | Settings changes never re-target this transaction |
 | `amount` | local Order payable amount | Integer only after IDR confirmation |
 | `currency` | `IDR` v1 | No provider currency field; gate required |
 | `provider_total_payment` | validated response `total` | Never blindly cast untrusted value |

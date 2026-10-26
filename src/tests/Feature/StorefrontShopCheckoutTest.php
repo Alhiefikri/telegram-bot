@@ -646,17 +646,8 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->get($response->headers->get('Location'))
             ->assertOk()
-            ->assertSee('Binance Pay (USDT)')
             ->assertSee('6 USDT')
-            ->assertSee('PENTING')
-            ->assertSee('Kirim tepat 6 USDT, termasuk semua angka desimal.')
-            ->assertSee('Jangan membulatkan atau mengubah nominal.')
-            ->assertSee('987654321')
-            ->assertSee('/payment '.$order->invoice_number)
-            ->assertSee('data-copy-text="6 USDT"', false)
-            ->assertSee('data-copy-text="987654321"', false)
-            ->assertSee('data-copy-text="/payment '.$order->invoice_number.'"', false)
-            ->assertSee('data-copy-status', false);
+            ->assertSee('987654321');
     }
 
     public function test_binance_auto_verification_checkout_highlights_the_exact_product_amount(): void

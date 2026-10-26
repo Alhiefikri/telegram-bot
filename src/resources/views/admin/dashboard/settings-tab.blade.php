@@ -182,6 +182,57 @@
                         </div>
                     @endif
 
+                    <section class="mt-5 border-t border-admin-line pt-4" aria-labelledby="sakurupiah-channel-heading">
+                        <h3 id="sakurupiah-channel-heading" class="text-base font-semibold text-admin-ink">Channel QRIS Sakurupiah</h3>
+                        <p id="sakurupiah-channel-help" class="mt-2 text-sm leading-6 text-admin-muted">
+                            Tersimpan: <strong class="text-admin-ink">{{ $paymentControl['sakurupiah_channel'] }}</strong>.
+                            Perubahan hanya berlaku untuk transaksi baru, termasuk top-up saldo. Provider aktif, payment dan top-up lama tidak berubah. Tidak ada fallback otomatis ke channel lain.
+                        </p>
+                        @if ($paymentControl['sakurupiah_channels']['error'])
+                            <x-admin-dashboard.notice tone="warning" class="mt-3" role="status">
+                                {{ $paymentControl['sakurupiah_channels']['error'] }}
+                            </x-admin-dashboard.notice>
+                        @endif
+                        <form method="POST" action="{{ $paymentControl['sakurupiah_channel_update_url'] }}" class="mt-3 space-y-3">
+                            @csrf
+                            <input type="hidden" name="payment_provider_version" value="{{ $paymentControl['payment_provider_version'] }}">
+                            <x-admin-dashboard.field-label for="sakurupiah-channel">Channel untuk transaksi baru</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.select id="sakurupiah-channel" name="sakurupiah_channel" required aria-describedby="sakurupiah-channel-help" :disabled="! $paymentControl['can_switch_provider'] || $paymentControl['sakurupiah_channels']['channels'] === []">
+                                <option value="">Pilih channel aktif</option>
+                                @foreach ($paymentControl['sakurupiah_channels']['channels'] as $channel)
+                                    <option value="{{ $channel->code }}" @selected(old('sakurupiah_channel', $paymentControl['sakurupiah_channel']) === $channel->code)>{{ $channel->code }}{{ $channel->name !== $channel->code ? ' · '.$channel->name : '' }}</option>
+                                @endforeach
+                            </x-admin-dashboard.select>
+                            @foreach (['sakurupiah_channel', 'payment_provider_version'] as $field)
+                                @error($field, 'sakurupiahChannel')
+                                    <x-admin-dashboard.field-error role="alert">{{ $message }}</x-admin-dashboard.field-error>
+                                @enderror
+                            @endforeach
+                            @if ($paymentControl['can_switch_provider'])
+                                <x-admin-dashboard.button type="submit" :disabled="$paymentControl['sakurupiah_channels']['channels'] === []">Simpan channel Sakurupiah</x-admin-dashboard.button>
+                            @else
+                                <p class="text-sm text-admin-muted">Hanya Owner yang dapat menyimpan pilihan channel.</p>
+                            @endif
+                        </form>
+                        @if ($paymentControl['sakurupiah_channels']['channels'] !== [])
+                            <p class="mt-4 text-xs leading-5 text-admin-muted">Metadata berikut berasal dari provider. Total bayar mengikuti kontrak fee dan invoice provider; nilai yang tidak dikirim ditandai tidak tersedia.</p>
+                            <dl class="mt-2 divide-y divide-admin-line">
+                                @foreach ($paymentControl['sakurupiah_channels']['channels'] as $channel)
+                                    <div class="py-3">
+                                        <dt class="text-sm font-semibold text-admin-ink">{{ $channel->code }}{{ $channel->name !== $channel->code ? ' · '.$channel->name : '' }}</dt>
+                                        <dd class="mt-1 break-words text-sm leading-6 text-admin-muted">
+                                            Batas Rp {{ number_format($channel->minimum, 0, ',', '.') }} sampai Rp {{ number_format($channel->maximum, 0, ',', '.') }}.
+                                            Biaya: {{ $channel->percent !== null ? $channel->percent.'%' : ($channel->feeAmount() === null ? 'tidak tersedia' : 'Rp '.number_format($channel->feeAmount(), 0, ',', '.')) }}.
+                                            Biaya tambahan: {{ $channel->addition?->additionalFee() === null ? 'tidak tersedia' : (strtolower((string) $channel->addition->kind()) === 'nominal' ? 'Rp '.$channel->addition->additionalFee()->submitted() : $channel->addition->additionalFee()->submitted().' '.$channel->addition->kind()) }}.
+                                            Batas bayar invoice baru: {{ \App\Services\Sakurupiah\SakurupiahChannelPolicy::expiryHours($channel->code) }} jam.
+                                            Settlement: {{ $channel->addition?->settlement() ?? 'tidak tersedia' }}.
+                                        </dd>
+                                    </div>
+                                @endforeach
+                            </dl>
+                        @endif
+                    </section>
+
                     @if ($paymentControl['can_manage'])
                         <form id="admin-binance-enabled-setting" method="POST" action="{{ $paymentControl['update_url'] }}" class="mt-3">
                             @csrf

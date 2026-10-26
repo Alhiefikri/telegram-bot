@@ -26,6 +26,7 @@ use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
@@ -37,6 +38,7 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         $this->configureReadySakurupiah();
         $setting = ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::SAKURUPIAH,
+            'sakurupiah_channel' => 'QRISC',
             'is_active' => true,
         ]);
         $product = Product::factory()->create([
@@ -116,6 +118,7 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         config()->set('services.sakurupiah.qris_contract.currency_confirmed', false);
         ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::SAKURUPIAH,
+            'sakurupiah_channel' => 'QRISC',
             'is_active' => true,
         ]);
         $product = Product::factory()->create(['price_amount' => 12_000, 'stock' => 1, 'reserved_stock' => 0]);
@@ -139,6 +142,7 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         $this->configureReadySakurupiah(minimum: 1_000, maximum: 5_000);
         ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::SAKURUPIAH,
+            'sakurupiah_channel' => 'QRISC',
             'is_active' => true,
         ]);
         $product = Product::factory()->create(['price_amount' => 6_000, 'stock' => 1, 'reserved_stock' => 0]);
@@ -162,6 +166,7 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         $this->configureReadySakurupiah();
         $setting = ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::SAKURUPIAH,
+            'sakurupiah_channel' => 'QRISC',
             'is_active' => true,
         ]);
         $product = Product::factory()->create(['price_amount' => 12_000, 'stock' => 1, 'reserved_stock' => 0]);
@@ -191,7 +196,41 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    private function configureReadySakurupiah(int $minimum = 200, int $maximum = 20_000_000): void
+    #[DataProvider('checkoutChannels')]
+    public function test_checkout_persists_the_observed_channel_and_its_expiry_before_invoice_creation(string $channel, int $expiryHours): void
+    {
+        $this->travelTo('2026-10-27 07:00:00');
+        $this->configureReadySakurupiah(channel: $channel);
+        ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::SAKURUPIAH,
+            'sakurupiah_channel' => $channel,
+            'is_active' => true,
+        ]);
+        $product = Product::factory()->create(['price_amount' => 12_000, 'stock' => 2, 'reserved_stock' => 0]);
+        $cart = $this->cartForProduct($product, telegramId: null);
+
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::sakurupiah());
+        $payment = $order->payments()->sole();
+
+        $this->assertSame($channel, $payment->sakurupiah_channel);
+        $this->assertSame(now()->addHours($expiryHours)->timestamp, $payment->expired_at->timestamp);
+        $this->assertNull($payment->provider_reference);
+        $this->assertSame($order->expires_at->timestamp, $payment->expired_at->timestamp);
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/list-payment.php'));
+    }
+
+    public static function checkoutChannels(): array
+    {
+        return [
+            'QRIS' => ['QRIS', 24],
+            'QRISC' => ['QRISC', 24],
+            'QRISMU' => ['QRISMU', 12],
+            'QRIS2' => ['QRIS2', 24],
+        ];
+    }
+
+    private function configureReadySakurupiah(int $minimum = 200, int $maximum = 20_000_000, string $channel = 'QRISC'): void
     {
         config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
             'sandbox_enabled' => true,
@@ -211,13 +250,13 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         Http::fake(fn () => Http::response([
             'status' => '200',
             'data' => [[
-                'kode' => 'QRISC',
-                'nama' => 'QRISC Custom Merchant',
+                'kode' => $channel,
+                'nama' => $channel.' Merchant',
                 'minimal' => $minimum,
                 'maksimal' => $maximum,
                 'tipe' => 'DIRECT',
                 'status' => 'Aktif',
-                'addition' => ['default_expired' => 24],
+                'addition' => ['default_expired' => $channel === 'QRISMU' ? 12 : 24],
             ]],
         ], 200));
     }

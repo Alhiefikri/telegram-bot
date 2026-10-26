@@ -638,8 +638,9 @@ seam `StoreBalanceTopUpLifecycle`, yang dipilih
 `StoreBalanceTopUpLifecycleResolver` dari provider top-up:
 `KlikQrisStoreBalanceTopUpLifecycle` mendelegasikan ke
 `KlikQrisNativeQrisService`, `SakurupiahStoreBalanceTopUpLifecycle` membuat/
-refresh invoice `QRISC` lewat adapter Sakurupiah dan menyimpan payload QR
-terenkripsi, dan `ManualStoreBalanceTopUpLifecycle` membuat top-up
+refresh invoice pada snapshot `sakurupiah_channel` lewat adapter Sakurupiah dan
+menyimpan payload QR atau URL gambar provider yang aman secara terenkripsi,
+dan `ManualStoreBalanceTopUpLifecycle` membuat top-up
 `awaiting_confirmation` untuk dikonfirmasi operator. Rail mengembalikan DTO
 provider-neutral dan tidak pernah memindahkan saldo: `StoreBalanceTopUpService`
 tetap pemilik transaksi top-up, urutan lock, validasi settlement evidence,
@@ -1293,9 +1294,11 @@ Telegram `/payment` routes pending `USDT_BEP20` Orders to BSC verification, not 
 ### 5.7 Sakurupiah QRIS
 
 Sakurupiah is an Owner-selectable provider for new QRIS checkout
-(`provider=sakurupiah`, local `method=QRIS`, provider API `method=QRISC`,
-`currency=IDR`). Checkout preparation, post-commit invoice lifecycle, callback
-verification, and safe presentation live in [`src/app/Services/Sakurupiah/`](../../src/app/Services/Sakurupiah/).
+(`provider=sakurupiah`, local `method=QRIS`, `currency=IDR`). The Owner selects
+`QRIS` (default), `QRISC`, `QRISMU`, or `QRIS2` through the existing payment
+settings Dashboard. Checkout preparation, post-commit invoice lifecycle,
+callback verification, and safe presentation live in
+[`src/app/Services/Sakurupiah/`](../../src/app/Services/Sakurupiah/).
 `SakurupiahInvoiceLifecycleService` owns create/recovery and classifies only
 safe outcomes (`Payable` carries presentation; all other states carry no
 provider payload).
@@ -1307,6 +1310,17 @@ endpoints, callback routes, host policy, QRIS settlement defaults, and
 operational budgets remain pinned in application configuration. Readiness still
 checks the runtime channel, queue, scheduler, and payment schema before
 provider I/O.
+
+`SakurupiahChannelSettings` owns the Owner-only, optimistic-versioned channel
+update and atomic audit. The DB-backed selection does not change the provider.
+`SakurupiahChannelPolicy` owns supported codes, per-channel expiry and legacy
+interpretation. Checkout and funding confirmation snapshot `sakurupiah_channel`
+before provider create; every create, recovery and settlement verifies that
+transaction's channel rather than the current setting. Historical observed
+Payment channels are retained; missing historical channel evidence and old
+top-ups remain QRISC. Readiness caches exact-channel observations and rejects
+stale checkout snapshots. Automatic channel fallback is prohibited.
+
 
 The QRIS fee is borne by the buyer (`fee_payer = customer` / `merchant_fee = 2`),
 so the provider adds the channel fee on top of the order amount, the customer

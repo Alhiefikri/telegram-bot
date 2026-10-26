@@ -4,6 +4,7 @@ namespace App\Services\Checkout;
 
 use App\Exceptions\InvalidCheckout;
 use App\Services\Checkout\PaymentPlan\SakurupiahCheckoutPaymentSnapshot;
+use App\Services\Sakurupiah\SakurupiahChannelPolicy;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahProviderReadinessReport;
@@ -25,7 +26,7 @@ final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPay
     {
         return CheckoutPaymentPreflight::withState(
             $context,
-            $this->readiness->observe(),
+            $this->readiness->observe(channelOverride: SakurupiahChannelPolicy::selected($context->currentSetting)),
         );
     }
 
@@ -50,10 +51,7 @@ final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPay
             throw new InvalidCheckout('Sakurupiah QRIS amount is outside the provider limits. Try again later or contact support.');
         }
 
-        $expiryHours = config('services.sakurupiah.qris_contract.expiry_hours');
-        if (! is_int($expiryHours) || $expiryHours < 1) {
-            throw new InvalidCheckout('Sakurupiah QRIS expiry policy is not ready. Try again later or contact support.');
-        }
+        $expiryHours = SakurupiahChannelPolicy::expiryHours($channel->code);
 
         $expiresAt = now()->addHours($expiryHours);
         $snapshot = new SakurupiahCheckoutPaymentSnapshot(
@@ -62,6 +60,7 @@ final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPay
             paymentCurrency: self::PAYMENT_CURRENCY,
             amount: $amount,
             expiresAt: $expiresAt,
+            channel: $channel->code,
         );
 
         return new CheckoutPaymentPlan(

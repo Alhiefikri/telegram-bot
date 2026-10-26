@@ -135,7 +135,7 @@ class SakurupiahGatewayTest extends TestCase
             ],
         ]));
 
-        $report = app(SakurupiahProviderReadiness::class)->observe();
+        $report = app(SakurupiahProviderReadiness::class)->observe(channelOverride: 'QRISC');
 
         $this->assertTrue($report->isReady(), $report->configurationMessage());
         $this->assertSame('QRISC', $report->qrisChannel()?->code);

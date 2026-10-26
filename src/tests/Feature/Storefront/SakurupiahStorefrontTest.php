@@ -5,6 +5,7 @@ namespace Tests\Feature\Storefront;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -55,6 +56,35 @@ class SakurupiahStorefrontTest extends TestCase
                 'expiry_confirmed' => true,
             ],
         ]));
+    }
+
+    public function test_qris_presentation_uses_its_snapshot_after_owner_selects_qrisc(): void
+    {
+        ManualPaymentSetting::create(['payment_mode' => 'sakurupiah', 'sakurupiah_channel' => 'QRISC']);
+        [$order] = $this->payment([
+            'sakurupiah_channel' => 'QRIS',
+            'provider_payment_method' => 'QRIS',
+        ]);
+
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($order);
+
+        $this->assertTrue($invoice->isQrisPayable);
+        $this->assertSame('https://sakurupiah.id/pay/invoice', $invoice->hostedPaymentUrl);
+        $this->get($invoice->redirectUrl)->assertOk();
+    }
+
+    public function test_presentation_does_not_expose_a_payment_with_a_different_supported_channel(): void
+    {
+        [$order] = $this->payment([
+            'sakurupiah_channel' => 'QRIS',
+            'provider_payment_method' => 'QRISC',
+        ]);
+
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($order);
+
+        $this->assertFalse($invoice->isQrisPayable);
+        $this->assertNull($invoice->hostedPaymentUrl);
+        $this->assertNull($invoice->qrisImageSource);
     }
 
     public function test_direct_qris_invoice_uses_signed_png_endpoint_and_safe_sakurupiah_copy(): void

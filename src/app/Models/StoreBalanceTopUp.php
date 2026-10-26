@@ -29,6 +29,7 @@ use Illuminate\Database\Eloquent\Model;
     'provider_fee',
     'provider_total_payment',
     'provider_payment_method',
+    'sakurupiah_channel',
     'provider_created_at',
     'provider_expires_at',
     'expires_at',

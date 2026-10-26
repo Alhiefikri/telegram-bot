@@ -443,6 +443,7 @@ final class SakurupiahCallbackProcessor
     {
         $providerReference = trim((string) $payment->provider_reference);
         $merchantRef = (string) $payment->merchant_ref;
+        $channel = SakurupiahChannelPolicy::forPayment($payment);
 
         try {
             $history = $this->provider->transactionHistory(new SakurupiahHistoryFilter(
@@ -458,7 +459,7 @@ final class SakurupiahCallbackProcessor
             $history,
             static fn (SakurupiahHistoryItem $item): bool => $item->trxId === $providerReference
                 && $item->merchantRef === $merchantRef
-                && strcasecmp($item->paymentCode, SakurupiahCreateInvoice::METHOD_QRISC) === 0
+                && strcasecmp($item->paymentCode, $channel) === 0
                 && $item->isSuccessful(),
         ));
 
@@ -480,7 +481,7 @@ final class SakurupiahCallbackProcessor
         }
 
         if ($status->paymentCode !== null
-            && strcasecmp($status->paymentCode, SakurupiahCreateInvoice::METHOD_QRISC) !== 0) {
+            && strcasecmp($status->paymentCode, SakurupiahChannelPolicy::forPayment($payment)) !== 0) {
             return 'provider_payment_method_mismatch';
         }
         if ($status->currency !== null

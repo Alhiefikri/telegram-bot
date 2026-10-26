@@ -76,6 +76,96 @@ class SakurupiahWebhookTest extends TestCase
         config()->set('queue.default', 'sync');
     }
 
+    public function test_qris_paid_callback_keeps_owned_channel_after_owner_selects_another_channel(): void
+    {
+        Queue::fake();
+        ManualPaymentSetting::create(['payment_mode' => PaymentProvider::SAKURUPIAH, 'sakurupiah_channel' => 'QRISC']);
+        $payment = $this->payment(['sakurupiah_channel' => 'QRIS', 'provider_payment_method' => 'QRIS']);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, channel: 'QRIS'),
+        );
+        $provider->shouldReceive('transactionHistory')->once()->andReturn([
+            new SakurupiahHistoryItem(
+                trxId: (string) $payment->provider_reference,
+                merchantRef: (string) $payment->merchant_ref,
+                paymentCode: 'QRIS',
+                amount: $payment->amount,
+                status: SakurupiahTransactionStatus::Successful,
+            ),
+        ]);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame('QRIS', $payment->fresh()->sakurupiah_channel);
+        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+    }
+
+    public function test_historical_qrisc_paid_callback_remains_valid_after_setting_switches_to_qris(): void
+    {
+        Queue::fake();
+        ManualPaymentSetting::create(['payment_mode' => PaymentProvider::SAKURUPIAH, 'sakurupiah_channel' => 'QRIS']);
+        $payment = $this->payment(['sakurupiah_channel' => null]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame('QRISC', $payment->fresh()->provider_payment_method);
+    }
+
+    public function test_paid_callback_for_another_supported_channel_cannot_authorize_payment(): void
+    {
+        Queue::fake();
+        $payment = $this->payment(['sakurupiah_channel' => 'QRIS', 'provider_payment_method' => 'QRIS']);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, $payment->amount, channel: 'QRISC'),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))->assertOk();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $payment->order->fresh()->order_status);
+        $this->assertSame('provider_payment_method_mismatch', $payment->fresh()->provider_create_last_error);
+        $this->assertSame('QRIS', $payment->fresh()->provider_payment_method);
+    }
+
+    public function test_paid_callback_does_not_use_history_amount_from_another_supported_channel(): void
+    {
+        Queue::fake();
+        $payment = $this->payment(['sakurupiah_channel' => 'QRIS', 'provider_payment_method' => 'QRIS']);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, channel: 'QRIS'),
+        );
+        $provider->shouldReceive('transactionHistory')->once()->andReturn([
+            new SakurupiahHistoryItem(
+                trxId: (string) $payment->provider_reference,
+                merchantRef: (string) $payment->merchant_ref,
+                paymentCode: 'QRISC',
+                amount: $payment->amount,
+                status: SakurupiahTransactionStatus::Successful,
+            ),
+        ]);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))->assertOk();
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $payment->order->fresh()->order_status);
+        $this->assertSame('authoritative_amount_unverified', $payment->fresh()->provider_create_last_error);
+    }
+
     public function test_invalid_signature_json_event_and_status_are_rejected_without_event_or_lifecycle_mutation(): void
     {
         $payment = $this->payment();
@@ -787,11 +877,12 @@ class SakurupiahWebhookTest extends TestCase
         SakurupiahTransactionStatus $status,
         ?int $amount = null,
         ?string $currency = null,
+        string $channel = SakurupiahCreateInvoice::METHOD_QRISC,
     ): SakurupiahStatus {
         $data = [
             'trx_id' => $payment->provider_reference,
             'merchant_ref' => $payment->merchant_ref,
-            'payment_kode' => SakurupiahCreateInvoice::METHOD_QRISC,
+            'payment_kode' => $channel,
             'payment_status' => $status->value,
         ];
         if ($amount !== null) {
@@ -805,7 +896,7 @@ class SakurupiahWebhookTest extends TestCase
             trxId: (string) $payment->provider_reference,
             status: $status,
             merchantRef: (string) $payment->merchant_ref,
-            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+            paymentCode: $channel,
             amount: $amount === null ? null : SakurupiahAmount::from($amount),
             currency: $currency,
             sanitizedPayload: ['status' => '200', 'data' => [$data]],

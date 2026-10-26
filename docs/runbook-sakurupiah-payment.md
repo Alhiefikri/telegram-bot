@@ -14,6 +14,39 @@ Automated release evidence is recorded in
 [`docs/sakurupiah-release-evidence.md`](sakurupiah-release-evidence.md). This
 runbook and the evidence document never contain production credentials.
 
+## Owner-selected QRIS channel
+
+After the channel-selection migration, the default for new Sakurupiah checkouts
+and Store Balance top-ups is `QRIS`. The Owner can change it in **Admin →
+Pengaturan → Pembayaran → Channel QRIS Sakurupiah**. Supported choices are
+`QRIS`, `QRISC`, `QRISMU`, and `QRIS2`; only unique, active channels with a
+supported contract returned by the merchant API can be saved. The Dashboard
+shows provider limits, fees, additional fees, and settlement metadata.
+The payment settings page shares one bounded channel lookup between its metadata
+list and readiness evaluation, so a provider outage cannot double the HTTP retry
+budget. Other Dashboard sections do not load this channel selector.
+
+The setting is `manual_payment_settings.sakurupiah_channel`, not ENV. Saving
+requires the current `payment_provider_version`, increments it only on change,
+and records an audit in the same transaction. Only the Owner can save it.
+Channel availability is not a promise that the provider can create an invoice.
+
+Each new Payment/top-up snapshots `sakurupiah_channel` before create. Retries,
+status/history verification, callbacks, and presentation use that snapshot,
+never the current Dashboard choice. The migration preserves observed Payment
+channel codes; previously unobserved Payments and historical top-ups remain
+`QRISC`. Old top-ups' generic `provider_payment_method=QRIS` does not mean their
+provider channel was QRIS. Changing the selection never retries or reopens
+terminal Orders or re-targets an existing invoice.
+
+There is no automatic channel fallback, including after timeout or an ambiguous
+create. The same reference must be reconciled instead of creating an invoice on
+another channel. `QRISMU` uses 12-hour expiry; the other supported channels use
+the qualified 24-hour policy. Readiness requires the exact selected channel and
+checks its metadata against that policy. Fee payer remains customer-borne; the
+actual fee and total come from the provider invoice, not a static tariff.
+
+
 ## Channel lookup failure with an active QRISC channel
 
 The 2026-10-21 production investigation found HTTP 200 from
@@ -70,9 +103,9 @@ reads `src/.env`. Use the root file through a Compose command, or configure the
 same credential pair in the untracked `src/.env`; never copy credentials into
 tracked files or commit either file.
 
-Do not add ENV for channel labels, fees, expiry hours, callback URLs, host
-allowlists, retry budgets, or presentation copy. Those values are code/config
-settings. The provider spelling `api-sanbox` is intentional and must not be
+Do not add ENV for channel selection, labels, fees, expiry hours, callback URLs,
+host allowlists, retry budgets, or presentation copy. Channel selection belongs
+in the database/Admin; stable safety policy remains in code. The provider spelling `api-sanbox` is intentional and must not be
 "corrected".
 
 Changing `src/.env` requires restarting the local Artisan server and workers;
@@ -256,11 +289,14 @@ php artisan sakurupiah:check-readiness --json   # channel/contract/readiness
 php artisan sakurupiah:reconcile --chunk=100     # retry + observe
 ```
 
-Observed production example: `application_status:400|provider_message:Gagal
-membuat Invoice. hubungi tim dukungan` on a live `QRISC` create. The provider
-accepted the request shape (a rejected-signature request answers
-`Signature tidak valid`) and rejected the transaction creation itself, so the
-correct action is a provider-side/merchant-side check, not a code change.
+Observed on 2026-10-26: `QRISC` creates returned application status `400`,
+`Gagal membuat Invoice. hubungi tim dukungan`. An independently signed native
+PHP cURL request reproduced the same rejection over HTTP 200. A later
+URL-encoded `QRIS` create for the same Rp10,000 base amount succeeded with
+fee Rp420 and total Rp10,420. No payment was made. This supports a
+channel/merchant-specific incident, not proof of its internal cause: the
+attempts occurred at different times. Provider metadata still marked QRISC
+active, so list/readiness success alone did not establish create health.
 
 ## Reconciliation
 
@@ -303,14 +339,13 @@ that already advanced is not re-queried or re-applied.
 
 ## Store Balance top-ups on the Sakurupiah rail
 
-Store Balance top-ups follow the same store-wide provider selection as checkout,
-so a funding intent confirmed while Sakurupiah is the active provider creates a
-Sakurupiah `QRISC` top-up instead of the KlikQRIS rail. The provider is resolved
-once at funding confirmation and snapshotted on the top-up together with the
-payment setting identity and version; switching the active provider afterwards
-never re-targets an existing top-up. The EMV QR payload is stored encrypted on the
-top-up and rendered to a PNG locally, and settlement always credits only the exact
-requested amount through the shared Store Balance ledger
+Store Balance top-ups follow the same store-wide provider selection as checkout.
+Funding confirmation snapshots the selected Sakurupiah channel together with
+the payment setting identity and version; switching provider or channel later
+never re-targets an existing top-up. Safe EMV payloads or allowlisted provider
+QR image URLs are stored encrypted, and images use the existing bounded
+downloader rather than encoding a URL as QR text. Settlement always credits only
+the exact requested amount through the shared Store Balance ledger
 (`balance_top_up:<id>:credit`), never the provider fee. A Sakurupiah top-up that
 is not operationally ready fails closed to `provider_unavailable` before any
 provider request.
@@ -355,11 +390,11 @@ Never use a production transaction to discover undocumented provider behavior.
 
 ### Channel correction
 
-The historical observations below exercised provider code `QRIS`. The merchant
-has now confirmed that the approved channel is `QRISC` (`QRIS Custom Merchant`,
-minimum `200`, maximum `20,000,000`, `0.7%`, additional fee `100`, settlement
-`H+1`). Those earlier `QRIS` observations are not qualification evidence for
-`QRISC`; current application requests and readiness selection target `QRISC`.
+The historical observations below exercised provider code `QRIS`. In September
+the merchant qualified `QRISC` (`QRIS Custom Merchant`, minimum `200`, maximum
+`20,000,000`, `0.7%`, additional fee `100`, settlement `H+1`). Those earlier QRIS
+observations were not QRISC qualification evidence. The October channel
+selection cutover supersedes the fixed-channel rule for new transactions only.
 ### QRISC-specific local rerun
 
 On 2026-09-07, the isolated Compose project `telegram-bot-testing` was rebuilt

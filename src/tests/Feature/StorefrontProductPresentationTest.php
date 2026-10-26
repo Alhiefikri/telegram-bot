@@ -219,7 +219,7 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertStringContainsString('QRIS otomatis dibuat setelah checkout', $websiteQris->description);
     }
 
-    public function test_ready_sakurupiah_uses_native_qris_copy(): void
+    public function test_sakurupiah_checkout_availability_tracks_the_selected_channel(): void
     {
         config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
             'sandbox_enabled' => true,
@@ -231,41 +231,26 @@ class StorefrontProductPresentationTest extends TestCase
             'sandbox_allowed_hosts' => ['sakurupiah.id'],
             'sandbox_callback_allowed_hosts' => ['store.example.test'],
             'sandbox_return_allowed_hosts' => ['store.example.test'],
-            'qris_contract' => [
-                'currency' => 'IDR',
-                'currency_confirmed' => true,
-                'fee_payer' => 'merchant',
-                'merchant_fee' => 1,
-                'fee_confirmed' => true,
-                'expiry_hours' => 24,
-                'expiry_confirmed' => true,
-            ],
         ]));
         Http::fake(fn () => Http::response([
             'status' => '200',
-            'data' => [[
-                'kode' => 'QRISC',
-                'nama' => 'QRISC Custom Merchant',
-                'minimal' => 200,
-                'maksimal' => 20_000_000,
-                'tipe' => 'DIRECT',
-                'status' => 'Aktif',
-                'addition' => ['default_expired' => 24],
-            ]],
-        ], 200));
-        ManualPaymentSetting::current()->update(['payment_mode' => 'sakurupiah']);
-        $product = $this->availableProduct(['name' => 'Sakurupiah Ready']);
+            'data' => [
+                ['kode' => 'QRIS', 'nama' => 'QRIS', 'minimal' => 500, 'maksimal' => 2_000_000, 'tipe' => 'DIRECT', 'status' => 'Aktif', 'addition' => ['default_expired' => 24]],
+                ['kode' => 'QRISC', 'nama' => 'QRISC', 'minimal' => 200, 'maksimal' => 20_000_000, 'tipe' => 'DIRECT', 'status' => 'Offline', 'addition' => ['default_expired' => 24]],
+            ],
+        ]));
+        $setting = ManualPaymentSetting::current();
+        $setting->update(['payment_mode' => 'sakurupiah', 'sakurupiah_channel' => 'QRIS']);
+        $product = $this->availableProduct();
 
-        $presentation = app(StorefrontProductPresenter::class)->present($product);
-        $websiteQris = $presentation->checkoutChoice('website_qris');
+        $available = app(StorefrontProductPresenter::class)->present($product);
+        $this->assertTrue($available->checkoutReadiness->ready);
+        $this->assertSame('sakurupiah', $available->checkoutChoice('website_qris')?->provider);
 
-        $this->assertTrue($presentation->checkoutReadiness->ready);
-        $this->assertSame('sakurupiah', $presentation->checkoutReadiness->provider);
-        $this->assertSame('QRIS otomatis', $presentation->checkoutReadiness->label);
-        $this->assertNotNull($websiteQris);
-        $this->assertSame('Bayar via QRIS', $websiteQris->label);
-        $this->assertStringContainsString('QRIS otomatis dibuat setelah checkout', $websiteQris->description);
-        $this->assertSame('sakurupiah', $websiteQris->provider);
+        $setting->update(['sakurupiah_channel' => 'QRISC', 'payment_provider_version' => 1]);
+        $this->app->forgetInstance(StorefrontProductPresenter::class);
+        $unavailable = app(StorefrontProductPresenter::class)->present($product);
+        $this->assertFalse($unavailable->checkoutReadiness->ready);
     }
 
     public function test_binance_choice_exposes_only_configured_binance_pay_id_rail(): void

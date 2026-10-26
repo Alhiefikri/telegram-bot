@@ -466,6 +466,10 @@ final class SakurupiahInvoiceLifecycleService
      */
     private function assessInvoice(Payment $payment, SakurupiahInvoice $invoice): array
     {
+        if ($invoice->paymentCode !== SakurupiahChannelPolicy::forPayment($payment)) {
+            return $this->assessment(SakurupiahInvoiceOutcome::InvalidProviderResult, self::STATE_INVALID_PROVIDER_RESULT, 'payment_method');
+        }
+
         if ($invoice->isExpired()) {
             return $this->assessment(SakurupiahInvoiceOutcome::Expired, self::STATE_PROVIDER_EXPIRED, 'provider_expired');
         }
@@ -625,7 +629,7 @@ final class SakurupiahInvoiceLifecycleService
             $payment,
             function (Order $order, Payment $lockedPayment) use ($invoice, $state, $reason, $payable): void {
                 $merchantMatches = $invoice->merchantRef === (string) $lockedPayment->merchant_ref;
-                $methodMatches = strtoupper($invoice->paymentCode) === SakurupiahCreateInvoice::METHOD_QRISC;
+                $methodMatches = strtoupper($invoice->paymentCode) === SakurupiahChannelPolicy::forPayment($lockedPayment);
                 $referenceMatches = blank($lockedPayment->provider_reference)
                     || $lockedPayment->provider_reference === $invoice->trxId;
 
@@ -635,7 +639,7 @@ final class SakurupiahInvoiceLifecycleService
                 }
 
                 $updates = [
-                    'provider_payment_method' => $invoice->paymentCode,
+                    'provider_payment_method' => $methodMatches ? $invoice->paymentCode : $lockedPayment->provider_payment_method,
                     'provider_total_payment' => $invoice->totalValue(),
                     'provider_fee' => $invoice->fee?->fixedAmount(),
                     'provider_payload' => $invoice->sanitizedPayload(),
@@ -686,7 +690,11 @@ final class SakurupiahInvoiceLifecycleService
                 );
                 $updates = [
                     'provider_reference' => $lockedPayment->provider_reference ?: $status->trxId,
-                    'provider_payment_method' => $status->paymentCode ?? $lockedPayment->provider_payment_method,
+                    'provider_payment_method' => $status->paymentCode === null
+                        ? ($lockedPayment->provider_payment_method ?? SakurupiahChannelPolicy::forPayment($lockedPayment))
+                        : (strtoupper($status->paymentCode) === SakurupiahChannelPolicy::forPayment($lockedPayment)
+                            ? $status->paymentCode
+                            : $lockedPayment->provider_payment_method),
                     'provider_total_payment' => $status->totalValue() ?? $lockedPayment->provider_total_payment,
                     'provider_fee' => $status->feeValue() ?? $lockedPayment->provider_fee,
                     'provider_payload' => $payload,
@@ -859,8 +867,9 @@ final class SakurupiahInvoiceLifecycleService
             );
 
             $contract = SakurupiahQrisContract::configured();
+            $channel = SakurupiahChannelPolicy::forPayment($payment);
             $merchantFee = $contract['merchant_fee'] ?? null;
-            $expiryHours = $contract['expiry_hours'] ?? null;
+            $expiryHours = SakurupiahChannelPolicy::expiryHours($channel);
             if (! SakurupiahQrisContract::currencyIsQualified($contract)
                 || ! SakurupiahQrisContract::feeRuleIsQualified($contract)
                 || ! SakurupiahQrisContract::expiryIsQualified($contract)
@@ -884,7 +893,7 @@ final class SakurupiahInvoiceLifecycleService
             }
 
             return new SakurupiahCreateInvoice(
-                method: SakurupiahCreateInvoice::METHOD_QRISC,
+                method: $channel,
                 phone: $phone,
                 amount: (int) $payment->amount,
                 merchantFee: $merchantFee,
@@ -936,9 +945,11 @@ final class SakurupiahInvoiceLifecycleService
                 );
             } catch (SakurupiahInvoiceIntegrityException $exception) {
                 return SakurupiahInvoiceLifecycleResult::state(
-                    in_array($exception->reason, ['qris_presentation', 'qris_image_presentation', 'hosted_presentation', 'presentation_snapshot'], true)
-                        ? SakurupiahInvoiceOutcome::ProviderPresentationPending
-                        : SakurupiahInvoiceOutcome::ProviderTotalPending,
+                    match (true) {
+                        in_array($exception->reason, ['payment_identity', 'payment_method', 'merchant_reference'], true) => SakurupiahInvoiceOutcome::InvalidProviderResult,
+                        in_array($exception->reason, ['qris_presentation', 'qris_image_presentation', 'hosted_presentation', 'presentation_snapshot'], true) => SakurupiahInvoiceOutcome::ProviderPresentationPending,
+                        default => SakurupiahInvoiceOutcome::ProviderTotalPending,
+                    },
                 );
             } catch (Throwable) {
                 return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::ProviderTotalPending);
@@ -1082,7 +1093,7 @@ final class SakurupiahInvoiceLifecycleService
         }
 
         if ($status->paymentCode !== null
-            && strtoupper($status->paymentCode) !== SakurupiahCreateInvoice::METHOD_QRISC) {
+            && strtoupper($status->paymentCode) !== SakurupiahChannelPolicy::forPayment($payment)) {
             return 'payment_method_mismatch';
         }
         if ($status->currency !== null
@@ -1108,7 +1119,7 @@ final class SakurupiahInvoiceLifecycleService
             trxId: $status->trxId,
             merchantRef: $status->merchantRef ?? (string) $payment->merchant_ref,
             paymentCode: $status->paymentCode === null
-                ? SakurupiahCreateInvoice::METHOD_QRISC
+                ? SakurupiahChannelPolicy::forPayment($payment)
                 : strtoupper($status->paymentCode),
             status: $status->status,
             total: $status->total,

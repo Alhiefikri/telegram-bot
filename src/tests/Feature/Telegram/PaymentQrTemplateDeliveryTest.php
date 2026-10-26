@@ -300,8 +300,8 @@ final class PaymentQrTemplateDeliveryTest extends TelegramBotTestSupport
     public function test_sakurupiah_top_up_attachment_is_composited(): void
     {
         $this->configureTemplate();
-        $topUp = new StoreBalanceTopUp(['provider_qris_payload' => self::DIRECT_QRIS]);
-        $payable = new StoreBalanceTopUpPayable(5_000, 450, 5_450, now()->addMinutes(10)->toImmutable());
+        $topUp = $this->sakurupiahTopUp();
+        $payable = new StoreBalanceTopUpPayable(20_000, 450, 20_450, now()->addMinutes(10)->toImmutable());
 
         $attachment = app(SakurupiahStoreBalanceTopUpLifecycle::class)
             ->instructionAttachment($topUp, $payable);
@@ -315,8 +315,8 @@ final class PaymentQrTemplateDeliveryTest extends TelegramBotTestSupport
     {
         $rail = app(StoreBalanceTopUpLifecycleResolver::class)
             ->resolve('sakurupiah');
-        $topUp = new StoreBalanceTopUp(['provider_qris_payload' => self::DIRECT_QRIS]);
-        $payable = new StoreBalanceTopUpPayable(5_000, 450, 5_450, now()->addMinutes(10)->toImmutable());
+        $topUp = $this->sakurupiahTopUp();
+        $payable = new StoreBalanceTopUpPayable(20_000, 450, 20_450, now()->addMinutes(10)->toImmutable());
         $original = $rail->instructionAttachment($topUp, $payable)->photoContents();
 
         $this->configureTemplate();
@@ -387,6 +387,22 @@ final class PaymentQrTemplateDeliveryTest extends TelegramBotTestSupport
     private function decoded(string $png): string
     {
         return (new QRCode)->readFromBlob($png)->data;
+    }
+
+    private function sakurupiahTopUp(): StoreBalanceTopUp
+    {
+        return new StoreBalanceTopUp([
+            'provider' => 'sakurupiah',
+            'currency' => 'IDR',
+            'merchant_ref' => 'BAL-TEMPLATE',
+            'provider_reference' => 'trx-topup-template',
+            'provider_payment_method' => 'QRIS',
+            'amount' => 20_000,
+            'provider_total_payment' => 20_450,
+            'provider_fee' => 450,
+            'provider_expires_at' => now()->addMinutes(10),
+            'provider_qris_payload' => self::DIRECT_QRIS,
+        ]);
     }
 
     /** @return array{0: Order, 1: Payment} */

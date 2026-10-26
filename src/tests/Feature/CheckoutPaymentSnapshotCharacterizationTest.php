@@ -601,6 +601,7 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         ]);
         ManualPaymentSetting::create([
             'payment_mode' => 'sakurupiah',
+            'sakurupiah_channel' => 'QRISC',
             'is_active' => true,
         ]);
     }

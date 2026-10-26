@@ -43,6 +43,8 @@ Pengaturan berada di `/admin?tab=settings`, dengan bagian `pembayaran`, `saldo`,
 
 Riwayat KlikQRIS dan Withdraw sudah dihapus dari dashboard. Owner hanya dapat memilih QR Manual atau Sakurupiah untuk pergantian provider baru; Payment, Order, audit, dan penanganan transaksi KlikQRIS yang sudah ada tetap dipertahankan.
 
+Untuk Sakurupiah, Owner dapat memilih channel `QRIS`, `QRISC`, `QRISMU`, atau `QRIS2` di **Pengaturan → Pembayaran → Channel QRIS Sakurupiah**. Default setelah migrasi adalah `QRIS`; pilihan aktif, limit, fee, dan settlement dibaca dari API merchant. Perubahan hanya berlaku untuk checkout dan top-up baru, tanpa fallback otomatis. Invoice lama tetap memakai channel yang tersimpan. Lihat [runbook Sakurupiah](docs/runbook-sakurupiah-payment.md#owner-selected-qris-channel).
+
 ### Data demo lokal
 
 Dashboard lokal dapat diisi dengan katalog berlabel DEMO, stok dummy, 18 pelanggan, dan transaksi IDR/USDT selama 30 hari terakhir:
