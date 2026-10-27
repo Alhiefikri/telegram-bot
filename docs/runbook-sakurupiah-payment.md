@@ -228,6 +228,49 @@ starting its loop. That health check includes `--supervisor`, so live worker
 ownership is verified before the scheduler can run; the bootstrap readiness
 gate itself remains a non-invasive queue/schema/schedule configuration check.
 
+## Paid callback received but Order still pending
+
+Compare the successful callback's `payment_events.received_at` with
+`payments.paid_at` and the receipt effect's `sent_at`. Callback
+`processed_at` can be later than settlement if a scheduled reconciliation
+settled the Payment before the deferred webhook job ran again. Neither the
+callback timestamp nor `paid_at` establishes when the buyer's bank debited them.
+
+The 2026-10-27 investigation observed a successful callback at 21:05:03 WIB,
+five `status_unavailable` observations, local settlement at 21:07:32, and
+credential delivery at 21:07:42–43. A successful status lookup may omit amount,
+so the same transaction's authoritative history must also supply matching
+identity/channel/currency/amount before settlement. Never bypass that check.
+
+`VerifySakurupiahWebhookPayment` now permits six worker attempts, with retry
+delays of 5, 10, 15, 30 and 60 seconds after successive failures. These are
+delays after each attempt, not an end-to-end latency guarantee; HTTP retries,
+worker availability and payment locks still consume time. Exhausted jobs do
+not authorize payment or disable the existing scheduled reconciliation.
+
+Failed status/history calls emit `Sakurupiah verification lookup failed.`
+with only `payment_id`, `operation`, `exception_class`, `reason`, `http_status`
+and `provider_status`. Inspect `transactionStatus` versus `transactionHistory`
+to distinguish the failing lookup. Exception messages/chains, URLs, provider
+bodies, credentials and customer data are intentionally excluded. An
+`unexpected` reason names an unclassified exception, not proof of provider
+fault; HTTP/schema/transport errors must be interpreted using their own evidence.
+
+The scheduler runs `orders:expire-pending`, `store-balance:expire-top-ups`,
+`klikqris:backfill-in-flight` and `ops:payment-lifecycle-rollout-report` in
+background processes with their existing overlap mutexes. Their execution time
+must not serialize the minute-based provider recovery loop. A foreground
+heartbeat is not proof that these child commands completed successfully.
+
+Local verification used a disposable SQLite database and the actual database
+queue worker/client parsers with synthetic HTTP responses: four failed status
+lookups followed by successful status and matching amount-bearing history
+settled once at simulated second 30 and queued one receipt. A separate actual
+`schedule:run` smoke launched three active maintenance commands as delayed
+fixtures and reached the next scheduled task before they finished. These
+checks are not live-provider, production-load or deployment qualification.
+
+
 ## QRIS fee policy
 
 The QRIS channel fee is charged to the buyer. `services.sakurupiah.qris_contract`

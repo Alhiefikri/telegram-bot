@@ -1558,6 +1558,14 @@ The seven provider reconciliation commands (KlikQRIS/Sakurupiah Payments and bal
 - cleanup login links tiap jam dan retained data tiap hari;
 - daily admin stats job di queue `notifications`.
 
+`orders:expire-pending`, `store-balance:expire-top-ups`,
+`klikqris:backfill-in-flight` and `ops:payment-lifecycle-rollout-report` run
+in background with their existing overlap mutexes, so their runtime does not
+serialize the next provider reconciliation cycle. Sakurupiah webhook retries
+use six attempts with 5/10/15/30/60-second delays; status/history lookup failure
+logs carry safe operation/error metadata without provider bodies or exception
+messages. See [payment delay diagnosis](../runbook-sakurupiah-payment.md#paid-callback-received-but-order-still-pending).
+
 The Docker `scheduler` service runs `php artisan schedule:run` with a
 384 MiB memory limit. Its heartbeat means a clean foreground scheduling cycle,
 not successful completion of every background provider sweep. The loop prints

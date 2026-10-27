@@ -20,12 +20,12 @@ final class VerifySakurupiahWebhookPayment implements ShouldBeUnique, ShouldQueu
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 4;
+    public int $tries = 6;
 
     public int $uniqueFor = 300;
 
     /** @var list<int> */
-    public array $backoff = [15, 60, 180];
+    public array $backoff = [5, 10, 15, 30, 60];
 
     public function __construct(public readonly int $eventId)
     {

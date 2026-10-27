@@ -30,6 +30,7 @@ use App\Services\Sakurupiah\SakurupiahCallback;
 use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahHistoryItem;
+use App\Services\Sakurupiah\SakurupiahHttpException;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahStatus;
@@ -39,8 +40,10 @@ use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Queue\WorkerOptions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
 use Tests\TestCase;
@@ -325,6 +328,51 @@ class SakurupiahWebhookTest extends TestCase
         (new VerifySakurupiahWebhookPayment($event->id))->handle(app(SakurupiahCallbackProcessor::class));
     }
 
+    public function test_paid_callback_recovers_within_a_minute_after_three_worker_verification_failures(): void
+    {
+        config()->set('queue.default', 'database');
+        $queue = Queue::getFacadeRoot();
+        Queue::fake()->except([VerifySakurupiahWebhookPayment::class]);
+        $this->freezeTime();
+        $payment = $this->payment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->times(4)
+            ->andThrow(new \RuntimeException('temporary provider outage'));
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful),
+        );
+        $provider->shouldReceive('transactionHistory')->once()->andReturn([
+            new SakurupiahHistoryItem(
+                trxId: (string) $payment->provider_reference,
+                merchantRef: (string) $payment->merchant_ref,
+                paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+                amount: (int) $payment->provider_total_payment,
+                status: SakurupiahTransactionStatus::Successful,
+            ),
+        ]);
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
+            ->assertOk();
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $worker = app('queue.worker');
+        $worker->setManager($queue);
+        $options = new WorkerOptions(sleep: 0);
+        for ($second = 0; $second <= 60; $second++) {
+            $worker->runNextJob('database', 'default', $options);
+            if ($payment->fresh()->status === PaymentStatus::Paid) {
+                break;
+            }
+            $this->travel(1)->seconds();
+        }
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertNotNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
+        $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
     public function test_authoritative_currency_mismatch_never_marks_paid(): void
     {
         Queue::fake();
@@ -589,6 +637,41 @@ class SakurupiahWebhookTest extends TestCase
         $this->assertNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
         Queue::assertPushed(VerifySakurupiahWebhookPayment::class);
         $this->assertStringNotContainsString('provider secret', $response->getContent());
+    }
+
+    public function test_history_outage_logs_safe_failure_details_without_authorizing_payment(): void
+    {
+        config()->set('queue.default', 'database');
+        Queue::fake();
+        Log::spy();
+        $payment = $this->payment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful),
+        );
+        $provider->shouldReceive('transactionHistory')->once()->andThrow(
+            new SakurupiahHttpException(
+                operation: 'transactionHistory',
+                status: 503,
+                previous: new \RuntimeException('https://provider.test/?api_key=secret buyer@example.test'),
+            ),
+        );
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
+            ->assertOk()->assertExactJson(['success' => true]);
+
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $payment->order->fresh()->order_status);
+        Queue::assertPushed(VerifySakurupiahWebhookPayment::class);
+        Log::shouldHaveReceived('warning')->once()->with('Sakurupiah verification lookup failed.', [
+            'payment_id' => $payment->id,
+            'operation' => 'transactionHistory',
+            'exception_class' => SakurupiahHttpException::class,
+            'reason' => 'http',
+            'http_status' => 503,
+            'provider_status' => null,
+        ]);
     }
 
     public function test_expired_callback_applies_only_after_authoritative_expired_status(): void

@@ -14,6 +14,7 @@ use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -127,7 +128,7 @@ final class SakurupiahCallbackProcessor
         }
 
         try {
-            $status = $this->fetchStatus($providerReference);
+            $status = $this->fetchStatus($payment);
         } catch (SakurupiahStatusUnavailableException) {
             $this->lifecycle->persistRecoveryUnconfirmed($payment, 'status_unavailable');
 
@@ -298,7 +299,7 @@ final class SakurupiahCallbackProcessor
             return ['processed' => true, 'defer' => false];
         }
 
-        $status = $this->fetchStatus($providerReference);
+        $status = $this->fetchStatus($payment);
         $identityReason = $this->statusIdentityMismatchReason($payment, $status);
         if ($identityReason !== null) {
             $this->lifecycle->persistAuthoritativeStatusObservation(
@@ -396,11 +397,13 @@ final class SakurupiahCallbackProcessor
             || $order->expires_at?->isPast() === true;
     }
 
-    private function fetchStatus(string $providerReference): SakurupiahStatus
+    private function fetchStatus(Payment $payment): SakurupiahStatus
     {
         try {
-            return $this->provider->transactionStatus($providerReference);
+            return $this->provider->transactionStatus((string) $payment->provider_reference);
         } catch (Throwable $exception) {
+            $this->logLookupFailure($payment, 'transactionStatus', $exception);
+
             throw new SakurupiahStatusUnavailableException(previous: $exception);
         }
     }
@@ -452,6 +455,8 @@ final class SakurupiahCallbackProcessor
                 merchantRef: $merchantRef,
             ));
         } catch (Throwable $exception) {
+            $this->logLookupFailure($payment, 'transactionHistory', $exception);
+
             throw new SakurupiahStatusUnavailableException(previous: $exception);
         }
 
@@ -468,6 +473,18 @@ final class SakurupiahCallbackProcessor
         }
 
         return $matches[0];
+    }
+
+    private function logLookupFailure(Payment $payment, string $operation, Throwable $exception): void
+    {
+        Log::warning('Sakurupiah verification lookup failed.', [
+            'payment_id' => $payment->getKey(),
+            'operation' => $operation,
+            'exception_class' => $exception::class,
+            'reason' => $exception instanceof SakurupiahProviderException ? $exception->reason : 'unexpected',
+            'http_status' => $exception instanceof SakurupiahProviderException ? $exception->httpStatus : null,
+            'provider_status' => $exception instanceof SakurupiahProviderException ? $exception->providerStatus : null,
+        ]);
     }
 
     private function statusIdentityMismatchReason(Payment $payment, SakurupiahStatus $status): ?string
