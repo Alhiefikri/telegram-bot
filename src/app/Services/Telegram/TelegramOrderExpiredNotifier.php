@@ -4,10 +4,13 @@ namespace App\Services\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\TelegramApiException;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Support\PaymentProvider;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class TelegramOrderExpiredNotifier
@@ -28,6 +31,7 @@ class TelegramOrderExpiredNotifier
             $locked = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
             if ($locked->order_status !== OrderStatus::Expired
                 || $locked->telegram_expired_order_notified_at !== null
+                || $locked->telegram_expired_order_notification_failed_at !== null
                 || $this->hasActiveClaim($locked->telegram_expired_order_notification_started_at)) {
                 return null;
             }
@@ -99,6 +103,27 @@ class TelegramOrderExpiredNotifier
         try {
             $this->bot->sendMessage((string) $order->customer->telegram_id, implode("\n", $lines), $replyMarkup);
         } catch (Throwable $exception) {
+            $apiException = $exception instanceof RequestException
+                ? TelegramApiException::fromRequest('sendMessage', $exception)
+                : ($exception instanceof TelegramApiException ? $exception : null);
+            if ($apiException?->isRecipientUnavailable()) {
+                Order::query()
+                    ->whereKey($order->id)
+                    ->whereNull('telegram_expired_order_notified_at')
+                    ->whereNull('telegram_expired_order_notification_failed_at')
+                    ->update([
+                        'telegram_expired_order_notification_started_at' => null,
+                        'telegram_expired_order_notification_failed_at' => now(),
+                        'telegram_expired_order_notification_failure_code' => 'recipient_unavailable',
+                    ]);
+                Log::notice('telegram.order_expired_notification.undeliverable', [
+                    'order_id' => (string) $order->id,
+                    'failure_code' => 'recipient_unavailable',
+                ]);
+
+                return;
+            }
+
             Order::query()
                 ->whereKey($order->id)
                 ->whereNull('telegram_expired_order_notified_at')

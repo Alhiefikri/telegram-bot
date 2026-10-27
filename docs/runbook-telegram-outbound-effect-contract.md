@@ -308,6 +308,30 @@ recreation. Isolation tests retain actual schedule policy
 with fixture child payloads; transaction suites separately verify real payment,
 expiry, stock, top-up and delivery behavior.
 
+Buyer expiry notifications retain an explicit per-Order terminal failure:
+`telegram_expired_order_notification_failed_at` and
+`telegram_expired_order_notification_failure_code=recipient_unavailable`.
+Only Telegram HTTP 403 with the known blocked-user/deactivated-user descriptions
+sets this state. It never fills `telegram_expired_order_notified_at`, changes
+money/stock/order status, or blocks notifications for a future Order. The expiry
+sweep excludes these failed deliveries instead of retrying an unreachable
+recipient every minute. Other 403 descriptions and temporary failures remain
+errors with retryable claims. The two nullable columns are an additive migration;
+there is no destructive outbound-contract operation.
+
+`ExpiredNotificationFailureTest` covers blocked/deactivated recipients, delivery
+recovery after a temporary failure, unknown 403 refusal and isolation between
+recipients; it is also in the PostgreSQL release lane. A disposable SQLite runtime
+smoke ran two real expiry commands with HTTP-boundary fixtures: both exited zero,
+made two total send attempts, retained an explicit unsent terminal failure for
+the blocked recipient and recorded successful delivery only for the other one.
+
+KlikQRIS reconciliation failure logs include `diagnostic_code` and `http_status`.
+`KlikQrisStatusResponseException::diagnosticCode()` exposes only HTTP status or
+allowlisted validation reasons, never arbitrary exception text, provider payload,
+credential or QR URL. Invalid responses still fail closed: these diagnostics do
+not authorize expiry, payment confirmation or fulfillment.
+
 The recovery container records every interrupted, failed, or timed-out child
 run, but opens `telegram_recovery_runtime_failure` only after two consecutive
 failures; repeated failures dedupe within the open episode and a successful

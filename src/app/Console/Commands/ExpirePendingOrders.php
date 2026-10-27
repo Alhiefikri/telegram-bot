@@ -84,6 +84,7 @@ class ExpirePendingOrders extends Command
             ->where('order_status', OrderStatus::Expired)
             ->when($expiredThisRun !== [], fn ($query) => $query->whereNotIn('id', $expiredThisRun))
             ->whereNull('telegram_expired_order_notified_at')
+            ->whereNull('telegram_expired_order_notification_failed_at')
             ->where(function ($query) use ($cutoff): void {
                 $query->whereNull('telegram_expired_order_notification_started_at')
                     ->orWhere('telegram_expired_order_notification_started_at', '<=', $cutoff);

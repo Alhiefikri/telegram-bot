@@ -75,6 +75,13 @@ final class TelegramApiException extends RuntimeException
         return false;
     }
 
+    public function isRecipientUnavailable(): bool
+    {
+        return $this->status === 403
+            && (str_contains($this->normalizedDescription(), 'bot was blocked by the user')
+                || str_contains($this->normalizedDescription(), 'user is deactivated'));
+    }
+
     private function normalizedDescription(): string
     {
         return strtolower((string) $this->description);

@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Services\KlikQris\KlikQrisCallbackProcessor;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
+use App\Services\KlikQris\KlikQrisStatusResponseException;
 use App\Services\KlikQris\KlikQrisStatusUnavailableException;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
@@ -416,6 +417,8 @@ class ReconcileKlikQrisPayments extends Command
                 'payment_id' => (string) $payment->getKey(),
                 'exception' => $exception::class,
                 'retryable' => $exception instanceof KlikQrisStatusUnavailableException,
+                'diagnostic_code' => $exception instanceof KlikQrisStatusResponseException ? $exception->diagnosticCode() : null,
+                'http_status' => $exception instanceof KlikQrisStatusResponseException ? $exception->httpStatus : null,
                 'duration_ms' => $this->elapsedMilliseconds($paymentStartedAt),
             ]);
             $escalator->notifyFor($payment);
@@ -796,6 +799,9 @@ class ReconcileKlikQrisPayments extends Command
     {
         if ($exception instanceof KlikQrisStatusUnavailableException) {
             return 'KlikQRIS status is temporarily unavailable.';
+        }
+        if ($exception instanceof KlikQrisStatusResponseException) {
+            return $exception::class.' ['.$exception->diagnosticCode().']';
         }
 
         return $exception::class;

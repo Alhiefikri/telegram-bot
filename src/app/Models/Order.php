@@ -43,6 +43,7 @@ class Order extends Model
             'notification_email' => 'encrypted',
             'telegram_expired_order_notification_started_at' => 'datetime',
             'telegram_expired_order_notified_at' => 'datetime',
+            'telegram_expired_order_notification_failed_at' => 'datetime',
             'telegram_receipt_sent_at' => 'datetime',
             'telegram_credential_message_id' => 'integer',
             'telegram_credential_pinned_at' => 'datetime',
