@@ -229,11 +229,85 @@ allows it and its next-attempt time is due.
 
 ### Runtime supervision and alerts
 
-The scheduler wrapper updates `storage/framework/scheduler-heartbeat` only
-after a successful `schedule:run`. A non-zero exit opens the durable
-`scheduler_runtime_failure` episode; recovery resolves it through the same
-Telegram Outbound Effect path. The wrapper also compares cgroup v2
-`memory.events` OOM-kill counts and reports new kills through that episode.
+The scheduler wrapper runs `php artisan ops:schedule-run`, not the unbounded
+Laravel `schedule:run`. A file lock in `storage/framework/scheduler-cycle.lock`
+rejects a second concurrent cycle sharing this storage. Command events registered
+without `runInBackground()` receive priority slots in the same two-child pool;
+Order/top-up expiry uses this priority. Priority means launch first, not finish
+before every other task: Order expiry can perform BSC verification and Telegram
+I/O. Mail/update recovery, maintenance and provider commands use ordinary slots.
+A single slow expiry or maintenance task must not serially block all polling.
+Two occupied slots still impose queue wait; the bound is not a zero-latency SLA.
+The parent runs Laravel completion callbacks and
+releases each overlap mutex without starting a separate `schedule:finish`.
+Provider count/deadline limits, schedule frequencies and money authority remain
+unchanged. More than two due commands wait for a slot without holding
+their overlap mutex. A long full cycle can exceed one minute; inspect durations
+and the existing 180-second liveness threshold under actual provider load.
+
+The wrapper updates `storage/framework/scheduler-heartbeat` and resolves the
+runtime episode only after the entire cycle succeeds and the cgroup
+`memory.events` OOM-kill counter has no new kill. Non-zero child exits fail the
+cycle but do not stop the remaining due work. OOM is checked before recovery,
+so a successful parent cannot resolve and immediately reopen the same incident.
+SIGTERM/INT/QUIT stop every active child before releasing any overlap mutex and
+the cycle lock. Only locks belonging to confirmed-stopped children are released,
+without success/failure completion callbacks. This permits immediate recovery
+instead of waiting for long legacy mutex TTLs after a controlled shutdown.
+`RunBoundedSchedule::handleSignal()` returns false to Symfony so its immediate
+exit cannot bypass cleanup. Process tests cover all three signals for priority
+and ordinary tasks, including children ignoring SIGTERM; locks remain held while
+children are alive and become available only after they stop. `SIGKILL` cannot
+run cleanup: overlap mutexes then expire and the interrupted-cycle marker remains.
+
+Earlier pool validation used the actual Laravel scheduler and 12 synthetic
+commands, each retaining 64 MiB for four seconds, with network disabled,
+384 MiB RAM, no swap and 0.35 CPU. The unbounded control exited 137 with
+`OOMKilled=true` and no completed task. The bounded command completed all 12,
+ran foreground recovery first, observed at most two tasks concurrently, exited
+zero in 59.20 seconds and peaked at 305.45 MiB with zero cgroup OOM events.
+This is a resource/lifecycle smoke, not production throughput or live-provider
+qualification. Before the priority-slot refinement, a latency smoke loaded actual `routes/console.php` with
+disposable SQLite and replaced only selected task payloads: two expiry commands,
+a three-second slow provider, a fast provider, five-second mail recovery and the
+next recovery task. Both cases used 384 MiB, no swap, 0.35 CPU and no network.
+The control retained the earlier serial-mail flag; the pooled-mail case used
+that iteration's registration. All six tasks completed in both cases, at most two were
+active, and neither cgroup recorded OOM.
+
+| Single-run observation | Serial-mail control | Pooled mail |
+| --- | ---: | ---: |
+| First provider start after cycle start, seconds | 17.50 | 10.08 |
+| Full cycle, seconds | 20.92 | 17.92 |
+| Peak cgroup memory, MiB | 233.72 | 271.07 |
+
+In that earlier pooled-mail case, both expiries finished before polling and the
+next recovery started while slow mail was still running. The priority-slot
+refinement removes that expiry completion barrier as well.
+
+Latest priority-pool smoke: two expiry tasks were registered after four ordinary
+tasks, with a ten-second slow expiry, a three-second provider and five-second
+mail task. At 384 MiB, no swap and 0.35 CPU, all six completed with at most two
+active children, exit zero, zero OOM events, 214.93 MiB peak memory and a
+20.42-second full cycle. The first provider began at 7.68 seconds while expiry
+continued until 15.52 seconds; the next recovery began at 17.70 seconds while
+mail continued until 20.40 seconds. PHP bootstrap and throttling are included.
+These are single fixture runs, not production latency distributions or an SLA.
+
+Completed targeted regression batches covered 720 unique cases; after the final
+priority/shutdown refinement, 37 scheduler cases and 149 integration cases were
+rechecked. The initial combined invocation exceeded its 300-second command
+deadline, so verification was split into completed batches. No full-suite,
+PostgreSQL race, live-provider or production-rollout claim is implied.
+
+Regression coverage: `BoundedSchedulerTest`, `BoundedSchedulerSafetyTest`,
+`BoundedSchedulerProcessTest`, `SchedulerIsolationTest`, `SchedulerLoopTest`,
+`SchedulerOomRecoveryTest` and `BalanceOperationsAlertTest`. OOM recovery tests
+cover alert-persistence retries, stable counters and counter reset after container
+recreation. Isolation tests retain actual schedule policy
+with fixture child payloads; transaction suites separately verify real payment,
+expiry, stock, top-up and delivery behavior.
+
 The recovery container records every interrupted, failed, or timed-out child
 run, but opens `telegram_recovery_runtime_failure` only after two consecutive
 failures; repeated failures dedupe within the open episode and a successful

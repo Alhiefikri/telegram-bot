@@ -24,7 +24,7 @@ final class SchedulerLoopTest extends TestCase
 set -eu
 printf '%s\n' "$*" >> "$SCHEDULER_TEST_LOG"
 case "$*" in
-    *schedule:run*)
+    *schedule:run*|*ops:schedule-run*)
         if [ ! -f "$SCHEDULER_TEST_FAILED" ]; then
             : > "$SCHEDULER_TEST_FAILED"
             printf 'oom_kill 1\n' > "$SCHEDULER_TEST_OOM_EVENTS"
@@ -77,6 +77,46 @@ SH);
                 $process->stop(1);
             }
 
+            File::deleteDirectory($workspace);
+        }
+    }
+
+    public function test_successful_command_with_new_oom_does_not_report_recovery_or_advance_heartbeat(): void
+    {
+        $workspace = sys_get_temp_dir().'/scheduler-oom-'.bin2hex(random_bytes(8));
+        File::ensureDirectoryExists($workspace.'/bin');
+        file_put_contents($workspace.'/memory.events', "oom_kill 0\n");
+        file_put_contents($workspace.'/bin/id', "#!/bin/sh\nprintf '1000\\n'\n");
+        file_put_contents($workspace.'/bin/sleep', "#!/bin/sh\nexit 99\n");
+        file_put_contents($workspace.'/bin/php', <<<'SH'
+#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$SCHEDULER_TEST_LOG"
+case "$*" in
+    *schedule:run*|*ops:schedule-run*)
+        printf 'oom_kill 1\n' > "$SCHEDULER_OOM_EVENTS_FILE"
+        ;;
+esac
+SH);
+        foreach (['id', 'sleep', 'php'] as $binary) {
+            chmod($workspace.'/bin/'.$binary, 0755);
+        }
+        $process = new Process(['/bin/sh', base_path('../docker-scheduler.sh')], $workspace, [
+            'PATH' => $workspace.'/bin:'.(string) getenv('PATH'),
+            'SCHEDULER_APP_PATH' => $workspace,
+            'SCHEDULER_HEARTBEAT_FILE' => $workspace.'/heartbeat',
+            'SCHEDULER_RUNNING_FILE' => $workspace.'/running',
+            'SCHEDULER_OOM_COUNT_FILE' => $workspace.'/oom-count',
+            'SCHEDULER_OOM_EVENTS_FILE' => $workspace.'/memory.events',
+            'SCHEDULER_TEST_LOG' => $workspace.'/calls',
+        ]);
+        try {
+            $this->assertSame(99, $process->run());
+            $calls = (string) file_get_contents($workspace.'/calls');
+            $this->assertStringContainsString('scheduler failed --reason=oom_kill', $calls);
+            $this->assertStringNotContainsString('scheduler recovered', $calls);
+            $this->assertFileDoesNotExist($workspace.'/heartbeat');
+        } finally {
             File::deleteDirectory($workspace);
         }
     }

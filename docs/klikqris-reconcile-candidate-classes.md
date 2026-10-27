@@ -178,7 +178,9 @@ integrasi latency, dan #656 memiliki validasi end-to-end sesudah seluruh tuning.
 
 `src/routes/console.php` menjalankan tujuh command provider di background:
 Payment dan balance top-up KlikQRIS/Sakurupiah, legacy Pakasir, Binance dan BSC.
-Laravel tetap memegang mutex sampai `schedule:finish`; tidak ada queue baru,
+`ops:schedule-run` kini membatasi seluruh task background menjadi dua child
+bersamaan. Parent memanggil `Event::finish()` dan melepas mutex setelah child
+selesai, tanpa proses `schedule:finish` terpisah. Tidak ada queue baru,
 perubahan interval, worker baru, atau perubahan otoritas settlement.
 Binance/BSC mempertahankan batas kandidat yang sudah ada.
 
@@ -237,11 +239,16 @@ storage/logs/binance-reconciliation.log
 storage/logs/bsc-reconciliation.log
 ```
 
-Heartbeat Docker scheduler menandakan foreground `schedule:run` selesai.
-Ia tidak menyatakan semua provider sehat atau semua child selesai. Periksa
-output/completion per rail untuk failure, carry-over dan progress. Shell tetap
-mempertahankan running marker, interruption/OOM alert dan heartbeat 180 detik;
-stdout kini mencatat `scheduler cycle duration_seconds`.
+Heartbeat Docker scheduler kini menandakan seluruh cycle `ops:schedule-run`,
+termasuk child background, selesai tanpa exit non-zero dan tanpa OOM baru.
+Expiry mendapat slot prioritas pada pool yang sama, bukan fase foreground
+eksklusif; verifikasi BSC/notifikasi expiry yang lambat tidak menahan semua
+polling. Recovery mail/update dan provider berbagi pool. Exit zero tetap
+bukan bukti provider sudah paid atau semua carry-over habis: periksa
+output/completion per rail. Shell mempertahankan running marker,
+interruption/OOM alert, heartbeat 180 detik, dan log durasi cycle.
+Validasi resource pool yang menggantikan fan-out #654 dicatat di
+[runtime supervision](runbook-telegram-outbound-effect-contract.md#runtime-supervision-and-alerts).
 
 Framework diperiksa melalui Context7 terhadap Laravel 13
 [`runInBackground` dan `withoutOverlapping`](https://github.com/laravel/docs/blob/13.x/scheduling.md)

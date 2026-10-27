@@ -1542,7 +1542,7 @@ Jadwal canonical ada di [`src/routes/console.php`](../../src/routes/console.php)
 - `bsc:reconcile --chunk=100` tiap menit; BSC readiness/RPC failure dan backlog masuk owner alert;
 - Telegram updates/payment-proof recovery and `telegram:reconcile-stock-notifications --chunk=25` remain scheduler work; the heavier `telegram:recover-outbound` ledger/projection sweep is owned by a dedicated supervised container.
 
-The seven provider reconciliation commands (KlikQRIS/Sakurupiah Payments and balance top-ups, Pakasir, Binance, BSC) run as independent Laravel background commands, not jobs on an unserved queue. Existing count/page limits remain on Binance/BSC; KlikQRIS, Sakurupiah and Pakasir also propagate their remaining sweep deadline into HTTP retries. Provider polling no longer serially holds Order expiry, update recovery or credential-mail recovery. Each provider event overwrites its own latest-sweep `storage/logs/*-reconciliation.log` rather than appending indefinitely. See [the #654 contract and disposable-runtime measurements](../klikqris-reconcile-candidate-classes.md#scheduler-isolation-and-deadlines-654).
+The seven provider reconciliation commands (KlikQRIS/Sakurupiah Payments and balance top-ups, Pakasir, Binance, BSC) use the two-child pool in `ops:schedule-run`, not jobs on an unserved queue. Order/top-up expiry gets priority slots, not an exclusive foreground phase: Order expiry can perform BSC/Telegram I/O. Mail/update recovery and maintenance share the pool, so one slow task does not serially hold all polling. Two occupied slots still impose queue wait. Existing provider count/page/deadline limits remain unchanged. Each provider event overwrites its own latest-sweep `storage/logs/*-reconciliation.log` rather than appending indefinitely. See [the scheduler contract and disposable-runtime measurements](../klikqris-reconcile-candidate-classes.md#scheduler-isolation-and-deadlines-654).
 
 - The dedicated worker's bounded `telegram:recover-outbound` sweep also
   repairs sent checkout-instruction effects whose Order notification marker is
@@ -1558,24 +1558,31 @@ The seven provider reconciliation commands (KlikQRIS/Sakurupiah Payments and bal
 - cleanup login links tiap jam dan retained data tiap hari;
 - daily admin stats job di queue `notifications`.
 
-`orders:expire-pending`, `store-balance:expire-top-ups`,
-`klikqris:backfill-in-flight` and `ops:payment-lifecycle-rollout-report` run
-in background with their existing overlap mutexes, so their runtime does not
-serialize the next provider reconciliation cycle. Sakurupiah webhook retries
+`orders:expire-pending` and `store-balance:expire-top-ups` are registered without
+`runInBackground()` to receive priority slots from the bounded runner. All command
+children, including those two, share its concurrency cap and keep their existing
+overlap mutexes. Sakurupiah webhook retries
 use six attempts with 5/10/15/30/60-second delays; status/history lookup failure
 logs carry safe operation/error metadata without provider bodies or exception
 messages. See [payment delay diagnosis](../runbook-sakurupiah-payment.md#paid-callback-received-but-order-still-pending).
 
-The Docker `scheduler` service runs `php artisan schedule:run` with a
-384 MiB memory limit. Its heartbeat means a clean foreground scheduling cycle,
-not successful completion of every background provider sweep. The loop prints
-`scheduler cycle duration_seconds`, retains interrupted-cycle recovery, and
-reports non-zero scheduler exits and cgroup OOM-kills through durable alert
-episodes. Inspect each provider's latest-sweep output and completion log as
-well as the heartbeat. Background completion releases the existing Laravel
-mutex; abrupt process-tree death leaves it to expire. Never clear a live
-worker's mutex to force another sweep. Redis loss can still lose cache locks
-and cursors; financial deduplication/fencing remains owned by existing DB
+The Docker `scheduler` service runs `php artisan ops:schedule-run` with a
+384 MiB memory limit. `RunBoundedSchedule` uses a storage-backed cycle lock,
+collects priority and ordinary command events, then drains both with at most
+two child processes. Inline callbacks retain native behavior. The parent calls
+Laravel event completion callbacks and
+releases overlap mutexes itself; it does not spawn `schedule:finish` children.
+The command handles Symfony termination signals without Symfony's immediate exit,
+stops all active children before releasing their overlap mutexes and cycle lock.
+Controlled shutdown skips completion callbacks and can recover promptly; abrupt
+death still leaves mutexes to expire.
+Child failures make the cycle fail without abandoning the other due tasks.
+Heartbeat/recovery require the entire cycle to finish successfully and no new
+cgroup OOM-kill; the OOM check precedes recovery. Logs include child exit codes
+and `scheduler cycle duration_seconds`. Provider success still requires its own
+completion evidence: exit zero can mean a bounded pending sweep. Abrupt death
+leaves overlap mutexes to expire; never clear a live worker's mutex.
+Redis loss can still lose cache locks and cursors; financial fencing stays in DB
 lifecycle services. The separate `outbound-recovery` service also has a 384 MiB limit
 and runs one child per minute: per-facet pages are capped at 25, PostgreSQL
 statements at 10 seconds, the recovery command at 40 seconds, and the supervisor

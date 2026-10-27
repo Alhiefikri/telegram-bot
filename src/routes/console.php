@@ -45,7 +45,8 @@ Schedule::command('ops:balance-alerts --json')
 // Bounded retention for the operational metric ledger (append-only, UPDATE-denied).
 Schedule::command('usdt-balance:metrics --prune-days=30 --json')
     ->daily()
-    ->withoutOverlapping(10);
+    ->withoutOverlapping(10)
+    ->runInBackground();
 $klikQrisEnvironment = KlikQrisEnvironment::runtime();
 if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnvironment)) {
     Schedule::command((string) config('services.klikqris.reconciliation_command', 'klikqris:reconcile --chunk=100'))
@@ -65,8 +66,7 @@ if (app(KlikQrisProviderReadiness::class)->schedulingEnabledFor($klikQrisEnviron
 // has no provider to poll. This command performs no provider I/O.
 Schedule::command('store-balance:expire-top-ups --chunk=100')
     ->everyMinute()
-    ->withoutOverlapping(2)
-    ->runInBackground();
+    ->withoutOverlapping(2);
 
 // Sakurupiah reconciliation runs only when the environment is enabled,
 // operationally ready, and the verification queue is served by the release.
@@ -90,25 +90,25 @@ Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverla
     ->runInBackground()->sendOutputTo(storage_path('logs/binance-reconciliation.log'));
 Schedule::command('bsc:reconcile --chunk=100')->everyMinute()->withoutOverlapping()
     ->runInBackground()->sendOutputTo(storage_path('logs/bsc-reconciliation.log'));
-Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping()->runInBackground();
+Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping();
 // Credential emails are durable per order row; the queue is only the wakeup
 // path and this run also materializes handoffs that a lifecycle hook missed.
-Schedule::command('orders:recover-credential-mails --limit=100 --since-hours=72')->everyMinute()->withoutOverlapping(2);
-Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->withoutOverlapping();
-Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()->withoutOverlapping();
+Schedule::command('orders:recover-credential-mails --limit=100 --since-hours=72')->everyMinute()->withoutOverlapping(2)->runInBackground();
+Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->withoutOverlapping()->runInBackground();
+Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()->withoutOverlapping()->runInBackground();
 // The outbound recovery worker owns this bounded sweep in its dedicated container.
 Schedule::command('telegram:reconcile-stock-notifications --chunk=25')
     ->everyMinute()
     ->withoutOverlapping(45)
     ->runInBackground();
-Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverlapping();
+Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverlapping()->runInBackground();
 // Health episodes and outbound effects are PostgreSQL-durable. One existing
 // scheduler is sufficient; Redis overlap is not the dedupe authority.
 Schedule::command('suppliers:notify-health --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping()->runInBackground();
-Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping();
-Schedule::command('customer-auth:cleanup --limit=500')->hourly()->withoutOverlapping(10);
-Schedule::command('customer-auth:recover-mail --limit=100')->everyMinute()->withoutOverlapping(2);
-Schedule::command('customer-api:flush-usage --limit=500')->everyMinute()->withoutOverlapping(2);
-Schedule::command('ops:cleanup-retained-data --chunk=500')->daily()->withoutOverlapping();
+Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping()->runInBackground();
+Schedule::command('customer-auth:cleanup --limit=500')->hourly()->withoutOverlapping(10)->runInBackground();
+Schedule::command('customer-auth:recover-mail --limit=100')->everyMinute()->withoutOverlapping(2)->runInBackground();
+Schedule::command('customer-api:flush-usage --limit=500')->everyMinute()->withoutOverlapping(2)->runInBackground();
+Schedule::command('ops:cleanup-retained-data --chunk=500')->daily()->withoutOverlapping()->runInBackground();
 Schedule::job(new SendDailyAdminStatsNotification, 'notifications')->dailyAt('00:00')->withoutOverlapping()->onOneServer();

@@ -20,7 +20,7 @@ run_artisan() {
 }
 
 run_scheduler() {
-    run_artisan schedule:run
+    run_artisan ops:schedule-run
 }
 
 report_runtime_failure() {
@@ -32,6 +32,7 @@ report_runtime_failure() {
 }
 
 record_oom_kill_count() {
+    OOM_DETECTED=0
     current_count=
     if [ -r "$OOM_EVENTS_FILE" ]; then
         while IFS=' ' read -r event_name event_value; do
@@ -55,6 +56,7 @@ record_oom_kill_count() {
     esac
 
     if [ "$current_count" -gt "$previous_count" ]; then
+        OOM_DETECTED=1
         if ! report_runtime_failure oom_kill; then
             return 1
         fi
@@ -77,22 +79,29 @@ while true; do
     date -u +"%Y-%m-%dT%H:%M:%SZ" > "$RUNNING_FILE.tmp"
     mv "$RUNNING_FILE.tmp" "$RUNNING_FILE"
 
+    cycle_status=0
     if run_scheduler; then
-        if ! run_artisan ops:scheduler-runtime-alert scheduler recovered; then
-            echo "WARNING: scheduler recovery could not be persisted." >&2
-        fi
-        date -u +"%Y-%m-%dT%H:%M:%SZ" > "$HEARTBEAT_FILE.tmp"
-        mv "$HEARTBEAT_FILE.tmp" "$HEARTBEAT_FILE"
-        rm -f "$RUNNING_FILE"
+        :
     else
-        status=$?
-        echo "WARNING: schedule:run exited non-zero (status=$status); the scheduler loop continues." >&2
+        cycle_status=$?
+        echo "WARNING: ops:schedule-run exited non-zero (status=$cycle_status); the scheduler loop continues." >&2
         if report_runtime_failure schedule_exit; then
             rm -f "$RUNNING_FILE"
         fi
     fi
 
-    record_oom_kill_count || true
+    if record_oom_kill_count; then
+        if [ "$cycle_status" -eq 0 ] && [ "$OOM_DETECTED" -eq 0 ]; then
+            if ! run_artisan ops:scheduler-runtime-alert scheduler recovered; then
+                echo "WARNING: scheduler recovery could not be persisted." >&2
+            fi
+            date -u +"%Y-%m-%dT%H:%M:%SZ" > "$HEARTBEAT_FILE.tmp"
+            mv "$HEARTBEAT_FILE.tmp" "$HEARTBEAT_FILE"
+            rm -f "$RUNNING_FILE"
+        elif [ "$OOM_DETECTED" -eq 1 ]; then
+            rm -f "$RUNNING_FILE"
+        fi
+    fi
 
     elapsed=$(( $(date +%s) - started_at ))
     printf 'scheduler cycle duration_seconds=%s\n' "$elapsed"

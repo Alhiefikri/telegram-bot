@@ -120,7 +120,7 @@ final class BalanceOperationsAlertService
             default => throw new \InvalidArgumentException('Unknown runtime alert component.'),
         };
         $reasonLabels = [
-            'schedule_exit' => 'schedule:run keluar dengan status non-zero',
+            'schedule_exit' => 'siklus scheduler keluar dengan status non-zero',
             'cycle_interrupted' => 'proses scheduler berhenti di tengah satu siklus',
             'oom_kill' => 'cgroup mencatat proses scheduler terkena OOM-kill',
             'recovery_exit' => 'proses recovery keluar dengan status non-zero',
