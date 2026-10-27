@@ -26,7 +26,6 @@ use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\OrderCheckoutService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Carbon\CarbonImmutable;
-use Carbon\CarbonInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -48,7 +47,7 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         string $method,
         string $effectType,
     ): void {
-        $deadline = CarbonImmutable::parse('2030-01-02 03:04:05', config('app.timezone'));
+        $checkoutAt = CarbonImmutable::parse('2030-01-02 03:04:05', config('app.timezone'));
         $this->configureIdrRail($rail);
 
         $product = Product::factory()->create([
@@ -57,13 +56,8 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             'reserved_stock' => 0,
         ]);
         $cart = $this->cartForProduct($product, quantity: 2);
-        $minutesBeforeDeadline = match ($rail) {
-            'klikqris' => 15,
-            'sakurupiah' => 60,
-            default => 10,
-        };
-        $this->travelTo($deadline->copy()->subMinutes($minutesBeforeDeadline));
-        $cart->update(['expires_at' => $deadline->copy()->addHour()]);
+        $this->travelTo($checkoutAt);
+        $cart->update(['expires_at' => $checkoutAt->addHour()]);
 
         try {
             $order = app(OrderCheckoutService::class)->checkout(
@@ -83,7 +77,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             paymentCurrency: 'IDR',
             paymentAmount: 30_000,
             orderTotal: 30_000,
-            deadline: $deadline,
             effectType: $effectType,
         );
     }
@@ -132,7 +125,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             paymentCurrency: 'USDT',
             paymentAmount: 3_250_000,
             orderTotal: 20_000,
-            deadline: $deadline,
             effectType: TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
         );
 
@@ -174,7 +166,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             paymentCurrency: 'USDT',
             paymentAmount: 2_500_000,
             orderTotal: 25_000,
-            deadline: $deadline,
             effectType: TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
         );
         $detail = $payment->bscDetail()->sole();
@@ -197,7 +188,7 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         string $method,
         string $effectType,
     ): void {
-        $deadline = CarbonImmutable::parse('2030-04-05 06:07:08', config('app.timezone'));
+        $checkoutAt = CarbonImmutable::parse('2030-04-05 06:07:08', config('app.timezone'));
         $this->configureIdrRail($rail);
 
         $product = Product::factory()->withQuantityPriceTiers([
@@ -208,13 +199,8 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             'reserved_stock' => 0,
         ]);
         $cart = $this->cartForProduct($product, quantity: 2);
-        $minutesBeforeDeadline = match ($rail) {
-            'klikqris' => 15,
-            'sakurupiah' => 60,
-            default => 10,
-        };
-        $this->travelTo($deadline->copy()->subMinutes($minutesBeforeDeadline));
-        $cart->update(['expires_at' => $deadline->copy()->addHour()]);
+        $this->travelTo($checkoutAt);
+        $cart->update(['expires_at' => $checkoutAt->addHour()]);
 
         try {
             $order = app(OrderCheckoutService::class)->checkout($cart, $this->idrIntent($rail));
@@ -231,7 +217,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             paymentCurrency: 'IDR',
             paymentAmount: 24_000,
             orderTotal: 24_000,
-            deadline: $deadline,
             effectType: $effectType,
         );
         $item = $order->orderItems->sole();
@@ -282,7 +267,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             paymentCurrency: 'USDT',
             paymentAmount: 6_000_000,
             orderTotal: 36_000,
-            deadline: $deadline,
             effectType: TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
         );
         $this->assertSame(2, $order->orderItems->sole()->quantity_price_tier_minimum);
@@ -325,7 +309,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
             paymentCurrency: 'USDT',
             paymentAmount: 4_600_000,
             orderTotal: 44_000,
-            deadline: $deadline,
             effectType: TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
         );
         $detail = $order->payments()->sole()->bscDetail()->sole();
@@ -713,7 +696,6 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         string $paymentCurrency,
         int $paymentAmount,
         int $orderTotal,
-        CarbonInterface $deadline,
         string $effectType,
     ): Payment {
         $payment = $order->payments()->sole();
@@ -729,8 +711,7 @@ final class CheckoutPaymentSnapshotCharacterizationTest extends TestCase
         $this->assertSame($paymentCurrency, $payment->currency);
         $this->assertSame($paymentAmount, $payment->amount);
         $this->assertSame(PaymentStatus::Pending, $payment->status);
-        $this->assertSame($deadline->timestamp, $order->expires_at->timestamp);
-        $this->assertSame($deadline->timestamp, $payment->expired_at->timestamp);
+        $this->assertSame($order->expires_at->timestamp, $payment->expired_at->timestamp);
         $this->assertSame(InventoryMovementType::Reservation, $movement->type);
         $this->assertSame($quantity, $movement->quantity);
         $this->assertSame($quantity, $product->fresh()->reserved_stock);

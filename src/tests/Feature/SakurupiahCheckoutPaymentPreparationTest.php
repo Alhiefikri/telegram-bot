@@ -281,6 +281,11 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
             'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
             'sandbox_api_id' => 'sandbox-id',
             'sandbox_api_key' => 'sandbox-key',
+            'sandbox_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+            'sandbox_return_url' => 'https://store.example.test/shop/orders',
+            'sandbox_allowed_hosts' => ['sakurupiah.id'],
+            'sandbox_callback_allowed_hosts' => ['store.example.test'],
+            'sandbox_return_allowed_hosts' => ['store.example.test'],
             'qris_contract' => [
                 'currency' => 'IDR',
                 'currency_confirmed' => true,
