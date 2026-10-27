@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\InventoryMovementType;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
 use App\Models\Customer;
@@ -22,10 +24,19 @@ use App\Services\Checkout\SakurupiahCheckoutIntent;
 use App\Services\Checkout\SakurupiahCheckoutPaymentPreparation;
 use App\Services\OrderCheckoutService;
 use App\Services\Pricing\ProductQuantityPricing;
+use App\Services\Sakurupiah\SakurupiahCreateInvoice;
+use App\Services\Sakurupiah\SakurupiahFee;
+use App\Services\Sakurupiah\SakurupiahInvoice;
+use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
+use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
+use App\Services\Sakurupiah\SakurupiahProviderAdapter;
+use App\Services\Sakurupiah\SakurupiahTransactionStatus;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -197,9 +208,10 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
     }
 
     #[DataProvider('checkoutChannels')]
-    public function test_checkout_persists_the_observed_channel_and_its_expiry_before_invoice_creation(string $channel, int $expiryHours): void
+    public function test_checkout_releases_stock_after_fifteen_minutes_while_provider_invoice_remains_valid(string $channel, int $expiryHours): void
     {
         $this->travelTo('2026-10-27 07:00:00');
+        Queue::fake();
         $this->configureReadySakurupiah(channel: $channel);
         ManualPaymentSetting::create([
             'payment_mode' => PaymentProvider::SAKURUPIAH,
@@ -208,16 +220,48 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
         ]);
         $product = Product::factory()->create(['price_amount' => 12_000, 'stock' => 2, 'reserved_stock' => 0]);
         $cart = $this->cartForProduct($product, telegramId: null);
-
+        $cart->customer->update(['phone_number' => '08123456789']);
+        $startedAt = now()->toImmutable();
         $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::sakurupiah());
         $payment = $order->payments()->sole();
+        $providerDeadline = $startedAt->addHours($expiryHours);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->withArgs(
+            fn (SakurupiahCreateInvoice $request): bool => $request->method === $channel && $request->expired === $expiryHours,
+        )->andReturn(new SakurupiahInvoice(
+            trxId: 'trx-local-deadline',
+            merchantRef: $payment->merchant_ref,
+            paymentCode: $channel,
+            status: SakurupiahTransactionStatus::Pending,
+            amount: 12_000,
+            total: 12_000,
+            fee: SakurupiahFee::from(0),
+            merchantFee: 1,
+            createdAt: $startedAt,
+            expiresAt: $providerDeadline,
+            checkoutUrl: 'https://sakurupiah.id/pay/local-deadline',
+        ));
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $result = app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment);
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $result->outcome());
+        $this->assertSame($startedAt->addMinutes(15)->timestamp, $order->fresh()->expires_at->timestamp);
+        $this->assertSame($startedAt->addMinutes(15)->timestamp, $payment->fresh()->expired_at->timestamp);
+        $this->assertSame($providerDeadline->timestamp, $payment->fresh()->provider_expires_at->timestamp);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
 
-        $this->assertSame($channel, $payment->sakurupiah_channel);
-        $this->assertSame(now()->addHours($expiryHours)->timestamp, $payment->expired_at->timestamp);
-        $this->assertNull($payment->provider_reference);
-        $this->assertSame($order->expires_at->timestamp, $payment->expired_at->timestamp);
+        $this->travelTo($startedAt->addMinutes(15)->subSecond());
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+
+        $this->travelTo($startedAt->addMinutes(15));
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(2, $product->fresh()->availableStock());
+        $this->assertSame($providerDeadline->timestamp, $payment->fresh()->provider_expires_at->timestamp);
         Http::assertSentCount(1);
-        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/list-payment.php'));
     }
 
     public static function checkoutChannels(): array

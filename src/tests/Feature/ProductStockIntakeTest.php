@@ -528,11 +528,12 @@ class ProductStockIntakeTest extends TestCase
         Customer::factory()->create(['telegram_id' => 399031, 'locale' => 'id']);
         $product = Product::factory()
             ->withQuantityPriceTiers([
-                ['minimum_quantity' => 2, 'price_amount' => 45_000, 'usdt_price_amount' => null],
-                ['minimum_quantity' => 5, 'price_amount' => 40_000, 'usdt_price_amount' => null],
+                ['minimum_quantity' => 2, 'price_amount' => 45_000, 'usdt_price_amount' => 2_500_001],
+                ['minimum_quantity' => 5, 'price_amount' => 40_000, 'usdt_price_amount' => 2_000_000],
             ])
             ->create([
                 'price_amount' => 50_000,
+                'usdt_price_amount' => 3_125_001,
                 'stock' => 0,
                 'reserved_stock' => 0,
             ]);
@@ -552,6 +553,8 @@ class ProductStockIntakeTest extends TestCase
 
         $this->assertStringContainsString('Harga grosir mulai 2 unit: Rp45.000/unit', $recipient->text);
         $this->assertStringNotContainsString('Harga grosir mulai 5 unit', $recipient->text);
+        $this->assertStringContainsString('Rp50.000 / 3.125001 USD', $recipient->text);
+        $this->assertStringContainsString('Rp45.000/unit / 2.500001 USD/unit', $recipient->text);
 
         $product->quantityPriceTiers()->delete();
         $product->quantityPriceTiers()->create([
@@ -559,6 +562,7 @@ class ProductStockIntakeTest extends TestCase
             'price_amount' => 30_000,
             'usdt_price_amount' => null,
         ]);
+        $product->update(['usdt_price_amount' => 9_000_000]);
 
         $job = new SendProductStockNotifications($result['movement_id']);
         $job->handle(app(StockNotificationDeliveryPipeline::class));

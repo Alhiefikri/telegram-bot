@@ -676,7 +676,7 @@ class SakurupiahWebhookTest extends TestCase
         ]);
         $payment->update([
             'expired_at' => now()->subMinute(),
-            'provider_expires_at' => now()->subMinute(),
+            'provider_expires_at' => now()->addDay(),
             'status' => PaymentStatus::Pending,
         ]);
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
@@ -689,6 +689,8 @@ class SakurupiahWebhookTest extends TestCase
         $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
             ->assertOk()
             ->assertExactJson(['success' => true]);
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))
+            ->assertOk();
 
         $payment->refresh();
         $order = $payment->order->fresh();
@@ -698,6 +700,10 @@ class SakurupiahWebhookTest extends TestCase
         $this->assertSame(1, ManualFulfillmentReview::query()->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
         $this->assertSame(0, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
         $this->assertNotNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
+        $item = $order->orderItems()->sole();
+        $this->assertSame(0, $item->product->fresh()->reserved_stock);
+        $this->assertNull(ProductStockItem::where('product_id', $item->product_id)->sole()->order_item_id);
+        $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', InventoryMovementType::Release)->count());
     }
 
     public function test_out_of_order_callbacks_cause_one_paid_sale_and_stale_callbacks_are_acknowledged(): void

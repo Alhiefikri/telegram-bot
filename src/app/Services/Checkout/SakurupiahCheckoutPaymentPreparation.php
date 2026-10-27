@@ -51,9 +51,7 @@ final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPay
             throw new InvalidCheckout('Sakurupiah QRIS amount is outside the provider limits. Try again later or contact support.');
         }
 
-        $expiryHours = SakurupiahChannelPolicy::expiryHours($channel->code);
-
-        $expiresAt = now()->addHours($expiryHours);
+        $expiresAt = now()->addMinutes(15);
         $snapshot = new SakurupiahCheckoutPaymentSnapshot(
             provider: PaymentProvider::SAKURUPIAH,
             method: self::METHOD,

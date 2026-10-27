@@ -883,6 +883,71 @@ class SakurupiahInvoiceLifecycleTest extends TestCase
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
     }
 
+    #[DataProvider('localAndProviderDeadlines')]
+    public function test_payable_deadline_is_the_earlier_local_or_provider_deadline(int $providerMinutes, string $expectedDeadline): void
+    {
+        $this->travelTo('2026-10-27 07:00:00');
+        $payment = $this->payment(['expired_at' => now()->addMinutes(15)]);
+        $payment->order->update(['expires_at' => now()->addMinutes(15)]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->andReturn(
+            $this->invoice($payment, expiresAt: CarbonImmutable::now()->addMinutes($providerMinutes)),
+        );
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $service = app(SakurupiahInvoiceLifecycleService::class);
+
+        foreach ([$service->lifecycle($payment), $service->lifecycle($payment->fresh())] as $result) {
+            $this->assertSame(SakurupiahInvoiceOutcome::Payable, $result->outcome());
+            $this->assertSame($expectedDeadline, $result->payable()->effectiveExpiresAt()->format('Y-m-d H:i:s'));
+        }
+        $this->assertSame($expectedDeadline, $payment->fresh()->expired_at->format('Y-m-d H:i:s'));
+        $this->assertSame($expectedDeadline, $payment->fresh()->order->expires_at->format('Y-m-d H:i:s'));
+        $this->assertSame(CarbonImmutable::now()->addMinutes($providerMinutes)->timestamp, $payment->fresh()->provider_expires_at->timestamp);
+    }
+
+    public static function localAndProviderDeadlines(): array
+    {
+        return [
+            'provider earlier' => [5, '2026-10-27 07:05:00'],
+            'same deadline' => [15, '2026-10-27 07:15:00'],
+            'provider next day' => [1440, '2026-10-27 07:15:00'],
+        ];
+    }
+
+    public function test_status_refresh_does_not_extend_local_deadline_when_provider_still_has_a_day(): void
+    {
+        $this->travelTo('2026-10-27 07:00:00');
+        $payment = $this->payment(['expired_at' => now()->addMinutes(15)]);
+        $payment->order->update(['expires_at' => now()->addMinutes(15)]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('createInvoice')->once()->andReturn($this->invoice($payment));
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(new SakurupiahStatus(
+            trxId: 'trx-411',
+            status: SakurupiahTransactionStatus::Pending,
+            merchantRef: $payment->merchant_ref,
+            amount: SakurupiahAmount::from(12000),
+            total: SakurupiahAmount::from(12084),
+            fee: SakurupiahFee::from(84),
+            expiresAt: CarbonImmutable::parse('2026-10-28 07:00:00'),
+            checkoutUrl: 'https://sakurupiah.id/pay/invoice',
+        ));
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $service = app(SakurupiahInvoiceLifecycleService::class);
+        $service->lifecycle($payment);
+        $this->travelTo('2026-10-27 07:14:59');
+
+        $refreshed = $service->refreshStatus($payment->fresh());
+
+        $this->assertSame(SakurupiahInvoiceOutcome::Payable, $refreshed->outcome());
+        $this->assertSame('2026-10-27 07:15:00', $refreshed->payable()->effectiveExpiresAt()->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-10-27 07:15:00', $payment->fresh()->order->expires_at->format('Y-m-d H:i:s'));
+        $this->travelTo('2026-10-27 07:15:01');
+        $expired = $service->lifecycle($payment->fresh());
+        $this->assertSame(SakurupiahInvoiceOutcome::Expired, $expired->outcome());
+        $this->assertNull($expired->payable());
+        $this->assertSame('2026-10-28 07:00:00', $payment->fresh()->provider_expires_at->format('Y-m-d H:i:s'));
+    }
+
     public function test_expired_provider_deadline_is_never_payable(): void
     {
         $payment = $this->payment(['merchant_ref' => 'INV-411-EXPIRED']);

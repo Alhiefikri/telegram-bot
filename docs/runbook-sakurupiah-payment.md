@@ -41,10 +41,27 @@ terminal Orders or re-targets an existing invoice.
 
 There is no automatic channel fallback, including after timeout or an ambiguous
 create. The same reference must be reconciled instead of creating an invoice on
-another channel. `QRISMU` uses 12-hour expiry; the other supported channels use
-the qualified 24-hour policy. Readiness requires the exact selected channel and
-checks its metadata against that policy. Fee payer remains customer-borne; the
-actual fee and total come from the provider invoice, not a static tariff.
+another channel. Provider invoices use 12-hour expiry for `QRISMU` and the
+qualified 24-hour policy for the other supported channels. Readiness checks
+channel metadata against that provider policy. Fee payer remains customer-borne;
+the actual fee and total come from the provider invoice, not a static tariff.
+
+Store checkout has a separate **15-minute local deadline**, measured from Order
+creation, for every Sakurupiah channel. `Order.expires_at` and `Payment.expired_at`
+bound checkout and stock reservation; `Payment.provider_expires_at` preserves the
+provider deadline. A shorter provider deadline may tighten the local deadline,
+but a longer provider deadline never extends it. Customer instructions use the
+effective local deadline. The minute-based `orders:expire-pending` sweep releases
+due reservations through `OrderLifecycle`, without cancelling or waiting for the
+provider QRIS. Verified money arriving after local expiry enters Late Payment
+manual review and never automatically re-reserves stock or fulfills the Order.
+
+The `2026_10_27_000002` migration caps existing unpaid pending Sakurupiah Orders
+at `created_at + 15 minutes`, retaining earlier deadlines and provider history.
+It also tightens the encrypted presentation's effective deadline. The normal
+expiry sweep, not the migration, releases stock. Paid/terminal Orders, other
+providers and Store Balance top-ups are untouched. Rollback does not extend
+deadlines or re-reserve stock.
 
 
 ## Channel lookup failure with an active QRISC channel
@@ -404,7 +421,8 @@ endpoint was used.
 
 The live sandbox observation selected `QRISC` and reported `minimum=200`,
 `maximum=20,000,000`, active status, `default_expired=24`, and settlement
-`H+1`. The local expiry contract was aligned to 24 hours before checkout.
+`H+1`. That historical run aligned the local expiry contract to 24 hours;
+current checkout instead uses the separate 15-minute local deadline above.
 A fresh amount-`200` app-linked checkout then returned provider method `QRISC`,
 status `pending`, fee `0`, and total `200`; the total equation matched
 `amount + fee`.

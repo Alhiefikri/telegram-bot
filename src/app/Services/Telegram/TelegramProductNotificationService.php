@@ -44,9 +44,7 @@ class TelegramProductNotificationService
             fn (Customer $customer) => implode("\n", [
                 $this->locale->translate($customer, 'notification.product.created.lead'),
                 $this->productNames->renderSelection($product->name, $icon),
-                $this->locale->translate($customer, 'notification.product.price', [
-                    'amount' => number_format($product->price_amount, 0, ',', '.'),
-                ]),
+                $this->customerPriceLine($product, $this->locale->code($customer)),
                 $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
                 ...$this->customerTierLines($customer, $promotedTier),
                 '',
@@ -88,9 +86,7 @@ class TelegramProductNotificationService
                 fn (Customer $customer) => implode("\n", [
                     $this->locale->translate($customer, 'notification.product.restock.lead'),
                     $this->productNames->renderSelection($product->name, $icon),
-                    $this->locale->translate($customer, 'notification.product.price', [
-                        'amount' => number_format($product->price_amount, 0, ',', '.'),
-                    ]),
+                    $this->customerPriceLine($product, $this->locale->code($customer)),
                     $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
                     ...$this->customerTierLines($customer, $promotedTier),
                     '',
@@ -298,9 +294,7 @@ class TelegramProductNotificationService
                 '━━━━━━━━━━━━━━',
                 $lead,
                 $this->productNames->renderSelection($product->name, $icon),
-                $this->locale->translateLocale($locale, 'notification.product.price', [
-                    'amount' => number_format($product->price_amount, 0, ',', '.'),
-                ]),
+                $this->customerPriceLine($product, $locale),
                 $this->locale->translateLocale($locale, 'notification.product.stock', ['stock' => $availableStock]),
                 ...$this->customerTierLines($customer, $promotedTier),
                 '',
@@ -354,6 +348,16 @@ class TelegramProductNotificationService
         return $deliveries;
     }
 
+    private function customerPriceLine(Product $product, string $locale): string
+    {
+        return $this->locale->translateLocale($locale, $product->usdt_price_amount === null
+            ? 'notification.product.price'
+            : 'notification.product.price_dual', [
+                'amount' => number_format($product->price_amount, 0, ',', '.'),
+                'usd' => $product->usdt_price_amount === null ? '' : $this->formatUsdt($product->usdt_price_amount),
+            ]);
+    }
+
     /** @return list<string> */
     private function customerTierLines(Customer $customer, ?ProductPriceTierQuote $tier): array
     {
@@ -361,10 +365,13 @@ class TelegramProductNotificationService
             return [];
         }
 
-        return [$this->locale->translate($customer, 'notification.product.tier', [
-            'minimum' => $tier->minimumQuantity,
-            'amount' => number_format($tier->priceAmount, 0, ',', '.'),
-        ])];
+        return [$this->locale->translate($customer, $tier->usdtPriceAmount === null
+            ? 'notification.product.tier'
+            : 'notification.product.tier_dual', [
+                'minimum' => $tier->minimumQuantity,
+                'amount' => number_format($tier->priceAmount, 0, ',', '.'),
+                'usd' => $tier->usdtPriceAmount === null ? '' : $this->formatUsdt($tier->usdtPriceAmount),
+            ])];
     }
 
     public function tierPromotionForStock(Product $product, ?int $availableBefore, int $availableAfter): ?ProductPriceTierQuote

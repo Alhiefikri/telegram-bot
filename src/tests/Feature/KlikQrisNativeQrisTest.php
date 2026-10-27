@@ -9,8 +9,10 @@ use App\Enums\PaymentStatus;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Models\InventoryMovement;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductStockItem;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\KlikQris\KlikQrisCreatePreRequestException;
 use App\Services\KlikQris\KlikQrisNativeQrisLifecycleResult;
@@ -485,6 +487,40 @@ class KlikQrisNativeQrisTest extends TestCase
         $this->assertSame(now()->addMinutes(5)->timestamp, $result->payable()->effectiveExpiresAt()->timestamp);
         $this->assertSame(now()->addMinutes(5)->timestamp, $payment->fresh()->expired_at->timestamp);
         $this->assertSame(now()->addMinutes(5)->timestamp, $payment->fresh()->order->expires_at->timestamp);
+    }
+
+    public function test_local_expiry_releases_managed_stock_once_even_when_provider_qris_is_valid_until_tomorrow(): void
+    {
+        config()->set('services.telegram.token', null);
+        $cart = $this->cartWithProduct(price: 1000, stock: 2);
+        $product = $cart->cartItems()->firstOrFail()->product;
+        $credential = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'local-expiry@example.test|password']);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::klikQris());
+        $payment = $order->payments()->sole();
+        $providerDeadline = '2026-07-29T07:00:00+07:00';
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::createPayload($payment, [
+            'expired_at' => $providerDeadline,
+        ]), 200));
+        $this->assertTrue($this->lifecycle($payment)->isPayable());
+        $this->assertSame('2026-07-28 07:15:00', $order->fresh()->expires_at->format('Y-m-d H:i:s'));
+        $this->assertNotNull($credential->fresh()->order_item_id);
+        $this->travelTo('2026-07-28 07:14:59');
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->order_status);
+        $this->assertSame(1, $product->fresh()->reserved_stock);
+
+        $this->travelTo('2026-07-28 07:15:00');
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+
+        $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(2, $product->fresh()->stock);
+        $this->assertNull($credential->fresh()->order_item_id);
+        $this->assertSame(1, InventoryMovement::where('order_id', $order->id)->where('type', 'release')->count());
+        $this->assertSame($providerDeadline, $payment->fresh()->provider_expires_at->toIso8601String());
+        Http::assertSentCount(1);
     }
 
     public function test_expire_pending_orders_releases_reservation_and_lifecycle_returns_expired_after_provider_deadline(): void
