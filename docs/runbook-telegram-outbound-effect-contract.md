@@ -117,15 +117,14 @@ moves wakeups and persisted routing metadata.
    ```
 
    The supervised queues are `default`, `payments`, `telegram-receipts`,
-   `telegram-pins`, `notifications`, `telegram-outbound`, `telegram-broadcast`,
-   `telegram-stock`, `binance-verification` and `suppliers`.
+   `notifications`, `telegram-outbound`, `telegram-broadcast`, `telegram-stock`,
+   `binance-verification` and `suppliers`.
 
 If a wakeup is lost, the receipt effect rows are still pending in PostgreSQL.
 `telegram:recover-outbound` redispatches them through the type-based dispatcher,
-which always routes receipt families to `telegram-receipts`. The same sweep
-repairs a sent credential receipt whose optional pin was lost: it applies the
-unchanged pin eligibility and claim rules and never resends the receipt. Do not
-recreate receipt content or resend an ambiguous unit by hand.
+which always routes receipt families to `telegram-receipts`. Recovery does not
+pin sent receipts or interpret historical pin columns. Do not recreate receipt
+content or resend an ambiguous unit by hand.
 
 Rollback uses the same command in reverse while the receipt worker is stopped:
 
@@ -139,6 +138,81 @@ delivery state, claim token, sequence or ambiguity record. Deploy the previous
 application image before a rollback: the current dispatcher routes receipt
 families by type and would keep sending them to `telegram-receipts` even after
 the metadata is moved back.
+
+## Automatic credential pin retirement (#668)
+
+This is a production cutover **plan**, not a record of execution or deployment
+authorization. #668 removes automatic receipt pins, the serialized
+`App\Jobs\PinTelegramCredentialReceipt` class, its service, dedicated
+`telegram-pins` worker and health requirement. There is no compatibility job
+stub. Do not start the new code while retired payloads can still be consumed.
+
+1. Before changing code, record ready, delayed, reserved and failed counts on
+   every relevant queue connection, Redis database/prefix and database queue
+   store. Inventory the retired class across all queues, not only
+   `telegram-pins`; old/custom routing can leave payloads elsewhere. Record
+   sanitized job IDs/UUIDs, source queue/connection and counts, never credential
+   payloads. Preserve the receipt ledger and unrelated queue work.
+2. Quiesce ingress and stop every old producer that can reach receipt delivery
+   or pin dispatch, including old application instances, receipt workers,
+   scheduler/manual recovery entry points and the dedicated `outbound-recovery`
+   service. Wait for any already-running recovery child and application request
+   to finish. Gracefully stop old workers that can produce or consume pin jobs,
+   including `laravel-receipt-worker:*` and `laravel-pin-worker:*` in every
+   replica, and any worker configured to consume their queues. Use the process
+   manager's explicit stop with autorestart held off, not `queue:restart` alone.
+   Keep the old code available until these processes and their in-flight jobs
+   have exited; verify no old producer, recovery child or pin transport call
+   remains. Do not SIGKILL an in-flight delivery to meet a rollout deadline.
+   Supervisor `stopwaitsecs` must exceed the longest running job.
+3. With that stop barrier held, inspect each candidate payload as JSON.
+   Match the exact `data.commandName` value
+   `App\Jobs\PinTelegramCredentialReceipt` and confirm the serialized command's
+   class identity agrees; display names, queue names or substring matches alone
+   are not deletion authority. Do not execute/unserialize a payload to inspect
+   it. An undecodable or conflicting payload blocks its removal until reviewed.
+   Freeze the reviewed set of exact payload bytes and database IDs/UUIDs.
+4. Selectively remove only that reviewed retired class:
+   - For Redis, remove matching exact payload members from each ready list
+     (`queues:<queue>`), delayed sorted set (`queues:<queue>:delayed`) and
+     reserved sorted set (`queues:<queue>:reserved`), using the actual runtime
+     prefix and Redis database. Use exact-member list/sorted-set removals;
+     preserve unrelated members and ready-list ordering. Reserved entries may
+     be removed only after their owning processes are confirmed exited, never
+     while an old worker or in-flight job can still acknowledge/release them.
+   - For a database queue store, delete only reviewed `jobs` primary keys whose
+     current payload still matches, including delayed and abandoned reserved
+     rows after the same ownership barrier. Leave other jobs unchanged.
+   - Inspect PostgreSQL `failed_jobs` across all queues/connections as well.
+     Forget only the reviewed retired-class UUIDs (one `queue:forget <uuid>`
+     per approved entry for the configured provider), or delete exact reviewed
+     IDs with the same payload guard. Never retry the retired class.
+   Re-inspect ready, delayed, reserved and failed storage under the same barrier
+   and reconcile removed counts against the reviewed inventory. Unrelated job
+   IDs/counts must remain accounted for. Any remaining retired payload or old
+   process blocks activation.
+5. Only then install/start the new code and topology, without a pin consumer.
+   Resume ingress and the new recovery owner. Check
+   `ops:health --db --queue-schema --queue-depth --supervisor` and the normal
+   receipt/recovery flow under the release's approved verification procedure.
+   Recovery must retain receipt ordering, pending redispatch, claim fencing,
+   admin wakeup and unknown/manual-review behavior, without pin dispatch.
+
+Never use `queue:clear`, `queue:flush`, a queue-wide delete, `FLUSHDB` or
+`FLUSHALL` for this retirement. A named queue can contain unrelated jobs.
+Do not modify `telegram_outbound_effects`, receipt state/claims/sequence,
+message identity or ambiguity records to clean up jobs. Do not drop or reset
+historical Order pin pointer/claim columns or their migrations, and do not
+call `unpinChatMessage` or otherwise change existing Telegram pins. Authorized
+List Order and Order detail access remain available without pinning.
+
+[Laravel 13's queue lifecycle](https://github.com/laravel/docs/blob/13.x/queues.md)
+confirms that `queue:restart` exits after the current job and Supervisor can
+restart the worker; it is not a stop barrier. Its `queue:clear` operation
+removes all jobs on the named queue and is unsuitable for this selective
+retirement. Rolling back to pin-producing code would re-enable the retired
+feature and requires a separate approved decision; the #651 routing rollback
+above is not a pin-retirement rollback procedure.
 
 ## Runtime recovery contract
 

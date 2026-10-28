@@ -96,7 +96,7 @@ dogfood inputs by exporting the variable before running the command.
 
 Telegram Bot API calls use a 10-second overall HTTP timeout and a 3-second connection-setup timeout. The connection timeout is within the overall budget, not an additional three seconds. The same budget applies to multipart photo/document uploads; there is no separately longer upload timeout. Interactive update jobs retain their existing retry/backoff behavior, while a timeout for a durable Telegram Outbound Effect remains ambiguous and requires Manual Delivery Review rather than automatic resend.
 
-The production app image runs PHP-FPM in dynamic mode with `pm.max_children=6`, `pm.start_servers=2`, `pm.min_spare_servers=2`, `pm.max_spare_servers=4`, `pm.max_requests=500`, and `request_terminate_timeout=60s`. Nginx's FastCGI read timeout is 65 seconds, leaving a five-second margin beyond FPM's request limit. These limits apply to FPM requests; the app container also runs ten supervised queue workers under the Compose 1.50-CPU/896-MiB cap; see [the queue topology note](telegram-queue-topology.md) for the current consumer list, timeout margins and the unverified memory headroom caveat.
+The checked-in app image runs PHP-FPM in dynamic mode with `pm.max_children=6`, `pm.start_servers=2`, `pm.min_spare_servers=2`, `pm.max_spare_servers=4`, `pm.max_requests=500`, and `request_terminate_timeout=60s`. Nginx's FastCGI read timeout is 65 seconds, leaving a five-second margin beyond FPM's request limit. These limits apply to FPM requests; the local Compose configuration also has nine supervised queue-worker processes under the 1.50-CPU/896-MiB cap after #668 removes the one-process pin worker. This is one fewer configured local process than #652, not a claim about production process count or measured CPU/memory savings. See [the queue topology note](telegram-queue-topology.md) for the current consumer list, timeout margins and the unverified memory headroom caveat.
 
 The pool settings are a resource bound, not proof that peak FPM plus queue-worker memory fits the container. The benchmark records final container memory, not a peak-memory/OOM trace; green `ops:health` does not demonstrate FPM capacity. For production acceptance, capture peak app memory/OOM and restart state, storefront latency/502s under representative load, and PostgreSQL connection counts before and after rollout.
 
@@ -123,11 +123,20 @@ On 2026-07-02, issue #70 was verified with clean dogfood volumes by running:
 BENCHMARK_COMPOSE_PROJECT=telegram-bot-dogfood-issue70 WEB_PORT=18081 BASE_URL=http://127.0.0.1:18081 ./scripts/benchmark-production.sh
 ```
 
-Result: passed. The report measured webhook ACK p95 at 31.049 ms, handler drain at 4133.749 ms, final queue depth at 0, and failed jobs at 0. This run used fake Telegram outbound for safe synthetic handler coverage, but exercised the then-current Docker/Nginx/PostgreSQL/Supervisor queue topology with split `default` and combined `telegram-outbound,notifications` workers. Current runs additionally use Redis for cache/session/locks/queue and the later issue #171 topology with independent `default`, `telegram-outbound`, `notifications`, `telegram-broadcast`, and `telegram-stock` pools, and from issue #651 `payments` and `telegram-receipts` as separate supervised queues; issue #652 adds `telegram-pins` for the optional credential pin.
+Result: passed. The report measured webhook ACK p95 at 31.049 ms, handler drain at 4133.749 ms, final queue depth at 0, and failed jobs at 0. This run used fake Telegram outbound for safe synthetic handler coverage, but exercised the then-current Docker/Nginx/PostgreSQL/Supervisor queue topology with split `default` and combined `telegram-outbound,notifications` workers. That historical evidence is unchanged. Current runs additionally use Redis for cache/session/locks/queue and the later issue #171 topology with independent `default`, `telegram-outbound`, `notifications`, `telegram-broadcast`, and `telegram-stock` pools, and from issue #651 `payments` and `telegram-receipts` as separate supervised queues. Issue #652's optional pin worker was subsequently retired by #668; pin scenarios are historical only.
 
 ## Synthetic Versus Real External Calls
 
 The current supervised topology separates `default` interactions, `payments` verification, `telegram-receipts` credential delivery, and `notifications` email/admin/proof work instead of combining `payments,default` or receipts with notifications. See [the queue topology note](telegram-queue-topology.md).
+
+Automatic credential receipt pins are no longer dispatched or recovered.
+Receipt ledger states, ordered successors, admin wakeup, unknown/manual-review
+handling and authorized List Order/detail access remain unchanged. Existing
+pins and historical Order pin pointer/claim columns are preserved. The
+[targeted retirement plan](runbook-telegram-outbound-effect-contract.md#automatic-credential-pin-retirement-668)
+requires a graceful old-producer/recovery/worker stop barrier, including
+in-flight jobs, before selective retired-payload cleanup and new-code startup.
+It forbids global purges and does not authorize production execution.
 
 Synthetic Telegram handler scenarios set `DOGFOOD_FAKE_TELEGRAM_OUTBOUND=true` by default. This replaces outbound Telegram API calls with `FakeTelegramBotClient` inside the Docker app worker, so the benchmark does not send real Telegram messages while still exercising the application handler, queue, database, cart, checkout, and manual-payment code paths.
 

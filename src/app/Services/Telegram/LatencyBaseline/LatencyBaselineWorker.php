@@ -146,8 +146,6 @@ final class LatencyBaselineWorker
             'workers' => 1,
             'peak_rss_bytes' => $this->peakRssBytes > 0 ? $this->peakRssBytes : null,
             'telegram_latency_ms' => (int) round(((int) ($this->environment['DOGFOOD_FAKE_TELEGRAM_LATENCY_US'] ?? 0)) / 1000),
-            'telegram_pin_latency_ms' => (int) round(((int) ($this->environment['DOGFOOD_FAKE_TELEGRAM_PIN_LATENCY_US'] ?? 0)) / 1000),
-            'telegram_pin_failure' => ($this->environment['DOGFOOD_FAKE_TELEGRAM_PIN_FAILURE'] ?? 'false') === 'true',
             'fake_telegram_transport' => ($this->environment['DOGFOOD_FAKE_TELEGRAM_OUTBOUND'] ?? 'false') === 'true',
         ];
     }

@@ -133,7 +133,7 @@ transport details, and synchronization of its own read projection:
 | Store Balance top-up payment proof | Manual-rail customer payment proof forwarded to the admin chat with operator approve/reject actions and admin projection | notifications |
 | Store Balance owner alert | Admin alert for top-ups that may carry money but could not be settled automatically, deduplicated per top-up with sanitized diagnostics | notifications |
 | Store Balance top-up channel proof | Public Store Channel photo proof for a settled top-up, reusing the paid-invoice image and masked-buyer caption | notifications |
-| Receipt credentials | Ordered chunk rendering, credential delivery projection, and completion cleanup | telegram-receipts (cleanup: notifications; optional pin: telegram-pins) |
+| Receipt credentials | Ordered chunk rendering, credential delivery projection, and completion cleanup | telegram-receipts (cleanup: notifications) |
 | Admin Order notifications | Pending, paid, and expired admin projections | notifications |
 | Manual payment proof | Proof attachment forwarding and Payment projection | notifications |
 | Sales Proof Post | Store Channel announcement rendering and SalesProofPost projection | notifications |
@@ -149,12 +149,15 @@ uses `payments` and never shares the `default` interaction worker. The full
 consumer table, timeout margins and cutover sequence are in
 [the queue topology note](telegram-queue-topology.md).
 
-The optional credential pin is not a ledger effect. After a receipt is
-persisted as `sent` and the successor/admin handoffs are done,
-`ReceiptDeliveryPipeline` enqueues `PinTelegramCredentialReceipt` on
-`telegram-pins`; `telegram:recover-outbound` repairs a lost or failed attempt.
-The pin therefore cannot delay receipt order, admin wakeup, or Order access,
-and an unknown delivery never triggers one.
+Automatic credential receipt pinning is removed by #668. Receipt delivery and
+`telegram:recover-outbound` never dispatch a pin job or call `pinChatMessage`;
+there is no pin worker or compatibility stub. Receipt ledger transitions,
+ordered successors, admin wakeup and unknown/manual-review semantics remain
+unchanged. Customers retain authorized List Order and Order detail access.
+Existing Telegram pins are not unpinned, and historical Order pin pointer and
+claim columns remain untouched, without runtime reads or writes. Optional
+work must still never block receipt completion, as retained from
+[ADR 0031](adr/0031-credential-pin-outside-receipt-critical-path.md).
 
 The principal adapters are
 CheckoutInstructionDeliveryPipeline, ReceiptDeliveryPipeline,

@@ -5,7 +5,6 @@ namespace Tests\Feature\Telegram;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
-use App\Jobs\PinTelegramCredentialReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Models\Customer;
 use App\Models\Order;
@@ -19,7 +18,6 @@ use App\Models\User;
 use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\ReceiptActionPanelDeliveryPipeline;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
-use App\Services\Telegram\TelegramCredentialPinService;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectPolicy;
@@ -501,6 +499,10 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $document = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument'))->sole()[0];
         $payload = app(TelegramPaidOrderTxtExporter::class)->export($order->fresh(), $order->customer);
         $this->assertTrue($document->hasFile('document', $payload->documentContents(), $payload->filename()));
+        $documentEffect = TelegramOutboundEffect::query()->where('telegram_method', 'sendDocument')->sole();
+        $this->assertSame(TelegramOutboundEffectState::Sent, $documentEffect->state);
+        $this->assertSame('424499', (string) $documentEffect->telegram_message_id);
+        $this->assertSame(1, (int) $documentEffect->attempts);
         $this->assertStringContainsString(str_contains($secret, '|') ? 'password0' : $secret.'0', $payload->documentContents());
         $this->assertStringContainsString('Invoice : '.url(app(StorefrontInvoiceUrl::class)->show($order)), $payload->documentContents());
         $this->assertFalse(filter_var($this->telegramRequestField($document, 'protect_content'), FILTER_VALIDATE_BOOLEAN));
@@ -509,10 +511,15 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString($secret, (string) $this->telegramRequestField($photo, 'caption'));
         $this->assertEmpty($this->telegramRequestField($photo, 'reply_markup'));
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
-        foreach (Queue::pushed(PinTelegramCredentialReceipt::class) as $pinJob) {
-            $pinJob->handle(app(TelegramCredentialPinService::class));
+        $this->assertNull($order->fresh()->telegram_credential_message_id);
+        $this->assertNull($order->fresh()->telegram_credential_pinned_at);
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/pinChatMessage')));
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/unpinChatMessage')));
+        foreach (Queue::pushedJobs() as $jobs) {
+            foreach ($jobs as $queued) {
+                $this->assertNotSame('telegram-pins', $queued['job']->queue);
+            }
         }
-        $this->assertSame(424499, $order->fresh()->telegram_credential_message_id);
         $panel = TelegramOutboundEffect::query()->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)->sole();
         app(ReceiptActionPanelDeliveryPipeline::class)->deliver($panel);
         $message = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage'))->sole()[0];
@@ -549,10 +556,23 @@ final class TelegramReceiptActionPanelTest extends TelegramBotTestSupport
         $pipeline->deliver($first, dispatchNext: false);
         $pipeline->deliver($document, dispatchNext: false);
         $pipeline->deliver($document->fresh(), dispatchNext: false);
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
+        $pipeline->deliver($document->fresh(), dispatchNext: false);
         $this->assertSame(TelegramOutboundEffectState::Unknown, $document->fresh()->state);
         $this->assertNull($order->fresh()->telegram_receipt_sent_at);
         $this->assertCount(1, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
         $this->assertSame(0, TelegramOutboundEffect::query()->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_ORDER_ACTIONS)->count());
+        $this->assertSame(1, (int) $document->fresh()->attempts);
+        $this->assertNull($order->fresh()->telegram_credential_message_id);
+        $this->assertNull($order->fresh()->telegram_credential_pinned_at);
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/pinChatMessage')));
+        $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/unpinChatMessage')));
+        foreach (Queue::pushedJobs() as $jobs) {
+            foreach ($jobs as $queued) {
+                $this->assertNotSame('telegram-pins', $queued['job']->queue);
+            }
+        }
     }
 
     public function test_automatic_txt_photo_rejection_delivers_fallback_and_support_panel(): void

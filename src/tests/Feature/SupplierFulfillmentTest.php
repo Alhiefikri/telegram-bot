@@ -692,16 +692,9 @@ class SupplierFulfillmentTest extends TestCase
         };
     }
 
-    /**
-     * Credential pinning is deferred off the receipt critical path, so the
-     * recovery sweep may pin a delivered receipt. Only message sends prove a
-     * receipt was (or was not) delivered twice.
-     */
     private function deliveryRequestCount(): int
     {
-        return Http::recorded()
-            ->reject(static fn ($pair): bool => str_ends_with($pair[0]->url(), '/pinChatMessage'))
-            ->count();
+        return Http::recorded()->count();
     }
 
     private function deliverBulkReceipt(Order $order, array $credentials): void

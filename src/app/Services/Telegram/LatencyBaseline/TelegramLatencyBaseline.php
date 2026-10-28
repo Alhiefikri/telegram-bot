@@ -56,10 +56,6 @@ final class TelegramLatencyBaseline
         'slow-payment',
         'slow-provider',
         'slow-telegram',
-        'pin-normal',
-        'pin-slow',
-        'pin-failed',
-        'pin-recovery',
         'burst-interactions',
         'failed-provider',
         'failed-telegram',
@@ -84,7 +80,7 @@ final class TelegramLatencyBaseline
     ) {}
 
     /**
-     * @param  array{scenarios: list<string>, batches: int, samples: int, warmup_batches: int, interval_ms: int, timeout_seconds: int, worker_sleep: int, worker_topology: string, provider_latency_ms: int, telegram_latency_ms: int, pin_latency_ms: int, backlog: int, output: string, run_id: string}  $options
+     * @param  array{scenarios: list<string>, batches: int, samples: int, warmup_batches: int, interval_ms: int, timeout_seconds: int, worker_sleep: int, worker_topology: string, provider_latency_ms: int, telegram_latency_ms: int, backlog: int, output: string, run_id: string}  $options
      * @return array<string, mixed>
      */
     public function run(array $options): array
@@ -178,7 +174,6 @@ final class TelegramLatencyBaseline
                 'resources' => $result['resources'],
                 'interaction_probe' => $result['interaction_probe'],
                 'interactions' => $result['interactions'],
-                'pin_recovery' => $result['pin_recovery'],
                 'redis_recovery' => $result['redis_recovery'],
                 'history' => $result['history'],
             ];
@@ -197,7 +192,6 @@ final class TelegramLatencyBaseline
             'samples' => $samples,
             'cold' => $this->report->summarize($cold),
             'warm' => $this->report->summarize($warm),
-            'pin' => $this->report->summarizePins($samples),
         ]);
     }
 
@@ -216,7 +210,7 @@ final class TelegramLatencyBaseline
 
             for ($index = 0; $index < $options['samples']; $index++) {
                 $ordinal++;
-                $samples[] = $this->seedOrder($batch, $index, $cold, $ordinal, $config['burst'] || $config['pin_latency_ms'] > 0 || $config['telegram_fault'] === 'ambiguous' ? 10 : 1);
+                $samples[] = $this->seedOrder($batch, $index, $cold, $ordinal, $config['burst'] || $config['telegram_fault'] === 'ambiguous' ? 10 : 1);
             }
         }
 
@@ -311,7 +305,6 @@ final class TelegramLatencyBaseline
                 array_values($workers),
                 $config['telegram_fault'] === 'ambiguous' ? 8 : $options['timeout_seconds'],
                 $interactionProbe['update_id'] ?? null,
-                str_starts_with($scenario, 'pin-'),
             );
             if ($config['burst']) {
                 $this->waitForEvent($collector, $workers, 'dogfood.telegram.baseline_provider_finished', $samples[0]['payment_correlation_id'], 15, 'worker');
@@ -338,10 +331,6 @@ final class TelegramLatencyBaseline
                 $workers,
             );
         }
-
-        $pinRecovery = $config['pin_recovery']
-            ? $this->runPinRecovery($samples, $collector)
-            : null;
 
         $raw = [];
         foreach ($samples as $sample) {
@@ -386,8 +375,6 @@ final class TelegramLatencyBaseline
             'interactions' => $interactions,
             'redis_recovery' => $redisRecovery,
             'history' => $history,
-            'pin' => $this->report->summarizePins($raw),
-            'pin_recovery' => $pinRecovery,
             'fixture' => [
                 'provider' => KlikQrisLatencyFixtureProvider::class,
                 'provider_status_delay_ms' => $config['provider_latency_ms'],
@@ -398,11 +385,8 @@ final class TelegramLatencyBaseline
                     : 'direct KlikQRIS reconciliation owner call',
                 'telegram_transport' => 'TelegramBotClient with bounded local HTTP fakes and stray HTTP blocked',
                 'telegram_latency_ms' => $config['telegram_latency_ms'],
-                'telegram_pin_latency_ms' => $config['pin_latency_ms'],
-                'telegram_pin_failure_injected' => $config['pin_fail'],
                 'telegram_fault' => $config['telegram_fault'],
                 'provider_outage' => $config['provider_fail'],
-                'pin_queue' => QueueTopology::PINS,
                 'admin_target' => 'synthetic numeric chat from TELEGRAM_ADMIN_CHAT_ID',
                 'queue_probe_latency_ms' => $config['probe_latency_ms'],
             ],
@@ -424,9 +408,6 @@ final class TelegramLatencyBaseline
             'notification_backlog' => 0,
             'interaction_probe' => false,
             'probe_latency_ms' => 0,
-            'pin_latency_ms' => 0,
-            'pin_fail' => false,
-            'pin_recovery' => false,
             'burst' => false,
             'provider_fail' => false,
             'telegram_fault' => 'none',
@@ -449,15 +430,6 @@ final class TelegramLatencyBaseline
             ]),
             'slow-telegram' => array_replace($base, [
                 'telegram_latency_ms' => max(self::SLOW_TRANSPORT_MS, $options['telegram_latency_ms']),
-            ]),
-            'pin-normal' => $base,
-            'pin-slow' => array_replace($base, [
-                'pin_latency_ms' => max(100, (int) ($options['pin_latency_ms'] ?? 3000)),
-            ]),
-            'pin-failed' => array_replace($base, ['pin_fail' => true]),
-            'pin-recovery' => array_replace($base, [
-                'pin_fail' => true,
-                'pin_recovery' => true,
             ]),
             'burst-interactions' => array_replace($base, ['burst' => true, 'interaction_probe' => true, 'probe_latency_ms' => self::SLOW_PAYMENT_PROBE_MS]),
             'failed-provider' => array_replace($base, ['provider_fail' => true, 'provider_latency_ms' => max(self::SLOW_TRANSPORT_MS, $options['provider_latency_ms'])]),
@@ -482,7 +454,7 @@ final class TelegramLatencyBaseline
 
         if ($options['worker_topology'] === 'combined') {
             $topology['receipt-and-notifications'] = [
-                'queue' => QueueTopology::NOTIFICATIONS.','.TelegramOutboundEffectService::RECEIPT_QUEUE.','.QueueTopology::PINS,
+                'queue' => QueueTopology::NOTIFICATIONS.','.TelegramOutboundEffectService::RECEIPT_QUEUE,
                 'environment' => $baseEnvironment,
             ];
 
@@ -506,10 +478,6 @@ final class TelegramLatencyBaseline
             ];
             $topology['notifications'] = [
                 'queue' => QueueTopology::NOTIFICATIONS,
-                'environment' => $baseEnvironment,
-            ];
-            $topology['pins'] = [
-                'queue' => QueueTopology::PINS,
                 'environment' => $baseEnvironment,
             ];
 
@@ -954,7 +922,6 @@ final class TelegramLatencyBaseline
         array $workers,
         int $timeoutSeconds,
         ?int $updateId = null,
-        bool $requirePinAttempt = false,
     ): void {
         $deadline = microtime(true) + $timeoutSeconds;
 
@@ -974,15 +941,6 @@ final class TelegramLatencyBaseline
                         ->where('source_id', $sample['order_id'])
                         ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
                         ->where('state', TelegramOutboundEffectState::Unknown->value)->exists()) {
-                    $complete = false;
-                    break;
-                }
-                // Pin scenarios must observe the isolated side effect itself;
-                // otherwise a graceful worker stop can hide late pin work.
-                if ($requirePinAttempt
-                    && $collector->first('dogfood.telegram.credential_pin_finished', $correlation) === null
-                    && ! array_any($collector->transportFor(DogfoodTiming::correlation(Order::findOrFail($sample['order_id'])->customer->telegram_id)),
-                        static fn (array $e): bool => $e['context']['operation'] === 'pinChatMessage')) {
                     $complete = false;
                     break;
                 }
@@ -1019,84 +977,6 @@ final class TelegramLatencyBaseline
     }
 
     /**
-     * Reproduce a lost pin wakeup: the failed-pin scenario stops its workers,
-     * then this bounded recovery owner attempts the pin twice. The second run
-     * must not call Telegram again or move the recorded pointer.
-     *
-     * @param  list<array<string, mixed>>  $samples
-     * @return array<string, mixed>
-     */
-    private function runPinRecovery(array $samples, LatencyBaselineEventCollector $collector): array
-    {
-        $orderIds = array_values(array_map(
-            static fn (array $sample): string => (string) $sample['order_id'],
-            $samples,
-        ));
-        $pinned = static fn (): int => Order::query()
-            ->whereIn('id', $orderIds)
-            ->whereNotNull('telegram_credential_pinned_at')
-            ->count();
-        $pointers = static fn (): array => Order::query()
-            ->whereIn('id', $orderIds)
-            ->orderBy('id')
-            ->pluck('telegram_credential_message_id', 'id')
-            ->all();
-        $pinnedAttempts = function () use ($collector, $samples): int {
-            $total = 0;
-            foreach ($samples as $sample) {
-                $recipient = DogfoodTiming::correlation(Order::findOrFail($sample['order_id'])->customer->telegram_id);
-                foreach ($collector->transportFor($recipient) as $event) {
-                    if ($event['context']['operation'] === 'pinChatMessage' && $event['context']['status'] === 200) {
-                        $total++;
-                    }
-                }
-            }
-
-            return $total;
-        };
-
-        // The workers injected the failure; recovery runs with the local fake
-        // transport healthy again so only recovery can complete the pin.
-        config()->set('services.dogfood_timing.fake_telegram_pin_failure', false);
-        config()->set('services.dogfood_timing.fake_telegram_pin_latency_us', 0);
-
-        $pinnedBefore = $pinned();
-        $attemptsBefore = $pinnedAttempts();
-
-        $firstStartedAt = CarbonImmutable::now();
-        for ($recoverySweeps = 1; $recoverySweeps <= 10; $recoverySweeps++) {
-            Artisan::call('telegram:recover-outbound', ['--chunk' => 100, '--max-items' => 100], new NullOutput);
-            if ($pinned() === count($orderIds)) {
-                break;
-            }
-        }
-        $firstRecoveryMs = round($firstStartedAt->diffInMilliseconds(CarbonImmutable::now()), 2);
-        $pinnedAfterFirst = $pinned();
-        $attemptsAfterFirst = $pinnedAttempts();
-        $firstPointers = $pointers();
-
-        $secondStartedAt = CarbonImmutable::now();
-        Artisan::call('telegram:recover-outbound', ['--chunk' => 100, '--max-items' => 100], new NullOutput);
-        $secondRecoveryMs = round($secondStartedAt->diffInMilliseconds(CarbonImmutable::now()), 2);
-        $pinnedAfterSecond = $pinned();
-        $attemptsAfterSecond = $pinnedAttempts();
-        $secondPointers = $pointers();
-
-        return [
-            'orders' => count($orderIds),
-            'first_recovery_sweeps' => min(10, $recoverySweeps),
-            'pinned_before_recovery' => $pinnedBefore,
-            'pinned_after_first_recovery' => $pinnedAfterFirst,
-            'pinned_after_second_recovery' => $pinnedAfterSecond,
-            'attempts_first_recovery' => $attemptsAfterFirst - $attemptsBefore,
-            'attempts_second_recovery' => $attemptsAfterSecond - $attemptsAfterFirst,
-            'pointer_unchanged_on_replay' => $firstPointers === $secondPointers,
-            'first_recovery_ms' => $firstRecoveryMs,
-            'second_recovery_ms' => $secondRecoveryMs,
-        ];
-    }
-
-    /**
      * @param  array<string, mixed>  $sample
      * @return array<string, mixed>
      */
@@ -1112,18 +992,6 @@ final class TelegramLatencyBaseline
         $firstAck = $firstAcks[0] ?? null;
         $completed = $collector->first('dogfood.telegram.receipt_completed', $correlation);
         $admin = $collector->first('dogfood.telegram.admin_paid_notification_acknowledged', $correlation);
-        $pinDispatches = $collector->matching('dogfood.telegram.credential_pin_dispatched', $correlation);
-        $pinPickups = $collector->matching('dogfood.telegram.credential_pin_job_picked_up', $correlation);
-        $pinFinishes = $collector->matching('dogfood.telegram.credential_pin_finished', $correlation);
-        $pinnedFinish = null;
-        foreach ($pinFinishes as $candidate) {
-            if (($candidate['context']['pin_outcome'] ?? null) === 'pinned') {
-                $pinnedFinish = $candidate;
-                break;
-            }
-        }
-        $pinFinish = $pinnedFinish ?? ($pinFinishes === [] ? null : $pinFinishes[array_key_last($pinFinishes)]);
-        $pinPickup = $pinPickups[0] ?? null;
 
         $observedAt = $this->timestamp($observed['context']['application_observed_at'] ?? null);
         $providerPaidAt = $this->timestamp($observed['context']['provider_paid_at'] ?? null);
@@ -1133,15 +1001,6 @@ final class TelegramLatencyBaseline
         $firstAckAt = $this->timestamp($firstAck['context']['telegram_acknowledged_at'] ?? null);
         $completedAt = $this->timestamp($completed['context']['receipt_completed_at'] ?? null);
         $adminAckAt = $this->timestamp($admin['context']['telegram_acknowledged_at'] ?? null);
-        $pinEnqueuedAt = $this->timestamp($pinPickup['context']['job_enqueued_at'] ?? null);
-        $pinPickedUpAt = $this->timestamp($pinPickup['context']['job_picked_up_at'] ?? null);
-        $pinFinishedAt = $this->timestamp($pinFinish['context']['pin_finished_at'] ?? null);
-        $pinQueueWait = $pinPickup['context']['queue_wait_ms'] ?? null;
-        $pinQueueWait = is_int($pinQueueWait) || is_float($pinQueueWait)
-            ? (int) $pinQueueWait
-            : $this->diffMs($pinEnqueuedAt, $pinPickedUpAt);
-        $pinDuration = $pinFinish['context']['pin_duration_ms'] ?? null;
-        $pinDuration = is_int($pinDuration) || is_float($pinDuration) ? (float) $pinDuration : null;
 
         $queueWait = $pickup['context']['queue_wait_ms'] ?? null;
         $queueWait = is_int($queueWait) || is_float($queueWait)
@@ -1160,15 +1019,6 @@ final class TelegramLatencyBaseline
             $effectStates[$key] = $group->count();
         }
 
-        $pointerOnCredentialEffect = $order?->telegram_credential_message_id !== null
-            && TelegramOutboundEffect::query()
-                ->where('source_type', Order::class)
-                ->where('source_id', (string) $order->getKey())
-                ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)
-                ->where('state', TelegramOutboundEffectState::Sent->value)
-                ->where('telegram_message_id', $order->telegram_credential_message_id)
-                ->exists();
-
         $failedJobs = DB::table('failed_jobs')
             ->where('payload', 'like', '%'.$sample['order_id'].'%')
             ->count();
@@ -1177,10 +1027,6 @@ final class TelegramLatencyBaseline
         $accepted = array_filter($credentialCalls, static fn (array $e): bool => $e['context']['accepted']);
         $digests = array_map(static fn (array $e): string => $e['context']['content_digest'], $accepted);
         $wrongRecipient = $collector->wrongRecipientCount();
-        $pinCalls = array_values(array_filter($transport, static fn (array $e): bool => $e['context']['operation'] === 'pinChatMessage'));
-        $lastPin = $pinCalls === [] ? null : $pinCalls[array_key_last($pinCalls)]['context'];
-        $pinFinishedAt ??= $lastPin['finished_at'] ?? null;
-        $pinDuration ??= $lastPin['duration_ms'] ?? null;
         $stockAllocated = ProductStockItem::whereIn('order_item_id', $order->orderItems()->pluck('id'))->count();
         $receiptEffects = $effects->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value);
         $unknown = $receiptEffects->where('state', TelegramOutboundEffectState::Unknown)->count();
@@ -1201,7 +1047,6 @@ final class TelegramLatencyBaseline
                 'first_credential_ack_at' => $firstAckAt,
                 'receipt_completed_at' => $completedAt,
                 'admin_ack_at' => $adminAckAt,
-                'pin_finished_at' => $pinFinishedAt,
             ],
             'receipt_units' => $receiptEffects->map(static fn ($e): array => [
                 'sequence' => $e->sequence,
@@ -1245,17 +1090,6 @@ final class TelegramLatencyBaseline
             'admin_notice_sent' => $order?->admin_paid_order_notified_at !== null,
             'order_item_count' => (int) ($order?->order_items_count ?? 0),
             'effect_states' => $effectStates,
-            'pin_dispatches' => count($pinDispatches),
-            'pin_pickups' => count($pinPickups),
-            'pin_attempts' => count($pinCalls),
-            'pin_failed_attempts' => count(array_filter($pinCalls, static fn (array $e): bool => $e['context']['status'] !== 200)),
-            'pin_outcome' => $pinFinish['context']['pin_outcome'] ?? ($lastPin === null ? 'none' : ($lastPin['status'] === 200 ? 'pinned' : 'failed')),
-            'pin_queue_wait_ms' => $pinQueueWait,
-            'pin_duration_ms' => $pinDuration,
-            'pin_finished_after_receipt_completion_ms' => $this->signedDiffMs($completedAt, $pinFinishedAt),
-            'pin_finished_after_admin_ack_ms' => $this->signedDiffMs($adminAckAt, $pinFinishedAt),
-            'pinned' => $order?->telegram_credential_pinned_at !== null,
-            'pin_pointer_on_credential_effect' => $pointerOnCredentialEffect,
         ];
 
         $raw['missing_boundaries'] = array_keys(array_filter(
@@ -1285,26 +1119,6 @@ final class TelegramLatencyBaseline
     private function timestamp(mixed $value): ?string
     {
         return is_string($value) && trim($value) !== '' ? $value : null;
-    }
-
-    /**
-     * Positive when $to happened after $from. The boundary report keeps the
-     * unsigned absolute distances; pin isolation needs direction.
-     */
-    private function signedDiffMs(?string $from, ?string $to): ?float
-    {
-        if ($from === null || $to === null) {
-            return null;
-        }
-
-        try {
-            return round(
-                CarbonImmutable::parse($to)->getTimestampMs() - CarbonImmutable::parse($from)->getTimestampMs(),
-                2,
-            );
-        } catch (Throwable) {
-            return null;
-        }
     }
 
     private function diffMs(?string $from, ?string $to): ?float
@@ -1347,8 +1161,6 @@ final class TelegramLatencyBaseline
             'DOGFOOD_TIMING_LOG_CHANNEL' => 'stderr',
             'DOGFOOD_FAKE_TELEGRAM_OUTBOUND' => 'true',
             'DOGFOOD_FAKE_TELEGRAM_LATENCY_US' => (string) ($config['telegram_latency_ms'] * 1000),
-            'DOGFOOD_FAKE_TELEGRAM_PIN_LATENCY_US' => (string) ($config['pin_latency_ms'] * 1000),
-            'DOGFOOD_FAKE_TELEGRAM_PIN_FAILURE' => $config['pin_fail'] ? 'true' : 'false',
             'LATENCY_BASELINE_TELEGRAM_FAULT' => $config['telegram_fault'],
             'LATENCY_BASELINE_PROVIDER_DELAY_MS' => $config['burst'] ? '3000' : '0',
             'LATENCY_BASELINE_ADMIN_DELAY_ONLY' => $config['notification_backlog'] > 0 ? 'true' : 'false',
@@ -1431,8 +1243,6 @@ final class TelegramLatencyBaseline
         return [
             'note' => 'Local repeatable baseline; Telegram acknowledgement is not a read receipt and these percentiles are not a production SLO.',
             'boundaries' => LatencyBaselineReport::BOUNDARIES,
-            'pin_boundaries' => LatencyBaselineReport::PIN_BOUNDARIES,
-            'pin_note' => 'The credential pin is optional convenience work; its timestamps are reported separately and never gate receipt completion or the admin notice.',
             'percentile' => 'nearest rank over available samples; p95 requires at least 20 known samples; unknown timestamps stay unknown; no p99',
             'cold_start' => 'warm-up batches are reported separately and excluded from warmed percentiles',
         ];

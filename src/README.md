@@ -447,13 +447,26 @@ Checklist operasional:
 - jalankan queue worker di process manager seperti Supervisor;
 - pastikan queue `default` diproses untuk update Telegram;
 - pastikan queue `telegram-outbound` diproses untuk instruksi pembayaran manual dan notifikasi pending order yang berasal dari checkout;
-- pastikan queue `notifications` diproses oleh worker pool terpisah karena receipt pembayaran, paid/expired notifications, Sales Proof Post, dan cleanup instruksi checkout dikirim melalui queue tersebut;
+- pastikan queue `telegram-receipts` diproses oleh worker khusus untuk unit receipt, successor/fallback dan action panel; queue `notifications` tetap terpisah untuk email, paid/expired admin notifications, Sales Proof Post dan cleanup instruksi checkout;
 - pastikan queue `telegram-stock` diproses oleh worker terpisah untuk restock/added-stock notifications; satu job mengirim satu batch recipient terbatas lalu melanjutkan pekerjaan melalui self-dispatch yang idempotent;
 - worker count and sleep settings are pinned in `supervisord.conf`; scale them through a reviewed infrastructure change rather than adding more application `.env` knobs.
 
 Sebelum cutover queue database ke Redis atau rollback kembali ke database, ikuti [runbook Redis runtime](../docs/runbook-redis-runtime-cutover.md) dan [ADR 0014](../docs/adr/0014-redis-runtime-state.md). Redis tidak memakai persistent volume atau AOF/RDB; jangan memulai rollback database saat queue Redis masih berisi pekerjaan.
 
-Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-payment-verification-worker` handles `payments`, `laravel-receipt-worker` handles `telegram-receipts`, `laravel-pin-worker` handles `telegram-pins`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, `laravel-broadcast-worker` handles `telegram-broadcast`, and `laravel-stock-worker` handles `telegram-stock`. Stock intake commits only the durable notification handoff; recipient rendering/materialization runs after commit in bounded batches, so admin stock requests do not hold inventory transactions while querying every Telegram customer.
+Production-like Docker runs separate Supervisor-managed workers: `laravel-update-worker` handles `default`, `laravel-payment-verification-worker` handles `payments`, `laravel-receipt-worker` handles `telegram-receipts`, `laravel-outbound-worker` handles `telegram-outbound`, `laravel-notification-worker` handles `notifications`, `laravel-broadcast-worker` handles `telegram-broadcast`, and `laravel-stock-worker` handles `telegram-stock`. Stock intake commits only the durable notification handoff; recipient rendering/materialization runs after commit in bounded batches, so admin stock requests do not hold inventory transactions while querying every Telegram customer.
+
+Automatic Telegram credential receipt pins are removed by #668. There is no
+pin dispatch, recovery, worker or health requirement. Receipt ledger ordering,
+unknown/manual-review behavior, admin wakeup and authorized List Order/detail
+access are unchanged. Existing pins are not unpinned; historical Order pin
+pointer/claim columns remain intact and unused. Removing the dedicated worker
+reduces the local configured process count by one, not a measured production
+resource saving. Before deployment, follow the
+[targeted retirement plan](../docs/runbook-telegram-outbound-effect-contract.md#automatic-credential-pin-retirement-668):
+gracefully stop old producers/recovery and workers including in-flight jobs,
+then selectively remove only retired pin-job payloads from ready, delayed,
+reserved and failed storage. Never globally purge queues or alter the receipt
+ledger.
 
 Manual checkout notification retry behavior:
 

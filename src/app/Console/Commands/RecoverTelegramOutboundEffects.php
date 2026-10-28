@@ -95,7 +95,6 @@ class RecoverTelegramOutboundEffects extends Command
             foreach ([
                 'reconcile_completed_receipt_projections' => fn () => $recovery->reconcileCompletedReceiptProjections($pageLimit),
                 'reconcile_missing_receipt_action_panels' => fn () => $recovery->reconcileMissingReceiptActionPanels($pageLimit),
-                'reconcile_missing_credential_pins' => fn () => $recovery->reconcileMissingCredentialPins($pageLimit),
                 'reconcile_sent_manual_payment_proof_projections' => fn () => $recovery->reconcileSentManualPaymentProofProjections($pageLimit),
                 'reconcile_sent_sales_proof_projections' => fn () => $recovery->reconcileSentSalesProofProjections($pageLimit),
                 'reconcile_sent_admin_broadcast_projections' => fn () => $recovery->reconcileSentAdminBroadcastProjections($pageLimit),

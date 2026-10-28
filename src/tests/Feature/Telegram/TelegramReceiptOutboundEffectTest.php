@@ -10,7 +10,6 @@ use App\Enums\TelegramOutboundEffectState;
 use App\Enums\UserRole;
 use App\Exceptions\TelegramOutboundPreSendException;
 use App\Jobs\DeleteBuyerCheckoutMessages;
-use App\Jobs\PinTelegramCredentialReceipt;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Models\Customer;
@@ -36,7 +35,6 @@ use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCredentialDeliveryRenderer;
-use App\Services\Telegram\TelegramCredentialPinService;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMessageChunker;
 use App\Services\Telegram\TelegramMessageUnit;
@@ -392,22 +390,19 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
             0,
             Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/pinChatMessage')),
         );
-        Queue::assertPushed(
-            PinTelegramCredentialReceipt::class,
-            fn (PinTelegramCredentialReceipt $job): bool => $job->effectId === (string) $effects->sole()->getKey()
-                && $job->orderId === (string) $order->getKey(),
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effects->sole()->fresh()->state);
+        $this->assertSame('834001', (string) $effects->sole()->fresh()->telegram_message_id);
+        $this->assertNull($order->fresh()->telegram_credential_message_id);
+        $this->assertNull($order->fresh()->telegram_credential_pinned_at);
+        $this->assertCount(
+            0,
+            Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/unpinChatMessage')),
         );
-
-        // The pin is optional queued work; this direct call exercises the job
-        // body without changing the receipt delivery assertions above.
-        Queue::pushed(PinTelegramCredentialReceipt::class)->sole()
-            ->handle(app(TelegramCredentialPinService::class));
-
-        $pinRequest = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/pinChatMessage'))->sole()[0];
-        $this->assertSame((string) $order->customer->telegram_id, (string) $pinRequest['chat_id']);
-        $this->assertSame('834001', (string) $pinRequest['message_id']);
-        $this->assertTrue(filter_var($pinRequest['disable_notification'], FILTER_VALIDATE_BOOLEAN));
-        $this->assertNotNull($order->fresh()->telegram_credential_pinned_at);
+        foreach (Queue::pushedJobs() as $jobs) {
+            foreach ($jobs as $queued) {
+                $this->assertNotSame('telegram-pins', $queued['job']->queue);
+            }
+        }
     }
 
     /** @return iterable<string, array{string, CredentialAccessMethod}> */

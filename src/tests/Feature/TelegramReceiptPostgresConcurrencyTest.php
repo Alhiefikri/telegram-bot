@@ -68,7 +68,6 @@ final class TelegramReceiptPostgresConcurrencyTest extends TestCase
                     'ok' => true,
                     'result' => ['message_id' => random_int(700000, 799999), 'document' => ['file_id' => 'race-document']],
                 ]),
-                'https://api.telegram.org/*/pinChatMessage' => Http::response(['ok' => true, 'result' => true]),
             ]);
 
             app(ReceiptDeliveryPipeline::class)->deliver($first->fresh());
@@ -92,7 +91,6 @@ final class TelegramReceiptPostgresConcurrencyTest extends TestCase
                 'ok' => true,
                 'result' => ['message_id' => random_int(700000, 799999), 'document' => ['file_id' => 'race-document']],
             ]),
-            'https://api.telegram.org/*/pinChatMessage' => Http::response(['ok' => true, 'result' => true]),
         ]);
 
         $drainedSends = 0;

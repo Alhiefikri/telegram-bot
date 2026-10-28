@@ -2,7 +2,6 @@
 
 namespace App\Services\Telegram;
 
-use App\Exceptions\TelegramApiException;
 use App\Support\DogfoodTiming;
 
 class FakeTelegramBotClient extends TelegramBotClient
@@ -177,38 +176,7 @@ class FakeTelegramBotClient extends TelegramBotClient
         $this->record('deleteMessage');
     }
 
-    public function pinChatMessage(
-        int|string $chatId,
-        int|string $messageId,
-        bool $disableNotification = true,
-    ): array {
-        $failure = (bool) config('services.dogfood_timing.fake_telegram_pin_failure', false);
-        $this->record('pinChatMessage', [
-            'chat_id' => $chatId,
-            'message_id' => $messageId,
-            'disable_notification' => $disableNotification,
-            'injected_failure' => $failure,
-        ], $failure ? 400 : 200);
-
-        // Pin isolation scenarios delay or fail only this operation so the
-        // receipt and admin paths keep their normal local transport cost.
-        $latencyUs = (int) config('services.dogfood_timing.fake_telegram_pin_latency_us', 0);
-        if ($latencyUs > 0) {
-            usleep($latencyUs);
-        }
-
-        if ($failure) {
-            throw TelegramApiException::fromResponse('pinChatMessage', [
-                'ok' => false,
-                'error_code' => 400,
-                'description' => 'Bad Request: message to pin not found',
-            ]);
-        }
-
-        return ['ok' => true, 'result' => true];
-    }
-
-    private function record(string $operation, array $metadata = [], int $status = 200): void
+    private function record(string $operation, array $metadata = []): void
     {
         $callIndex = count($this->calls);
         $this->calls[] = ['method' => $operation, ...$metadata];
@@ -219,7 +187,7 @@ class FakeTelegramBotClient extends TelegramBotClient
         DogfoodTiming::log('dogfood.outbound_http', [
             'provider' => 'telegram',
             'operation' => $operation,
-            'status' => $status,
+            'status' => 200,
             'fake' => true,
             'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
         ]);

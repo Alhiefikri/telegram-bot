@@ -32,19 +32,13 @@ honest but not measurable across the initial, retry and recovery dispatches.
 | `admin_paid_notification_acknowledged` | The Telegram Bot API response for the paid admin notice. |
 | `provider_paid_to_observation_ms` | `application_observed_at - provider_paid_at`; proves provider time and application observation time are separate. |
 
-Issue #652 adds separate pin boundaries. They are reported outside the receipt
-completeness set because a failed pin is allowed to leave no pin timestamp:
-
-| Pin boundary | Meaning |
-| --- | --- |
-| `pin_queue_wait_ms` | Pin job enqueue to pin worker pickup. |
-| `pin_duration_ms` | Pin attempt duration, including the fixture transport. |
-| `pin_finished_after_receipt_completion_ms` | Positive means the pin finished after the receipt group completed. |
-| `pin_finished_after_admin_ack_ms` | Positive means the pin finished after the admin paid notice was acknowledged. |
-
-`pin-dispatched` / `pin-job-picked-up` / `pin-finished` events stay correlated
-by the existing HMAC order digest and never include a chat ID, message ID or
-credential value.
+Issue #668 removes automatic credential receipt pins. The #652 pin boundaries
+and timing events are retired, not part of the current report or receipt
+completeness set. No pin is dispatched or recovered, and no pin completion
+timestamp is expected. Receipt completion, admin acknowledgement and authorized
+List Order/detail access remain independent of historical pin columns.
+The [#652 evidence](telegram-latency-baseline-evidence.md#issue-652-pin-isolation)
+and integrated #656 artifacts remain unchanged historical measurements.
 
 Button ACK is separate from action completion:
 
@@ -92,9 +86,6 @@ boundary. No second observability system, table or queue is added.
 | `dogfood.telegram.receipt_first_credential_acknowledged` | `ReceiptDeliveryPipeline` | `telegram_acknowledged_at`, sequence, correlations |
 | `dogfood.telegram.receipt_completed` | `ReceiptDeliveryPipeline` | `receipt_completed_at`, sequence, correlations |
 | `dogfood.telegram.admin_paid_notification_acknowledged` | Admin notification pipeline | `telegram_acknowledged_at`, correlations |
-| `dogfood.telegram.credential_pin_dispatched` | `ReceiptDeliveryPipeline` | `pin_enqueued_at`, sequence, correlations |
-| `dogfood.telegram.credential_pin_job_picked_up` | `PinTelegramCredentialReceipt` | enqueue/pickup timestamps, `queue_wait_ms`, unknown flag |
-| `dogfood.telegram.credential_pin_finished` | `TelegramCredentialPinService` | `pin_started_at`, `pin_finished_at`, `pin_duration_ms`, `pin_outcome` (`pinned`/`failed`/`ineligible`/`claim_contended`/`claim_lost`) |
 
 Correlations are keyed HMAC digests. Credentials, tokens, chat identifiers and
 message payloads are never logged.
@@ -148,7 +139,7 @@ The temporary snapshots are removed on exit.
 
 Only the `LatencyBaseline/` measurement directory, its command and the
 `QueueTopology` name list are overlaid on the historical source. The baseline's
-checkout, provider selection, settlement, receipt, pin, recovery and notification
+checkout, provider selection, settlement, receipt, recovery and notification
 owners are not replaced. The wrapper records source revisions, dirty file names,
 harness hashes, image ID and a manifest of the integration PHP/config/schema
 source. It runs the historical shared topology and the integrated split topology.
@@ -198,23 +189,27 @@ in-process call.
 | `slow-payment` | One local payment-queue probe followed by one real `/start` Telegram update; measured orders run in parallel | probe occupies the payments queue for 3 s, no provider call | split: default and payments are separate; combined: one `payments,default` worker |
 | `slow-provider` | Same order dataset | KlikQRIS fixture status delay ≥ 500 ms | same as receipt topology |
 | `slow-telegram` | Same order dataset | fake Telegram latency ≥ 500 ms | same as receipt topology |
-| `pin-normal` | Same order dataset; the run waits for the pin event as well as the admin acknowledgement | none | split: `telegram-pins` has its own worker |
-| `pin-slow` | Ten allocated credentials per Order, photo + TXT delivery | fake `pinChatMessage` delay `--pin-latency-ms` (default 3000 ms) | same as `pin-normal` |
-| `pin-failed` | Same order dataset | fake `pinChatMessage` returns HTTP 400; the receipt and admin paths keep their normal fixture cost | same as `pin-normal` |
-| `pin-recovery` | Same as `pin-failed`, then stop workers and run bounded `telegram:recover-outbound` pages until all measured pins recover (at most ten sweeps), followed by one replay | healthy recovery; replay must make zero calls and leave the pointer unchanged; sweep count is recorded | same as `pin-normal` |
 | `burst-interactions` | Ten credentials per Order; two Check callbacks followed by Home on the same Customer chat | actual status-refresh owner reaches a 3 s provider fixture before Home is enqueued | split payments/default; combined payments/default |
 | `failed-provider` | Provider outage, unchanged pending state, then authoritative recovery on the same Payment | two ≥ 500 ms status attempts, first throws a connection exception | same receipt topology |
 | `failed-telegram` | Definite rejection of the first credential-bearing request, then healthy transport | HTTP 400; existing receipt fallback/retry policy is unchanged | same |
 | `ambiguous-telegram` | Accepted credential send whose ACK is lost; bounded recovery is replayed | connection exception after fixture acceptance; `unknown` must block blind resend | same |
 | `redis-loss` | Commit paid sources with workers stopped; flush queue/cache Redis DBs; invoke existing recovery and start workers | lost wakeups and cache locks, not lost PostgreSQL | same |
 
+Retired by #668: `pin-normal`, `pin-slow`, `pin-failed` and `pin-recovery`.
+They are not accepted by the current runner or included in `--scenario=all`.
+Their pin-dispatch/pickup/duration events, report metrics,
+`--pin-latency-ms` option and `DOGFOOD_FAKE_TELEGRAM_PIN_*` fixture knobs are
+removed, without aliases or fallback behavior. Use the immutable #652 evidence
+to interpret historical results; do not treat those scenarios as current
+acceptance gates.
+
 Worker topology is selected with `--worker-topology=split|combined`:
 
-- `split` starts separate `telegram-receipts`, `telegram-pins`, `notifications`
-  and `telegram-outbound` workers, plus `default` and `payments` for interaction
+- `split` starts separate `telegram-receipts`, `notifications` and
+  `telegram-outbound` workers, plus `default` and `payments` for interaction
   scenarios. Queue ownership matches the runtime; the CLI sleep is a controlled
   measurement setting, not a claim that all supervised workers use that sleep.
-- `combined` shares receipts/notifications/pins, and payments/default where
+- `combined` shares receipts/notifications, and payments/default where
   needed; outbound stays separate. On historical source the receipt queue
   constant still resolves to `notifications`. This is comparison-only.
 
@@ -237,7 +232,7 @@ Automatic receipt attempts are distinguished from authorized detail responses.
 
 `--batches` 1–10, `--samples` 1–25, `--warmup-batches` 0–3,
 `--interval-ms` 0–10000, `--timeout-seconds` 5–300, `--worker-sleep` 0–5,
-`--backlog` 0–50, `--pin-latency-ms` 100–10000. `--worker-topology` is `split`
+`--backlog` 0–50. `--worker-topology` is `split`
 or `combined`. Workers exit by `--max-time` and are stopped after every batch.
 The script removes its containers/network. No cron, scheduler or persistent
 monitor is installed.

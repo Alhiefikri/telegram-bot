@@ -2,7 +2,25 @@
 
 ## Status
 
-Accepted — issue #652 (part of #648)
+Superseded for the automatic credential-pin feature by issue #668 (S03, parent
+#666). Originally accepted for issue #652 (part of #648).
+
+The current decision is **no automatic Telegram credential receipt pins**.
+Receipt delivery and `telegram:recover-outbound` neither dispatch pin jobs nor
+call `pinChatMessage`. The pin service, job, dedicated queue consumer and
+health requirement are removed without a compatibility stub. Existing pins
+are not unpinned, and historical Order pin pointer/claim columns and their
+migrations remain intact but are not runtime authority.
+
+The broader principle remains accepted: optional convenience work must not
+block receipt completion, ordered successors or admin wakeup. Receipt ledger
+states, claims, ordering, unknown/manual-review behavior and authorized List
+Order/detail access are unchanged. See the
+[targeted cutover plan](../runbook-telegram-outbound-effect-contract.md#automatic-credential-pin-retirement-668)
+before deploying code that removes the serialized job class.
+
+The original rationale and local evidence below are historical, not current
+runtime instructions or acceptance scenarios.
 
 ## Context
 
@@ -19,7 +37,7 @@ remain the access path to credentials, and a pin never proves delivery. The
 existing `telegram:recover-outbound` sweep already reconciled sent effects that
 had no pin, so a lost pin wakeup already had a durable repair owner.
 
-## Decision
+## Original decision (retired pin feature)
 
 - Receipt delivery persists the `sent` ledger transition first. Only after the
   effect group, successor dispatch, receipt projection and admin wakeup have
@@ -51,7 +69,7 @@ had no pin, so a lost pin wakeup already had a durable repair owner.
   `timeout 60`, one process. It adds no second ledger, outbox, job state
   machine or ENV presentation setting.
 
-## Consequences
+## Original consequences (historical)
 
 - The credential pin may be delivered a few seconds after the receipt, bounded
   by worker pickup and the configured local transport. That is acceptable for

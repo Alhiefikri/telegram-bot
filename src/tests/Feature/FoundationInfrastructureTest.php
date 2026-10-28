@@ -9,6 +9,7 @@ use App\Providers\AppServiceProvider;
 use App\Services\Telegram\TelegramBotClient;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -89,13 +90,27 @@ class FoundationInfrastructureTest extends TestCase
             ->expectsOutput('Queue payments: depth=0 oldest_age=0s')
             ->expectsOutput('Queue default: depth=1 oldest_age=180s')
             ->expectsOutput('Queue telegram-receipts: depth=0 oldest_age=0s')
-            ->expectsOutput('Queue telegram-pins: depth=0 oldest_age=0s')
+            ->doesntExpectOutputToContain('Queue telegram-pins:')
             ->expectsOutput('Queue notifications: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-outbound: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-broadcast: depth=0 oldest_age=0s')
             ->expectsOutput('Queue telegram-stock: depth=0 oldest_age=0s')
             ->expectsOutput('Queue suppliers: depth=0 oldest_age=0s')
             ->expectsOutput('Queue binance-verification: depth=0 oldest_age=0s')
+            ->assertSuccessful();
+    }
+
+    public function test_supervisor_health_requires_current_workers_without_a_pin_worker(): void
+    {
+        Process::fake(function ($process) {
+            return str_contains($process->command, 'laravel-pin-worker')
+                ? Process::result(errorOutput: 'ERROR (no such process)', exitCode: 2)
+                : Process::result(output: 'php-fpm RUNNING');
+        });
+        Process::preventStrayProcesses();
+
+        $this->artisan('ops:health', ['--supervisor' => true])
+            ->expectsOutput('Supervisor: ok')
             ->assertSuccessful();
     }
 

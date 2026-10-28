@@ -63,11 +63,23 @@ class TelegramLatencyBaselineCommandTest extends TestCase
             ->assertFailed();
 
         $this->artisan('telegram:latency-baseline', [
-            '--scenario' => 'pin-slow',
-            '--pin-latency-ms' => 50,
+            '--scenario' => 'slow-telegram',
+            '--telegram-latency-ms' => 5001,
             '--confirm-disposable' => true,
         ])
-            ->expectsOutputToContain('--pin-latency-ms must be between 100 and 10000')
+            ->expectsOutputToContain('--telegram-latency-ms must be between 0 and 5000')
             ->assertFailed();
+    }
+
+    public function test_runner_rejects_retired_pin_scenarios(): void
+    {
+        foreach (['pin-normal', 'pin-slow', 'pin-failed', 'pin-recovery'] as $scenario) {
+            $this->artisan('telegram:latency-baseline', [
+                '--scenario' => $scenario,
+                '--confirm-disposable' => true,
+            ])
+                ->expectsOutputToContain('Unknown scenario: '.$scenario)
+                ->assertFailed();
+        }
     }
 }

@@ -377,8 +377,6 @@ return [
         'log_channel' => env('DOGFOOD_TIMING_LOG_CHANNEL'),
         'fake_telegram_outbound' => env('DOGFOOD_FAKE_TELEGRAM_OUTBOUND', false),
         'fake_telegram_latency_us' => env('DOGFOOD_FAKE_TELEGRAM_LATENCY_US', 1000),
-        'fake_telegram_pin_latency_us' => env('DOGFOOD_FAKE_TELEGRAM_PIN_LATENCY_US', 0),
-        'fake_telegram_pin_failure' => env('DOGFOOD_FAKE_TELEGRAM_PIN_FAILURE', false),
     ],
 
     'dogfood_fixtures' => [

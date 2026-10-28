@@ -85,71 +85,6 @@ final class LatencyBaselineReport
         ];
     }
 
-    /** @var array<string, string> */
-    public const PIN_BOUNDARIES = [
-        'pin_queue_wait_ms' => 'pin job enqueue to pin worker pickup',
-        'pin_duration_ms' => 'pin attempt duration',
-        'pin_finished_after_receipt_completion_ms' => 'positive means the pin finished after the receipt group completed',
-        'pin_finished_after_admin_ack_ms' => 'positive means the pin finished after the admin paid notice acknowledgement',
-    ];
-
-    /**
-     * @param  list<array<string, mixed>>  $samples
-     * @return array<string, mixed>
-     */
-    public function summarizePins(array $samples): array
-    {
-        $boundaries = [];
-
-        foreach (self::PIN_BOUNDARIES as $boundary => $label) {
-            $values = [];
-            $unknown = 0;
-
-            foreach ($samples as $sample) {
-                $value = $sample[$boundary] ?? null;
-                if (is_int($value) || is_float($value)) {
-                    $values[] = (float) $value;
-                } else {
-                    $unknown++;
-                }
-            }
-
-            sort($values, SORT_NUMERIC);
-
-            $boundaries[$boundary] = [
-                'label' => $label,
-                'samples' => count($values),
-                'unknown' => $unknown,
-                'p50_ms' => $this->percentile($values, 50),
-                'p95_ms' => count($values) >= 20 ? $this->percentile($values, 95) : null,
-                'max_ms' => $values === [] ? null : round(max($values), 2),
-            ];
-        }
-
-        $outcomes = [];
-        foreach ($samples as $sample) {
-            $outcome = (string) ($sample['pin_outcome'] ?? 'none');
-            $outcomes[$outcome] = ($outcomes[$outcome] ?? 0) + 1;
-        }
-
-        return [
-            'sample_count' => count($samples),
-            'attempts' => array_sum(array_map(static fn (array $sample): int => (int) ($sample['pin_attempts'] ?? 0), $samples)),
-            'pinned' => count(array_filter($samples, static fn (array $sample): bool => ($sample['pinned'] ?? false) === true)),
-            'failed' => (int) ($outcomes['failed'] ?? 0),
-            'outcomes' => $outcomes,
-            'boundaries' => $boundaries,
-            'counts' => [
-                'dispatched' => count(array_filter($samples, static fn (array $sample): bool => (int) ($sample['pin_dispatches'] ?? 0) > 0)),
-                'picked_up' => count(array_filter($samples, static fn (array $sample): bool => (int) ($sample['pin_pickups'] ?? 0) > 0)),
-                'receipt_completed_before_pin_finished' => count(array_filter($samples, static fn (array $sample): bool => ($sample['pin_finished_after_receipt_completion_ms'] ?? null) !== null && (float) $sample['pin_finished_after_receipt_completion_ms'] > 0)),
-                'admin_ack_before_pin_finished' => count(array_filter($samples, static fn (array $sample): bool => ($sample['pin_finished_after_admin_ack_ms'] ?? null) !== null && (float) $sample['pin_finished_after_admin_ack_ms'] > 0)),
-                'pointer_on_credential_effect' => count(array_filter($samples, static fn (array $sample): bool => ($sample['pin_pointer_on_credential_effect'] ?? false) === true)),
-                'recovered' => count(array_filter($samples, static fn (array $sample): bool => ($sample['pinned'] ?? false) === true && (int) ($sample['pin_failed_attempts'] ?? 0) > 0)),
-            ],
-        ];
-    }
-
     /** @param  list<float>  $sorted */
     private function percentile(array $sorted, int $percentile): ?float
     {
@@ -184,15 +119,6 @@ final class LatencyBaselineReport
             $lines[] = '## Measurement contract';
             $lines[] = '';
             foreach ($report['contract']['boundaries'] as $boundary => $label) {
-                $lines[] = '- `'.$boundary.'`: '.$label;
-            }
-            $lines[] = '';
-        }
-
-        if (isset($report['contract']['pin_boundaries']) && is_array($report['contract']['pin_boundaries'])) {
-            $lines[] = '## Pin measurement contract';
-            $lines[] = '';
-            foreach ($report['contract']['pin_boundaries'] as $boundary => $label) {
                 $lines[] = '- `'.$boundary.'`: '.$label;
             }
             $lines[] = '';
@@ -236,33 +162,6 @@ final class LatencyBaselineReport
                 $lines[] = '';
                 $lines[] = 'Counts: '.json_encode($summary['counts'] ?? [], JSON_UNESCAPED_SLASHES);
                 $lines[] = 'Effect states: '.json_encode($summary['effect_states'] ?? [], JSON_UNESCAPED_SLASHES);
-                $lines[] = '';
-            }
-
-            if (isset($result['pin']) && is_array($result['pin'])) {
-                $pin = $result['pin'];
-                $lines[] = '### Credential pin isolation';
-                $lines[] = '';
-                $lines[] = 'Attempts: '.(int) ($pin['attempts'] ?? 0).' | pinned: '.(int) ($pin['pinned'] ?? 0)
-                    .' | failed outcomes: '.(int) ($pin['failed'] ?? 0)
-                    .' | outcomes: '.json_encode($pin['outcomes'] ?? [], JSON_UNESCAPED_SLASHES);
-                $lines[] = '';
-                $lines[] = '| Pin boundary | n | p50 ms | p95 ms | max ms | unknown |';
-                $lines[] = '| --- | ---: | ---: | ---: | ---: | ---: |';
-                foreach (($pin['boundaries'] ?? []) as $boundary => $values) {
-                    $lines[] = '| `'.$boundary.'` | '.(int) ($values['samples'] ?? 0)
-                        .' | '.$this->format($values['p50_ms'] ?? null)
-                        .' | '.$this->format($values['p95_ms'] ?? null)
-                        .' | '.$this->format($values['max_ms'] ?? null)
-                        .' | '.(int) ($values['unknown'] ?? 0).' |';
-                }
-                $lines[] = '';
-                $lines[] = 'Counts: '.json_encode($pin['counts'] ?? [], JSON_UNESCAPED_SLASHES);
-                $lines[] = '';
-            }
-
-            if (isset($result['pin_recovery']) && is_array($result['pin_recovery'])) {
-                $lines[] = 'Pin recovery: '.json_encode($result['pin_recovery'], JSON_UNESCAPED_SLASHES);
                 $lines[] = '';
             }
         }

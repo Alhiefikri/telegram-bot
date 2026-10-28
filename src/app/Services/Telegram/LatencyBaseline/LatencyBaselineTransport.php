@@ -24,8 +24,6 @@ final class LatencyBaselineTransport
             || preg_match('/baseline|test/i', (string) config('database.connections.pgsql.database')) !== 1) {
             throw new RuntimeException('Latency HTTP fixtures require the disposable local baseline.');
         }
-        config()->set('services.dogfood_timing.fake_telegram_pin_latency_us', (int) (getenv('DOGFOOD_FAKE_TELEGRAM_PIN_LATENCY_US') ?: 0));
-        config()->set('services.dogfood_timing.fake_telegram_pin_failure', getenv('DOGFOOD_FAKE_TELEGRAM_PIN_FAILURE') === 'true');
 
         Http::preventStrayRequests();
         $rejected = [];
@@ -58,13 +56,7 @@ final class LatencyBaselineTransport
                 $rejected[$chat] = true;
                 $status = 400;
             }
-            if ($operation === 'pinChatMessage' && config('services.dogfood_timing.fake_telegram_pin_failure')) {
-                $status = 400;
-            }
             $delay = (int) config('services.dogfood_timing.fake_telegram_latency_us', 0);
-            if ($operation === 'pinChatMessage') {
-                $delay += (int) config('services.dogfood_timing.fake_telegram_pin_latency_us', 0);
-            }
             if (getenv('LATENCY_BASELINE_ADMIN_DELAY_ONLY') === 'true'
                 && $chat !== (string) config('services.telegram.admin_telegram_chat_id')) {
                 $delay = 0;
@@ -93,7 +85,7 @@ final class LatencyBaselineTransport
             if ($status !== 200) {
                 return Http::response(['ok' => false, 'error_code' => $status, 'description' => 'Synthetic bounded transport failure'], $status);
             }
-            if (in_array($operation, ['deleteMessage', 'pinChatMessage', 'answerCallbackQuery'], true)) {
+            if (in_array($operation, ['deleteMessage', 'answerCallbackQuery'], true)) {
                 return Http::response(['ok' => true, 'result' => true]);
             }
 

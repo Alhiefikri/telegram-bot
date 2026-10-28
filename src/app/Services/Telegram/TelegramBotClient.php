@@ -397,29 +397,6 @@ class TelegramBotClient
         $this->timed('deleteMessage', fn () => $this->requests->request()->post($this->requests->url('deleteMessage'), ['chat_id' => $chatId, 'message_id' => $messageId])->throw());
     }
 
-    public function pinChatMessage(
-        int|string $chatId,
-        int|string $messageId,
-        bool $disableNotification = true,
-    ): array {
-        $payload = [
-            'chat_id' => $chatId,
-            'message_id' => $messageId,
-            'disable_notification' => $disableNotification,
-        ];
-
-        try {
-            $response = $this->timed(
-                'pinChatMessage',
-                fn () => $this->requests->request()->post($this->requests->url('pinChatMessage'), $payload)->throw()->json(),
-            );
-        } catch (RequestException $exception) {
-            throw TelegramApiException::fromRequest('pinChatMessage', $exception);
-        }
-
-        return $this->successfulResponse('pinChatMessage', $response);
-    }
-
     protected function sanitizeDocumentFilename(string $filename): string
     {
         $sanitized = preg_replace('/[^A-Za-z0-9._-]+/', '-', $filename) ?? '';

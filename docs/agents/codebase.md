@@ -250,7 +250,7 @@ repository root
 - service scheduler yang menjalankan Laravel scheduler tiap menit;
 - Telegram Bot API, KlikQRIS, Binance, and (until the retirement gate passes) Pakasir legacy settlement as external dependencies.
 
-Queue Redis bersifat volatile: restart Redis dapat menghilangkan queued jobs dan session/cache/lock state. Queue operasional dipisah per beban kerja: `default` untuk update/interaksi bot, `payments` untuk verifikasi pembayaran, `telegram-receipts` khusus unit receipt kredensial beserta successor/fallback-nya, `telegram-pins` untuk pin kredensial opsional sesudah receipt terkirim, `notifications` untuk email/admin notice/proof/cleanup, serta `telegram-outbound`, `telegram-broadcast`, `telegram-stock`, `binance-verification`, dan `suppliers`. `QueueTopology` adalah satu-satunya daftar nama queue yang dipakai health summary, readiness, cutover, dan test consumer. Jangan menggabungkan `payments` dengan `default`, atau receipt dengan `notifications`, karena worker priority tidak mem-preempt job yang sedang berjalan. Detail batas worker, timeout, dan cutover ada di [topologi queue Telegram](../telegram-queue-topology.md).
+Queue Redis bersifat volatile: restart Redis dapat menghilangkan queued jobs dan session/cache/lock state. Queue operasional dipisah per beban kerja: `default` untuk update/interaksi bot, `payments` untuk verifikasi pembayaran, `telegram-receipts` khusus unit receipt kredensial beserta successor/fallback-nya, `notifications` untuk email/admin notice/proof/cleanup, serta `telegram-outbound`, `telegram-broadcast`, `telegram-stock`, `binance-verification`, dan `suppliers`. `QueueTopology` adalah satu-satunya daftar nama queue yang dipakai health summary, readiness, cutover, dan test consumer. Jangan menggabungkan `payments` dengan `default`, atau receipt dengan `notifications`, karena worker priority tidak mem-preempt job yang sedang berjalan. Detail batas worker, timeout, dan cutover ada di [topologi queue Telegram](../telegram-queue-topology.md).
 
 ### Isolasi receipt dan verifikasi pembayaran (#651)
 
@@ -317,36 +317,64 @@ gunakan `ShouldBeUnique`, bukan `ShouldBeUniqueUntilProcessing`, agar lock
 uniqueness tidak dilepas sebelum HTTP selesai. Bukti runtime terisolasi:
 [status refresh smoke](../telegram-latency-baseline-evidence.md#issue-653-status-refresh).
 
-### Pin kredensial di luar critical path receipt (#652)
+### Tanpa pin receipt kredensial otomatis (#668)
 
-`ReceiptDeliveryPipeline::deliver()` menyimpan transisi `sent`, menjalankan
-successor/cleanup dan admin wakeup, lalu meng-enqueue
-`PinTelegramCredentialReceipt` ke queue `telegram-pins`. Pin tidak lagi dipanggil
-inline, sehingga timeout transport (10 detik respons / 3 detik connect) tidak
-menahan successor maupun notifikasi admin. `TelegramCredentialPinService`
-memuat ulang Order dan effect, mempertahankan eligibility lama (receipt
-kredensial `sent`, chat privat customer yang cocok, message ID valid,
-`contains_credentials`, belum ada pointer), dan memakai klaim atomik
-`telegram_credential_pin_claim_token`/`_claimed_at` (lease 60 detik) supaya
-hanya satu pesan kanonik yang di-pin walau delivery dan recovery berjalan
-bersamaan. Pointer hanya ditulis setelah respons Bot API yang valid dan tidak
-pernah menimpa pointer lain; kegagalan melepas klaim dan meninggalkan Order
-tanpa pin.
+Keputusan produk #668 (S03, parent #666) menggantikan fitur pin #652.
+`ReceiptDeliveryPipeline` dan `telegram:recover-outbound` tidak meng-enqueue
+`PinTelegramCredentialReceipt`, tidak menjalankan service pin dan tidak
+memanggil `pinChatMessage`. Job/service, queue operasional `telegram-pins`,
+worker khusus dan persyaratan health-nya dihapus tanpa compatibility stub.
 
-`telegram:recover-outbound` tetap menjadi owner pemulihan: ia memindai receipt
-kredensial `sent` tanpa pointer, mengurutkannya per source/sequence, dan
-menerapkan eligibility/klaim yang sama. Replay sesudah sukses tidak memanggil
-Telegram lagi dan tidak memindahkan pointer. Delivery `unknown`/ambiguous tidak
-memicu pin dan tidak di-resend. Worker `laravel-pin-worker` menjalankan queue
-`telegram-pins` terpisah; tidak ada ledger, outbox, tombol Order, threshold 120
-detik atau kontrak notifikasi pembayaran yang berubah.
+Transisi ledger `sent`, successor berurutan, fallback, cleanup dan admin
+wakeup tetap memakai owner yang sama. Delivery `unknown`/ambiguous tetap
+memerlukan review, bukan blind resend. List Order dan detail Order yang
+terotorisasi tetap menjadi akses kredensial. Pin Telegram yang sudah ada tidak
+di-unpin; kolom pointer/claim historis Order beserta migrasinya dipertahankan
+tanpa pembacaan atau penulisan runtime.
 
-Verification entry points: `TelegramCredentialPinTest` (dispatch setelah sent,
-tanpa pin untuk unknown, exactly-one, recovery, replay, efek asing/non-kredensial,
-claim lease, satu pesan kanonik) dan
-`TelegramCredentialPinPostgresConcurrencyTest` (dua proses, stale claim).
-`QueueConsumerTopologyTest` memastikan worker pin terpisah. Bukti runtime lokal
-`pin-normal`/`pin-slow`/`pin-failed`/`pin-recovery`: [latency evidence](../telegram-latency-baseline-evidence.md#issue-652-pin-isolation).
+[ADR 0031](../adr/0031-credential-pin-outside-receipt-critical-path.md) hanya
+superseded untuk fitur pin; prinsip optional work tidak boleh menghambat
+receipt, successor atau admin wakeup tetap berlaku. Konfigurasi lokal
+Supervisor berkurang satu proses (`numprocs=1`), bukan bukti penghematan resource
+production. Bukti #652 dan skenario pin tetap merupakan sejarah, bukan kontrak
+runtime aktif.
+
+Sebelum deploy kode tanpa class job lama, ikuti
+[rencana cutover terarah](../runbook-telegram-outbound-effect-contract.md#automatic-credential-pin-retirement-668):
+hentikan producer/recovery/worker lama secara graceful termasuk in-flight
+jobs, lalu periksa dan hapus hanya payload class pin yang retired dari ready,
+delayed, reserved dan failed storage. Jangan purge queue/Redis global atau
+mengubah receipt ledger dan job lain.
+
+Verifikasi lokal 2026-10-28: sembilan suite receipt/no-pin/action-panel,
+List Order, topology/health, baseline command/report dan supplier fulfillment
+lulus 265 test / 2.765 assertion. Race receipt PostgreSQL lulus 1 test /
+18 assertion; Pint dan diagnostik pipeline/baseline lulus. Smoke disposable
+PostgreSQL 16 / Redis 7 dengan `TelegramBotClient` asli dan HTTP fixture
+(stray request diblokir) menjalankan worker Redis, menghilangkan wakeup Redis,
+memulihkan receipt satu akun serta foto+TXT tiga akun, mengirim notifikasi admin,
+dan mengulang recovery tanpa resend. Delivery ambiguous tetap `unknown` tanpa
+successor; seluruh skenario menghasilkan nol panggilan pin dan nol job pin.
+Processor update Telegram asli membuka callback List Order milik Customer
+hingga kredensial dan menolak callback Customer lain.
+
+Smoke cutover lokal menghapus hanya enam payload dengan `data.commandName`
+dan identitas class serialized pin lama yang cocok dari ready/delayed/reserved
+di queue pin serta queue campuran `notifications`, ditambah satu failed pin.
+Receipt sentinel di setiap penyimpanan dan failed receipt lain tetap utuh;
+tidak ada class lama yang di-unserialize atau dijalankan. Worker sudah berhenti
+sebelum pembersihan reserved. Ini membuktikan prosedur fixture disposable,
+bukan drain production atau seluruh variasi payload historis production.
+
+Runner benchmark aktif lulus `idle`, `redis-loss`, `ambiguous-telegram`
+(masing-masing satu warm sample; tiga worker lokal tanpa pin, final audit
+semuanya benar). Artefak lokal:
+`artifacts/telegram-latency-baseline/20261028T072925Z-163610/`.
+Parser Supervisor menghitung sembilan program queue worker, satu lebih sedikit
+dari topologi #652. Angka ini bukan pengukuran CPU/RAM production. Rujukan
+Context7: Laravel 13 `/laravel/docs/__branch__13.x`,
+[queue lifecycle](https://github.com/laravel/docs/blob/13.x/queues.md).
+Tidak ada CI/CD, deploy, akses production, pembayaran nyata atau pesan pelanggan.
 
 Startup menolak cutover selama tabel database queue berisi job; rollback ke driver database menolak berpindah selama queue Redis tidak kosong atau tidak dapat diperiksa. Lihat [ADR 0014](../adr/0014-redis-runtime-state.md) dan [runbook cutover](../runbook-redis-runtime-cutover.md).
 

@@ -40,29 +40,6 @@ final class QueueConsumerTopologyTest extends TestCase
         }
     }
 
-    public function test_credential_pin_work_has_a_dedicated_worker(): void
-    {
-        $programs = $this->supervisorPrograms();
-        $pinWorkers = array_keys(array_filter(
-            $programs,
-            static fn (array $worker): bool => in_array(QueueTopology::PINS, $worker['queues'], true),
-        ));
-
-        $this->assertSame(['laravel-pin-worker'], $pinWorkers);
-
-        foreach ($programs as $name => $worker) {
-            if ($name === 'laravel-pin-worker') {
-                continue;
-            }
-
-            $this->assertNotContains(
-                QueueTopology::PINS,
-                $worker['queues'],
-                "Credential pin work must not share {$name}.",
-            );
-        }
-    }
-
     public function test_payment_verification_does_not_share_the_interaction_worker(): void
     {
         foreach ($this->supervisorPrograms() as $name => $worker) {
