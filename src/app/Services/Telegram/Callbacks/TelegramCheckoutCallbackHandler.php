@@ -25,6 +25,7 @@ use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendSakurupiahCheckoutInstructions;
 use App\Models\Cart;
 use App\Models\Customer;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
@@ -61,6 +62,7 @@ use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 {
@@ -99,6 +101,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         return $context->data === 'checkout'
             || $context->data === 'checkout:current'
             || $context->data === 'checkout:balance'
+            || preg_match('/^checkout:retry:[a-f0-9]{32}$/', $context->data) === 1
             || preg_match('/^checkout:wallet:(idr|usd|cancel):[a-f0-9]{16}$/', $context->data) === 1
             || $context->data === 'checkout:binance'
             || preg_match('/^checkout:binance:(?:rail:)?(binance_pay_id|usdt_bep20):[a-f0-9]{16}$/', $context->data) === 1
@@ -114,6 +117,21 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
             return true;
         }
+        if (preg_match('/^checkout:retry:([a-f0-9]{32})$/', $context->data, $matches) === 1) {
+            try {
+                $state = Cache::get($this->recoveryKey($context->customer, $matches[1]));
+            } catch (\Throwable) {
+                $this->bot->answerCallbackQuery($context->callbackQueryId);
+                $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.recovery.cache_unavailable'));
+
+                return true;
+            }
+            $this->withCheckoutIntentLock($context, $state['checkoutKey'] ?? null,
+                fn () => $this->retryCheckout($context, $state));
+
+            return true;
+        }
+
         if ($context->data === 'checkout') {
             $checkoutKey = $this->checkoutIntentKey($context->customer, $context->chatId, $context->messageId, $this->checkoutIntentPayload($context->data));
             $this->withCheckoutIntentLock($context, $checkoutKey, fn () => $this->choosePaymentMethod($context, $checkoutKey));
@@ -599,7 +617,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         );
     }
 
-    private function cartFingerprint($cart): string
+    private function cartFingerprint(Cart $cart): string
     {
         return hash('sha256', $cart->cartItems
             ->map(fn ($item): array => [(int) $item->product_id, (int) $item->quantity])
@@ -626,6 +644,12 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     {
         if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+            return;
+        }
+        $recovery = Cache::get($this->recoveryKey($context->customer, substr($checkoutKey, 0, 32)));
+        if (is_array($recovery)) {
+            $this->retryCheckout($context, $recovery, true);
 
             return;
         }
@@ -703,8 +727,11 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 return;
             }
 
-            $this->session->forget($context->customer);
             $this->checkout($context, $requestedRail, false, $checkoutKey, $balanceRequest);
+            $recovery = Cache::get($this->recoveryKey($context->customer, substr($checkoutKey, 0, 32)));
+            if (! is_array($recovery) || $this->checkoutIntentAlreadyHandled($checkoutKey)) {
+                $this->session->forget($context->customer);
+            }
         });
     }
 
@@ -864,7 +891,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         $this->bot->sendMessage($context->chatId, $paymentMethodMessage, ['inline_keyboard' => $buttons], ['parse_mode' => 'HTML']);
     }
 
-    private function checkout(TelegramCallbackContext $context, string|bool $rail = 'qris', bool $answerCallback = true, ?string $checkoutKey = null, ?BalanceCheckoutRequest $balanceRequest = null): void
+    private function checkout(TelegramCallbackContext $context, string|bool $rail = 'qris', bool $answerCallback = true, ?string $checkoutKey = null, ?BalanceCheckoutRequest $balanceRequest = null, bool $recovering = false): void
     {
         if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
             if ($answerCallback) {
@@ -872,6 +899,14 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             }
 
             return;
+        }
+        if (! $recovering && $checkoutKey !== null) {
+            $recovery = Cache::get($this->recoveryKey($context->customer, substr($checkoutKey, 0, 32)));
+            if (is_array($recovery)) {
+                $this->retryCheckout($context, $recovery, true);
+
+                return;
+            }
         }
         $paymentRail = is_bool($rail)
             ? ($rail ? CheckoutPaymentIntents::RAIL_BINANCE_PAY_ID : CheckoutPaymentIntents::RAIL_QRIS)
@@ -927,6 +962,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 }
             }
 
+            $recoveryFingerprint = $this->recoveryFingerprint($cart, $preview['snapshot']);
             $selection = $this->paymentIntentSelector->select($paymentRail);
             $paymentMode = $selection->paymentMode;
             $paymentIntent = $selection->paymentIntent;
@@ -980,8 +1016,8 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             ]));
 
             return;
-        } catch (CheckoutPaymentUnavailable) {
-            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'balance.topup.provider_unavailable'));
+        } catch (CheckoutPaymentUnavailable $exception) {
+            $this->sendPaymentUnavailable($context, $exception, $checkoutKey, $paymentRail, $recoveryFingerprint ?? null);
 
             return;
         } catch (InsufficientStock) {
@@ -998,6 +1034,149 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
         $this->dispatchCheckoutInstructions($order, $payment);
         $this->dispatchPendingAdminNotification($order);
+    }
+
+    private function recoveryKey(Customer $customer, string $nonce): string
+    {
+        return 'telegram:checkout-recovery:'.$customer->getKey().':'.$nonce;
+    }
+
+    private function recoveryFingerprint(Cart $cart, CheckoutPricingSnapshot $pricing): string
+    {
+        $setting = ManualPaymentSetting::current();
+
+        return hash_hmac('sha256', json_encode([
+            'cart' => $cart->getKey(),
+            'items' => $this->cartFingerprint($cart),
+            'quotes' => $pricing->quotes(),
+            'setting' => $setting === null ? null : [
+                $setting->getKey(), $setting->payment_provider_version,
+                $setting->payment_mode, $setting->sakurupiah_channel,
+            ],
+            'configuration' => config('services.sakurupiah'),
+        ], JSON_THROW_ON_ERROR), (string) config('app.key'));
+    }
+
+    private function retryCheckout(TelegramCallbackContext $context, mixed $state, bool $originalCallback = false): void
+    {
+        if (! is_array($state) || ! $context->isPrivate()
+            || $context->chatId !== (string) $context->customer->telegram_id
+            || $context->chatId !== ($state['chatId'] ?? null)
+            || ($originalCallback
+                ? $context->messageId !== ($state['messageId'] ?? null) || $context->data !== ($state['data'] ?? null)
+                : ! in_array($context->messageId, $state['retryMessageIds'] ?? [], true))) {
+            $this->sendSelectionStale($context);
+
+            return;
+        }
+        $checkoutKey = $state['checkoutKey'];
+        if ($this->checkoutIntentAlreadyHandled($checkoutKey)) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+
+            return;
+        }
+        $original = new TelegramCallbackContext($context->customer, $context->chatId,
+            $context->callbackQueryId, $state['data'], $context->chatType, $state['messageId']);
+        $cart = $this->carts->currentActiveCartFor($context->customer);
+        $preview = $cart === null ? null : $this->cartPricing($cart);
+        $selection = $this->session->get($context->customer);
+        $detailMatches = preg_match('/^detail:pay:qris:([1-9][0-9]*):([a-f0-9]{16})$/', $state['data'], $matches) === 1;
+        if (! is_array($preview)
+            || ! hash_equals($state['fingerprint'], $this->recoveryFingerprint($cart, $preview['snapshot']))
+            || ($detailMatches && ($selection === null || $selection['mode'] !== 'browsing'
+                || $selection['productId'] !== (int) $matches[1]
+                || ! hash_equals($selection['interactionToken'], $matches[2])))) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->sendPaymentUnavailable($original, new CheckoutPaymentUnavailable(
+                'Checkout recovery snapshot changed.', reason: 'snapshot_changed',
+            ), $checkoutKey, $state['rail'], null);
+
+            return;
+        }
+        if (($state['retryAt'] ?? 0) > now()->timestamp) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate(
+                $context->customer, 'checkout.recovery.wait', ['seconds' => $state['retryAt'] - now()->timestamp],
+            ));
+
+            return;
+        }
+        $this->checkout($original, $state['rail'], true, $checkoutKey, recovering: true);
+        if ($detailMatches && $this->checkoutIntentAlreadyHandled($checkoutKey)) {
+            $this->session->forget($context->customer);
+        }
+    }
+
+    private function sendPaymentUnavailable(TelegramCallbackContext $context, CheckoutPaymentUnavailable $exception, ?string $checkoutKey, string $rail, ?string $fingerprint): void
+    {
+        $reason = in_array($exception->reason, [
+            'rate_limit_cooldown', 'lookup_temporarily_unavailable', 'observation_refresh_busy', 'cache_unavailable',
+            'configuration_invalid', 'channel_inactive', 'channel_invalid', 'snapshot_changed',
+        ], true) ? $exception->reason : 'configuration_invalid';
+        $temporary = in_array($reason, [
+            'rate_limit_cooldown', 'lookup_temporarily_unavailable', 'observation_refresh_busy', 'cache_unavailable',
+        ], true);
+        try {
+            Log::notice('telegram.checkout.payment_rejected', [
+                'reason' => $reason,
+                'operation' => 'checkout_preflight',
+                'intent_correlation' => $checkoutKey === null ? null : hash_hmac('sha256', $checkoutKey, (string) config('app.key')),
+                'channel' => in_array($exception->channel, ['QRIS', 'QRISC', 'QRISMU', 'QRIS2'], true) ? $exception->channel : null,
+                'retry_at' => $exception->retryAt,
+                'observation_age_seconds' => $exception->observationAgeSeconds,
+                'order_created' => false,
+            ]);
+        } catch (\Throwable) {
+            // Diagnostic storage cannot prevent a safe purchase recovery notice.
+        }
+        $keyboard = [];
+        $state = null;
+        $key = null;
+        if ($temporary && $reason !== 'cache_unavailable' && $checkoutKey !== null && $fingerprint !== null
+            && $context->isPrivate() && $context->messageId !== null
+            && $context->chatId === (string) $context->customer->telegram_id) {
+            try {
+                $nonce = substr($checkoutKey, 0, 32);
+                $key = $this->recoveryKey($context->customer, $nonce);
+                $previous = Cache::get($key);
+                $state = [
+                    'checkoutKey' => $checkoutKey, 'chatId' => $context->chatId,
+                    'messageId' => $context->messageId, 'data' => $context->data,
+                    'rail' => $rail, 'fingerprint' => $fingerprint, 'retryAt' => $exception->retryAt,
+                    'retryMessageIds' => is_array($previous) ? ($previous['retryMessageIds'] ?? []) : [],
+                ];
+                if (! Cache::put($key, $state, now()->addMinutes(15))) {
+                    throw new \RuntimeException('Checkout recovery state could not be stored.');
+                }
+                $keyboard = ['inline_keyboard' => [[[
+                    ...$this->uiIcons->apply('message.refresh', $this->locale->translate($context->customer, 'checkout.recovery.retry')),
+                    'callback_data' => 'checkout:retry:'.$nonce,
+                    'style' => 'primary',
+                ]]]];
+            } catch (\Throwable) {
+                $state = null;
+                $keyboard = [];
+                $reason = 'cache_unavailable';
+            }
+        }
+        $message = $this->locale->translate($context->customer, 'checkout.recovery.'.$reason);
+        if ($temporary && $exception->retryAt !== null && $exception->retryAt > now()->timestamp) {
+            $message .= "\n".$this->locale->translate($context->customer, 'checkout.recovery.wait', [
+                'seconds' => $exception->retryAt - now()->timestamp,
+            ]);
+        }
+        $response = $this->bot->sendMessage($context->chatId, $message, $keyboard);
+        $messageId = data_get($response, 'result.message_id');
+        if ($state !== null && $key !== null && is_numeric($messageId) && (int) $messageId > 0) {
+            $state['retryMessageIds'][] = (int) $messageId;
+            $state['retryMessageIds'] = array_slice(array_values(array_unique($state['retryMessageIds'])), -8);
+            try {
+                if (! Cache::put($key, $state, now()->addMinutes(15))) {
+                    throw new \RuntimeException('Checkout recovery message could not be bound.');
+                }
+            } catch (\Throwable) {
+                $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.recovery.cache_unavailable'));
+            }
+        }
     }
 
     /**
@@ -1227,10 +1406,27 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         try {
-            Cache::lock('telegram:checkout:'.$checkoutKey, 45)
-                ->block(5, fn () => $callback());
+            $lock = Cache::lock('telegram:checkout:'.$checkoutKey, 45);
+            $lock->block(5);
         } catch (LockTimeoutException) {
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'checkout.processing'));
+
+            return;
+        } catch (\Throwable) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.recovery.cache_unavailable'));
+
+            return;
+        }
+
+        try {
+            $callback();
+        } finally {
+            try {
+                $lock->release();
+            } catch (\Throwable) {
+                // Do not turn a committed checkout into a retry after an unlock outage.
+            }
         }
     }
 }

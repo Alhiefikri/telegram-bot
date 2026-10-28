@@ -20,6 +20,8 @@ final readonly class SakurupiahProviderReadinessReport
         private bool $channelObserved = false,
         private ?CarbonImmutable $checkedAt = null,
         private ?string $configurationFingerprint = null,
+        private ?string $failureReason = null,
+        private ?int $retryAt = null,
     ) {}
 
     public function isReady(): bool
@@ -73,6 +75,20 @@ final readonly class SakurupiahProviderReadinessReport
     public function configurationFingerprint(): ?string
     {
         return $this->configurationFingerprint;
+    }
+
+    public function failureReason(): ?string
+    {
+        if ($this->isReady()) {
+            return null;
+        }
+
+        return $this->failureReason ?? 'configuration_invalid';
+    }
+
+    public function retryAt(): ?int
+    {
+        return $this->retryAt;
     }
 
     public function configurationMessage(): string

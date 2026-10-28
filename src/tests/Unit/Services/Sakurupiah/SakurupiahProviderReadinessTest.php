@@ -3,11 +3,14 @@
 namespace Tests\Unit\Services\Sakurupiah;
 
 use App\Enums\SakurupiahEnvironment;
+use App\Exceptions\CheckoutPaymentUnavailable;
 use App\Models\ManualPaymentSetting;
 use App\Services\Sakurupiah\SakurupiahChannel;
 use App\Services\Sakurupiah\SakurupiahChannelAddition;
 use App\Services\Sakurupiah\SakurupiahFee;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\Sakurupiah\SakurupiahRequestBackpressure;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -196,6 +199,150 @@ class SakurupiahProviderReadinessTest extends TestCase
     public static function cachedObservationStates(): array
     {
         return ['ready' => [true], 'unavailable' => [false]];
+    }
+
+    public function test_lookup_failure_observed_near_cooldown_end_does_not_extend_checkout_rejection(): void
+    {
+        $this->travelTo('2026-10-28 12:00:00');
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'sandbox-id',
+            'sandbox_api_key' => 'sandbox-key',
+            'qris_contract' => $this->qualifiedQrisContract(),
+        ]));
+        $backpressure = new SakurupiahRequestBackpressure(SakurupiahEnvironment::Sandbox);
+        $backpressure->observe(new \Illuminate\Http\Client\Response(
+            new Response(429),
+        ));
+        $reader = function () use ($backpressure): array {
+            $backpressure->assertAvailable('listChannels', true);
+
+            return [new SakurupiahChannel('QRISC', 'QRISC', 500, 2_000_000, 'DIRECT', 'Aktif',
+                addition: new SakurupiahChannelAddition(defaultExpiredHours: 24))];
+        };
+        $readiness = app(SakurupiahProviderReadiness::class);
+        $this->travel(50)->seconds();
+        $this->assertFalse($readiness->observe(SakurupiahEnvironment::Sandbox, $reader)->isReady());
+        $this->travel(9)->seconds();
+        $this->assertFalse($readiness->observe(SakurupiahEnvironment::Sandbox, $reader)->isReady());
+        $this->travel(1)->seconds();
+        $report = $readiness->observe(SakurupiahEnvironment::Sandbox, $reader);
+        $this->assertTrue($report->isReady(), 'Checkout must recover at the merchant cooldown boundary, not a new failure-cache TTL.');
+        $readiness->assertCheckoutSnapshot($report, ManualPaymentSetting::query()->first());
+        $this->travel(1)->seconds();
+        $this->assertTrue($readiness->observe(SakurupiahEnvironment::Sandbox, $reader)->isReady());
+    }
+
+    public function test_preflight_observation_expiring_before_money_lock_is_rejected(): void
+    {
+        $this->configureObservation();
+        $this->travelTo('2026-10-28 12:00:00');
+        $readiness = app(SakurupiahProviderReadiness::class);
+        $report = $readiness->observe(SakurupiahEnvironment::Sandbox, fn () => [$this->readyChannel()]);
+        $this->travel(60)->seconds();
+        try {
+            $readiness->assertCheckoutSnapshot($report, ManualPaymentSetting::query()->first());
+            $this->fail('An expired preflight must not authorize persistence.');
+        } catch (CheckoutPaymentUnavailable $exception) {
+            $this->assertSame('snapshot_changed', $exception->reason);
+        }
+    }
+
+    public function test_temporary_lookup_failure_recovers_at_retry_boundary_not_success_cache_ttl(): void
+    {
+        $this->configureObservation();
+        $this->travelTo('2026-10-28 12:00:00');
+        $calls = 0;
+        $reader = function () use (&$calls): array {
+            if (++$calls === 1) {
+                throw new \RuntimeException('temporary lookup outage');
+            }
+
+            return [$this->readyChannel()];
+        };
+        $readiness = app(SakurupiahProviderReadiness::class);
+        $failed = $readiness->observe(SakurupiahEnvironment::Sandbox, $reader);
+        $this->assertSame('lookup_temporarily_unavailable', $failed->failureReason());
+        $this->travel(4)->seconds();
+        $this->assertFalse($readiness->observe(SakurupiahEnvironment::Sandbox, $reader)->isReady());
+        $this->assertSame(1, $calls);
+        $this->travel(1)->seconds();
+        $this->assertTrue($readiness->observe(SakurupiahEnvironment::Sandbox, $reader)->isReady());
+        $this->assertSame(2, $calls);
+    }
+
+    public function test_expired_success_requires_fresh_observation_and_busy_refresh_does_not_dispatch(): void
+    {
+        $this->configureObservation();
+        $this->travelTo('2026-10-28 12:00:00');
+        $readiness = app(SakurupiahProviderReadiness::class);
+        $calls = 0;
+        $reader = function () use (&$calls, $readiness): array {
+            $calls++;
+            $competing = $readiness->observe(SakurupiahEnvironment::Sandbox, fn () => throw new \LogicException('stampede'));
+            $this->assertSame('observation_refresh_busy', $competing->failureReason());
+
+            return [$this->readyChannel()];
+        };
+        $this->assertTrue($readiness->observe(SakurupiahEnvironment::Sandbox, $reader)->isReady());
+        $this->travel(59)->seconds();
+        $this->assertTrue($readiness->observe(SakurupiahEnvironment::Sandbox, $reader)->isReady());
+        $this->assertSame(1, $calls);
+        $this->travel(1)->seconds();
+        $this->assertTrue($readiness->observe(SakurupiahEnvironment::Sandbox, $reader)->isReady());
+        $this->assertSame(2, $calls);
+    }
+
+    public function test_cache_outage_does_not_bypass_observation_coordination(): void
+    {
+        $this->configureObservation();
+        Cache::shouldReceive('add')->andThrow(new \RuntimeException('cache down'));
+        Cache::shouldReceive('get')->andThrow(new \RuntimeException('cache down'));
+        $calls = 0;
+        $report = app(SakurupiahProviderReadiness::class)->observe(SakurupiahEnvironment::Sandbox, function () use (&$calls): array {
+            $calls++;
+
+            return [$this->readyChannel()];
+        });
+        $this->assertSame(0, $calls);
+        $this->assertSame('cache_unavailable', $report->failureReason());
+        $this->assertFalse($report->isReady());
+    }
+
+    #[DataProvider('unsafeChannels')]
+    public function test_channel_identity_activity_and_expiry_fail_closed(string $code, string $status, int $expiry, string $reason): void
+    {
+        $this->configureObservation();
+        $report = app(SakurupiahProviderReadiness::class)->observe(SakurupiahEnvironment::Sandbox,
+            fn () => [new SakurupiahChannel($code, $code, 500, 2_000_000, 'DIRECT', $status,
+                addition: new SakurupiahChannelAddition(defaultExpiredHours: $expiry))]);
+        $this->assertFalse($report->isReady());
+        $this->assertSame($reason, $report->failureReason());
+    }
+
+    public static function unsafeChannels(): array
+    {
+        return [
+            'wrong identity' => ['QRISMU', 'Aktif', 12, 'channel_inactive'],
+            'inactive' => ['QRISC', 'Offline', 24, 'channel_inactive'],
+            'wrong expiry' => ['QRISC', 'Aktif', 12, 'channel_invalid'],
+        ];
+    }
+
+    private function configureObservation(): void
+    {
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true, 'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'sandbox-id', 'sandbox_api_key' => 'sandbox-key',
+            'qris_contract' => $this->qualifiedQrisContract(),
+        ]));
+    }
+
+    private function readyChannel(): SakurupiahChannel
+    {
+        return new SakurupiahChannel('QRISC', 'QRISC', 500, 2_000_000, 'DIRECT', 'Aktif',
+            addition: new SakurupiahChannelAddition(defaultExpiredHours: 24));
     }
 
     public function test_unqualified_qris_contract_fails_closed_after_channel_observation(): void

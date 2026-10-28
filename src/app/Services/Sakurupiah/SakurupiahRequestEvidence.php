@@ -89,9 +89,24 @@ final class SakurupiahRequestEvidence
                 'finished_at' => now()->format('Y-m-d\TH:i:s.uP'),
                 'duration_ms' => round((hrtime(true) - $startedAt) / 1_000_000, 3),
                 'http_status' => $response?->status(),
+                'dispatched' => true,
             ]));
         } catch (Throwable) {
             // Evidence must not change create ambiguity or lookup retry behavior.
+        }
+    }
+
+    /** @param array<string, mixed> $context */
+    public static function deferred(array $context, SakurupiahProviderException|SakurupiahCreatePreRequestException $exception): void
+    {
+        try {
+            Log::info('sakurupiah.request_deferred', $context + [
+                'reason' => $exception->reason,
+                'retry_at' => $exception->retryAt,
+                'dispatched' => false,
+            ]);
+        } catch (Throwable) {
+            // Diagnostics cannot authorize a request.
         }
     }
 

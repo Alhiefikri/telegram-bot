@@ -248,7 +248,7 @@ class OrderCheckoutService
         );
         if (! $preflight->matches($preflightContext)) {
             if ($preflight->hasState()) {
-                throw new CheckoutPaymentUnavailable('Checkout payment preflight is stale.');
+                throw new CheckoutPaymentUnavailable('Checkout payment preflight is stale.', reason: 'snapshot_changed');
             }
 
             $preflight = CheckoutPaymentPreflight::none($preflightContext);

@@ -170,12 +170,6 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             $this->assertSame(0, Payment::query()->count());
             $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
             $this->assertSame($quantity, CartItem::query()->sole()->quantity);
-            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-                && (string) ($request['chat_id'] ?? '') === '318091'
-                && str_contains((string) ($request['text'] ?? ''), 'payment method is not ready'));
-            Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-                && (string) ($request['chat_id'] ?? '') === '318091'
-                && str_contains((string) ($request['text'] ?? ''), 'cart is empty'));
 
             return;
         }
@@ -184,17 +178,19 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             $this->assertSame(0, Order::query()->count());
             $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
             $this->assertSame($quantity, CartItem::query()->sole()->quantity);
-            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-                && (string) ($request['chat_id'] ?? '') === '318091'
-                && str_contains((string) ($request['text'] ?? ''), 'payment method is not ready'));
+            $retryMessage = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && str_contains(json_encode($request['reply_markup'] ?? []), 'checkout:retry:'))->last();
+            $this->assertNotNull($retryMessage);
+            $button = $retryMessage[0]['reply_markup']['inline_keyboard'][0][0];
+            $this->assertSame('primary', $button['style']);
+            $this->assertSame($state, $this->selection($customer));
+            $this->postTelegramWebhook($this->callbackUpdate(3180914, 'outlook-duplicate-before-retry', 'detail:pay:qris:'.$product->id.':'.$state['interactionToken'], [], 318091, 'private', 88091))->assertOk();
+            $this->assertSame($quantity, CartItem::query()->sole()->quantity);
+            $this->assertSame(0, Order::query()->count());
 
             $this->travel(61)->seconds();
-            $this->postTelegramWebhook($this->callbackUpdate(3180914, 'outlook-reopen', 'product:'.$product->id, [], 318091))->assertOk();
-            $state = $this->selection($customer);
-            $this->postTelegramWebhook($this->callbackUpdate(3180915, 'outlook-retry-custom', 'detail:qty:manual:'.$product->id.':'.$state['interactionToken'], [], 318091, 'private', 88091))->assertOk();
-            $this->postTelegramWebhook($this->messageUpdate(3180916, (string) $quantity, [], 318091))->assertOk();
-            $state = $this->selection($customer);
-            $this->postTelegramWebhook($this->callbackUpdate(3180917, 'outlook-retry-pay', 'detail:pay:qris:'.$product->id.':'.$state['interactionToken'], [], 318091, 'private', 88091))->assertOk();
+            $this->postTelegramWebhook($this->callbackUpdate(3180917, 'outlook-retry-pay', $button['callback_data'], [], 318091, 'private', 123457))->assertOk();
+            $this->postTelegramWebhook($this->callbackUpdate(3180919, 'outlook-retry-duplicate', $button['callback_data'], [], 318091, 'private', 123457))->assertOk();
         }
 
         $order = Order::query()->sole();

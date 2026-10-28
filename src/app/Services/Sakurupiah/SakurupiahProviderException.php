@@ -26,6 +26,7 @@ class SakurupiahProviderException extends RuntimeException
          */
         public readonly ?string $providerMessage = null,
         ?Throwable $previous = null,
+        public readonly ?int $retryAt = null,
     ) {
         parent::__construct($message, previous: $previous);
     }

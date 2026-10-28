@@ -220,25 +220,32 @@ final class SakurupiahProviderReadiness
             throw new CheckoutPaymentUnavailable(
                 'Sakurupiah QRIS checkout is not ready.'
                 .($message === '' ? '' : ' '.$message),
+                reason: $report?->failureReason() ?? 'configuration_invalid',
+                retryAt: $report?->retryAt(),
+                channel: $report?->qrisChannel()?->code ?? SakurupiahChannelPolicy::selected($setting),
+                observationAgeSeconds: $report?->checkedAt() === null ? null : max(0, now()->getTimestamp() - $report->checkedAt()->getTimestamp()),
             );
         }
 
         $environment = SakurupiahEnvironment::runtime();
         if ($report->environment() !== $environment
+            || $report->checkedAt() === null
+            || $report->checkedAt()->isFuture()
+            || $report->checkedAt()->getTimestamp() + $this->cacheSeconds() <= now()->getTimestamp()
             || $report->configurationFingerprint() !== $this->configurationFingerprint(
                 $environment,
                 includeOperational: true,
                 selectedChannel: SakurupiahChannelPolicy::selected($setting),
             )
         ) {
-            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS checkout readiness changed. Try again.');
+            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS checkout readiness changed. Try again.', reason: 'snapshot_changed');
         }
 
         if ($setting === null
             || ! $setting->is_active
             || $setting->paymentProvider() !== PaymentProvider::SAKURUPIAH
         ) {
-            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS provider selection changed. Try again.');
+            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS provider selection changed. Try again.', reason: 'snapshot_changed');
         }
 
         if (! $report->channelObserved()
@@ -247,7 +254,7 @@ final class SakurupiahProviderReadiness
             || ! $report->qrisChannel()->isActive()
             || $report->qrisChannel()->code !== SakurupiahChannelPolicy::selected($setting)
         ) {
-            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS channel is no longer ready. Try again.');
+            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS channel is no longer ready. Try again.', reason: 'channel_inactive');
         }
     }
 
@@ -687,20 +694,43 @@ final class SakurupiahProviderReadiness
             return $this->channelObservationFailure($configuration, $fingerprint);
         }
 
+        $lock = null;
         try {
             $cached = $this->cachedReport(Cache::get($cacheKey), $environment, $fingerprint, $selectedChannel);
             if ($cached !== null) {
                 return $cached;
             }
+            $retryAt = (new SakurupiahRequestBackpressure($environment))->retryAt();
+            if ($retryAt !== null) {
+                return $this->channelObservationFailure($configuration, $fingerprint, 'rate_limit_cooldown', $retryAt);
+            }
+            // One cold/expired refresh per merchant/configuration, never an unbounded wait in an update worker.
+            $attempts = max(1, (int) config('services.sakurupiah.lookup_max_attempts', 3));
+            $lockSeconds = (int) ceil(
+                max(1, (float) config('services.sakurupiah.http_timeout_seconds', 10)) * $attempts
+                + max(0, (int) config('services.sakurupiah.lookup_retry_max_delay_ms', 1000)) / 1000 * ($attempts - 1)
+            ) + 30;
+            $lock = Cache::lock($cacheKey.':refresh', $lockSeconds);
+            if (! $lock->get()) {
+                return $this->channelObservationFailure($configuration, $fingerprint, 'observation_refresh_busy', now()->getTimestamp() + 2);
+            }
+            $cached = $this->cachedReport(Cache::get($cacheKey), $environment, $fingerprint, $selectedChannel);
+            if ($cached !== null) {
+                return $cached;
+            }
+            $report = $this->evaluateChannelObservation($environment, $configuration, $fingerprint, $reader, $selectedChannel);
+            $expiresAt = $report->retryAt() ?? now()->getTimestamp() + $this->cacheSeconds();
+            if (! Cache::put($cacheKey, $this->reportCachePayload($report), now()->setTimestamp($expiresAt))) {
+                return $this->channelObservationFailure($configuration, $fingerprint, 'cache_unavailable', now()->getTimestamp() + 5);
+            }
         } catch (Throwable) {
-            // The provider observation below remains authoritative if cache is unavailable.
-        }
-
-        $report = $this->evaluateChannelObservation($environment, $configuration, $fingerprint, $reader, $selectedChannel);
-        try {
-            Cache::put($cacheKey, $this->reportCachePayload($report), now()->addSeconds($this->cacheSeconds()));
-        } catch (Throwable) {
-            // Return the fresh observation even if it cannot be cached.
+            return $this->channelObservationFailure($configuration, $fingerprint, 'cache_unavailable', now()->getTimestamp() + 5);
+        } finally {
+            try {
+                $lock?->release();
+            } catch (Throwable) {
+                // An owner-fenced lease expires naturally if cache recovery cannot release it.
+            }
         }
 
         return $report;
@@ -713,7 +743,7 @@ final class SakurupiahProviderReadiness
         $addition = $channel?->addition;
 
         return [
-            'version' => 1,
+            'version' => 2,
             'environment' => $report->environment()?->value,
             'fingerprint' => $report->configurationFingerprint(),
             'missing' => $report->missing(),
@@ -721,6 +751,8 @@ final class SakurupiahProviderReadiness
             'enabled' => $report->enabled(),
             'observed' => $report->channelObserved(),
             'checked_at' => $report->checkedAt()?->toISOString(),
+            'reason' => $report->failureReason(),
+            'retry_at' => $report->retryAt(),
             'channel' => $channel === null ? null : [
                 'code' => $channel->code,
                 'name' => $channel->name,
@@ -743,7 +775,7 @@ final class SakurupiahProviderReadiness
     private function cachedReport(mixed $payload, SakurupiahEnvironment $environment, string $fingerprint, string $selectedChannel): ?SakurupiahProviderReadinessReport
     {
         if (! is_array($payload)
-            || ($payload['version'] ?? null) !== 1
+            || ($payload['version'] ?? null) !== 2
             || ($payload['environment'] ?? null) !== $environment->value
             || ($payload['fingerprint'] ?? null) !== $fingerprint
             || ! is_array($payload['missing'] ?? null)
@@ -753,6 +785,11 @@ final class SakurupiahProviderReadiness
             || ($payload['observed'] ?? null) !== true
             || ! is_string($payload['checked_at'] ?? null)
             || ! array_key_exists('channel', $payload)
+            || ! array_key_exists('retry_at', $payload)
+            || ($payload['retry_at'] !== null && ! is_int($payload['retry_at']))
+            || ($payload['retry_at'] !== null && $payload['retry_at'] <= now()->getTimestamp())
+            || ! array_key_exists('reason', $payload)
+            || ($payload['reason'] !== null && ! is_string($payload['reason']))
         ) {
             return null;
         }
@@ -768,6 +805,10 @@ final class SakurupiahProviderReadiness
         }
 
         try {
+            $checkedAt = CarbonImmutable::parse($payload['checked_at']);
+            if ($checkedAt->isFuture() || $checkedAt->getTimestamp() + $this->cacheSeconds() <= now()->getTimestamp()) {
+                return null;
+            }
             $channel = null;
             $data = $payload['channel'];
             if ($data !== null) {
@@ -818,8 +859,10 @@ final class SakurupiahProviderReadiness
                 enabled: $payload['enabled'],
                 qrisChannel: $channel,
                 channelObserved: true,
-                checkedAt: CarbonImmutable::parse($payload['checked_at']),
+                checkedAt: $checkedAt,
                 configurationFingerprint: $fingerprint,
+                failureReason: $payload['reason'],
+                retryAt: $payload['retry_at'],
             );
         } catch (Throwable) {
             return null;
@@ -835,6 +878,8 @@ final class SakurupiahProviderReadiness
     ): SakurupiahProviderReadinessReport {
         $invalid = $configuration->invalid();
         $channel = null;
+        $reason = null;
+        $retryAt = null;
 
         try {
             $channels = $channelReader();
@@ -851,12 +896,15 @@ final class SakurupiahProviderReadiness
             ));
             if ($qrisChannels === []) {
                 $invalid['SAKURUPIAH_QRIS_CHANNEL'] = 'Sakurupiah QRIS channel was not returned for the target merchant.';
+                $reason = 'channel_inactive';
             } elseif (count($qrisChannels) > 1) {
                 $invalid['SAKURUPIAH_QRIS_CHANNEL'] = 'Sakurupiah returned an ambiguous QRIS channel set.';
+                $reason = 'channel_invalid';
             } else {
                 $channel = $qrisChannels[0];
                 if (! $channel->isActive()) {
                     $invalid['SAKURUPIAH_QRIS_CHANNEL'] = 'Sakurupiah QRIS channel is not active for the target merchant.';
+                    $reason = 'channel_inactive';
                 }
                 if (! in_array(strtoupper($channel->type), ['DIRECT', 'REDIRECT'], true)) {
                     $invalid['SAKURUPIAH_QRIS_CHANNEL_TYPE'] = 'Sakurupiah QRIS channel type is not qualified.';
@@ -865,12 +913,30 @@ final class SakurupiahProviderReadiness
                     $invalid['SAKURUPIAH_QRIS_CHANNEL_LIMITS'] = 'Sakurupiah QRIS channel limits are invalid.';
                 }
             }
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
             $invalid['SAKURUPIAH_QRIS_CHANNEL_LOOKUP'] = 'Sakurupiah QRIS channel metadata could not be observed safely.';
+            try {
+                $retryAt = (new SakurupiahRequestBackpressure($environment))->retryAt();
+                $reason = $retryAt === null ? 'lookup_temporarily_unavailable' : 'rate_limit_cooldown';
+            } catch (Throwable) {
+                $reason = 'cache_unavailable';
+            }
+            $retryAt ??= now()->getTimestamp() + 5;
+            if ($exception instanceof SakurupiahSchemaException) {
+                $reason = 'channel_invalid';
+                $retryAt = null;
+            } elseif ($exception instanceof SakurupiahApplicationException && $exception->isProviderRejection()
+                && $reason !== 'rate_limit_cooldown') {
+                $reason = 'configuration_invalid';
+                $retryAt = null;
+            }
         }
 
         if ($channel !== null) {
             $invalid += $this->invalidQrisContract($channel);
+            if ($invalid !== [] && $reason === null) {
+                $reason = 'channel_invalid';
+            }
         }
 
         return new SakurupiahProviderReadinessReport(
@@ -882,6 +948,8 @@ final class SakurupiahProviderReadiness
             channelObserved: true,
             checkedAt: CarbonImmutable::now(),
             configurationFingerprint: $fingerprint,
+            failureReason: $reason,
+            retryAt: $retryAt,
         );
     }
 
@@ -933,6 +1001,8 @@ final class SakurupiahProviderReadiness
     private function channelObservationFailure(
         SakurupiahProviderReadinessReport $configuration,
         string $fingerprint,
+        string $reason = 'lookup_temporarily_unavailable',
+        ?int $retryAt = null,
     ): SakurupiahProviderReadinessReport {
         $invalid = $configuration->invalid();
         $invalid['SAKURUPIAH_QRIS_CHANNEL_LOOKUP'] = 'Sakurupiah QRIS channel metadata could not be observed safely.';
@@ -945,6 +1015,8 @@ final class SakurupiahProviderReadiness
             channelObserved: true,
             checkedAt: CarbonImmutable::now(),
             configurationFingerprint: $fingerprint,
+            failureReason: $reason,
+            retryAt: $retryAt ?? now()->getTimestamp() + 5,
         );
     }
 

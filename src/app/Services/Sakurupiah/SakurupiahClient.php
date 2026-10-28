@@ -41,7 +41,16 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
         try {
             $channels = [];
             foreach (SakurupiahPayloadReader::dataItems($payload) as $item) {
-                $channels[] = SakurupiahChannel::fromPayload(SakurupiahPayloadReader::object($item));
+                $data = SakurupiahPayloadReader::object($item);
+                try {
+                    $channels[] = SakurupiahChannel::fromPayload($data);
+                } catch (Throwable $exception) {
+                    $code = SakurupiahPayloadReader::requiredString($data, 'kode', 64);
+                    if (preg_match('/\A[A-Za-z0-9_]+\z/', $code) !== 1 || SakurupiahChannelPolicy::supports(strtoupper($code))) {
+                        throw $exception;
+                    }
+                    // An identifiable non-QRIS method cannot authorize or invalidate a QRIS selection.
+                }
             }
 
             return $channels;
@@ -202,7 +211,12 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
         ];
         $backpressure = new SakurupiahRequestBackpressure($this->environment);
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-            $backpressure->assertAvailable($operation, $lookup);
+            try {
+                $requestLock = $backpressure->acquireRequest($operation, $lookup, $context['caller']);
+            } catch (SakurupiahProviderException|SakurupiahCreatePreRequestException $exception) {
+                SakurupiahRequestEvidence::deferred($context, $exception);
+                throw $exception;
+            }
             $startedAt = hrtime(true);
             $attemptContext = array_merge($context, [
                 'attempt' => $attempt,
@@ -210,6 +224,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
             ]);
             try {
                 $response = $this->request()->post($this->endpoint($path), $body);
+                $backpressure->observe($response);
             } catch (ConnectionException $exception) {
                 SakurupiahRequestEvidence::record($attemptContext, $startedAt, exception: $exception);
                 if ($lookup && $attempt < $maxAttempts) {
@@ -222,10 +237,15 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
             } catch (Throwable $exception) {
                 SakurupiahRequestEvidence::record($attemptContext, $startedAt, exception: $exception);
                 throw new SakurupiahTransportException($operation, outcomeUnknown: ! $lookup, previous: $exception);
+            } finally {
+                try {
+                    $requestLock->release();
+                } catch (Throwable) {
+                    // The owner-fenced lease expires without changing a dispatched request's outcome.
+                }
             }
 
             SakurupiahRequestEvidence::record($attemptContext, $startedAt, response: $response);
-            $backpressure->observe($response);
 
             if ($response->successful()) {
                 return $response;

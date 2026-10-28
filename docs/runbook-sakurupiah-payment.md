@@ -129,6 +129,160 @@ providers and Store Balance top-ups are untouched. Rollback does not extend
 deadlines or re-reserve stock.
 
 
+## Checkout throttle recovery (#677)
+
+The confirmed defect was a second, independent 60-second negative-readiness
+cache window. A provider throttle at t=0 followed by the first readiness read
+at t=50 denied checkout at t=60 even though merchant cooldown had ended. The
+permanent regression was observed failing before the fix and now requires
+recovery exactly at t=60, including the t=59 and t=61 boundaries.
+
+### Recovery and diagnosis
+
+- `rate_limit_cooldown`: no checkout invoice was requested; show the absolute
+  merchant retry deadline. `Retry-After` can extend the conservative local
+  60-second policy. This policy is not a published provider rate limit.
+- `lookup_temporarily_unavailable`: no checkout invoice was requested; retain
+  the purchase and retry metadata after five seconds, not the success-cache TTL.
+- `observation_refresh_busy`: another process owns the bounded refresh lease;
+  return a temporary retry instead of duplicating metadata HTTP.
+- `cache_unavailable`: do not dispatch without coordination or bypass payment
+  validation. Preserve the durable Cart and ask the Customer to retry from it
+  after recovery; do not claim that a retry token was saved.
+- `configuration_invalid`, `channel_inactive`, `channel_invalid`: report an
+  operator/configuration problem, not a throttle. Malformed supported QRIS rows
+  and unidentified rows fail closed. A malformed, identifiable non-QRIS method
+  cannot invalidate otherwise valid QRIS metadata.
+- `snapshot_changed`: reject changed settings/channel/pricing/selection and
+  an observation that expired before the money transaction. Review the purchase
+  rather than silently switching its payment channel.
+
+Temporary Telegram recovery retains the original checkout key, Cart quantity
+and selection. The retry callback is Customer/chat/message-bound and revalidates
+the original price/settings snapshot. Repeated original or retry callbacks do
+not add the quantity again. The cache-backed retry expires after 15 minutes;
+loss of Redis does not delete the Cart or an existing Order/Payment.
+
+Pre-Order recovery never creates an invoice itself. Post-Order recovery remains
+owned by the existing invoice lifecycle: a known pre-dispatch failure may retry,
+a definitive provider rejection reuses its merchant reference, and an unknown
+create outcome uses status/history without blind second create. Local checkout
+expiry, stock/money guards and Late Payment review remain unchanged.
+
+`telegram.checkout.payment_rejected` records an HMAC intent correlation,
+allowlisted reason/channel, observation age, retry time and `order_created=false`.
+`sakurupiah.request_deferred` records `dispatched=false`; actual request-attempt
+events carry `dispatched=true`. Correlate these with operation/caller and merchant
+fingerprint, not customer identifiers, QR payloads, full references or credentials.
+Do not infer that an invoice exists from an ACK or a sent retry notice.
+
+### Background traffic and capacity decision
+
+The merchant/environment request gate permits one provider HTTP dispatch at a
+time, independent of the per-Payment lifecycle lock. Foreground requests wait
+at most one second; reconciliation yields immediately on contention and retains
+its existing bounded active/released lanes and later retry. The gate is not an
+invented requests-per-second quota. Payment verification and late-money discovery
+are not disabled. Sustained provider throttling still requires provider support;
+no local gate can promise provider acceptance.
+
+Retain the current worker counts, PHP-FPM and Docker limits. The incident
+snapshots in #677/#672 show pressure, but do not establish safe extra concurrency.
+The disposable single-worker probe below measures application paths, not the
+production dataset, real provider latency or the memory of all resident workers.
+Increasing workers could consume more memory while every request still shares
+the merchant throttle. There is no evidence here authorizing that change or an
+OOM-protection rollback.
+
+### Verification entry points and limits
+
+Run the focused `Sakurupiah*`, `ProductDetailPurchaseTest`, `CartCheckoutTest` and
+`CheckoutPaymentSnapshotCharacterizationTest` suites. New behavior coverage is in
+`SakurupiahRequestBackpressureTest`, `SakurupiahProviderReadinessTest` and
+`Telegram/SakurupiahCheckoutRecoveryTest`. Existing lifecycle/reconciliation
+coverage retains definitive rejection, unknown create, supported-channel expiry,
+amount limits, late settlement, active/released fairness and QR-delivery ambiguity.
+
+`SakurupiahCheckoutRecoveryPostgresConcurrencyTest` requires isolated PostgreSQL
+and an explicitly opted-in disposable Redis at `127.0.0.1:56778`
+(`REDIS_PORT=56778`, cache/lock DB 7). It uses process races for cold/expired
+single-flight refresh, two Customers plus a duplicate checkout, merchant
+cooldown monotonicity, and background yielding/resumption. It is included in
+`phpunit.postgres.xml`; without the Redis opt-in this lane skips, not silently
+falls back to an in-memory cache. Never point this fixture at a shared Redis.
+
+The standalone disposable smoke boots the actual HTTP kernel, submits `/start`,
+Product Detail, custom quantity `10` and QRIS callbacks, drains actual Redis
+queue work, and exercises the real provider adapter, lifecycle, QR renderer and
+Telegram transport with synthetic HTTP responses. It checks temporary notices
+before any Order/Payment/create, both Customers' recovery, duplicate delivery,
+and unknown-create recovery without another create. PostgreSQL/Redis concurrency
+is separately exercised by the process tests; the smoke is a single queue worker,
+not a concurrent production benchmark. Telegram-native client rendering is not
+visually qualified by these HTTP fixtures.
+
+Local verification on 2026-10-28: the final focused SQLite lane passed
+448 tests / 3,483 assertions. The disposable PostgreSQL 16 / Redis 7 recovery
+and existing invoice-lifecycle concurrency lanes passed 7 / 62. Targeted Pint
+completed; PHP language-server diagnostics for readiness, client and Telegram
+checkout were clear.
+
+The final smoke used one actual queue worker inside an application container
+limited to 1.5 CPUs / 896 MiB, with fresh PostgreSQL and Redis and no live HTTP.
+Before recovery it left zero Orders, Payments and create requests for both
+Customers. Recovery created exactly two of each and delivered two QR PNGs,
+reserving 11 units. After a Redis cache flush, duplicate callbacks changed
+none of those counts. A third Customer's dispatched timeout retained
+`outcome_unknown` without another create. A fourth Customer's definitive
+rejection recovered the same reference, producing the third QR: four Orders /
+Payments and five create attempts total, with no failed jobs or remaining
+interaction queue.
+
+| Disposable measurement | Observed value |
+| --- | ---: |
+| Webhook / queue-wait samples | 20 |
+| Webhook ACK p50 (ms) | 5.18 |
+| Webhook ACK p95 (ms) | 6.27 |
+| Queue wait p95, monotonic enqueue-to-pickup (ms) | 106.83 |
+| Queue-drain invocation p95 (ms) | 284.94 |
+| PHP allocator peak (MiB) | 40 |
+| Process peak RSS, including bootstrap/migrations (KiB) | 136200 |
+
+The provider clock was advanced for cooldown boundaries; latency measurements
+used monotonic wall time, not the frozen provider clock. This small synthetic
+sample cannot establish a production SLO, safe additional workers, aggregate
+resident memory, or a numeric provider quota.
+
+Adjacent-gap disposition:
+
+- Fixed and covered: negative-cache extension, cold/expired refresh stampede,
+  stale preflight at transaction entry, retry quantity duplication/ownership,
+  changed channel/settings/price/selection, and Redis numeric-string cooldown
+  decoding. PostgreSQL/Redis proved the shared-lock and monotonic-deadline lane.
+- Fail closed: cache-read/coordination outages, malformed/unidentified or
+  supported-QRIS metadata, inactive channel, mismatched requested expiry,
+  amount/stock conflicts, and unknown create. Cache outage tests inject failures;
+  the runtime smoke separately proves real Redis-cache-loss replay safety.
+- Retained and exercised: original 15-minute local expiry versus the qualified
+  channel's `default_expired`, provider invoice identity/money checks,
+  definitive same-reference recovery and existing late-payment reconciliation.
+- Not established: which historical customer attempt hit which guard, the
+  provider's global/per-endpoint request quota, sustained-load fairness or
+  production latency after deployment. Redis loss can erase a local cooldown;
+  bounded request coordination and provider rejection still apply after recovery.
+  Escalate with sanitized request evidence rather than increasing retries.
+
+Framework decisions were checked through Context7 against Laravel 13
+[atomic cache locks](https://github.com/laravel/docs/blob/13.x/cache.md),
+[transaction retries](https://github.com/laravel/docs/blob/13.x/database.md) and
+[pessimistic locking](https://github.com/laravel/docs/blob/13.x/queries.md).
+The [official Sakurupiah documentation](https://sakurupiah.id/developers/api-dokumentasi)
+documents application `400` plus a failure message and channel/expiry metadata;
+the inspected page supplies no numeric request-frequency contract. No production,
+live transaction, CI/CD, restart, deployment or provider-support outcome is
+claimed by this verification.
+
+
 ## Intermittent checkout rejection and delayed QRIS
 
 The 2026-10-28 production audit found Outlook IMAP at Rp600 per unit with
@@ -145,13 +299,14 @@ amount range, and insufficient stock separately. Rejections retain the Cart and
 create no Order, Payment or supplier hold. A provider setting change during
 preflight also rejects checkout rather than using a stale payment snapshot.
 
-Sakurupiah readiness now caches only scalar and array data. With
-`cache.serializable_classes=false`, the previous cached report object was read
-back as an incomplete class, so a warm Redis cache could call the channel API
-again instead of reusing its observation. Old or malformed cache entries are
-replaced after a fresh observation; classes remain disallowed. Ready and failed
-observations retain the configured TTL (60 seconds by default), so retry after
-provider recovery still waits for that observation to expire.
+Sakurupiah readiness caches only scalar and array data. With
+`cache.serializable_classes=false`, old report objects could be read back as
+incomplete classes and trigger redundant metadata requests. Cache format v2
+also carries typed failure reasons and absolute retry deadlines. Old or malformed
+entries require a fresh, single-flight observation; classes remain disallowed.
+Successful and authoritative invalid-channel observations retain the configured
+TTL. Transient lookup failures use a short recovery deadline; merchant cooldown
+reports expire at the actual cooldown boundary, never a new full observation TTL.
 
 The OOM-related deployment preceded the reported failures, but the available
 incident evidence does not identify which guard rejected either Outlook attempt.

@@ -13,6 +13,24 @@ Sebelum mengubah behavior:
 
 Dokumen ini menjelaskan _mengapa_ file-file utama saling berhubungan. Source code tetap menjadi sumber kebenaran untuk detail method dan schema.
 
+## Sakurupiah checkout recovery (#677)
+
+`SakurupiahProviderReadiness` owns scalar v2 observation caching, absolute
+transient deadlines and single-flight cold/expired refresh. `SakurupiahRequestBackpressure`
+owns merchant/environment cooldown and bounded request dispatch coordination.
+`CheckoutPaymentUnavailable` carries cause/retry/observation facts to Telegram,
+whose retry retains the original checkout key and revalidates the purchase
+snapshot without adding quantity again. Post-Order create ambiguity remains
+owned by the existing invoice lifecycle, never a new retry invoice.
+
+See [the recovery runbook](../runbook-sakurupiah-payment.md#checkout-throttle-recovery-677)
+for cause-specific operation, Context7 references, gap disposition and disposable
+evidence. Test entry points: `SakurupiahProviderReadinessTest`,
+`SakurupiahRequestBackpressureTest`, `SakurupiahGatewayTest`,
+`Telegram/SakurupiahCheckoutRecoveryTest` and
+`SakurupiahCheckoutRecoveryPostgresConcurrencyTest` (explicit isolated Redis opt-in).
+Worker counts and resource limits are intentionally unchanged.
+
 ## Read-only notification retention (#676)
 
 `telegram:notification-retention-dry-run` delegates to

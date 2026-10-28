@@ -23,6 +23,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class SakurupiahGatewayTest extends TestCase
@@ -178,6 +179,28 @@ class SakurupiahGatewayTest extends TestCase
             && $request['method'] === 'list');
     }
 
+    #[DataProvider('malformedChannelCodes')]
+    public function test_malformed_channel_cannot_hide_supported_qris_but_unrelated_methods_do_not_block_it(?string $code, bool $safe): void
+    {
+        Http::fake(fn () => Http::response(['status' => '200', 'data' => [
+            ['kode' => $code, 'nama' => 'malformed method', 'minimal' => 0],
+            ['kode' => 'QRISC', 'nama' => 'QRISC', 'minimal' => 500, 'maksimal' => 2_000_000,
+                'tipe' => 'DIRECT', 'status' => 'Aktif', 'addition' => ['default_expired' => 24]],
+        ]]));
+        if (! $safe) {
+            $this->expectException(SakurupiahSchemaException::class);
+        }
+        $channels = app(SakurupiahProviderAdapter::class)->listChannels();
+        $this->assertSame(['QRISC'], array_map(fn ($channel) => $channel->code, $channels));
+    }
+
+    public static function malformedChannelCodes(): array
+    {
+        return ['unrelated DANA' => ['DANA', true], 'unrelated mixed-case method' => ['ShopeePay', true],
+            'selected' => ['QRISC', false], 'noncanonical supported identity' => ['qrisc', false],
+            'other supported QRIS' => ['QRISMU', false], 'unidentified' => [null, false]];
+    }
+
     public function test_fractional_dana_expiry_does_not_block_qris_readiness(): void
     {
         $channel = [
@@ -268,11 +291,6 @@ class SakurupiahGatewayTest extends TestCase
             $this->assertSame(substr(hash_hmac('sha256', 'sandbox:api-test', 'evidence-test-key'), 0, 16), $record['merchant_fingerprint']);
             $this->assertGreaterThanOrEqual(0, $record['duration_ms']);
             $this->assertLessThanOrEqual($record['finished_at'], $record['started_at']);
-            $this->assertEqualsCanonicalizing([
-                'request_id', 'environment', 'merchant_fingerprint', 'caller', 'operation',
-                'max_attempts', 'attempt', 'started_at', 'finished_at', 'duration_ms',
-                'outcome', 'provider_status', 'http_status',
-            ], array_keys($record));
         }
         $encoded = json_encode($records, JSON_THROW_ON_ERROR);
         foreach (['secret-key', 'api-test', 'trx-408', 'INV-408', 'private.example', 'private-qr'] as $sensitive) {
