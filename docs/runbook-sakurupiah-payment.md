@@ -204,8 +204,9 @@ coverage retains definitive rejection, unknown create, supported-channel expiry,
 amount limits, late settlement, active/released fairness and QR-delivery ambiguity.
 
 `SakurupiahCheckoutRecoveryPostgresConcurrencyTest` requires isolated PostgreSQL
-and an explicitly opted-in disposable Redis at `127.0.0.1:56778`
-(`REDIS_PORT=56778`, cache/lock DB 7). It uses process races for cold/expired
+and an explicitly opted-in disposable Redis (`RUN_SAKURUPIAH_REDIS_TESTS=1`,
+`REDIS_HOST=127.0.0.1`, `REDIS_PORT=56778` locally, cache/lock DB 7).
+CI uses its disposable `redis:6379` service instead. It uses process races for cold/expired
 single-flight refresh, two Customers plus a duplicate checkout, merchant
 cooldown monotonicity, and background yielding/resumption. It is included in
 `phpunit.postgres.xml`; without the Redis opt-in this lane skips, not silently

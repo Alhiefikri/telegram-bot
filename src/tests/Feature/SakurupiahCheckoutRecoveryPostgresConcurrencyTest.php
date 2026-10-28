@@ -42,13 +42,13 @@ class SakurupiahCheckoutRecoveryPostgresConcurrencyTest extends TestCase
         if (DB::getDriverName() !== 'pgsql' || ! extension_loaded('redis') || ! function_exists('pcntl_fork')) {
             $this->markTestSkipped('Requires disposable PostgreSQL, Redis extension and pcntl.');
         }
-        if ((string) env('REDIS_PORT') !== '56778') {
-            $this->markTestSkipped('Opt in with the disposable Redis fixture on REDIS_PORT=56778.');
+        if (env('RUN_SAKURUPIAH_REDIS_TESTS') !== '1') {
+            $this->markTestSkipped('Set RUN_SAKURUPIAH_REDIS_TESTS=1 with disposable Redis.');
         }
         PostgresTestDatabase::migrateFresh();
         config()->set('cache.default', 'redis');
-        config()->set('database.redis.cache.host', '127.0.0.1');
-        config()->set('database.redis.cache.port', 56778);
+        config()->set('database.redis.cache.host', env('REDIS_HOST', '127.0.0.1'));
+        config()->set('database.redis.cache.port', (int) env('REDIS_PORT', 6379));
         config()->set('database.redis.cache.database', 7);
         config()->set('database.redis.cache.password', null);
         config()->set('database.redis.cache.url', null);

@@ -86,6 +86,7 @@ jobs:
       CONCURRENCY_DB_APP_USERNAME: telegram_bot_ci
       CONCURRENCY_DB_APP_PASSWORD: ci-only-not-production
       RUN_CUSTOMER_API_REDIS_TESTS: '1'
+      RUN_SAKURUPIAH_REDIS_TESTS: '1'
       REDIS_HOST: redis
       REDIS_PORT: 6379
     defaults:

@@ -43,8 +43,10 @@ PHP test jobs run inside an `ubuntu:24.04` job container so `setup-php` has its
 supported Linux environment. The PostgreSQL service is reached through its
 `postgres` service-network alias from that job container, and a `redis:7-alpine`
 service is reached through its `redis` alias. `RUN_CUSTOMER_API_REDIS_TESTS=1`
-runs the shared-admission and availability races instead of skipping them, so
-`--fail-on-skipped` stays meaningful for the PostgreSQL lane. Container jobs
+runs the shared-admission and availability races; `RUN_SAKURUPIAH_REDIS_TESTS=1`
+runs the Sakurupiah checkout recovery races against the same disposable service.
+Both use `REDIS_HOST` and `REDIS_PORT`, so `--fail-on-skipped` stays meaningful.
+Container jobs
 explicitly use Bash because Ubuntu job containers otherwise default to `sh`,
 which rejects `set -o pipefail`. The hosted runner workspace is ephemeral,
 so no persistent self-hosted workspace ownership repair is required.
