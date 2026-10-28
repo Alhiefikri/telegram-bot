@@ -106,7 +106,6 @@ Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverl
 // scheduler is sufficient; Redis overlap is not the dedupe authority.
 Schedule::command('suppliers:notify-health --limit=25')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('ops:payment-lifecycle-rollout-report')->everyFiveMinutes()->withoutOverlapping()->runInBackground();
-Schedule::command('telegram:fake-sales-proof:auto')->everyMinute()->withoutOverlapping()->runInBackground();
 Schedule::command('customer-auth:cleanup --limit=500')->hourly()->withoutOverlapping(10)->runInBackground();
 Schedule::command('customer-auth:recover-mail --limit=100')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('customer-api:flush-usage --limit=500')->everyMinute()->withoutOverlapping(2)->runInBackground();

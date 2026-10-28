@@ -234,7 +234,7 @@ class AdminStoreChannelTest extends TestCase
         $this->assertDatabaseCount('store_channel_settings', 0);
     }
 
-    public function test_ready_channel_tab_renders_fake_sales_proof_product_selector_and_random_interval_copy(): void
+    public function test_ready_channel_tab_offers_only_active_available_products_for_manual_fake_sales_proof(): void
     {
         $this->actingAs(User::factory()->create(['role' => UserRole::Owner]));
         $firstProduct = Product::factory()->create([
@@ -289,10 +289,6 @@ class AdminStoreChannelTest extends TestCase
         foreach ([$inactiveProduct, $soldOutProduct] as $product) {
             $this->assertStringNotContainsString('value="'.$product->id.'"', $productSelectorHtml);
             $this->assertStringNotContainsString($product->name, $productSelectorHtml);
-        }
-
-        foreach (['2 jam', '3 jam', '4 jam', '5 jam'] as $intervalCopy) {
-            $this->assertStringContainsString($intervalCopy, $content);
         }
     }
 
@@ -415,50 +411,6 @@ class AdminStoreChannelTest extends TestCase
         $this->assertNoFakeSalesProofPosts();
     }
 
-    public function test_fake_sales_proof_cooldown_labels_render_in_configured_app_timezone(): void
-    {
-        $previousTimezone = config('app.timezone');
-        config()->set('app.timezone', 'Asia/Singapore');
-
-        $now = Carbon::parse('2026-07-06 08:58:00', 'Asia/Singapore');
-        Carbon::setTestNow($now);
-
-        try {
-            $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
-            $product = Product::factory()->create([
-                'name' => 'Timezone Channel Voucher',
-                'is_active' => true,
-                'stock' => 4,
-                'reserved_stock' => 0,
-            ]);
-            StoreChannelSetting::create([
-                'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
-                'telegram_chat_id' => '-100123',
-                'last_test_success' => true,
-                'sales_proof_enabled' => true,
-            ]);
-            Http::fake(['https://api.telegram.org/botbot-token/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 905]])]);
-
-            $this->artisan('telegram:fake-sales-proof:auto')->assertSuccessful();
-
-            $content = $this->get(route('admin.dashboard', ['tab' => 'telegram-channel']))
-                ->assertOk()
-                ->getContent();
-
-            $this->assertSame(
-                1,
-                preg_match('/Auto berikutnya<\/p>\s*<p[^>]*>\s*2026-07-06 (10|11|12|13):58\s*<\/p>/', $content),
-                'Expected the automatic fake sales proof availability label to keep the 08:58 local wall-clock minutes and add the recorded 2/3/4/5 hour cooldown.'
-            );
-            foreach (['2026-07-06 02:58', '2026-07-06 03:58', '2026-07-06 04:58', '2026-07-06 05:58'] as $utcLabel) {
-                $this->assertStringNotContainsString($utcLabel, $content, 'Dashboard rendered the cached UTC timestamp instead of local app time.');
-            }
-        } finally {
-            Carbon::setTestNow();
-            config()->set('app.timezone', $previousTimezone);
-        }
-    }
-
     public function test_post_rejects_unavailable_fake_sales_proof_product_ids_without_sending(): void
     {
         foreach ([
@@ -524,7 +476,7 @@ class AdminStoreChannelTest extends TestCase
         }
     }
 
-    public function test_manual_fake_sales_proof_posts_ignore_automatic_cooldown_and_stay_side_effect_free(): void
+    public function test_manual_fake_sales_proof_posts_can_be_repeated_without_changing_business_records(): void
     {
         $now = Carbon::parse('2026-07-05 12:00:00');
         Carbon::setTestNow($now);
@@ -565,50 +517,6 @@ class AdminStoreChannelTest extends TestCase
             $this->assertSame(['1', '2'], $orderNumberMatches[1]);
             $this->assertSame(4, $product->refresh()->stock);
             $this->assertSame(0, $product->reserved_stock);
-            $this->assertNoRealOrderPersistence();
-            $this->assertNoFakeSalesProofPosts();
-        } finally {
-            Carbon::setTestNow();
-        }
-    }
-
-    public function test_auto_fake_sales_proof_command_sends_once_when_due_then_skips_until_random_interval_passes(): void
-    {
-        $now = Carbon::parse('2026-07-05 12:00:00');
-        Carbon::setTestNow($now);
-
-        try {
-            $availableProduct = Product::factory()->create(['name' => 'Auto Channel Voucher', 'is_active' => true, 'stock' => 4, 'reserved_stock' => 0]);
-            $inactiveProduct = Product::factory()->create(['name' => 'Inactive Auto Channel Voucher', 'is_active' => false, 'stock' => 4, 'reserved_stock' => 0]);
-            $soldOutProduct = Product::factory()->create(['name' => 'Sold Out Auto Channel Voucher', 'is_active' => true, 'stock' => 4, 'reserved_stock' => 4]);
-            StoreChannelSetting::create([
-                'singleton_key' => StoreChannelSetting::SINGLETON_KEY,
-                'telegram_chat_id' => '-100123',
-                'last_test_success' => true,
-                'sales_proof_enabled' => true,
-            ]);
-            Http::fake(['https://api.telegram.org/botbot-token/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 906]])]);
-
-            $this->artisan('telegram:fake-sales-proof:auto')->assertSuccessful();
-
-            Carbon::setTestNow($now->copy()->addHour());
-
-            Http::assertSent(function (Request $request) use ($availableProduct, $inactiveProduct, $soldOutProduct): bool {
-                $caption = (string) $this->multipartField($request, 'caption');
-                $photo = (string) $this->multipartField($request, 'photo');
-                $dimensions = getimagesizefromstring($photo);
-
-                return $request->url() === 'https://api.telegram.org/botbot-token/sendPhoto'
-                    && $this->multipartField($request, 'chat_id') === '-100123'
-                    && ($dimensions['mime'] ?? null) === 'image/png'
-                    && str_contains($caption, 'ORDER PAYMENT CONFIRMED')
-                    && str_contains($caption, $availableProduct->name.' × 1')
-                    && ! str_contains($caption, $inactiveProduct->name)
-                    && ! str_contains($caption, $soldOutProduct->name)
-                    && mb_strlen($caption, 'UTF-8') <= 1024;
-            });
-            $this->assertSame(4, $availableProduct->refresh()->stock);
-            $this->assertSame(0, $availableProduct->reserved_stock);
             $this->assertNoRealOrderPersistence();
             $this->assertNoFakeSalesProofPosts();
         } finally {

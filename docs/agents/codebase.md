@@ -752,8 +752,8 @@ and accepts only the immutable
 `PaidInvoiceOrderPresentationAdapter` reads paid Order snapshots and the
 canonical paid Payment; its immutable item values include the nullable
 `quantity_price_tier_minimum` captured on each Order Item. `PaidInvoiceSyntheticPresentationAdapter`
-uses the same `ProductQuantityPricing` quote for manual, automatic, and
-deleted-stock Fake Sales Proofs, including the aggregated quantity and the
+uses the same `ProductQuantityPricing` quote for manual and deleted-stock
+Fake Sales Proofs, including the aggregated quantity and the
 one-percent provider fee; `SalesProofPostFormatter` renders subtotal, fee when
 non-zero, and total after fee. `PaidInvoiceTopUpPresentationAdapter` remains
 separate. Buyer receipts and real/fake Store Channel posts use the same
@@ -761,6 +761,43 @@ renderer; fake publication never creates an Order, Payment, Sale movement, or
 durable Sales Proof effect. Manual stock deletion remains an inventory
 adjustment/audit, while its cache-locked 20-second aggregation only controls
 the public fake proof.
+
+Issue #667 removes scheduled automatic fake publication entirely: the
+`telegram:fake-sales-proof:auto` command, scheduler registration, automatic
+publisher entry point, random-product selection and interval cache helpers no
+longer exist. The Store Channel card offers manual publication and its last-sent
+time only. Existing automatic interval cache entries are ignored and can expire
+normally; no migration, Telegram post deletion or historical-data cleanup is
+part of this cutover. Keep the shared Sales Proof toggle, publication lock,
+numbering, invoice renderer, manual route and deleted-stock aggregation. Real
+paid-order proof delivery and its durable recovery/ambiguity rules are unchanged.
+
+Local verification (2026-10-28): the seven focused suites
+`AdminStoreChannelTest`, `ProductStockDeletionFakeSalesProofTest`,
+`SchedulerIsolationTest`, `TelegramLifecycleOutboundEffectTest`,
+`SalesProofStockSignalTest`, `SalesProofPostFormatterTest` and
+`PaidInvoiceRendererTest` passed 114 tests / 804 assertions; targeted Pint passed.
+A disposable SQLite runtime with the real Telegram client and intercepted HTTP
+ran `ops:schedule-run` with unrelated tasks skipped and a local callback as a
+positive control: zero automatic entries/commands and zero scheduler sends.
+Manual publication, deleted-stock publication and an actual stock-deletion
+aggregation job sent invoice photos. A synthetic local checkout followed by
+`OrderStateMachine::applyPaymentPaid()` and `PublishSalesProofPost` finalized the
+real proof as `sent`; replay sent nothing. Fake publication left Order, Payment
+and Sales Proof records empty and stock unchanged before the separate deletion
+and checkout scenarios. Authenticated browser checks exercised the manual form
+by keyboard, channel validation and disabled controls; desktop and 390px mobile
+views retained the existing light/dark styles without overflow or automatic
+indicators. These are local transport fixtures, not live payments or messages.
+
+Framework reference: Context7's Laravel 13
+[scheduling snippets](https://context7.com/laravel/docs/llms.txt?tokens=3000&topic=scheduling)
+separate schedule definitions from Artisan commands. Related scope and baseline:
+[#666](https://github.com/Alhiefikri/telegram-bot/issues/666) and
+[#672](https://github.com/Alhiefikri/telegram-bot/issues/672#issuecomment-6462928894).
+No production access, deploy, CI/CD run or CPU/RAM savings claim accompanies
+this local cutover.
+
 `SalesProofStockSignal` owns the optional low-stock line of the public caption:
 it reads mutable Product availability and passes a plain number into the
 formatter, so `PaidInvoicePresentation` keeps only immutable order/payment data

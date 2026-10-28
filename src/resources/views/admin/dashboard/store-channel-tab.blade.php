@@ -104,14 +104,12 @@
                     </div>
 
                     <p class="mt-2 text-sm leading-6 text-admin-muted">
-                        Pilih produk nyata lalu kirim manual kapan saja. Auto fake notif tetap jalan sendiri memakai interval random, tanpa membuat data Pesanan dan tanpa mengurangi stok.
+                        Pilih produk nyata lalu kirim manual kapan saja, tanpa membuat data Pesanan dan tanpa mengurangi stok.
                     </p>
 
-                    <div class="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                    <div class="mt-3 grid grid-cols-2 gap-2">
                         <x-admin-dashboard.mini-stat label="Manual" value="Kapan saja" align="left" />
                         <x-admin-dashboard.mini-stat label="Manual terakhir" :value="$fakeSalesProof['manual_last_sent_label']" align="left" />
-                        <x-admin-dashboard.mini-stat label="Auto interval" :value="$fakeSalesProof['interval_label']" align="left" />
-                        <x-admin-dashboard.mini-stat label="Auto berikutnya" :value="$fakeSalesProof['next_available_label']" align="left" />
                     </div>
 
                     @if ($fakeSalesProof['disabled_reason'])
@@ -141,9 +139,6 @@
                                 Kirim Info Pembelian Fake
                             </x-admin-dashboard.button>
                         </form>
-                        <p class="mt-2 text-xs font-medium leading-5 text-admin-muted">
-                            Manual tidak kena cooldown. Auto dikirim scheduler saat interval acak {{ $fakeSalesProof['interval_options_label'] }} sudah due.
-                        </p>
                     @else
                         <x-admin-dashboard.notice tone="neutral" class="mt-3 text-xs">Hanya owner/admin yang bisa mengirim info pembelian fake.</x-admin-dashboard.notice>
                     @endif

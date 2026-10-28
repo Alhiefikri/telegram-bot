@@ -20,7 +20,6 @@ final class SchedulerIsolationTest extends TestCase
             'Telegram update recovery' => ['telegram:recover-updates'],
             'payment proof forwarding' => ['telegram:forward-payment-proofs'],
             'waitlist' => ['waitlist:reconcile'],
-            'automatic sales proof' => ['telegram:fake-sales-proof:auto'],
             'authentication cleanup' => ['customer-auth:cleanup'],
             'authentication mail' => ['customer-auth:recover-mail'],
             'API usage flush' => ['customer-api:flush-usage'],

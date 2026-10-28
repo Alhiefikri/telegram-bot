@@ -14,15 +14,7 @@ use Throwable;
 
 class FakeSalesProofPostPublisher
 {
-    public const COOLDOWN_HOUR_OPTIONS = [2, 3, 4, 5];
-
     private const CACHE_MANUAL_LAST_SENT_AT = 'fake-sales-proof:manual:last-sent-at';
-
-    private const CACHE_AUTO_LAST_SENT_AT = 'fake-sales-proof:last-sent-at';
-
-    private const CACHE_AUTO_NEXT_AVAILABLE_AT = 'fake-sales-proof:next-available-at';
-
-    private const CACHE_AUTO_INTERVAL_HOURS = 'fake-sales-proof:interval-hours';
 
     public function __construct(
         private readonly TelegramBotClient $bot,
@@ -36,12 +28,10 @@ class FakeSalesProofPostPublisher
     ) {}
 
     /**
-     * @return array{can_send: bool, disabled_reason: string|null, last_sent_label: string, manual_last_sent_label: string, auto_last_sent_label: string, next_available_label: string, interval_label: string, interval_options_label: string, product_options: list<array{id: int, name: string, label: string}>, send_url: string}
+     * @return array{can_send: bool, disabled_reason: string|null, manual_last_sent_label: string, product_options: list<array{id: int, name: string, label: string}>, send_url: string}
      */
     public function dashboardState(StoreChannelSetting $setting, bool $ready, bool $canManage): array
     {
-        $automatic = $this->automaticIntervalState();
-        $manualLastSentLabel = $this->manualLastSentLabel();
         $productOptions = $this->productOptions();
         $hasProduct = $productOptions !== [];
         $disabledReason = match (true) {
@@ -55,21 +45,13 @@ class FakeSalesProofPostPublisher
         return [
             'can_send' => $disabledReason === null,
             'disabled_reason' => $disabledReason,
-            'last_sent_label' => $manualLastSentLabel,
-            'manual_last_sent_label' => $manualLastSentLabel,
-            'auto_last_sent_label' => $automatic['last_sent_label'],
-            'next_available_label' => $automatic['next_available_label'],
-            'interval_label' => $automatic['interval_label'],
-            'interval_options_label' => $this->intervalOptionsLabel(),
+            'manual_last_sent_label' => $this->manualLastSentLabel(),
             'product_options' => $productOptions,
             'send_url' => route('admin.store-channel.fake-sales-proof'),
         ];
     }
 
     /**
-     * Manual button publish. It is intentionally not throttled by the automatic
-     * random interval; admins asked for this button to be fire-on-demand.
-     *
      * @return array{success: bool, message: string, skipped?: bool}
      */
     public function publish(mixed $productId): array
@@ -83,14 +65,6 @@ class FakeSalesProofPostPublisher
     public function publishManual(mixed $productId): array
     {
         return $this->withPublishLock(fn (): array => $this->publishManualWhileLocked($productId));
-    }
-
-    /**
-     * @return array{success: bool, message: string, skipped?: bool}
-     */
-    public function publishAutomatically(): array
-    {
-        return $this->withPublishLock(fn (): array => $this->publishAutomaticallyWhileLocked());
     }
 
     /**
@@ -152,46 +126,8 @@ class FakeSalesProofPostPublisher
     }
 
     /**
-     * @return array{success: bool, message: string, skipped?: bool}
-     */
-    private function publishAutomaticallyWhileLocked(): array
-    {
-        $setting = StoreChannelSetting::current();
-        $chatId = $setting->telegram_chat_id ?: $setting->channel_username;
-        if (! $setting->sales_proof_enabled) {
-            return ['success' => false, 'skipped' => true, 'message' => 'Sales Proof Post nonaktif; auto fake notif dilewati.'];
-        }
-
-        if (! $chatId) {
-            return ['success' => false, 'skipped' => true, 'message' => 'Store Channel belum punya chat ID/username; auto fake notif dilewati.'];
-        }
-
-        $automatic = $this->automaticIntervalState();
-        if (! $automatic['ready']) {
-            return ['success' => false, 'skipped' => true, 'message' => 'Auto fake notif belum waktunya. Berikutnya '.$automatic['next_available_label'].'.'];
-        }
-
-        $product = $this->randomAvailableProduct();
-        if (! $product) {
-            return ['success' => false, 'skipped' => true, 'message' => 'Tidak ada produk aktif dengan stok tersedia untuk auto fake notif.'];
-        }
-
-        try {
-            $this->sendFakeSalesProof((string) $chatId, $product, 1);
-            $intervalHours = $this->recordSuccessfulAutomaticInterval();
-
-            return [
-                'success' => true,
-                'message' => 'Auto fake notif dikirim ke Telegram Channel memakai produk '.$product->name.'. Auto berikutnya sekitar '.$intervalHours.' jam lagi.',
-            ];
-        } catch (Throwable $e) {
-            return $this->failedSendResult($e);
-        }
-    }
-
-    /**
      * Publish the proof for a committed manual stock deletion. The product may
-     * already be unavailable; unlike manual/automatic selection, this path
+     * already be unavailable; unlike manual selection, this path
      * deliberately renders the deleted quantity and does not mutate inventory.
      *
      * @return array{success: bool, message: string, skipped?: bool, retryable?: bool}
@@ -266,44 +202,9 @@ class FakeSalesProofPostPublisher
         ];
     }
 
-    /**
-     * @return array{ready: bool, last_sent_label: string, next_available_label: string, interval_label: string}
-     */
-    private function automaticIntervalState(): array
-    {
-        $lastSentAt = $this->cachedTime(self::CACHE_AUTO_LAST_SENT_AT);
-        $nextAvailableAt = $this->cachedTime(self::CACHE_AUTO_NEXT_AVAILABLE_AT);
-        $intervalHours = Cache::get(self::CACHE_AUTO_INTERVAL_HOURS);
-        $intervalHours = is_numeric($intervalHours) ? (int) $intervalHours : null;
-        $ready = $nextAvailableAt === null || now()->greaterThanOrEqualTo($nextAvailableAt);
-
-        return [
-            'ready' => $ready,
-            'last_sent_label' => $lastSentAt ? $this->formatDashboardTime($lastSentAt) : 'Belum pernah',
-            'next_available_label' => $nextAvailableAt ? $this->formatDashboardTime($nextAvailableAt) : 'Sekarang',
-            'interval_label' => in_array($intervalHours, self::COOLDOWN_HOUR_OPTIONS, true)
-                ? $intervalHours.' jam'
-                : 'Random '.$this->intervalOptionsLabel(),
-        ];
-    }
-
     private function recordSuccessfulManualPublish(): void
     {
         Cache::put(self::CACHE_MANUAL_LAST_SENT_AT, now()->toISOString(), now()->addDays(30));
-    }
-
-    private function recordSuccessfulAutomaticInterval(): int
-    {
-        $intervalHours = self::COOLDOWN_HOUR_OPTIONS[array_rand(self::COOLDOWN_HOUR_OPTIONS)];
-        $lastSentAt = now();
-        $nextAvailableAt = $lastSentAt->copy()->addHours($intervalHours);
-        $expiresAt = $nextAvailableAt->copy()->addDay();
-
-        Cache::put(self::CACHE_AUTO_LAST_SENT_AT, $lastSentAt->toISOString(), $expiresAt);
-        Cache::put(self::CACHE_AUTO_NEXT_AVAILABLE_AT, $nextAvailableAt->toISOString(), $expiresAt);
-        Cache::put(self::CACHE_AUTO_INTERVAL_HOURS, $intervalHours, $expiresAt);
-
-        return $intervalHours;
     }
 
     /**
@@ -312,11 +213,6 @@ class FakeSalesProofPostPublisher
     private function availableProducts(): Builder
     {
         return Product::query()->withAvailability()->publicVisible()->availableForPurchase();
-    }
-
-    private function randomAvailableProduct(): ?Product
-    {
-        return $this->availableProducts()->inRandomOrder()->first();
     }
 
     /**
@@ -340,11 +236,6 @@ class FakeSalesProofPostPublisher
     private function fakeOrderNumber(): int
     {
         return $this->numbering->reserveNextNumber();
-    }
-
-    private function intervalOptionsLabel(): string
-    {
-        return implode(' / ', array_map(fn (int $hours): string => $hours.' jam', self::COOLDOWN_HOUR_OPTIONS));
     }
 
     private function manualLastSentLabel(): string
