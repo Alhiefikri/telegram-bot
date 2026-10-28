@@ -48,27 +48,31 @@ final class SakurupiahReconciliationQuery
             ->whereNotNull('merchant_ref')
             ->where('method', SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS)
             ->where('currency', 'IDR')
+            ->where('status', '<>', PaymentStatus::Paid->value)
             ->where(function (Builder $query) use ($releasedCutoff): void {
-                $query
-                    ->where(function (Builder $recoverable) use ($releasedCutoff): void {
-                        $recoverable
-                            ->whereNotNull('provider_reference')
-                            ->where(function (Builder $status) use ($releasedCutoff): void {
-                                $status
-                                    ->where('status', PaymentStatus::Pending->value)
-                                    ->orWhere(fn (Builder $terminal) => $terminal
-                                        ->whereIn('status', [PaymentStatus::Expired->value, PaymentStatus::Failed->value])
-                                        ->where('updated_at', '>=', $releasedCutoff));
-                            });
-                    })
-                    ->orWhereIn('provider_create_state', [
-                        SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
-                        SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED,
-                        // A definitively rejected create is retried on the same
-                        // merchant reference, so the scheduled sweep must keep
-                        // selecting it until it becomes payable or expires.
-                        SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED,
-                    ]);
+                $query->where(function (Builder $referenced) use ($releasedCutoff): void {
+                    $referenced->whereNotNull('provider_reference')
+                        ->where(function (Builder $status) use ($releasedCutoff): void {
+                            $status->where('status', PaymentStatus::Pending->value)
+                                ->orWhere(function (Builder $terminal) use ($releasedCutoff): void {
+                                    $terminal->whereIn('status', [PaymentStatus::Expired->value, PaymentStatus::Failed->value])
+                                        ->where(function (Builder $deadline) use ($releasedCutoff): void {
+                                            // Lookup writes must not restart the late-money window.
+                                            $deadline->where('expired_at', '>=', $releasedCutoff)
+                                                ->orWhere(fn (Builder $legacy) => $legacy
+                                                    ->whereNull('expired_at')
+                                                    ->where('created_at', '>=', $releasedCutoff));
+                                        });
+                                });
+                        });
+                })->orWhereIn('provider_create_state', [
+                    // Uncertain money keeps its existing discovery path even
+                    // after local expiry or the ordinary terminal lookback.
+                    SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
+                    SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED,
+                ])->orWhere(fn (Builder $retry) => $retry
+                    ->where('status', PaymentStatus::Pending->value)
+                    ->where('provider_create_state', SakurupiahInvoiceLifecycleService::STATE_CREATE_FAILED));
             });
     }
 }

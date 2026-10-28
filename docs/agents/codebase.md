@@ -929,7 +929,6 @@ Every Telegram copy that names an individual Product uses its effective icon —
 Checkout snapshots the effective Product/Family icon fields on `OrderItem`, while price-change events snapshot the Product-owned icon alongside Product name for delayed delivery. The Store Bot icon screen keeps one row per family and adds a `producticon:family:<id>` list where one variant at a time can capture or clear its own icon.
 
 `TelegramCheckoutIntents` adalah adapter checkout Telegram. Ia membaca Payment provider yang sudah tersimpan, memanggil lifecycle provider bila perlu, lalu menerjemahkan hasil menjadi payment instruction. Payment instruction dan outbound send dikerjakan oleh job unique di queue yang sesuai.
-
 `CheckoutPaymentUnavailable` separates Sakurupiah readiness or stale payment-preflight rejection from invalid Cart state; `CheckoutPaymentAmountOutsideLimits` carries the observed QRIS minimum and maximum. Both remain `InvalidCheckout` subtypes for service/Web callers. The Telegram checkout callback also reports `InsufficientStock` separately. Each rejection retains the Cart and transaction rollback prevents Order, Payment or supplier-hold creation.
 
 `SakurupiahProviderReadiness` stores a versioned scalar/array observation, not a PHP object, so Redis can reuse it with `cache.serializable_classes=false`. An old or malformed value is replaced by one fresh observation; an unavailable cache still uses the fresh provider result. Configuration fingerprints, channel selection, financial guards and the existing observation TTL remain unchanged.
@@ -1342,8 +1341,10 @@ snapshotted with the presentation (`customer_pays_fee`).
 
 `SakurupiahCallbackProcessor::reconcilePayment()` is the reconciliation seam:
 under the same per-Payment cache lock used by create/callback/refresh, it
-performs an authoritative status lookup (never a create), validates identity
-and amount evidence, and delegates paid/expired transitions to `OrderLifecycle`.
+performs an authoritative status lookup, validates identity and amount evidence,
+and delegates paid/expired transitions to `OrderLifecycle`. A missing provider
+reference delegates to guarded lifecycle recovery: only definitive rejections
+may create again on the same reference; ambiguous creates never do.
 Late paid observations on terminal Orders become `ManualFulfillmentReview`
 without auto-fulfillment.
 
@@ -1365,13 +1366,27 @@ turns a Payment payable.
 
 [`ReconcileSakurupiahPayments`](../../src/app/Console/Commands/ReconcileSakurupiahPayments.php)
 (`sakurupiah:reconcile --chunk=100`) scans only Sakurupiah QRIS IDR Payments
-with a merchant reference in bounded eligible states, ordered deterministically
-by `(created_at, id)` with eager `order` loading; `outcome_unknown`,
-`recovery_unconfirmed`, and the retryable `create_failed` states are eligible
-too, so a rejected create is retried by the same bounded sweep. Terminal rows
-are bounded by a recent `updated_at` lookback. It reports only aggregate counts
-and redacted identifiers. The Postgres partial index
-`payments_sakurupiah_reconcile_cursor_idx` matches the scan predicate.
+with a merchant reference. Active and released lanes have independent rotating
+`(created_at,id)` cursors, eager `order` loading and at most `--chunk` rows each.
+The active lane runs first with half the remaining execution window; released
+work gets the remainder of the same overall budget. Rows processed in one lane
+are excluded from the other in that sweep. Paid Payments are excluded;
+`create_failed` retries remain eligible while pending. Ordinary terminal
+lookback uses `expired_at` (legacy fallback `created_at`), so observation writes
+cannot restart it. Uncertain `outcome_unknown`/`recovery_unconfirmed` Payments
+retain their existing discovery path beyond that lookback. It reports aggregate
+counts and redacted identifiers. See the [checkout rejection and recovery
+runbook](../runbook-sakurupiah-payment.md#intermittent-checkout-rejection-and-delayed-qris).
+
+`SakurupiahRequestEvidence` records safe per-attempt operation, caller, merchant
+HMAC fingerprint, timing, retries and closed response categories from the
+client. Generic application `400` is not classified as throttling. Attempt
+intervals permit overlap measurement but do not measure worker queue wait;
+sweep `busy` and deadline outcomes remain separate. Checkout delivery records
+actual response-derived `retry_notice_sent` versus `qris_sent` metadata for
+Sakurupiah as for KlikQRIS. The [issue 661 evidence and deployment
+comparison](../runbook-sakurupiah-payment.md#issue-661-post-order-recovery-evidence)
+separates local fixture proof from unresolved provider/production attribution.
 
 The scheduler registers `sakurupiah:reconcile` every minute only when
 `SakurupiahProviderReadiness::schedulingEnabledFor($runtime)` is true, i.e. the

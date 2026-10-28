@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
 use App\Models\Payment;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
@@ -36,9 +37,9 @@ final class ReconcileSakurupiahPayments extends Command
         TelegramOutboundEffectService $outboundEffects,
         TelegramOutboundEffectDispatcher $outboundEffectDispatcher,
     ): int {
-        return ProviderVerificationProfiles::until($this->executionDeadline(), fn (): int => $this->reconcile(
+        return $this->reconcile(
             $processor, $readiness, $reconciliationQuery, $lifecycle, $outboundEffects, $outboundEffectDispatcher,
-        ));
+        );
     }
 
     private function reconcile(
@@ -71,9 +72,11 @@ final class ReconcileSakurupiahPayments extends Command
         }
 
         $releasedCutoff = now()->subHours($this->releasedLookbackHours());
-        $cursorKey = $this->cursorKey($environment);
-        $cursor = null;
-        $stoppedEarly = false;
+        $deadline = $this->executionDeadline();
+        $carryOver = false;
+        $requests = 0;
+        $stopReasons = [];
+        $processed = [];
         $budgetExhausted = false;
         $paid = 0;
         $expired = 0;
@@ -85,74 +88,81 @@ final class ReconcileSakurupiahPayments extends Command
         $recovered = 0;
 
         try {
-            $cursor = $this->resumeCursor($cursorKey);
+            foreach (['active', 'released'] as $lane) {
+                $cursorKey = $this->cursorKey($environment).':'.$lane;
+                // Reserve half the I/O window for late-money verification even
+                // when active checkouts encounter a provider outage.
+                $laneDeadline = $lane === 'active'
+                    ? hrtime(true) + intdiv(max(0, $deadline - hrtime(true)), 2)
+                    : $deadline;
 
-            $page = $reconciliationQuery
-                ->eligible($releasedCutoff)
-                ->when($cursor !== null, fn (Builder $query): Builder => $this->applyCursor($query, $cursor))
-                ->with(['order:id,order_status,expires_at'])
-                ->orderBy('created_at')
-                ->orderBy('id')
-                ->limit($chunk)
-                ->get();
+                ProviderVerificationProfiles::until($laneDeadline, function () use (
+                    $lane, $cursorKey, $releasedCutoff, $chunk, $reconciliationQuery,
+                    $lifecycle, $processor, $outboundEffects, $outboundEffectDispatcher,
+                    &$carryOver, &$requests, &$stopReasons, &$budgetExhausted, &$processed,
+                    &$paid, &$expired, &$pending, &$verificationPending, &$invalid, &$busy, &$failed, &$recovered,
+                ): void {
+                    $cursor = $this->resumeCursor($cursorKey);
+                    $stoppedEarly = false;
+                    $page = $reconciliationQuery
+                        ->eligible($releasedCutoff)
+                        ->where('status', $lane === 'active' ? '=' : '<>', PaymentStatus::Pending->value)
+                        ->when($cursor !== null, fn (Builder $query): Builder => $this->applyCursor($query, $cursor))
+                        ->when($processed !== [], fn (Builder $query): Builder => $query->whereNotIn('id', $processed))
+                        ->with(['order:id,order_status,expires_at'])
+                        ->orderBy('created_at')
+                        ->orderBy('id')
+                        ->limit($chunk)
+                        ->get();
 
-            foreach ($page as $payment) {
-                if (ProviderVerificationProfiles::stopReason() !== null) {
-                    $budgetExhausted = true;
-                    $stoppedEarly = true;
+                    foreach ($page as $payment) {
+                        if (ProviderVerificationProfiles::stopReason() !== null) {
+                            $stoppedEarly = true;
 
-                    break;
-                }
+                            break;
+                        }
 
-                // Advance only after this row produces a durable outcome. A
-                // failed row stays at the cursor for the next scheduled retry.
-                $paymentCursor = $this->cursorFor($payment);
-                $payableBefore = $lifecycle->classify($payment)->isPayable();
+                        $paymentCursor = $this->cursorFor($payment);
+                        $processed[] = (string) $payment->getKey();
+                        $payableBefore = $lifecycle->classify($payment)->isPayable();
+                        try {
+                            $outcome = $processor->reconcilePayment($payment);
+                        } catch (Throwable $exception) {
+                            $failed++;
+                            $stoppedEarly = true;
+                            $this->error('Sakurupiah reconciliation failed payment '.$this->redactedPaymentId($payment).': '.$exception::class);
 
-                try {
-                    $outcome = $processor->reconcilePayment($payment);
-                } catch (Throwable $exception) {
-                    $failed++;
-                    $stoppedEarly = true;
-                    $this->error('Sakurupiah reconciliation failed payment '.$this->redactedPaymentId($payment).': '.$exception::class);
+                            break;
+                        }
 
-                    break;
-                }
+                        $cursor = $paymentCursor;
+                        match ($outcome) {
+                            SakurupiahReconciliationOutcome::Paid => $paid++,
+                            SakurupiahReconciliationOutcome::Expired => $expired++,
+                            SakurupiahReconciliationOutcome::VerificationPending => $verificationPending++,
+                            SakurupiahReconciliationOutcome::Invalid => $invalid++,
+                            SakurupiahReconciliationOutcome::Busy => $busy++,
+                            default => $pending++,
+                        };
 
-                $cursor = $paymentCursor;
+                        if (! $payableBefore && $lifecycle->classify($payment)->isPayable()) {
+                            $recovered++;
+                            $this->deliverRecoveredInstructions($payment, $outboundEffects, $outboundEffectDispatcher);
+                        }
+                    }
 
-                match ($outcome) {
-                    SakurupiahReconciliationOutcome::Paid => $paid++,
-                    SakurupiahReconciliationOutcome::Expired => $expired++,
-                    SakurupiahReconciliationOutcome::VerificationPending => $verificationPending++,
-                    SakurupiahReconciliationOutcome::Invalid => $invalid++,
-                    SakurupiahReconciliationOutcome::Busy => $busy++,
-                    default => $pending++,
-                };
-
-                // A sweep that turned an unpresentable Payment into a payable
-                // one delivers its QR instructions; the customer was told to
-                // wait, so recovery must not depend on another action.
-                if (! $payableBefore && $lifecycle->classify($payment)->isPayable()) {
-                    $recovered++;
-                    $this->deliverRecoveredInstructions($payment, $outboundEffects, $outboundEffectDispatcher);
-                }
-
-                if (ProviderVerificationProfiles::stopReason() !== null) {
-                    $budgetExhausted = true;
-                }
-            }
-
-            if (ProviderVerificationProfiles::stopReason() !== null) {
-                $budgetExhausted = true;
-            }
-
-            $reachedEnd = $page->count() < $chunk;
-            if ($reachedEnd && ! $stoppedEarly) {
-                Cache::forget($cursorKey);
-                $cursor = null;
-            } elseif ($cursor !== null) {
-                Cache::put($cursorKey, $cursor, self::CURSOR_TTL_SECONDS);
+                    $reason = ProviderVerificationProfiles::stopReason();
+                    $budgetExhausted = $budgetExhausted || $reason !== null;
+                    $requests += ProviderVerificationProfiles::requests();
+                    if ($page->count() < $chunk && ! $stoppedEarly) {
+                        Cache::forget($cursorKey);
+                        $cursor = null;
+                    } elseif ($cursor !== null) {
+                        Cache::put($cursorKey, $cursor, self::CURSOR_TTL_SECONDS);
+                    }
+                    $carryOver = $carryOver || $stoppedEarly || $cursor !== null;
+                    $stopReasons[] = $reason ?? ($stoppedEarly ? 'interrupted' : ($cursor !== null ? 'page_limit' : 'exhausted'));
+                });
             }
         } catch (Throwable $exception) {
             $this->error('sakurupiah:reconcile failed safely: '.$exception::class);
@@ -161,8 +171,7 @@ final class ReconcileSakurupiahPayments extends Command
         }
 
         $summary = "paid={$paid} expired={$expired} pending={$pending} verification_pending={$verificationPending} invalid={$invalid} busy={$busy} failed={$failed} recovered={$recovered} budget_exhausted=".($budgetExhausted ? '1' : '0');
-        $stopReason = ProviderVerificationProfiles::stopReason() ?? ($stoppedEarly ? 'interrupted' : ($cursor !== null ? 'page_limit' : 'exhausted'));
-        $this->line('sakurupiah:reconcile sweep: requests='.ProviderVerificationProfiles::requests().' stop_reason='.$stopReason.' carry_over='.($stoppedEarly || $cursor !== null ? 'yes' : 'no'));
+        $this->line('sakurupiah:reconcile sweep: requests='.$requests.' stop_reason='.implode(',', array_unique($stopReasons)).' carry_over='.($carryOver ? 'yes' : 'no'));
 
         if ($failed > 0) {
             $this->error('sakurupiah:reconcile completed with partial failures: '.$summary);

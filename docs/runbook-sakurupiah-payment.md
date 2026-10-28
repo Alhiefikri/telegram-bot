@@ -112,6 +112,39 @@ snapshot was fresh at either tap. The application log volume was not readable
 by the unprivileged audit account, and an authorized `sudo -n` read could not
 authenticate.
 
+Inspect both sides of an Order's history before attributing delay to workers:
+`PaymentEvent.received_count` and `last_received_at` include repeated identical
+provider rejections that share one event. The audited delayed invoice received
+ten rejected create responses before a later create succeeded. A checkout effect
+marked `sent` can also represent a retry notice; its delivery outcome, not the
+effect's declared `sendPhoto` method, establishes whether a QR was sent.
+
+`sakurupiah:reconcile` processes active Payments before released Payments, with
+independent `(created_at,id)` cursors and at most `--chunk` candidates per lane.
+The active lane gets half the remaining execution window; the released lane
+can use the rest, including unused active time. The total execution budget stays
+45 seconds by default. A Payment transitioning between lanes is not checked twice
+in one sweep. A provider outage in either lane does not consume the other's
+entire I/O window.
+
+Ordinary terminal lookback uses `Payment.expired_at`, or `created_at` for legacy
+rows without a deadline, rather than mutable `updated_at`. Paid Payments and
+definitively rejected terminal creates do not occupy recovery work. Uncertain
+`outcome_unknown` and `recovery_unconfirmed` Payments retain discovery beyond
+the ordinary lookback; verified late money still enters Manual Fulfillment
+Review without fulfillment. Retry intervals, provider limits, stock and
+supplier-wallet guards, the local 15-minute deadline and the ban on repeating
+ambiguous creates are unchanged.
+
+Regression entry points: the Outlook scenario matrix in
+`Telegram/ProductDetailPurchaseTest`, `SakurupiahReconciliationTest`, and the
+existing invoice lifecycle and Telegram checkout suites. The standalone local
+smoke used the actual checkout, provider adapter, recovery command, QR renderer
+and Telegram transport with HTTP fixtures: metadata rejection without a hold,
+Outlook ten-unit checkout, duplicate replay, rejected-create recovery, one PNG
+delivery and fresh 10/10/25-unit Orders reserving 45 units. It was not a live
+payment or supplier purchase.
+
 Additional local verification used disposable Redis and SQLite with the actual
 Telegram webhook, synchronous jobs, Sakurupiah adapter and Telegram transport
 against HTTP fixtures. A metadata rejection left no Order, Payment or hold; after
@@ -127,6 +160,93 @@ request-frequency contract was found during this audit. Do not invent a
 merchant-wide request rate or bypass readiness to make a rejected checkout pass.
 Escalate repeated “Permintaan terlalu cepat” responses to provider support with
 sanitized evidence.
+
+## Issue 661: post-Order recovery evidence
+
+Local reproduction used the original single-cursor command from `HEAD` with
+twelve older terminal Payments, an active explicitly rejected create, a
+two-candidate page and a one-second I/O budget. Two sweeps produced no recovery
+effect. The same scenario with the active/released candidate split recovered
+the original merchant reference and delivered one PNG through the actual
+Telegram transport with HTTP fixtures. Replay made no second create or QR send.
+The initial notice and recovered QR now record `retry_notice_sent` and
+`qris_sent` respectively in `outcome_metadata`; declared `telegram_method`
+still does not establish the actual delivery.
+
+The independent SQLite smoke bootstrapped the application outside PHPUnit,
+explicitly selected the real `TelegramBotClient` instead of the testing runtime
+fake, and invoked the actual recovery command twice. It observed one rejected
+create, one same-reference successful create, one PNG multipart delivery and an
+unchanged local deadline. No live provider or Telegram request was made.
+
+Final local verification: 195 tests / 1,268 assertions passed across the
+Sakurupiah reconciliation, gateway, lifecycle, webhook, operations, Admin,
+Telegram checkout/top-up, shared KlikQRIS checkout and six scheduler suites.
+Targeted Pint completed successfully. These are SQLite/process/HTTP-fixture
+results, not production acceptance, PostgreSQL concurrency proof or evidence
+that Sakurupiah's external rejection has stopped.
+
+### Request pressure attribution
+
+`SakurupiahClient` emits `sakurupiah.request_attempt` once per attempted HTTP
+dispatch, including retries. Group by `environment`, `merchant_fingerprint`,
+`caller` and `operation` (`createInvoice`, `listChannels`, `transactionStatus`,
+`transactionHistory`; balance reads are also included). `request_id` correlates
+retries; `attempt`, `max_attempts`, `started_at`, `finished_at` and `duration_ms`
+show attempt count and overlapping intervals. The merchant fingerprint is
+HMAC-derived with the application key, not a merchant identifier; key rotation
+changes it, and an absent key yields null. Caller labels are a closed,
+argument-free bounded stack classification; `unknown` is retained when no known
+entry point is visible. `reconciliation_command` does not distinguish a
+scheduled invocation from an operator's CLI invocation.
+
+Only the exact observed “Permintaan terlalu cepat silahkan coba lagi nanti.”
+failure is classified `application_rate_rejected`. Other application `400`
+responses remain `application_rejected_unknown`; HTTP `429`, HTTP/provider
+outage statuses, not-found statuses, malformed envelopes, transport ambiguity
+and exhausted local budgets have separate outcomes. No provider body, reason
+text, credentials, signatures, QR, URL, customer data or full transaction
+identifier is logged. `application_accepted` means only an accepted envelope,
+not validated QR/payment evidence. A not-found category never authorizes a
+second create.
+
+Measure request overlap from these attempt intervals, not elapsed Order age.
+Measure Payment lock contention from sweep `busy`, queue wait from existing
+worker/scheduler timing, and local I/O exhaustion from `stop_reason`; none is a
+provider rejection. These new events cannot reconstruct missing historical
+per-caller traffic. The incident's ten deduplicated explicit create rejections
+prove repeated provider responses, while the 4,160 status-lookup failures do
+not establish their individual causes or merchant-wide request rate.
+
+### Deployment comparison
+
+Local Git diffs, without CI inspection, establish:
+
+| Revision | Relevant change | Consequence |
+| --- | --- | --- |
+| `c5bdfcda` | Webhook attempts 4 → 6; backoff `[15,60,180]` → `[5,10,15,30,60]`; several maintenance/expiry commands backgrounded | Earlier and potentially more webhook verification attempts, not a changed create retry interval |
+| `bd11ea91` | Launcher switched from `schedule:run` to the two-child `ops:schedule-run` pool; expiry gets priority slots | Bounds memory/concurrency; two occupied slots can delay provider polling |
+| `4f645b4d` | Unreachable expiry-recipient handling and KlikQRIS diagnostics | No Sakurupiah client/lifecycle/command budget change |
+| `1a46d9e7` | Cycle completion token distinguishes child failure from scheduler liveness | Changes heartbeat evidence, not provider frequency policy |
+
+Across those revisions Sakurupiah command cadence remains every minute,
+execution budget 45 seconds, lookup attempts three with 250/500 ms retry
+delays, and rejected-create minimum interval 60 seconds per Payment. The
+default two-minute scheduler overlap TTL is stale-lock protection, not a
+mandatory two-minute cadence; normal completion releases it. A status lookup
+plus amount-history lookup can attempt six requests before the shared deadline
+truncates work. Scheduler cycle duration and occupied slots can stretch cadence.
+These source mechanisms support possible pressure/delay effects, not a causal
+claim that the OOM deployment triggered provider throttling. The user's
+observation that failures began after that deployment remains unresolved by
+local fixtures.
+
+Provider support questions: Does the create rejection apply per merchant,
+channel, endpoint or concurrent request? Which operations share its limit?
+What retry/cooldown contract and safe status/history absence semantics apply?
+Supply only incident times, channel, sanitized outcome counts and overlapping
+attempt intervals, plus the private correlation hash if requested securely.
+Do not invent a numeric throttle or claim the external rejection is fixed.
 
 ## Channel lookup failure with an active QRISC channel
 

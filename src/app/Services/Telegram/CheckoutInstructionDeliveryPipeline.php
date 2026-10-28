@@ -280,6 +280,7 @@ final class CheckoutInstructionDeliveryPipeline
     {
         if (! in_array($effect->effect_type, [
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
+            TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
         ], true)) {
             return [];

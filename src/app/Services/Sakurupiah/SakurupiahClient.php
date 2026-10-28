@@ -8,6 +8,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use JsonException;
 use Throwable;
@@ -191,10 +192,24 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
         $this->assertReady();
 
         $maxAttempts = $lookup ? $this->lookupMaxAttempts() : 1;
+        $context = [
+            'request_id' => (string) Str::uuid(),
+            'environment' => $this->environment->value,
+            'merchant_fingerprint' => SakurupiahRequestEvidence::merchantFingerprint($this->environment, $this->apiId()),
+            'caller' => SakurupiahRequestEvidence::caller(),
+            'operation' => $operation,
+            'max_attempts' => $maxAttempts,
+        ];
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $startedAt = hrtime(true);
+            $attemptContext = array_merge($context, [
+                'attempt' => $attempt,
+                'started_at' => now()->format('Y-m-d\TH:i:s.uP'),
+            ]);
             try {
                 $response = $this->request()->post($this->endpoint($path), $body);
             } catch (ConnectionException $exception) {
+                SakurupiahRequestEvidence::record($attemptContext, $startedAt, exception: $exception);
                 if ($lookup && $attempt < $maxAttempts) {
                     $this->sleepBeforeRetry($attempt);
 
@@ -203,8 +218,11 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
 
                 throw new SakurupiahTransportException($operation, outcomeUnknown: ! $lookup, previous: $exception);
             } catch (Throwable $exception) {
+                SakurupiahRequestEvidence::record($attemptContext, $startedAt, exception: $exception);
                 throw new SakurupiahTransportException($operation, outcomeUnknown: ! $lookup, previous: $exception);
             }
+
+            SakurupiahRequestEvidence::record($attemptContext, $startedAt, response: $response);
 
             if ($response->successful()) {
                 return $response;

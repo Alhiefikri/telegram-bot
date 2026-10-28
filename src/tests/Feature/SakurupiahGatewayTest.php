@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Services\Admin\SakurupiahChannelSettings;
+use App\Services\ProviderVerification\ProviderVerificationBudgetExhausted;
 use App\Services\Sakurupiah\SakurupiahApplicationException;
 use App\Services\Sakurupiah\SakurupiahClient;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
@@ -9,12 +11,15 @@ use App\Services\Sakurupiah\SakurupiahHistoryFilter;
 use App\Services\Sakurupiah\SakurupiahHttpException;
 use App\Services\Sakurupiah\SakurupiahJsonException;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
+use App\Services\Sakurupiah\SakurupiahProviderException;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahReadinessException;
 use App\Services\Sakurupiah\SakurupiahSchemaException;
 use App\Services\Sakurupiah\SakurupiahTransportException;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class SakurupiahGatewayTest extends TestCase
@@ -170,6 +175,146 @@ class SakurupiahGatewayTest extends TestCase
         }
 
         Http::assertNothingSent();
+    }
+
+    public function test_request_evidence_records_each_retry_with_sanitized_timing_and_merchant_context(): void
+    {
+        $records = [];
+        Log::listen(function (MessageLogged $event) use (&$records): void {
+            if ($event->message === 'sakurupiah.request_attempt') {
+                $records[] = $event->context;
+            }
+        });
+        config()->set('app.key', 'evidence-test-key');
+        Http::fakeSequence()
+            ->push(['status' => '429', 'message' => 'secret-key api-test trx-408'], 429)
+            ->push(['status' => '500', 'message' => 'https://private.example/INV-408'], 503)
+            ->push(['status' => '200', 'data' => [['status' => 'pending', 'qr' => 'private-qr']]], 200)
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]], 200);
+
+        app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+
+        $this->assertCount(3, $records);
+        $this->assertSame([1, 2, 3], array_column($records, 'attempt'));
+        $this->assertSame(['http_rate_rejected', 'http_unavailable', 'application_accepted'], array_column($records, 'outcome'));
+        $this->assertCount(1, array_unique(array_column($records, 'request_id')));
+        foreach ($records as $record) {
+            $this->assertSame('unknown', $record['caller']);
+            $this->assertSame('transactionStatus', $record['operation']);
+            $this->assertSame('sandbox', $record['environment']);
+            $this->assertSame(3, $record['max_attempts']);
+            $this->assertSame(substr(hash_hmac('sha256', 'sandbox:api-test', 'evidence-test-key'), 0, 16), $record['merchant_fingerprint']);
+            $this->assertGreaterThanOrEqual(0, $record['duration_ms']);
+            $this->assertLessThanOrEqual($record['finished_at'], $record['started_at']);
+            $this->assertEqualsCanonicalizing([
+                'request_id', 'environment', 'merchant_fingerprint', 'caller', 'operation',
+                'max_attempts', 'attempt', 'started_at', 'finished_at', 'duration_ms',
+                'outcome', 'provider_status', 'http_status',
+            ], array_keys($record));
+        }
+        $encoded = json_encode($records, JSON_THROW_ON_ERROR);
+        foreach (['secret-key', 'api-test', 'trx-408', 'INV-408', 'private.example', 'private-qr'] as $sensitive) {
+            $this->assertStringNotContainsString($sensitive, $encoded);
+        }
+        config()->set('services.sakurupiah.sandbox_api_id', 'another-merchant');
+        app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+        $this->assertNotSame($records[0]['merchant_fingerprint'], $records[3]['merchant_fingerprint']);
+    }
+
+    public function test_create_evidence_distinguishes_explicit_rate_rejection_from_other_application_400_without_retries(): void
+    {
+        $records = [];
+        Log::listen(function (MessageLogged $event) use (&$records): void {
+            if ($event->message === 'sakurupiah.request_attempt') {
+                $records[] = $event->context;
+            }
+        });
+        Http::fakeSequence()
+            ->push(['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'], 200)
+            ->push(['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'], 400)
+            ->push(['status' => '400', 'message' => 'Unknown rejection INV-408 08123456789 private-qr https://private.example'], 400);
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            try {
+                app(SakurupiahProviderAdapter::class)->createInvoice($this->invoice());
+                $this->fail('Expected explicit application rejection.');
+            } catch (SakurupiahApplicationException $exception) {
+                $this->assertTrue($exception->isProviderRejection());
+            }
+        }
+
+        Http::assertSentCount(3);
+        $this->assertSame(['application_rate_rejected', 'application_rate_rejected', 'application_rejected_unknown'], array_column($records, 'outcome'));
+        $this->assertSame([1, 1, 1], array_column($records, 'attempt'));
+        $this->assertSame([1, 1, 1], array_column($records, 'max_attempts'));
+        $this->assertSame(['createInvoice', 'createInvoice', 'createInvoice'], array_column($records, 'operation'));
+        $encoded = json_encode($records, JSON_THROW_ON_ERROR);
+        foreach (['Permintaan', 'INV-408', '08123456789', 'private-qr', 'private.example'] as $sensitive) {
+            $this->assertStringNotContainsString($sensitive, $encoded);
+        }
+    }
+
+    public function test_lookup_evidence_distinguishes_not_found_unknown_outage_and_budget_exhaustion(): void
+    {
+        $records = [];
+        Log::listen(function (MessageLogged $event) use (&$records): void {
+            if ($event->message === 'sakurupiah.request_attempt') {
+                $records[] = $event->context;
+            }
+        });
+        config()->set('services.sakurupiah.lookup_max_attempts', 1);
+        $responses = [
+            Http::response(['status' => '404', 'message' => 'private reference'], 200),
+            Http::response('private gateway response', 404),
+            Http::response(['status' => '500', 'message' => 'private outage'], 200),
+            Http::response(['status' => '400', 'message' => 'unknown rejection'], 200),
+            Http::response('not-json', 200),
+            Http::response(['unexpected' => 'schema'], 200),
+            new ConnectionException('secret-key https://private.example'),
+            new ProviderVerificationBudgetExhausted('deadline'),
+        ];
+        Http::fake(function () use (&$responses) {
+            $response = array_shift($responses);
+            if ($response instanceof \Throwable) {
+                throw $response;
+            }
+
+            return $response;
+        });
+        for ($attempt = 0; $attempt < 8; $attempt++) {
+            try {
+                app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+                $this->fail('Expected lookup failure.');
+            } catch (SakurupiahProviderException) {
+            }
+        }
+
+        $this->assertSame([
+            'application_not_found', 'http_not_found', 'application_unavailable',
+            'application_rejected_unknown', 'invalid_json', 'invalid_envelope',
+            'transport_unknown', 'budget_exhausted',
+        ], array_column($records, 'outcome'));
+    }
+
+    public function test_channel_and_history_evidence_use_closed_caller_and_operation_labels(): void
+    {
+        $records = [];
+        Log::listen(function (MessageLogged $event) use (&$records): void {
+            if ($event->message === 'sakurupiah.request_attempt') {
+                $records[] = $event->context;
+            }
+        });
+        Http::fake(fn () => Http::response(['status' => '200', 'data' => []]));
+
+        app(SakurupiahChannelSettings::class)->available();
+        app(SakurupiahProviderAdapter::class)->transactionHistory(new SakurupiahHistoryFilter(
+            trxId: 'trx-408',
+            merchantRef: 'INV-408',
+        ));
+
+        $this->assertSame(['admin_channel_settings', 'unknown'], array_column($records, 'caller'));
+        $this->assertSame(['listChannels', 'transactionHistory'], array_column($records, 'operation'));
+        $this->assertSame(['application_accepted', 'application_accepted'], array_column($records, 'outcome'));
     }
 
     public function test_status_retries_429(): void
