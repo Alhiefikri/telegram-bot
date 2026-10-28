@@ -61,13 +61,26 @@ final class SakurupiahRequestBackpressure
     public function acquireRequest(string $operation, bool $lookup, string $caller): Lock
     {
         $this->assertAvailable($operation, $lookup);
+        $background = in_array($caller, ['reconciliation_command', 'top_up_reconciliation_command'], true);
+        try {
+            if ($background) {
+                if (Cache::has($this->cacheKey().':foreground')) {
+                    $this->defer($operation, $lookup, 'lookup_temporarily_unavailable', now()->getTimestamp() + 1);
+                }
+            } elseif (! Cache::put($this->cacheKey().':foreground', true, now()->addSeconds(2))) {
+                throw new RuntimeException('Cannot reserve foreground request priority.');
+            }
+        } catch (SakurupiahProviderException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            $this->defer($operation, $lookup, 'cache_unavailable', previous: $exception);
+        }
         try {
             $timeout = config('services.sakurupiah.http_timeout_seconds', 10);
             $lease = (int) ceil(is_numeric($timeout) && (float) $timeout > 0 ? (float) $timeout : 10) + 30;
             $lock = Cache::lock($this->cacheKey().':request', $lease);
-            // Sweeps yield immediately; foreground callers wait at most one second.
-            // No spacing or provider quota is inferred from this single-flight gate.
-            $background = in_array($caller, ['reconciliation_command', 'top_up_reconciliation_command'], true);
+            // Foreground intent outlives the bounded wait so a sweep cannot
+            // immediately reclaim the request slot ahead of a customer retry.
             if ($background ? ! $lock->get() : ! $lock->block(1)) {
                 throw new LockTimeoutException;
             }

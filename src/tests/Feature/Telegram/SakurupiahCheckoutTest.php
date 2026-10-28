@@ -18,7 +18,9 @@ use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahFee;
 use App\Services\Sakurupiah\SakurupiahInvoice;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
+use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
+use App\Services\Sakurupiah\SakurupiahRequestBackpressure;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
 use App\Services\Telegram\TelegramCheckoutIntents;
@@ -60,6 +62,60 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
                 'expiry_confirmed' => true,
             ],
         ]));
+    }
+
+    public function test_undispatched_create_recovers_the_same_order_without_the_rejection_delay(): void
+    {
+        [$order, $payment] = $this->payment([
+            'provider_reference' => null,
+            'provider_payment_method' => null,
+            'provider_total_payment' => null,
+            'provider_fee' => null,
+            'provider_created_at' => null,
+            'provider_expires_at' => null,
+            'provider_payload' => null,
+            'provider_create_state' => null,
+        ]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'sakurupiah', 'sakurupiah_channel' => 'QRISC',
+            'is_active' => true, 'whatsapp_support_number' => '08123456789',
+        ]);
+        $this->fakeTelegramHttp([
+            'https://sakurupiah.id/api-sanbox/create.php' => fn (Request $request) => Http::response([
+                'status' => '200', 'data' => [[
+                    'trx_id' => 'trx-after-local-deferral',
+                    'merchant_ref' => $request['merchant_ref'], 'payment_kode' => 'QRISC',
+                    'payment_status' => 'pending', 'amount' => '20000', 'total' => '20000',
+                    'fee' => '0', 'merchant_fee' => 'Merchant', 'qr' => self::DIRECT_QRIS_20_000,
+                    'expired' => now()->addDay()->format('Y-m-d H:i:s'),
+                ]],
+            ]),
+        ]);
+        $policy = new SakurupiahRequestBackpressure;
+        $held = $policy->acquireRequest('transactionStatus', true, 'reconciliation_command');
+        try {
+            app(TelegramCheckoutIntents::class)->sendSakurupiahPaymentInstructions('7412001', $order, $payment);
+            $this->assertSame(
+                SakurupiahInvoiceOutcome::Creating,
+                app(SakurupiahInvoiceLifecycleService::class)->lifecycle($payment)->outcome(),
+            );
+        } finally {
+            $held->release();
+        }
+        Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'sakurupiah.id'));
+        $this->assertNull($payment->fresh()->provider_create_attempted_at);
+        $this->assertSame('create_failed', $payment->fresh()->provider_create_state);
+        $this->assertNull($payment->fresh()->provider_reference);
+
+        app(TelegramCheckoutIntents::class)->sendSakurupiahPaymentInstructions('7412001', $order, $payment);
+        app(SakurupiahInvoiceLifecycleService::class)->classify($payment);
+        $this->assertSame('trx-after-local-deferral', $payment->fresh()->provider_reference);
+        $this->assertSame('created', $payment->fresh()->provider_create_state);
+        $this->assertSame(1, Payment::where('order_id', $order->id)->count());
+        $this->assertCount(1, Http::recorded(fn (Request $request) => str_ends_with($request->url(), '/create.php')));
+        $photos = Http::recorded(fn (Request $request) => str_ends_with($request->url(), '/sendPhoto'));
+        $this->assertCount(1, $photos);
+        $this->assertStringContainsString("\x89PNG\r\n\x1A\n", $photos->sole()[0]->body());
     }
 
     public function test_direct_sakurupiah_effect_dispatches_and_delivers_provider_qr_content(): void

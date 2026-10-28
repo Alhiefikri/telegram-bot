@@ -314,6 +314,10 @@ final class SakurupiahInvoiceLifecycleService
             $invoice = $this->provider->createInvoice($request);
         } catch (SakurupiahCreatePreRequestException|SakurupiahReadinessException $exception) {
             $this->markCreationDefinitivelyFailed($payment, $exception);
+            if ($exception instanceof SakurupiahCreatePreRequestException
+                && in_array($exception->reason, ['rate_limit_cooldown', 'lookup_temporarily_unavailable', 'cache_unavailable'], true)) {
+                return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::Creating);
+            }
 
             if ($exception instanceof SakurupiahCreatePreRequestException) {
                 throw $exception;
@@ -807,10 +811,17 @@ final class SakurupiahInvoiceLifecycleService
                     return;
                 }
 
-                $lockedPayment->update([
+                $attributes = [
                     'provider_create_state' => self::STATE_CREATE_FAILED,
                     'provider_create_last_error' => $this->exceptionCode($exception),
-                ]);
+                ];
+                // Clear the provisional attempt only when transport proves no dispatch.
+                // Unknown outcomes retain their timestamp and are never recreated here.
+                if ($exception instanceof SakurupiahCreatePreRequestException
+                    || $exception instanceof SakurupiahReadinessException) {
+                    $attributes['provider_create_attempted_at'] = null;
+                }
+                $lockedPayment->update($attributes);
             },
         );
 

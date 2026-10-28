@@ -13,6 +13,34 @@ use Tests\TestCase;
 
 class SakurupiahRequestBackpressureTest extends TestCase
 {
+    public function test_waiting_checkout_gets_a_retry_window_before_the_sweep_can_reacquire(): void
+    {
+        $policy = new SakurupiahRequestBackpressure;
+        $background = $policy->acquireRequest('transactionStatus', true, 'reconciliation_command');
+        try {
+            $policy->acquireRequest('createInvoice', false, 'telegram_checkout');
+            $this->fail('A concurrent request must not overlap the sweep.');
+        } catch (SakurupiahCreatePreRequestException $exception) {
+            $this->assertSame('lookup_temporarily_unavailable', $exception->reason);
+            $this->assertFalse($policy->isCoolingDown());
+        } finally {
+            $background->release();
+        }
+
+        try {
+            $lock = $policy->acquireRequest('transactionStatus', true, 'reconciliation_command');
+            $lock->release();
+            $this->fail('The sweep must yield to the waiting checkout.');
+        } catch (SakurupiahProviderException $exception) {
+            $this->assertSame('lookup_temporarily_unavailable', $exception->reason);
+        }
+        $foreground = $policy->acquireRequest('createInvoice', false, 'telegram_checkout');
+        $foreground->release();
+        $this->travel(3)->seconds();
+        $resumed = $policy->acquireRequest('transactionStatus', true, 'reconciliation_command');
+        $resumed->release();
+    }
+
     #[DataProvider('retryHeaders')]
     public function test_throttle_deadline_respects_retry_after_and_recovers_at_exact_boundary(?string $header, int $seconds): void
     {

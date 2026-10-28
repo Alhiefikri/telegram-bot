@@ -14,6 +14,32 @@ Automated release evidence is recorded in
 [`docs/sakurupiah-release-evidence.md`](sakurupiah-release-evidence.md). This
 runbook and the evidence document never contain production credentials.
 
+## Checkout deferred after Order creation (#677)
+
+Merchant request-lock contention is a local admission decision, not evidence
+that a QRIS channel rejected the invoice. A foreground caller reserves a
+two-second priority window; order and top-up reconciliation sweeps yield during
+that window. The existing single-flight lock and provider throttle deadline
+still apply. This window is not a provider cooldown and does not serialize
+customers with a mandatory two-second delay.
+
+When transport confirms that create was not dispatched, the lifecycle clears
+the provisional `provider_create_attempted_at` and keeps the existing Payment
+and merchant reference. Temporary lock contention, merchant cooldown, or cache
+unavailability returns `creating`, so Telegram presents the existing preparation
+notice and Check Payment action instead of an invalid-provider-result warning.
+The next attempt must still pass merchant admission. Actual provider rejections
+retain their retry interval; ambiguous dispatched requests remain on recovery
+and must not be recreated.
+
+Local regression entry points are `SakurupiahRequestBackpressureTest`,
+`Telegram/SakurupiahCheckoutTest`, `SakurupiahInvoiceLifecycleTest`, and
+`SakurupiahCheckoutRecoveryPostgresConcurrencyTest`. An isolated SQLite smoke
+with HTTP fixtures exercised quantity 10 at Rp600: a held sweep lock produced
+no create request, and the same Payment subsequently sent one PNG QR at Rp6,000
+without waiting for the rejected-create interval. Replay did not create another
+invoice. This is local evidence, not a live Sakurupiah channel qualification.
+
 ## Store Balance partial status evidence (#665)
 
 The [official status example](https://sakurupiah.id/developers/api-dokumentasi)

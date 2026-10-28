@@ -105,6 +105,7 @@ class SakurupiahCheckoutRecoveryPostgresConcurrencyTest extends TestCase
             },
         ]);
         $this->assertSame(['checkout_completed', 'lookup_temporarily_unavailable'], $results);
+        sleep(3); // Redis expiry uses wall-clock time, not Carbon's test clock.
         $lock = (new SakurupiahRequestBackpressure)->acquireRequest('transactionStatus', true, 'reconciliation_command');
         $lock->release();
         $this->assertSame(1, DB::table('issue677_provider_effects')->count());
