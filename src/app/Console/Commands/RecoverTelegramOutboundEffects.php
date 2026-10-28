@@ -133,16 +133,12 @@ class RecoverTelegramOutboundEffects extends Command
                     TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION,
                     TelegramOutboundEffectService::TYPE_PRICE_CHANGE_STORE_CHANNEL,
                 ];
-                // Scope each branch to its family so PostgreSQL uses the existing
-                // dispatch-family index instead of walking the full ledger by ID.
-                // The outer page keeps one global limit and fairness cursor.
-                $dispatchableEffects = $ledger->readyToDispatchQuery(now(), array_shift($dispatchTypes));
-                foreach ($dispatchTypes as $effectType) {
-                    $dispatchableEffects->unionAll($ledger->readyToDispatchQuery(now(), $effectType));
-                }
-                $dispatchPage = $dispatchableEffects->getModel()->newQuery()
-                    ->fromSub($dispatchableEffects, 'telegram_outbound_effects');
-                $pages->load('dispatchable_effects', $dispatchPage, $pageLimit)
+                $at = now();
+                $dispatchFamilies = array_map(
+                    fn (string $effectType) => $ledger->readyToDispatchQuery($at, $effectType),
+                    $dispatchTypes,
+                );
+                $pages->loadUnion('dispatchable_effects', $dispatchFamilies, $pageLimit)
                     ->each(function ($effect) use (&$dispatched, $dispatcher): void {
                         $dispatcher->dispatch(
                             $effect,

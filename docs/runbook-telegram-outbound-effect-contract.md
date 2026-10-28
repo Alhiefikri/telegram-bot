@@ -394,6 +394,122 @@ docker inspect $(docker compose ps -q scheduler outbound-recovery) \
   --format '{{.Name}} OOMKilled={{.State.OOMKilled}} Memory={{.HostConfig.Memory}} RestartCount={{.RestartCount}}'
 ```
 
+### Ready-effect query pressure (#662)
+
+`RecoverTelegramOutboundEffects::dispatch_ready_effects` previously unioned
+unlimited family queries before applying its global ID cursor and page limit.
+The family index excluded terminal history, but PostgreSQL still read the
+entire ready backlog and sorted it to return one small page.
+`TelegramOutboundRecoveryPage::loadUnion()` now applies the same ID cursor,
+ordering and limit inside each disjoint family, then merges with the original
+global ordering and limit. For F families and page size L, the merge receives
+at most F × L candidates. The first L rows of the global order cannot require
+more than L rows from any one family.
+
+This bounds merge input, not every possible physical index visit: future-due
+rows, exhausted attempts and blocked receipt predecessors can still require
+filtering within a family. Keep the existing dispatch-family partial index
+and retry predicate aligned. No index migration, retention, polling change,
+extra concurrency or checkout admission restriction accompanies this fix.
+
+Local PostgreSQL 16 fixture, 28 October 2026, 10:30:53–10:31:22 WIB:
+720,000 thirty-day-old terminal stock effects (`sold_out_stale`) plus 40,000
+ready effects each for Sakurupiah checkout instructions, credential receipts
+and paid Admin notifications. These are synthetic owners/ages, not a breakdown
+of production backlog. The database container had a one-CPU/896-MiB cap.
+Both paths used the actual protocol predicates and the same 25-row page.
+
+| Single-run measurement | Original outer-limit query | Family-limited query |
+| --- | ---: | ---: |
+| Ready rows read by relation scans | 120,000 | 27 |
+| Relation-scan shared buffer hits + reads | 4,150 | 36 |
+| PostgreSQL EXPLAIN ANALYZE execution, ms | 159.522 | 0.224 |
+| Page query wall time, ms | 168.44 | 8.55 |
+| PHP peak allocated memory, MiB | 14 | 14 |
+
+The original query used bitmap heap scans; the fix used ordered
+`telegram_outbound_effects_dispatch_family_idx` scans. Terminal-history rows
+were not read by either ready-page plan. With a second connection holding
+100 paid-notification effect row locks and a 200-ms lock timeout, the original
+and fixed plans took 158.546 and 0.293 ms respectively; neither page acquired
+row locks. These are single local runs with a warmed fixture, not production
+percentiles or a PostgreSQL peak-memory measurement.
+
+Actual `telegram:recover-outbound --max-items=25 --max-seconds=40` bootstrap
+smoke on that large fixture, with the same held locks, exited zero:
+`completed cleanly: dispatched=25`. Wall time was 324.62 ms, with 37 SQL calls
+and 159.69 ms summed SQL time; its full dispatch-family union took 49.44 ms.
+A subsequent actual manual-QRIS `OrderCheckoutService::checkout()` took
+115.04 ms, created one pending-payment Order and Payment for Rp18,000, and
+reserved one Product unit. PHP peak allocation for the combined smoke was
+16 MiB under a 128-MiB PHP limit. Queue handoffs were captured and stray HTTP
+was prohibited; no real provider payment or Telegram delivery was attempted.
+
+`TelegramOutboundRecoveryPageTest` covers global order, advancing past each
+family's first page, wraparound, lost volatile cursor, due/terminal/attempt
+eligibility, receipt predecessor blocking and an actual PostgreSQL plan over
+30,000 ready effects. Existing claim/fencing, receipt, lifecycle and recovery
+worker tests cover delivery authority separately. Cursor loss can rediscover
+an effect but cannot authorize a second claim. Unknown/manual-review states
+remain unchanged; the patch never removes or resets durable obligations.
+Provider reconciliation and supplier financial work keep their existing
+queues, scheduler slots and resource limits.
+
+At 10:36:49 WIB, an actual PHP 8.4/Redis bootstrap smoke on the same fixture
+ran in a 384-MiB/0.35-CPU container, with a separate disposable Redis instance
+capped at 128 MiB/96 MiB managed data. Recovery queued 17 outbound and eight
+receipt jobs. After clearing only that disposable Redis instance to simulate
+loss of jobs, unique locks and the cursor, another sweep restored the same
+25-job page and cursor from PostgreSQL. Both sweeps exited zero (826.03 and
+167.95 ms); PHP peak allocation was 16 MiB. This proves lost-wakeup recovery,
+not execution or live delivery of those queued fixture jobs.
+
+Observed regression batches: 148 outbound cases (147 passed, one
+PostgreSQL-only skip in SQLite), 144 checkout/Sakurupiah/supplier/USDT cases
+passed, all four paging cases passed on PostgreSQL, and three existing
+PostgreSQL claim/fencing races passed. Targeted Pint and LSP diagnostics passed.
+
+#### Production attribution and bounded follow-up
+
+Nonprivileged SSH sampling on VM-0-7-ubuntu at 10:26:36 WIB showed 841 MiB
+swap used, interval I/O wait 42–52%, PostgreSQL 103.88% CPU/465.8 MiB and
+outbound recovery 7.34% CPU/74.58 MiB. Root filesystem usage was 86% with
+5.4 GiB available. At 10:27:30, inspected app/database/scheduler/recovery
+containers reported no current OOM kill and zero restarts. Host checkout
+identity was `1a46d9e7`; that is not proof of the running image revision.
+
+The owning query is background ready-effect discovery. Its avoidable reads
+can compete for shared database CPU/I/O; these samples do not establish a
+checkout lock wait or explain `InvalidCheckout`. The reported failures began
+after the OOM deployment; the local query fix does not prove that deployment
+caused them or close #660/#661/#663.
+
+The audit had no host `psql` and no published database port. It did not execute
+inside production containers, read secrets, use sudo, inspect kernel history,
+or obtain fresh query deltas/backlog ownership/age/checkout-wait samples.
+Those production attribution checks remain open. Through an approved
+read-only database connection:
+
+1. Record server timestamp and `pg_stat_statements_info.stats_reset`; capture
+   calls, total execution time, rows and block reads for selected recovery
+   query IDs twice over a stated interval. Compare deltas, never cumulative
+   mean/total values as current rates. Do not reset statistics.
+2. In read-only transactions with a two-second statement timeout and 200-ms
+   lock timeout, sample at most 1,000 rows per ledger state using its state
+   index. Classify only that sample's effect type and creation-age range.
+   State its sampling bias; do not extrapolate it as the backlog breakdown.
+3. Inspect a non-executing EXPLAIN for the exact family/cursor/due predicate.
+   Use ANALYZE only for a separately bounded read probe, not an unbounded
+   category aggregate. Stop on timeout and change the probe before retrying.
+4. Correlate recovery wall times with timestamped active checkout latency and
+   lock-wait samples, provider-reconciliation progress, receipt handoffs and
+   supplier financial progress. Preserve existing money/delivery authority.
+
+Do not delete failed/unknown/payment history, reset caches/stats, run
+`VACUUM FULL`, build production indexes, migrate, deploy or inspect CI/CD
+without the corresponding explicit approval. Retention needs a separate
+design and authorization.
+
 ### Admin Broadcast handoff
 
 Admin Broadcast uses the documented deferred-materialization exception in

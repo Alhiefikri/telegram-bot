@@ -1569,6 +1569,12 @@ The seven provider reconciliation commands (KlikQRIS/Sakurupiah Payments and bal
   redispatching the already-sent effect. Unknown and manual-review effects
   remain outside this repair.
 
+  Ready-effect dispatch uses `TelegramOutboundRecoveryPage::loadUnion()`:
+  the shared ID cursor and limit apply inside each disjoint family before the
+  globally limited merge. This avoids sorting the whole ready backlog without
+  changing retry/receipt policy, claims or cursor-loss recovery. See the
+  [#662 measurements and production attribution limits](../runbook-telegram-outbound-effect-contract.md#ready-effect-query-pressure-662).
+
 - The same sweep repairs sent Admin Order-notification effects whose Order
   projection is stale, restoring safe pending metadata and pending/paid/expired
   timestamps. Only the latest sent version repairs a source/type projection;
