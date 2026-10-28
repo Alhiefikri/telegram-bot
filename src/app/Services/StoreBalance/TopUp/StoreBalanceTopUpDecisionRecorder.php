@@ -10,9 +10,9 @@ use Illuminate\Support\Facades\DB;
 /**
  * Record one operator or provider observation for a top-up.
  *
- * Rows are provider-scoped and idempotent on the canonical payload, so a
- * replayed decision increments the observed count instead of appending a
- * second economic-relevant event.
+ * Rows are provider- and top-up-scoped and idempotent on the canonical
+ * payload, so replayed observations reuse their own event without claiming
+ * another top-up's decision.
  */
 final class StoreBalanceTopUpDecisionRecorder
 {
@@ -30,7 +30,7 @@ final class StoreBalanceTopUpDecisionRecorder
         $provider = strtolower(trim($provider));
         $receivedAt = now();
         $canonical = $this->canonicalize($payload);
-        $idempotencyKey = hash('sha256', $eventType.':'.json_encode($canonical, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+        $idempotencyKey = hash('sha256', $topUp->getKey().':'.$eventType.':'.json_encode($canonical, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
 
         try {
             return DB::transaction(function () use ($topUp, $provider, $eventType, $providerStatus, $canonical, $providerReference, $receivedAt, $idempotencyKey): StoreBalanceTopUpEvent {

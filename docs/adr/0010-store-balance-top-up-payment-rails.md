@@ -54,6 +54,20 @@ of provider evidence. Duplicate evidence, duplicate callbacks, duplicate
 reconciliation, and replayed operator actions return the existing economic
 result rather than a second credit.
 
+`StoreBalanceTopUpDecisionRecorder` scopes observation identity to the provider,
+top-up ID, event type, and canonical payload. Amount and operator alone cannot
+identify a manual confirmation: one operator may confirm several top-ups with
+the same amount. Settlement still rejects an event owned by another top-up.
+The per-top-up ledger credit key and receipt effect key remain unchanged.
+Existing events keep their recorded keys and ownership; this fix needs no
+history rewrite or balance repair, and paid top-ups remain replay-only.
+
+Regression coverage: `StoreBalanceTopUpManualRailTest` drives successive
+same-amount Telegram approvals and replays, including a legacy event key.
+`StoreBalancePostgresConcurrencyTest` races four approvals across two
+same-amount manual top-ups for different Customers and checks one credit and
+one receipt effect per top-up.
+
 A rail that is not operationally ready fails closed before any provider
 request. The top-up records `provider_unavailable`, no QR is claimed or sent,
 the customer sees a localized "payment method is not ready" state with Support

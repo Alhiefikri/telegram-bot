@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\CartStatus;
 use App\Enums\KlikQrisEnvironment;
+use App\Enums\ManualStoreBalanceTopUpDecision;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceFundingIntentStatus;
@@ -46,6 +47,7 @@ use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\StoreBalance\StoreBalanceReconciliation;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
+use App\Services\StoreBalance\TopUp\ManualStoreBalanceTopUpConfirmationService;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Support\PaymentProvider;
 use Illuminate\Database\QueryException;
@@ -270,6 +272,69 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
             'locale' => $customer->locale,
             'generation' => 1,
         ]);
+    }
+
+    public function test_postgres_same_amount_manual_approvals_keep_each_customers_credit_separate_under_replay(): void
+    {
+        $this->requirePostgresConcurrency();
+
+        $operator = $this->createCustomer(45480);
+        $topUps = [
+            $this->createSettlementTopUp(45481, 'manual-first'),
+            $this->createSettlementTopUp(45482, 'manual-second'),
+        ];
+        foreach ($topUps as $topUp) {
+            $topUp->forceFill([
+                'chat_id' => (string) $topUp->customer->telegram_id,
+                'provider' => PaymentProvider::MANUAL,
+                'status' => StoreBalanceTopUpStatus::AwaitingConfirmation,
+                'provider_reference' => null,
+                'provider_payment_method' => 'QR_MANUAL',
+                'provider_fee' => 0,
+                'provider_total_payment' => 8000,
+                'provider_create_state' => 'manual_awaiting_confirmation',
+            ])->save();
+        }
+        Queue::fake();
+
+        $results = $this->runConcurrentWorkers(4, function (int $index) use ($topUps, $operator): string {
+            return app(ManualStoreBalanceTopUpConfirmationService::class)->approve(
+                StoreBalanceTopUp::query()->findOrFail($topUps[$index % 2]->id),
+                Customer::query()->findOrFail($operator->id),
+                (string) $operator->telegram_id,
+            )->value;
+        });
+
+        $this->assertWorkersSucceeded($results);
+        foreach ($results as $result) {
+            $this->assertContains($result['value'], [
+                ManualStoreBalanceTopUpDecision::Confirmed->value,
+                ManualStoreBalanceTopUpDecision::AlreadyConfirmed->value,
+            ]);
+        }
+        foreach ($topUps as $topUp) {
+            $fresh = $topUp->fresh();
+            $this->assertSame(StoreBalanceTopUpStatus::Paid, $fresh->status);
+            $this->assertSame('manual_confirmed', $fresh->provider_create_state);
+            $this->assertNotNull($fresh->paid_at);
+            $this->assertNotNull($fresh->settled_at);
+            $entry = $fresh->creditEntry()->sole();
+            $this->assertSame(8000, (int) $entry->amount);
+            $this->assertSame((int) $fresh->customer_id, (int) $entry->account->customer_id);
+            $event = $fresh->events()->where('event_type', 'manual_confirmation')->sole();
+            $this->assertNotNull($event->processed_at);
+            $this->assertSame($fresh->merchant_ref, $event->merchant_ref);
+            $this->assertProjectionMatchesLedger($fresh->customer, 8000);
+            $this->assertSame(ManualStoreBalanceTopUpDecision::AlreadyConfirmed,
+                app(ManualStoreBalanceTopUpConfirmationService::class)->approve(
+                    $fresh, $operator, (string) $operator->telegram_id,
+                ));
+            $this->assertSame(1, $fresh->creditEntry()->count());
+            $this->assertSame(1, TelegramOutboundEffect::query()
+                ->where('effect_key', 'balance-top-up:'.$fresh->id.':manual-receipt:v1')
+                ->count());
+        }
+        $this->assertSame(0, $this->balanceOf($operator));
     }
 
     public function test_postgres_workers_settle_one_idempotency_claim_exactly_once(): void

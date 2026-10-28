@@ -17,6 +17,7 @@ use App\Models\Product;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
+use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUpdate;
@@ -27,6 +28,7 @@ use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramUpdateProcessor;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Support\TelegramBotTestSupport;
 
 final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
@@ -237,6 +239,80 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
     }
 
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function test_same_admin_can_confirm_same_amount_top_ups_without_reusing_another_top_up_event(bool $legacyEventKey): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => self::BUYER_CHAT_ID, 'locale' => 'en']);
+        Customer::factory()->create(['telegram_id' => self::ADMIN_CHAT_ID, 'locale' => 'id']);
+        $root = $this->openFundingChooser();
+        $topUps = [];
+
+        foreach ([46700, 46710] as $updateId) {
+            $topUp = $this->confirmTopUp($root->fresh(), $updateId, $updateId + 1);
+            $topUps[] = $topUp;
+            $this->postTelegramUpdate($this->paymentPhotoUpdate($updateId + 2, '', [], self::BUYER_CHAT_ID));
+            $proof = TelegramOutboundEffect::query()
+                ->where('effect_key', 'balance-top-up:'.$topUp->getKey().':admin-payment-proof:v1')
+                ->sole();
+
+            $this->postTelegramUpdate($this->callbackUpdate(
+                $updateId + 3,
+                'same-amount-approve-'.$updateId,
+                'admin:topup-approve:'.$topUp->getKey(),
+                [],
+                self::ADMIN_CHAT_ID,
+                'private',
+                (int) $proof->telegram_message_id,
+            ));
+
+            $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+            $entry = StoreBalanceEntry::query()
+                ->where('source_type', 'balance_top_up')
+                ->where('source_id', (string) $topUp->getKey())
+                ->sole();
+            $this->assertSame($customer->id, (int) $entry->account->customer_id);
+            $this->assertSame(5000, (int) $entry->amount);
+            $event = StoreBalanceTopUpEvent::query()
+                ->where('store_balance_top_up_id', $topUp->getKey())
+                ->where('event_type', 'manual_confirmation')
+                ->sole();
+            $this->assertNotNull($event->processed_at);
+            if ($legacyEventKey && count($topUps) === 1) {
+                $event->forceFill([
+                    'idempotency_key' => hash('sha256', 'manual_confirmation:'.json_encode(
+                        $event->raw_payload,
+                        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+                    )),
+                ])->save();
+            }
+            $receipt = TelegramOutboundEffect::query()
+                ->where('effect_key', 'balance-top-up:'.$topUp->getKey().':manual-receipt:v1')
+                ->sole();
+            $this->assertSame('sent', $receipt->state->value);
+        }
+
+        $this->assertNotSame($topUps[0]->getKey(), $topUps[1]->getKey());
+        foreach ($topUps as $index => $topUp) {
+            $this->postTelegramUpdate($this->callbackUpdate(
+                46720 + $index,
+                'same-amount-replay-'.$index,
+                'admin:topup-approve:'.$topUp->getKey(),
+                [],
+                self::ADMIN_CHAT_ID,
+                'private',
+                123456,
+            ));
+        }
+
+        $this->assertSame(10000, (int) CustomerBalanceAccount::query()->where('customer_id', $customer->id)->sole()->balance);
+        $this->assertSame(2, StoreBalanceEntry::query()->count());
+        $this->assertSame(2, StoreBalanceTopUpEvent::query()->where('event_type', 'manual_confirmation')->count());
+        $this->assertSame(2, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->count());
+    }
+
     public function test_admin_rejection_never_credits_the_balance(): void
     {
         Customer::factory()->create(['telegram_id' => self::BUYER_CHAT_ID, 'locale' => 'en']);
@@ -287,6 +363,31 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
 
         $this->assertSame(StoreBalanceTopUpStatus::AwaitingConfirmation, $topUp->fresh()->status);
         $this->assertSame(0, StoreBalanceEntry::query()->count());
+    }
+
+    public function test_admin_approval_at_the_manual_deadline_expires_without_a_credit_or_receipt(): void
+    {
+        Customer::factory()->create(['telegram_id' => self::BUYER_CHAT_ID, 'locale' => 'en']);
+        Customer::factory()->create(['telegram_id' => self::ADMIN_CHAT_ID, 'locale' => 'id']);
+        $root = $this->openFundingChooser();
+        $topUp = $this->confirmTopUp($root, 46730, 46731);
+        $topUp->forceFill(['expires_at' => now()])->save();
+
+        $this->postTelegramUpdate($this->callbackUpdate(
+            46732,
+            'expired-topup-approve',
+            'admin:topup-approve:'.$topUp->getKey(),
+            [],
+            self::ADMIN_CHAT_ID,
+            'private',
+            123456,
+        ));
+
+        $this->assertSame(StoreBalanceTopUpStatus::Expired, $topUp->fresh()->status);
+        $this->assertSame(0, StoreBalanceEntry::query()->count());
+        $this->assertSame(0, TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_RECEIPT)
+            ->count());
     }
 
     public function test_due_manual_top_up_expires_without_crediting(): void
