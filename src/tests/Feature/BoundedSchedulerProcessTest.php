@@ -27,6 +27,7 @@ final class BoundedSchedulerProcessTest extends TestCase
         $workspace = sys_get_temp_dir().'/scheduler-process-'.bin2hex(random_bytes(8));
         File::ensureDirectoryExists($workspace.'/framework/cache/data');
         File::ensureDirectoryExists($workspace.'/logs');
+        file_put_contents($workspace.'/framework/scheduler-cycle-completed', "previous-cycle\n");
         $process = new Process([
             PHP_BINARY,
             base_path('tests/Fixtures/bounded-scheduler-process.php'),
@@ -67,6 +68,7 @@ final class BoundedSchedulerProcessTest extends TestCase
             }
             $process->signal($signal);
             $this->assertSame(1, $process->wait());
+            $this->assertFileDoesNotExist($workspace.'/framework/scheduler-cycle-completed');
             $allChildren = array_map(fn (string $line): array => json_decode($line, true, flags: JSON_THROW_ON_ERROR), file($workspace.'/children', FILE_IGNORE_NEW_LINES));
             $this->assertEqualsCanonicalizing($expectedChildren, array_column($allChildren, 'id'));
             foreach ($children as $child) {

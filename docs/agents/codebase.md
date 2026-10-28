@@ -1577,10 +1577,16 @@ stops all active children before releasing their overlap mutexes and cycle lock.
 Controlled shutdown skips completion callbacks and can recover promptly; abrupt
 death still leaves mutexes to expire.
 Child failures make the cycle fail without abandoning the other due tasks.
-Heartbeat/recovery require the entire cycle to finish successfully and no new
-cgroup OOM-kill; the OOM check precedes recovery. Logs include child exit codes
-and `scheduler cycle duration_seconds`. Provider success still requires its own
-completion evidence: exit zero can mean a bounded pending sweep. Abrupt death
+Heartbeat measures completed loop progress, not business success. The supervisor
+passes `--cycle-id`; after fully draining normal zero/one-exit commands, the runner
+writes the matching `scheduler-cycle-completed` token. With no new cgroup OOM-kill,
+that evidence permits liveness to advance even when a task returns one. The cycle
+still exits non-zero and its critical runtime episode stays open; only a fully
+successful, OOM-free cycle resolves it. Callback failures, abnormal child exits
+and interruption cannot publish completion. The OOM check precedes heartbeat and
+recovery. Logs include child exit codes and `scheduler cycle duration_seconds`.
+Provider success still requires its own completion evidence: exit zero can mean
+a bounded pending sweep. Abrupt death
 leaves overlap mutexes to expire; never clear a live worker's mutex.
 Redis loss can still lose cache locks and cursors; financial fencing stays in DB
 lifecycle services. The separate `outbound-recovery` service also has a 384 MiB limit

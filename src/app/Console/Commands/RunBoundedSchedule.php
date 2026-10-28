@@ -15,13 +15,16 @@ use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Log\Context\Repository as Context;
+use Illuminate\Support\Facades\File;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
 
 final class RunBoundedSchedule extends ScheduleRunCommand
 {
-    protected $signature = 'ops:schedule-run {--whisper : Suppress the message when no tasks are due}';
+    protected $signature = 'ops:schedule-run
+        {--whisper : Suppress the message when no tasks are due}
+        {--cycle-id= : Supervisor token for evidence of a completed cycle}';
 
     protected $description = 'Run due tasks with at most two children and priority slots for expiry.';
 
@@ -34,6 +37,8 @@ final class RunBoundedSchedule extends ScheduleRunCommand
     private bool $failed = false;
 
     private bool $interrupted = false;
+
+    private bool $unsafeFailure = false;
 
     public function handle(Schedule $schedule, Dispatcher $dispatcher, Cache $cache, ExceptionHandler $handler): int
     {
@@ -55,14 +60,25 @@ final class RunBoundedSchedule extends ScheduleRunCommand
         $this->priority = [];
         $this->failed = false;
         $this->interrupted = false;
+        $this->unsafeFailure = false;
         $this->eventsRan = false;
         $this->startedAt = now();
 
+        $cycleId = $this->option('cycle-id');
+        $completionFile = storage_path('framework/scheduler-cycle-completed');
         try {
+            if ($cycleId !== null) {
+                File::delete($completionFile);
+            }
             parent::handle($schedule, $dispatcher, $cache, $handler);
             $this->pending = array_merge($this->priority, $this->pending);
             $this->priority = [];
             $this->drain();
+            if ($cycleId !== null && ! $this->interrupted && ! $this->unsafeFailure) {
+                if (File::put($completionFile, $cycleId."\n") === false) {
+                    throw new RuntimeException('Cannot persist scheduler cycle completion.');
+                }
+            }
 
             return $this->failed || $this->interrupted ? self::FAILURE : self::SUCCESS;
         } finally {
@@ -104,6 +120,7 @@ final class RunBoundedSchedule extends ScheduleRunCommand
                 parent::runEvent($event);
                 if (! $event->skippedBecauseOverlapping && $event->exitCode !== 0) {
                     $this->failed = true;
+                    $this->unsafeFailure = true;
                 }
             } finally {
                 $event->releaseOnTerminationSignals = $releaseOnSignals;
@@ -204,16 +221,21 @@ final class RunBoundedSchedule extends ScheduleRunCommand
                 : new ScheduledTaskFinished($event, round(microtime(true) - $started, 2)));
             $this->line(sprintf('Scheduled task completed: %s exit=%d', $event->command, $code));
             if ($code !== 0) {
-                throw new RuntimeException('Scheduled task failed with exit code '.$code.'.');
+                $this->reportTaskFailure(
+                    $event,
+                    new RuntimeException('Scheduled task failed with exit code '.$code.'.'),
+                    unsafe: $code !== self::FAILURE,
+                );
             }
         } catch (Throwable $error) {
             $this->reportTaskFailure($event, $error);
         }
     }
 
-    private function reportTaskFailure(Event $event, Throwable $error): void
+    private function reportTaskFailure(Event $event, Throwable $error, bool $unsafe = true): void
     {
         $this->failed = true;
+        $this->unsafeFailure = $this->unsafeFailure || $unsafe;
         $this->dispatcher->dispatch(new ScheduledTaskFailed($event, $error));
         $this->handler->report($error);
     }

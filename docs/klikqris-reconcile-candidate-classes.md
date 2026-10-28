@@ -239,8 +239,12 @@ storage/logs/binance-reconciliation.log
 storage/logs/bsc-reconciliation.log
 ```
 
-Heartbeat Docker scheduler kini menandakan seluruh cycle `ops:schedule-run`,
-termasuk child background, selesai tanpa exit non-zero dan tanpa OOM baru.
+Heartbeat Docker scheduler menandakan seluruh cycle `ops:schedule-run`,
+termasuk child background, selesai dengan bukti token cycle yang cocok dan tanpa
+OOM baru. Exit satu yang normal tetap menggagalkan cycle dan mempertahankan
+alert kritis, tetapi tidak menyatakan loop mati. Hanya cycle yang seluruh task-nya
+sukses dapat memulihkan alert. Callback gagal, exit abnormal, interupsi, atau token
+cycle lain tidak dapat menyegarkan heartbeat setelah exit non-zero.
 Expiry mendapat slot prioritas pada pool yang sama, bukan fase foreground
 eksklusif; verifikasi BSC/notifikasi expiry yang lambat tidak menahan semua
 polling. Recovery mail/update dan provider berbagi pool. Exit zero tetap

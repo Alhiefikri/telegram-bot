@@ -6,6 +6,7 @@ cd "$APP_PATH"
 
 HEARTBEAT_FILE=${SCHEDULER_HEARTBEAT_FILE:-storage/framework/scheduler-heartbeat}
 RUNNING_FILE=${SCHEDULER_RUNNING_FILE:-storage/framework/scheduler-running}
+COMPLETED_FILE="$(dirname "$RUNNING_FILE")/scheduler-cycle-completed"
 OOM_COUNT_FILE=${SCHEDULER_OOM_COUNT_FILE:-storage/framework/scheduler-oom-kill-count}
 OOM_EVENTS_FILE=${SCHEDULER_OOM_EVENTS_FILE:-/sys/fs/cgroup/memory.events}
 INTERVAL_SECONDS=${SCHEDULER_INTERVAL_SECONDS:-60}
@@ -20,7 +21,7 @@ run_artisan() {
 }
 
 run_scheduler() {
-    run_artisan ops:schedule-run
+    run_artisan ops:schedule-run "--cycle-id=$cycle_id"
 }
 
 report_runtime_failure() {
@@ -76,6 +77,8 @@ record_oom_kill_count || true
 
 while true; do
     started_at=$(date +%s)
+    cycle_id="$started_at-$$"
+    rm -f "$COMPLETED_FILE"
     date -u +"%Y-%m-%dT%H:%M:%SZ" > "$RUNNING_FILE.tmp"
     mv "$RUNNING_FILE.tmp" "$RUNNING_FILE"
 
@@ -90,14 +93,25 @@ while true; do
         fi
     fi
 
+    cycle_completed=0
+    if [ -r "$COMPLETED_FILE" ]; then
+        completed_id=
+        IFS= read -r completed_id < "$COMPLETED_FILE" || true
+        if [ "$completed_id" = "$cycle_id" ]; then
+            cycle_completed=1
+        fi
+    fi
+
     if record_oom_kill_count; then
-        if [ "$cycle_status" -eq 0 ] && [ "$OOM_DETECTED" -eq 0 ]; then
-            if ! run_artisan ops:scheduler-runtime-alert scheduler recovered; then
-                echo "WARNING: scheduler recovery could not be persisted." >&2
+        if [ "$OOM_DETECTED" -eq 0 ] && { [ "$cycle_status" -eq 0 ] || [ "$cycle_completed" -eq 1 ]; }; then
+            if [ "$cycle_status" -eq 0 ]; then
+                if ! run_artisan ops:scheduler-runtime-alert scheduler recovered; then
+                    echo "WARNING: scheduler recovery could not be persisted." >&2
+                fi
+                rm -f "$RUNNING_FILE"
             fi
             date -u +"%Y-%m-%dT%H:%M:%SZ" > "$HEARTBEAT_FILE.tmp"
             mv "$HEARTBEAT_FILE.tmp" "$HEARTBEAT_FILE"
-            rm -f "$RUNNING_FILE"
         elif [ "$OOM_DETECTED" -eq 1 ]; then
             rm -f "$RUNNING_FILE"
         fi

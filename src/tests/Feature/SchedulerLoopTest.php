@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\File;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -116,6 +117,92 @@ SH);
             $this->assertStringContainsString('scheduler failed --reason=oom_kill', $calls);
             $this->assertStringNotContainsString('scheduler recovered', $calls);
             $this->assertFileDoesNotExist($workspace.'/heartbeat');
+        } finally {
+            File::deleteDirectory($workspace);
+        }
+    }
+
+    public static function cycleOutcomes(): array
+    {
+        return [
+            'handled domain failure' => ['domain', true, false],
+            'success' => ['success', true, true],
+            'PHP fatal error' => ['fatal', false, false],
+            'killed child' => ['killed', false, false],
+            'unexpected child exit' => ['unexpected', false, false],
+            'before callback failed' => ['before', false, false],
+            'after callback failed' => ['after', false, false],
+            'another cycle token' => ['stale-token', false, false],
+            'domain failure with OOM' => ['oom', false, false],
+        ];
+    }
+
+    #[DataProvider('cycleOutcomes')]
+    public function test_liveness_requires_matching_safe_completion_and_does_not_hide_task_failures(string $mode, bool $progress, bool $recovered): void
+    {
+        $workspace = sys_get_temp_dir().'/scheduler-liveness-'.bin2hex(random_bytes(8));
+        File::ensureDirectoryExists($workspace.'/bin');
+        File::ensureDirectoryExists($workspace.'/framework');
+        File::ensureDirectoryExists($workspace.'/logs');
+        $heartbeat = $workspace.'/framework/scheduler-heartbeat';
+        $staleHeartbeat = "2000-01-01T00:00:00Z\n";
+        file_put_contents($heartbeat, $staleHeartbeat);
+        file_put_contents($workspace.'/memory.events', "oom_kill 0\n");
+        file_put_contents($workspace.'/framework/scheduler-cycle-completed', "old-cycle\n");
+        file_put_contents($workspace.'/bin/id', "#!/bin/sh\nprintf '1000\\n'\n");
+        file_put_contents($workspace.'/bin/sleep', "#!/bin/sh\nexit 99\n");
+        file_put_contents($workspace.'/bin/php', <<<'SH'
+#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$SCHEDULER_TEST_LOG"
+case "$*" in
+    *ops:schedule-run*)
+        exec "$SCHEDULER_TEST_PHP" "$SCHEDULER_TEST_RUNNER" "$SCHEDULER_APP_PATH" "$@"
+        ;;
+esac
+SH);
+        foreach (['id', 'sleep', 'php'] as $binary) {
+            chmod($workspace.'/bin/'.$binary, 0755);
+        }
+        $process = new Process(['/bin/sh', base_path('../docker-scheduler.sh')], $workspace, [
+            'PATH' => $workspace.'/bin:'.(string) getenv('PATH'),
+            'APP_ENV' => 'testing',
+            'APP_KEY' => 'base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=',
+            'APP_CONFIG_CACHE' => $workspace.'/no-config.php',
+            'DB_CONNECTION' => 'sqlite',
+            'DB_DATABASE' => ':memory:',
+            'DB_URL' => '',
+            'LOG_CHANNEL' => 'stderr',
+            'SCHEDULER_APP_PATH' => $workspace,
+            'SCHEDULER_HEARTBEAT_FILE' => $heartbeat,
+            'SCHEDULER_RUNNING_FILE' => $workspace.'/framework/scheduler-running',
+            'SCHEDULER_OOM_COUNT_FILE' => $workspace.'/oom-count',
+            'SCHEDULER_OOM_EVENTS_FILE' => $workspace.'/memory.events',
+            'SCHEDULER_TEST_LOG' => $workspace.'/calls',
+            'SCHEDULER_TEST_PHP' => PHP_BINARY,
+            'SCHEDULER_TEST_RUNNER' => base_path('tests/Fixtures/bounded-scheduler-liveness.php'),
+            'SCHEDULER_TEST_MODE' => $mode,
+        ], timeout: 15);
+        try {
+            $this->assertSame(99, $process->run(), $process->getErrorOutput());
+            $this->assertFileExists($workspace.'/remaining-completed');
+            if ($progress) {
+                $this->assertNotSame($staleHeartbeat, file_get_contents($heartbeat));
+            } else {
+                $this->assertSame($staleHeartbeat, file_get_contents($heartbeat));
+            }
+            $calls = file_get_contents($workspace.'/calls');
+            if ($recovered) {
+                $this->assertStringContainsString('scheduler recovered', $calls);
+                $this->assertStringNotContainsString('scheduler failed', $calls);
+            } else {
+                $this->assertStringContainsString('status=1', $process->getErrorOutput());
+                $this->assertStringContainsString('scheduler failed --reason=schedule_exit', $calls);
+                $this->assertStringNotContainsString('scheduler recovered', $calls);
+            }
+            if ($mode === 'oom') {
+                $this->assertStringContainsString('scheduler failed --reason=oom_kill', $calls);
+            }
         } finally {
             File::deleteDirectory($workspace);
         }

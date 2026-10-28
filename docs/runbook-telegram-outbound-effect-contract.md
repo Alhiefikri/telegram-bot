@@ -245,11 +245,30 @@ unchanged. More than two due commands wait for a slot without holding
 their overlap mutex. A long full cycle can exceed one minute; inspect durations
 and the existing 180-second liveness threshold under actual provider load.
 
-The wrapper updates `storage/framework/scheduler-heartbeat` and resolves the
-runtime episode only after the entire cycle succeeds and the cgroup
-`memory.events` OOM-kill counter has no new kill. Non-zero child exits fail the
-cycle but do not stop the remaining due work. OOM is checked before recovery,
-so a successful parent cannot resolve and immediately reopen the same incident.
+`storage/framework/scheduler-heartbeat` measures loop liveness, not payment
+success. The supervisor supplies `--cycle-id`; after draining the entire pool,
+the runner writes that token to `storage/framework/scheduler-cycle-completed`.
+Normally exited commands may return zero or the standard failure code one.
+The wrapper accepts completion evidence only for its current token and only
+without a new cgroup `memory.events` OOM-kill. A managed task failure still
+returns a non-zero cycle exit and opens or retains the critical runtime episode;
+advancing liveness does not resolve that alert. Only an entirely successful
+cycle with no new OOM resolves it.
+
+Preparation/completion callback failures, abnormal child exits, interrupted
+cycles and failure to write completion evidence cannot refresh liveness after
+a non-zero exit. Stale or foreign cycle tokens cannot substitute for completion.
+OOM is checked before heartbeat or recovery, so a surviving parent cannot
+resolve and immediately reopen the same incident. This separates completed
+work attempts from successful business outcomes: provider HTTP 404 must remain
+a failed lookup, not proof that a payment is unpaid. The earlier success-only
+heartbeat incorrectly made these lookup failures block both rollout and rollback.
+
+A local smoke used the actual bounded runner, one command exiting one, another
+completing successfully, and the actual runtime-alert command with disposable
+SQLite. Both tasks completed in a one-second cycle; the heartbeat advanced while
+`scheduler_runtime_failure` remained `open` with `resolved_at = NULL`. This proves
+liveness/alert separation, not live-provider availability or Telegram delivery.
 SIGTERM/INT/QUIT stop every active child before releasing any overlap mutex and
 the cycle lock. Only locks belonging to confirmed-stopped children are released,
 without success/failure completion callbacks. This permits immediate recovery

@@ -36,4 +36,7 @@ foreach (['first', 'second', 'queued'] as $id) {
 }
 file_put_contents($workspace.'/mutexes', json_encode($mutexes));
 $app->instance(Schedule::class, $schedule);
-exit($app->handleCommand(new ArrayInput(['command' => 'ops:schedule-run'])));
+exit($app->handleCommand(new ArrayInput([
+    'command' => 'ops:schedule-run',
+    '--cycle-id' => 'termination-fixture',
+])));
