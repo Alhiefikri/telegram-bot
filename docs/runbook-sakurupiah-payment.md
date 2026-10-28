@@ -218,6 +218,52 @@ per-caller traffic. The incident's ten deduplicated explicit create rejections
 prove repeated provider responses, while the 4,160 status-lookup failures do
 not establish their individual causes or merchant-wide request rate.
 
+### Merchant backpressure after an explicit throttle
+
+A read-only production log inspection on 2026-10-28 found 19 accepted
+`transactionStatus` attempts and 15 rate-rejected attempts during 11:29 WIB.
+Checkout `createInvoice` attempts at 11:29:45 and 11:29:53 were also rate-rejected.
+The reconciliation loop continued dispatching after the first explicit throttle.
+These observations establish continued request pressure and contemporaneous
+checkout rejection, not the provider's numeric quota or an exact per-invoice
+correlation. The screenshot's two-product Order had already been created;
+the create request sends one aggregate amount, not one request per Product.
+
+`SakurupiahRequestBackpressure` now shares a scalar cooldown through the normal
+cache, keyed by environment, API endpoint and hashed merchant API ID. HTTP `429`
+or the observed rate-rejection message with application status `400`/`429`
+starts a 60-second local recovery pause. A longer valid `Retry-After` extends
+the pause. This is application backoff policy, not an advertised provider limit.
+Generic application `400`, malformed responses and upstream `5xx` do not start
+this cooldown. Their existing create rejection/ambiguity rules remain unchanged.
+
+During the pause every client instance checks before dispatch, including
+checkout, readiness, webhook verification and both reconciliation commands.
+Lookups report `rate_limit_cooldown`, without claiming a provider response;
+an unsent create uses the existing pre-request failure path, retaining its
+same-reference recovery. Cache read failures defer before dispatch too.
+The original throttled HTTP response keeps its existing ambiguity/rejection
+classification. In particular, an ambiguous create is still never repeated.
+Cooldown skips emit no `request_attempt` because no HTTP attempt occurred.
+
+Payment reconciliation stops both lanes on throttle, preserves unvisited work
+and its rotating cursors, and exits nonzero with `stop_reason=provider_throttled`
+and `carry_over=yes`. The top-up sweep also stops provider work during the pause.
+Already-issued payable instructions, financial validation, stock holds and
+local payment deadlines remain unchanged. Requests already in flight when a
+throttle arrives cannot be recalled; this is not a fixed request-frequency cap.
+
+Regression: the gateway cascade test failed before the change with
+`Expected merchant cooldown.` Focused local verification passed 180 tests /
+1,537 assertions. A standalone application smoke used a disposable SQLite DB,
+shared file cache and HTTP fixtures with 8 Gemini and 10 Outlook units totaling
+Rp106,000. A second PHP process observed the same cooldown without dispatch;
+recovery after the pause used the same reference, sent one PNG, retained one
+Order/Payment and 18 reserved units, and did not extend the deadline. These are
+local proofs, not Redis concurrency qualification, live-provider acceptance or
+a production rollout. The inspected production revision was `839d017d`; this
+backpressure correction was not deployed during the investigation.
+
 ### Deployment comparison
 
 Local Git diffs, without CI inspection, establish:

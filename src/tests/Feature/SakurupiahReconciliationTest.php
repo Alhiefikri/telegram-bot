@@ -33,6 +33,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Mockery;
 use Tests\TestCase;
 
@@ -70,6 +71,43 @@ class SakurupiahReconciliationTest extends TestCase
         foreach (['active', 'released'] as $lane) {
             Cache::forget('sakurupiah:reconcile:cursor:'.SakurupiahEnvironment::runtime()->value.':'.$lane);
         }
+    }
+
+    public function test_provider_throttle_stops_both_lanes_preserves_unvisited_payments_and_resumes_after_cooldown(): void
+    {
+        $first = $this->sakurupiahPayment();
+        $next = $this->sakurupiahPayment();
+        $late = $this->sakurupiahPayment();
+        app(OrderLifecycle::class)->applyPaymentExpired($late);
+        $lateState = $late->fresh()->provider_create_state;
+        Http::fakeSequence()
+            ->push(['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'], 400)
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]])
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]])
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]])
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]]);
+
+        $this->artisan('sakurupiah:reconcile --chunk=10')
+            ->expectsOutputToContain('stop_reason=provider_throttled carry_over=yes')
+            ->assertExitCode(1);
+        Http::assertSentCount(1);
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $next->fresh()->provider_create_state);
+        $this->assertSame($lateState, $late->fresh()->provider_create_state);
+        $this->assertSame(PaymentStatus::Pending, $first->fresh()->status);
+        $this->assertSame(PaymentStatus::Pending, $next->fresh()->status);
+        $this->assertSame(PaymentStatus::Expired, $late->fresh()->status);
+
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(1);
+        Http::assertSentCount(1);
+
+        $this->travel(61)->seconds();
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        Http::assertSent(fn ($request): bool => $request['trx_id'] === $next->provider_reference);
+        Http::assertSent(fn ($request): bool => $request['trx_id'] === $late->provider_reference);
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        $this->assertSame(2, Http::recorded(fn ($request): bool => ($request['trx_id'] ?? null) === $first->provider_reference)->count());
+        $this->assertSame(3, Payment::query()->count());
+        $this->assertSame(0, ManualFulfillmentReview::query()->count());
     }
 
     public function test_command_reconciles_authoritative_paid_and_leaves_pending_and_other_providers_untouched(): void

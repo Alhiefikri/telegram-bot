@@ -1410,6 +1410,17 @@ Sakurupiah as for KlikQRIS. The [issue 661 evidence and deployment
 comparison](../runbook-sakurupiah-payment.md#issue-661-post-order-recovery-evidence)
 separates local fixture proof from unresolved provider/production attribution.
 
+`SakurupiahRequestBackpressure` shares a scalar merchant/environment/endpoint
+cooldown through the configured cache after an explicit rate rejection, so
+separate checkout, webhook and reconciliation clients stop dispatching during
+the same pause. The local minimum is 60 seconds; a longer valid `Retry-After`
+extends it. Generic `400` and upstream ambiguity keep their existing semantics.
+An unsent create remains a pre-request failure, not an unknown remote invoice;
+already-ambiguous creates are never repeated. Both sweeps stop provider work on
+cooldown; Payment reconciliation retains unvisited work and reports
+`provider_throttled` with carry-over and a nonzero exit. See [incident evidence,
+policy and local smoke limits](../runbook-sakurupiah-payment.md#merchant-backpressure-after-an-explicit-throttle).
+
 The scheduler registers `sakurupiah:reconcile` every minute only when
 `SakurupiahProviderReadiness::schedulingEnabledFor($runtime)` is true, i.e. the
 environment is enabled, operationally ready, and the verification queue is the

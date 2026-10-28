@@ -200,7 +200,9 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
             'operation' => $operation,
             'max_attempts' => $maxAttempts,
         ];
+        $backpressure = new SakurupiahRequestBackpressure($this->environment);
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $backpressure->assertAvailable($operation, $lookup);
             $startedAt = hrtime(true);
             $attemptContext = array_merge($context, [
                 'attempt' => $attempt,
@@ -223,6 +225,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
             }
 
             SakurupiahRequestEvidence::record($attemptContext, $startedAt, response: $response);
+            $backpressure->observe($response);
 
             if ($response->successful()) {
                 return $response;
@@ -249,7 +252,7 @@ final readonly class SakurupiahClient implements SakurupiahProviderAdapter
                 status: $response->status(),
                 outcomeUnknown: ! $lookup,
             );
-            if ($lookup && $attempt < $maxAttempts && $exception->isRetryable()) {
+            if ($lookup && $attempt < $maxAttempts && $exception->isRetryable() && $response->status() !== 429) {
                 $this->sleepBeforeRetry($attempt);
 
                 continue;

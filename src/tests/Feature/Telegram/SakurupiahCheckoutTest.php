@@ -420,7 +420,11 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         $this->assertSame('retry_notice_sent', $initial->fresh()->outcome_metadata['delivery_outcome'] ?? null);
         $this->assertSame('create_failed', $payment->fresh()->provider_create_state);
         $this->assertCount(0, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto')));
-        $payment->update(['provider_create_attempted_at' => now()->subMinutes(2)]);
+        $this->artisan('sakurupiah:reconcile --chunk=2')
+            ->expectsOutputToContain('stop_reason=provider_throttled')
+            ->assertExitCode(1);
+        $this->assertSame(1, $creates);
+        $this->travel(61)->seconds();
         $deadline = $order->expires_at->toIso8601String();
 
         $this->artisan('sakurupiah:reconcile --chunk=2')->assertExitCode(0);

@@ -7,6 +7,7 @@ use App\Enums\StoreBalanceTopUpStatus;
 use App\Models\StoreBalanceTopUp;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\Sakurupiah\SakurupiahRequestBackpressure;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
@@ -57,8 +58,9 @@ final class ReconcileSakurupiahBalanceTopUps extends Command
             'failed' => 0,
         ];
 
-        $this->candidateQuery()->limit($chunk)->get()->each(function (StoreBalanceTopUp $topUp) use ($topUps, &$counts, $maxTopUps): void {
-            if ($counts['eligible'] >= $maxTopUps || ProviderVerificationProfiles::stopReason() !== null) {
+        $backpressure = new SakurupiahRequestBackpressure;
+        $this->candidateQuery()->limit($chunk)->get()->each(function (StoreBalanceTopUp $topUp) use ($topUps, &$counts, $maxTopUps, $backpressure): void {
+            if ($counts['eligible'] >= $maxTopUps || ProviderVerificationProfiles::stopReason() !== null || $backpressure->isCoolingDown()) {
                 return;
             }
 
@@ -92,8 +94,9 @@ final class ReconcileSakurupiahBalanceTopUps extends Command
                 $counts['paid']++;
             }
         });
-        $stopReason = ProviderVerificationProfiles::stopReason() ?? ($counts['eligible'] >= $maxTopUps ? 'top_up_limit' : 'page_complete');
-        $carryOver = ProviderVerificationProfiles::stopReason() !== null || $counts['eligible'] >= min($chunk, $maxTopUps);
+        $rateLimited = $backpressure->isCoolingDown();
+        $stopReason = $rateLimited ? 'provider_throttled' : (ProviderVerificationProfiles::stopReason() ?? ($counts['eligible'] >= $maxTopUps ? 'top_up_limit' : 'page_complete'));
+        $carryOver = $rateLimited || ProviderVerificationProfiles::stopReason() !== null || $counts['eligible'] >= min($chunk, $maxTopUps);
         $this->line('sakurupiah:reconcile-balance-top-ups sweep: requests='.ProviderVerificationProfiles::requests().' stop_reason='.$stopReason.' carry_over='.($carryOver ? 'yes' : 'no'));
 
         $this->info('sakurupiah:reconcile-balance-top-ups completed: '
@@ -104,7 +107,7 @@ final class ReconcileSakurupiahBalanceTopUps extends Command
             .' review='.$counts['review']
             .' failed='.$counts['failed']);
 
-        return self::SUCCESS;
+        return $rateLimited ? self::FAILURE : self::SUCCESS;
     }
 
     /** @return Builder<StoreBalanceTopUp> */

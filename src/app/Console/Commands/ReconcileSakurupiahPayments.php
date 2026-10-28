@@ -12,6 +12,7 @@ use App\Services\Sakurupiah\SakurupiahProviderLookupBudget;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahReconciliationOutcome;
 use App\Services\Sakurupiah\SakurupiahReconciliationQuery;
+use App\Services\Sakurupiah\SakurupiahRequestBackpressure;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use DateTimeImmutable;
@@ -86,9 +87,18 @@ final class ReconcileSakurupiahPayments extends Command
         $busy = 0;
         $failed = 0;
         $recovered = 0;
+        $backpressure = new SakurupiahRequestBackpressure($environment);
+        $rateLimited = false;
 
         try {
             foreach (['active', 'released'] as $lane) {
+                if ($backpressure->isCoolingDown()) {
+                    $rateLimited = true;
+                    $carryOver = true;
+                    $stopReasons[] = 'provider_throttled';
+
+                    break;
+                }
                 $cursorKey = $this->cursorKey($environment).':'.$lane;
                 // Reserve half the I/O window for late-money verification even
                 // when active checkouts encounter a provider outage.
@@ -99,6 +109,7 @@ final class ReconcileSakurupiahPayments extends Command
                 ProviderVerificationProfiles::until($laneDeadline, function () use (
                     $lane, $cursorKey, $releasedCutoff, $chunk, $reconciliationQuery,
                     $lifecycle, $processor, $outboundEffects, $outboundEffectDispatcher,
+                    $backpressure, &$rateLimited,
                     &$carryOver, &$requests, &$stopReasons, &$budgetExhausted, &$processed,
                     &$paid, &$expired, &$pending, &$verificationPending, &$invalid, &$busy, &$failed, &$recovered,
                 ): void {
@@ -116,6 +127,12 @@ final class ReconcileSakurupiahPayments extends Command
                         ->get();
 
                     foreach ($page as $payment) {
+                        if ($backpressure->isCoolingDown()) {
+                            $rateLimited = true;
+                            $stoppedEarly = true;
+
+                            break;
+                        }
                         if (ProviderVerificationProfiles::stopReason() !== null) {
                             $stoppedEarly = true;
 
@@ -149,6 +166,12 @@ final class ReconcileSakurupiahPayments extends Command
                             $recovered++;
                             $this->deliverRecoveredInstructions($payment, $outboundEffects, $outboundEffectDispatcher);
                         }
+                        if ($backpressure->isCoolingDown()) {
+                            $rateLimited = true;
+                            $stoppedEarly = true;
+
+                            break;
+                        }
                     }
 
                     $reason = ProviderVerificationProfiles::stopReason();
@@ -161,7 +184,7 @@ final class ReconcileSakurupiahPayments extends Command
                         Cache::put($cursorKey, $cursor, self::CURSOR_TTL_SECONDS);
                     }
                     $carryOver = $carryOver || $stoppedEarly || $cursor !== null;
-                    $stopReasons[] = $reason ?? ($stoppedEarly ? 'interrupted' : ($cursor !== null ? 'page_limit' : 'exhausted'));
+                    $stopReasons[] = $rateLimited ? 'provider_throttled' : ($reason ?? ($stoppedEarly ? 'interrupted' : ($cursor !== null ? 'page_limit' : 'exhausted')));
                 });
             }
         } catch (Throwable $exception) {
@@ -173,7 +196,7 @@ final class ReconcileSakurupiahPayments extends Command
         $summary = "paid={$paid} expired={$expired} pending={$pending} verification_pending={$verificationPending} invalid={$invalid} busy={$busy} failed={$failed} recovered={$recovered} budget_exhausted=".($budgetExhausted ? '1' : '0');
         $this->line('sakurupiah:reconcile sweep: requests='.$requests.' stop_reason='.implode(',', array_unique($stopReasons)).' carry_over='.($carryOver ? 'yes' : 'no'));
 
-        if ($failed > 0) {
+        if ($failed > 0 || $rateLimited) {
             $this->error('sakurupiah:reconcile completed with partial failures: '.$summary);
 
             return self::FAILURE;

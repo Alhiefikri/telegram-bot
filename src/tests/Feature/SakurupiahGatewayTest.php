@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Enums\SakurupiahEnvironment;
 use App\Services\Admin\SakurupiahChannelSettings;
 use App\Services\ProviderVerification\ProviderVerificationBudgetExhausted;
 use App\Services\Sakurupiah\SakurupiahApplicationException;
 use App\Services\Sakurupiah\SakurupiahClient;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
+use App\Services\Sakurupiah\SakurupiahCreatePreRequestException;
 use App\Services\Sakurupiah\SakurupiahHistoryFilter;
 use App\Services\Sakurupiah\SakurupiahHttpException;
 use App\Services\Sakurupiah\SakurupiahJsonException;
@@ -14,6 +16,7 @@ use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahProviderException;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahReadinessException;
+use App\Services\Sakurupiah\SakurupiahRequestBackpressure;
 use App\Services\Sakurupiah\SakurupiahSchemaException;
 use App\Services\Sakurupiah\SakurupiahTransportException;
 use Illuminate\Http\Client\ConnectionException;
@@ -39,6 +42,65 @@ class SakurupiahGatewayTest extends TestCase
             'lookup_retry_delay_ms' => 0,
             'lookup_retry_max_delay_ms' => 0,
         ]));
+    }
+
+    public function test_rate_rejected_polling_defers_other_calls_and_checkout_without_dispatch_until_cooldown_expires(): void
+    {
+        Http::fakeSequence()
+            ->push(['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'], 400)
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]], 200);
+
+        try {
+            app(SakurupiahProviderAdapter::class)->transactionStatus('old-invoice');
+            $this->fail('Expected provider throttle.');
+        } catch (SakurupiahApplicationException $exception) {
+            $this->assertSame('400', $exception->providerStatus);
+        }
+
+        foreach (['transactionStatus', 'transactionHistory', 'listChannels'] as $operation) {
+            try {
+                $client = app(SakurupiahProviderAdapter::class);
+                $operation === 'transactionStatus' ? $client->$operation('another-invoice') : $client->$operation();
+                $this->fail('Expected merchant cooldown.');
+            } catch (SakurupiahProviderException $exception) {
+                $this->assertSame('rate_limit_cooldown', $exception->reason);
+                $this->assertFalse($exception->isOutcomeUnknown());
+                $this->assertFalse($exception->isProviderRejection());
+            }
+        }
+        try {
+            app(SakurupiahProviderAdapter::class)->createInvoice($this->invoice());
+            $this->fail('Expected create to remain safely undispatched.');
+        } catch (SakurupiahCreatePreRequestException) {
+        }
+        Http::assertSentCount(1);
+
+        $this->travel(61)->seconds();
+        $this->assertTrue(app(SakurupiahProviderAdapter::class)->transactionStatus('old-invoice')->isPending());
+        Http::assertSentCount(2);
+    }
+
+    public function test_throttle_is_shared_only_by_the_same_environment_and_merchant(): void
+    {
+        Http::fakeSequence()
+            ->push(['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'], 200)
+            ->push(['status' => '200', 'data' => [['status' => 'pending']]]);
+        try {
+            app(SakurupiahProviderAdapter::class)->transactionStatus('throttled-invoice');
+            $this->fail('Expected provider throttle.');
+        } catch (SakurupiahApplicationException) {
+        }
+        $this->assertFalse((new SakurupiahRequestBackpressure(SakurupiahEnvironment::Production))->isCoolingDown());
+        config()->set('services.sakurupiah.sandbox_api_id', 'another-merchant');
+        $this->assertTrue(app(SakurupiahProviderAdapter::class)->transactionStatus('another-invoice')->isPending());
+        config()->set('services.sakurupiah.sandbox_api_id', 'api-test');
+        try {
+            app(SakurupiahProviderAdapter::class)->transactionStatus('throttled-invoice');
+            $this->fail('Expected original merchant to remain deferred.');
+        } catch (SakurupiahProviderException $exception) {
+            $this->assertSame('rate_limit_cooldown', $exception->reason);
+        }
+        Http::assertSentCount(2);
     }
 
     public function test_provider_adapter_is_bound_without_activating_checkout(): void
@@ -187,7 +249,7 @@ class SakurupiahGatewayTest extends TestCase
         });
         config()->set('app.key', 'evidence-test-key');
         Http::fakeSequence()
-            ->push(['status' => '429', 'message' => 'secret-key api-test trx-408'], 429)
+            ->push(['status' => '500', 'message' => 'secret-key api-test trx-408'], 503)
             ->push(['status' => '500', 'message' => 'https://private.example/INV-408'], 503)
             ->push(['status' => '200', 'data' => [['status' => 'pending', 'qr' => 'private-qr']]], 200)
             ->push(['status' => '200', 'data' => [['status' => 'pending']]], 200);
@@ -196,7 +258,7 @@ class SakurupiahGatewayTest extends TestCase
 
         $this->assertCount(3, $records);
         $this->assertSame([1, 2, 3], array_column($records, 'attempt'));
-        $this->assertSame(['http_rate_rejected', 'http_unavailable', 'application_accepted'], array_column($records, 'outcome'));
+        $this->assertSame(['http_unavailable', 'http_unavailable', 'application_accepted'], array_column($records, 'outcome'));
         $this->assertCount(1, array_unique(array_column($records, 'request_id')));
         foreach ($records as $record) {
             $this->assertSame('unknown', $record['caller']);
@@ -241,6 +303,7 @@ class SakurupiahGatewayTest extends TestCase
             } catch (SakurupiahApplicationException $exception) {
                 $this->assertTrue($exception->isProviderRejection());
             }
+            $this->travel(61)->seconds();
         }
 
         Http::assertSentCount(3);
@@ -317,15 +380,28 @@ class SakurupiahGatewayTest extends TestCase
         $this->assertSame(['application_accepted', 'application_accepted'], array_column($records, 'outcome'));
     }
 
-    public function test_status_retries_429(): void
+    public function test_status_honors_429_retry_after_without_immediate_retries(): void
     {
         Http::fakeSequence()
-            ->push(['status' => '429', 'message' => 'retry'], 429)
+            ->push(['status' => '429', 'message' => 'retry'], 429, ['Retry-After' => '120'])
             ->push(['status' => '200', 'data' => [['status' => 'pending']]], 200);
 
-        $status = app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
-
-        $this->assertTrue($status->isPending());
+        try {
+            app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+            $this->fail('Expected HTTP throttle.');
+        } catch (SakurupiahHttpException $exception) {
+            $this->assertSame(429, $exception->httpStatus);
+        }
+        $this->travel(61)->seconds();
+        try {
+            app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408');
+            $this->fail('Expected Retry-After cooldown.');
+        } catch (SakurupiahProviderException $exception) {
+            $this->assertSame('rate_limit_cooldown', $exception->reason);
+        }
+        Http::assertSentCount(1);
+        $this->travel(60)->seconds();
+        $this->assertTrue(app(SakurupiahProviderAdapter::class)->transactionStatus('trx-408')->isPending());
         Http::assertSentCount(2);
     }
 
