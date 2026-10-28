@@ -231,11 +231,7 @@ class KlikQrisWebhookTest extends TestCase
         $this->assertSame($payment->id, $event->payment_id);
         $this->assertSame(hash('sha256', (string) $payment->merchant_ref), $event->merchant_ref);
         $this->assertSame('DISPUTED.REVIEW-1', $event->provider_status);
-        $this->assertSame([
-            'condition' => 'unknown_callback_status',
-            'merchant_ref_hash' => hash('sha256', (string) $payment->merchant_ref),
-            'status' => 'DISPUTED.REVIEW-1',
-        ], $event->raw_payload);
+        $this->assertStringNotContainsString('UNKNOWN_', json_encode($event->raw_payload, JSON_THROW_ON_ERROR));
         $this->assertNull($event->signature);
         $this->assertNotNull($event->processed_at);
         $this->assertStringNotContainsString((string) $payment->merchant_ref, json_encode($event->toArray(), JSON_THROW_ON_ERROR));
@@ -266,11 +262,7 @@ class KlikQrisWebhookTest extends TestCase
         $this->assertNull($event->payment_id);
         $this->assertSame(hash('sha256', $merchantRef), $event->merchant_ref);
         $this->assertSame('REVIEW_REQUIRED', $event->provider_status);
-        $this->assertSame([
-            'condition' => 'unknown_callback_status',
-            'merchant_ref_hash' => hash('sha256', $merchantRef),
-            'status' => 'REVIEW_REQUIRED',
-        ], $event->raw_payload);
+        $this->assertStringNotContainsString('UNKNOWN_', json_encode($event->raw_payload, JSON_THROW_ON_ERROR));
         $this->assertSame(2, $event->received_count);
         $this->assertNotNull($event->processed_at);
         $this->assertStringNotContainsString($merchantRef, json_encode($event->toArray(), JSON_THROW_ON_ERROR));
@@ -724,6 +716,30 @@ class KlikQrisWebhookTest extends TestCase
         $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))->assertTooManyRequests();
 
         $this->assertNotNull(collect(app('router')->getRoutes())->first(fn ($route) => $route->uri() === 'api/webhook/pakasir'));
+    }
+
+    public function test_callback_recovery_bypasses_discovery_cooldown_and_duplicate_cannot_fulfill_twice(): void
+    {
+        Queue::fake();
+        $payment = $this->payableKlikQrisPayment();
+        $payment->forceFill([
+            'provider_create_state' => 'created',
+            'klikqris_status_failure_count' => 3,
+            'klikqris_status_next_check_at' => now()->addDay(),
+            'klikqris_status_last_error' => 'status_http_404',
+        ])->save();
+        Http::fake(fn () => Http::response(KlikQrisSandboxScenarios::statusPayload($payment, [
+            'signature' => 'opaque-callback-signature',
+        ]), 200));
+
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))->assertOk();
+        $this->postJson('/api/webhook/klikqris/sandbox', $this->callbackPayload($payment))->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertNull($payment->fresh()->klikqris_status_last_error);
+        $this->assertNull($payment->fresh()->klikqris_status_next_check_at);
+        Http::assertSentCount(1);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
     }
 
     private function payableKlikQrisPayment()

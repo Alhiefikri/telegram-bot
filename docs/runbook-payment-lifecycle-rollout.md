@@ -29,6 +29,15 @@ php artisan ops:payment-lifecycle-rollout-report --require-contract-safe
 
 Investigate rather than discard `late_payment_queue`, `cancellation_attempts`, and terminal notification failures. Only remove legacy columns or workers in a separate contract migration after the final command succeeds and the PostgreSQL concurrency and end-to-end release gates pass.
 
+Legacy KlikQRIS HTTP 404 bukan bukti unpaid. `klikqris:reconcile` menyimpan
+next-check durable dan tetap exit 1 selama `unresolved_status_404>0`, termasuk
+tick tanpa request. Jangan mengulang sweep atau mereset cursor untuk melewati
+delay. Verifikasi merchant/environment/kredensial asli dengan provider dan
+pertahankan unresolved money sampai ada evidence otoritatif. Ikuti
+[prosedur diagnosis dan remediasi #663](klikqris-reconcile-candidate-classes.md#legacy-http-404-and-durable-discovery-663);
+health heartbeat yang hijau tidak menutup task/payment failure.
+
+
 ## Alert response and rollback
 
 Alert on a non-zero report count for stuck pending payments, provider uncertainty, Late Payment reviews, cancellation attempts, notification claims, or lifecycle mismatches. Pause queue workers when a deployment must be contained, set `PAYMENT_LIFECYCLE_ROLLOUT_MODE=rollback`, deploy that configuration, then resume only the reconciliation workers needed to recover confirmed provider state. Never manually mark an uncertain payment paid or delete its lock/claim marker.

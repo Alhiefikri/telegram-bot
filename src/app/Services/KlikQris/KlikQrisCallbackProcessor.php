@@ -279,6 +279,7 @@ class KlikQrisCallbackProcessor
         if ($transaction->isSuccess() && $transaction->totalAmount() < (int) $payment->amount) {
             return $event->fresh();
         }
+        $this->nativeQris->recordAuthoritativeStatusObserved($payment, $transaction);
 
         if ($transaction->isSuccess()) {
             $payment = $this->persistRecoveredOutcomeUnknownSuccess($payment, $transaction);

@@ -217,6 +217,12 @@ class ReconcileKlikQrisPayments extends Command
         }
 
         $summary = "processed={$totals['processed']} skipped={$totals['skipped']} failed={$totals['failed']}";
+        $unresolved = Payment::query()
+            ->where('provider', PaymentProvider::KLIKQRIS)
+            ->where('klikqris_status_last_error', 'status_http_404')
+            ->count();
+        $this->line("klikqris:reconcile verification: unresolved_status_404={$unresolved}"
+            .($unresolved > 0 ? ' operator_action=verify_original_provider_context payment_outcome=unknown' : ''));
         $this->line('klikqris:reconcile classes: '.$this->classSummary($classStats));
         $stopReason = ProviderVerificationProfiles::stopReason() ?? ($totals['selected'] >= $maxPayments ? 'payment_limit' : ($pagesFetched >= $scanCap ? 'scan_limit' : 'exhausted'));
         $this->line('klikqris:reconcile sweep: requests='.ProviderVerificationProfiles::requests().' stop_reason='.$stopReason.' carry_over='.($stopReason !== 'exhausted' ? 'yes' : 'no'));
@@ -237,6 +243,7 @@ class ReconcileKlikQrisPayments extends Command
             'processed' => $totals['processed'],
             'skipped' => $totals['skipped'],
             'failed' => $totals['failed'],
+            'unresolved_status_404' => $unresolved,
             'http_attempt_count' => ProviderVerificationProfiles::requests(),
             'stop_reason' => $stopReason,
             'carry_over' => $stopReason !== 'exhausted',
@@ -245,6 +252,11 @@ class ReconcileKlikQrisPayments extends Command
 
         if ($totals['failed'] > 0) {
             $this->error('klikqris:reconcile completed with partial failures: '.$summary);
+
+            return self::FAILURE;
+        }
+        if ($unresolved > 0) {
+            $this->error('klikqris:reconcile has unresolved provider verification; deferred discovery is not recovery.');
 
             return self::FAILURE;
         }
@@ -434,23 +446,30 @@ class ReconcileKlikQrisPayments extends Command
     {
         $query = Payment::query()
             ->where('provider', PaymentProvider::KLIKQRIS)
-            ->whereNotNull('merchant_ref');
+            ->whereNotNull('merchant_ref')
+            ->where(function (Builder $query): void {
+                $query->whereNull('klikqris_status_next_check_at')
+                    ->orWhere('klikqris_status_next_check_at', '<=', now());
+            });
 
         return match ($class) {
             self::CLASS_ACTIVE => $query
                 ->where('status', PaymentStatus::Pending->value)
                 ->where(function (Builder $query): void {
                     $query->whereNull('provider_create_state')
-                        ->orWhere('provider_create_state', '!=', 'outcome_unknown');
+                        ->orWhereNotIn('provider_create_state', ['outcome_unknown', 'recovery_unconfirmed']);
                 }),
             self::CLASS_OUTCOME_UNKNOWN => $query
-                ->where('provider_create_state', 'outcome_unknown'),
+                ->whereIn('provider_create_state', ['outcome_unknown', 'recovery_unconfirmed']),
             self::CLASS_HISTORY => $query
                 ->whereIn('status', [PaymentStatus::Expired->value, PaymentStatus::Failed->value])
-                ->where('updated_at', '>=', $releasedCutoff)
+                ->where(function (Builder $query) use ($releasedCutoff): void {
+                    $query->where('updated_at', '>=', $releasedCutoff)
+                        ->orWhereNotNull('klikqris_status_last_error');
+                })
                 ->where(function (Builder $query): void {
                     $query->whereNull('provider_create_state')
-                        ->orWhere('provider_create_state', '!=', 'outcome_unknown');
+                        ->orWhereNotIn('provider_create_state', ['outcome_unknown', 'recovery_unconfirmed']);
                 }),
             default => throw new InvalidArgumentException('Unknown KlikQRIS reconciliation class.'),
         };

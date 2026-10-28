@@ -862,6 +862,126 @@ class KlikQrisReconciliationTest extends TestCase
         Http::assertSentCount(4);
     }
 
+    public function test_missing_legacy_transaction_is_not_repolled_after_cursor_wrap_or_cache_loss(): void
+    {
+        Queue::fake();
+        $payment = $this->payableKlikQrisPayment([
+            'status' => PaymentStatus::Expired,
+            'provider_create_state' => 'outcome_unknown',
+            'created_at' => now()->subDays(10),
+        ]);
+        $payment->order->update(['order_status' => OrderStatus::Expired]);
+        Http::fake(['*' => Http::response([], 404)]);
+
+        $this->assertSame(1, Artisan::call('klikqris:reconcile'));
+        Http::assertSentCount(1);
+        $this->assertSame(1, $payment->fresh()->klikqris_status_failure_count);
+        $this->assertSame('status_http_404', $payment->fresh()->klikqris_status_last_error);
+        $this->assertTrue($payment->fresh()->klikqris_status_next_check_at->equalTo(now()->addMinutes(5)));
+        Cache::flush();
+        $this->assertSame(1, Artisan::call('klikqris:reconcile'));
+        Http::assertSentCount(1);
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $payment->order->fresh()->order_status);
+        $this->assertSame(0, PaymentEvent::where('event_type', 'reconciliation')->count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_missing_status_uses_bounded_discovery_delays_without_extending_history_and_recovers_late_money(): void
+    {
+        Queue::fake();
+        $payment = $this->payableKlikQrisPayment(['status' => PaymentStatus::Expired]);
+        $payment->order->update(['order_status' => OrderStatus::Expired]);
+        $originalUpdatedAt = $payment->updated_at;
+        $recovered = false;
+        Http::fake(function () use ($payment, &$recovered) {
+            return $recovered
+                ? Http::response(KlikQrisSandboxScenarios::statusPayload($payment), 200)
+                : Http::response([], 404);
+        });
+
+        foreach ([300, 1800, 86400, 86400] as $index => $delay) {
+            $this->assertSame(1, Artisan::call('klikqris:reconcile'));
+            $fresh = $payment->fresh();
+            $this->assertSame(min(3, $index + 1), $fresh->klikqris_status_failure_count);
+            $this->assertTrue($fresh->klikqris_status_next_check_at->equalTo(now()->addSeconds($delay)));
+            $this->assertTrue($originalUpdatedAt->equalTo($fresh->updated_at));
+            Cache::flush();
+            $this->assertSame(1, Artisan::call('klikqris:reconcile'));
+            Http::assertSentCount($index + 1);
+            $this->travel($delay)->seconds();
+        }
+
+        $this->travel(4)->days();
+        $recovered = true;
+        $this->assertSame(0, Artisan::call('klikqris:reconcile'));
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertNull($payment->fresh()->klikqris_status_last_error);
+        $this->assertNull($payment->fresh()->klikqris_status_next_check_at);
+        $this->assertSame(0, $payment->fresh()->klikqris_status_failure_count);
+        $this->assertSame(ManualFulfillmentReview::REASON_LATE_PAYMENT,
+            ManualFulfillmentReview::where('payment_id', $payment->id)->sole()->reason);
+        Queue::assertNotPushed(SendTelegramReceipt::class);
+        $this->assertSame(0, Artisan::call('klikqris:reconcile'));
+        $this->assertSame(1, ManualFulfillmentReview::where('payment_id', $payment->id)->count());
+    }
+
+    public function test_deferred_missing_rows_do_not_spend_the_next_sweep_budget_or_starve_new_candidates(): void
+    {
+        Queue::fake();
+        $missing = collect(range(1, 5))->map(fn (int $index) => $this->payableKlikQrisPayment([
+            'merchant_ref' => 'KLIK-MISSING-'.$index,
+            'status' => PaymentStatus::Expired,
+            'provider_create_state' => 'recovery_unconfirmed',
+            'created_at' => now()->subDays(10)->addSeconds($index),
+            'updated_at' => now()->subDays(10),
+        ]));
+        $active = $this->payableKlikQrisPayment(['merchant_ref' => 'KLIK-LIVE-AFTER-404']);
+        $requested = [];
+        Http::fake(function ($request) use ($active, &$requested) {
+            $requested[] = basename($request->url());
+
+            return str_contains($request->url(), 'KLIK-MISSING')
+                ? Http::response([], 404)
+                : Http::response(KlikQrisSandboxScenarios::statusPayload($active), 200);
+        });
+
+        foreach (range(1, 3) as $sweep) {
+            $before = count($requested);
+            $this->assertSame(1, Artisan::call('klikqris:reconcile', ['--max-payments' => 2]));
+            $this->assertLessThanOrEqual(2, count($requested) - $before);
+        }
+        $this->assertSame(PaymentStatus::Paid, $active->fresh()->status);
+        $this->assertEqualsCanonicalizing(
+            ['KLIK-LIVE-AFTER-404', 'KLIK-MISSING-1', 'KLIK-MISSING-2', 'KLIK-MISSING-3', 'KLIK-MISSING-4', 'KLIK-MISSING-5'],
+            $requested,
+        );
+        $this->assertSame(1, Artisan::call('klikqris:reconcile', ['--max-payments' => 2]));
+        Http::assertSentCount(6);
+        $this->assertTrue($missing->every(fn (Payment $payment) => $payment->fresh()->status === PaymentStatus::Expired));
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_authoritative_unpaid_recovery_clears_only_missing_status_uncertainty(): void
+    {
+        Queue::fake();
+        $payment = $this->payableKlikQrisPayment();
+        $recovered = false;
+        Http::fake(function () use ($payment, &$recovered) {
+            return $recovered
+                ? Http::response(KlikQrisSandboxScenarios::statusPayload($payment, ['status' => 'PENDING']), 200)
+                : Http::response([], 404);
+        });
+        $this->assertSame(1, Artisan::call('klikqris:reconcile'));
+        $this->travel(5)->minutes();
+        $recovered = true;
+        $this->assertSame(0, Artisan::call('klikqris:reconcile'));
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $payment->order->fresh()->order_status);
+        $this->assertNull($payment->fresh()->klikqris_status_last_error);
+        Queue::assertNothingPushed();
+    }
+
     private function expiredHistoryPayment(int $index): Payment
     {
         return $this->payableKlikQrisPayment([

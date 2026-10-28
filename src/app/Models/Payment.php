@@ -88,6 +88,8 @@ class Payment extends Model
             'provider_payment_number' => 'encrypted',
             'klikqris_transaction_signature' => 'encrypted',
             'provider_create_attempted_at' => 'datetime',
+            'klikqris_status_failure_count' => 'integer',
+            'klikqris_status_next_check_at' => 'datetime',
             'status' => PaymentStatus::class,
             'paid_at' => 'datetime',
             'expired_at' => 'datetime',

@@ -20,14 +20,19 @@ ketiga setelah 20 history eligible.
 
 | Kelas | Predicate | Tujuan |
 | --- | --- | --- |
-| `active` | `provider=klikqris`, `merchant_ref` terisi, `status=pending`, `provider_create_state != outcome_unknown` | Payment yang masih aktif dan sensitif terhadap latency. |
-| `outcome_unknown` | `provider=klikqris`, `merchant_ref` terisi, `provider_create_state=outcome_unknown` (status apa pun) | Create ambigu, termasuk Payment yang sudah dibayar lokal tetapi masih butuh signature authoritative. |
-| `history` | `provider=klikqris`, `merchant_ref` terisi, `status in (expired, failed)`, `updated_at >= now-72h`, `provider_create_state != outcome_unknown` | Late payment dan recovery terminal yang masih dalam lookback. |
+| `active` | `provider=klikqris`, `merchant_ref` terisi, `status=pending`, state bukan `outcome_unknown`/`recovery_unconfirmed` | Payment yang masih aktif dan sensitif terhadap latency. |
+| `outcome_unknown` | `provider=klikqris`, `merchant_ref` terisi, state `outcome_unknown` atau `recovery_unconfirmed` (status apa pun) | Create ambigu, termasuk Payment yang sudah dibayar lokal tetapi masih butuh signature authoritative. |
+| `history` | `provider=klikqris`, `merchant_ref` terisi, `status in (expired, failed)`, masih dalam lookback 72 jam **atau** memiliki status lookup 404 yang belum terverifikasi, state bukan kedua state ambigu | Late payment dan recovery terminal; uncertainty 404 tidak hilang ketika melewati lookback. |
 
 Predicate ketiga kelas saling lepas, sehingga satu Payment tidak dihitung dua
 kali dalam satu sweep. Jika state berubah di tengah sweep dan Payment masuk ke
 kelas berikutnya, ID yang sudah diproses dilewati sehingga tidak ada dua
 percobaan dalam satu sweep.
+
+Sejak #663, semua kelas juga mensyaratkan `klikqris_status_next_check_at`
+kosong atau sudah due. Deferred row tidak ikut `exists()`, alokasi kelas,
+page, maupun kuota Payment. Detail retry dan tindakan operator ada di
+[Legacy HTTP 404](#legacy-http-404-and-durable-discovery-663).
 
 Alokasi kuota:
 
@@ -405,4 +410,167 @@ IP di atas adalah alamat container disposable saat run. Pint pada file PHP
 yang berubah dan `sh -n docker-scheduler.sh` lulus. Dua regression Pakasir gagal
 sebelum implementasi karena opsi cap belum ada. Tidak ada CI/CD, deploy,
 production probe, pembayaran nyata, pesan pelanggan atau klaim full-suite.
+
+
+## Legacy HTTP 404 and durable discovery (#663)
+
+### Evidence and attribution
+
+Audit read-only 2026-10-28 terhadap release `1a46d9e7` memakai bounded logs
+dan SELECT dalam transaksi `READ ONLY`, `statement_timeout=4s`,
+`lock_timeout=1s`, lalu `ROLLBACK`. Tidak ada provider probe atau mutation sweep.
+
+- Ada 12 terminal `outcome_unknown`: 3 expired, 9 failed, dibuat
+  2026-09-18 sampai 2026-10-08. Lima memiliki signature dan event authoritative;
+  tujuh tidak memiliki payload, signature, maupun event authoritative.
+- Output terakhir memilih 8 unknown dan 2 history, membuat 10 request dan
+  mencatat 4 HTTP 404. Fingerprint MD5 12 karakter dari Payment ID yang gagal:
+  `193641f090fc`, `8e763bd0159e`, `62ec11a7e0ca`, `5d6c49031e51`.
+  Keempatnya tidak memiliki payload/signature/event authoritative.
+  Fingerprint hanya untuk korelasi audit, bukan identifier pembayaran provider.
+- Ada pula 71 terminal `recovery_unconfirmed` tanpa payload/signature yang
+  dibuat 2026-08-31 sampai 2026-10-24. Predicate lama membuangnya setelah
+  lookback 72 jam; #663 menjaga keduanya dalam kelas create ambigu yang sama.
+- Deployed source merutekan production ke
+  `GET https://klikqris.com/api/qris/status/{merchant_ref}` dengan kredensial
+  production **saat ini**, bukan snapshot kredensial saat create. Database
+  tidak merekam endpoint/environment/credential version historis.
+  Nilai effective config cache dan credential rotation tidak diaudit.
+- HTTP 404 membuktikan lookup gagal dalam konteks yang dipakai, bukan bahwa
+  provider tidak pernah menerima uang. Transaction tidak pernah tercipta,
+  retention/provider state, dan perubahan merchant/credentials tetap tidak
+  dapat dibedakan dari evidence ini. Operator harus memverifikasi konteks
+  asli dengan provider; jangan menyimpulkan unpaid dari tidak adanya snapshot.
+
+Penyebab kandidat berulang terbukti secara lokal: cursor bergerak dan wrap,
+tetapi bukan retry delay. `outcome_unknown` tidak memiliki batas umur;
+terminal lookup 404 melempar exception sebelum callback dapat memperbarui
+evidence. Row tetap eligible dan kembali setelah wrap. Tidak ada next-check
+durable sebelumnya. Repro command sebelum fix membuat dua request untuk satu
+row setelah cache dibersihkan; regression sekarang membatasi request kedua.
+
+Scheduler production yang dibaca tetap healthy; bounded log menunjukkan cycle
+76 dan 41 detik, KlikQRIS exit 1, sementara Sakurupiah, BSC, Pakasir dan expiry
+exit 0. Ini bukti progress task lain, bukan jaminan latency production.
+
+### Discovery policy and failure signal
+
+`KlikQrisNativeQrisService::reconcile()` memiliki policy ini di bawah lock
+Payment existing, bukan lifecycle/queue kedua:
+
+| HTTP 404 berturut dalam episode | Delay sebelum discovery berikut |
+| --- | --- |
+| 1 | 5 menit |
+| 2 | 30 menit |
+| 3 dan seterusnya | 24 jam |
+
+Migration additive menyimpan `klikqris_status_failure_count` (tier jenuh di 3),
+`klikqris_status_next_check_at`, dan `klikqris_status_last_error` pada Payment.
+Metadata tidak memperbarui `updated_at`, sehingga tidak memperpanjang history
+lookback sebagai efek samping. Cache loss, cursor wrap dan `--after` tidak
+mereset delay. Setelah dua retry cepat, discovery dibatasi satu lookup per
+hari per row, masih tunduk pada kuota kelas/deadline global; ini bukan
+pernyataan bahwa unresolved money selesai.
+
+Order, Payment status, inventory, signature, payload dan event historis tidak
+diubah oleh HTTP 404. History yang pernah gagal tetap dapat ditemukan setelah
+72 jam. Callback tetap dapat melakukan lookup authoritative selama cooldown.
+Hanya evidence identity/amount yang lolos boundary processor existing
+menghapus metadata 404. Late success tetap masuk Manual Fulfillment Review;
+callback/sweep duplikat tidak menggandakan fulfillment atau receipt.
+
+Stdout `verification: unresolved_status_404=N` dan completion log menyimpan
+jumlah unresolved. `operator_action=verify_original_provider_context` berarti
+operator harus memeriksa konteks provider asli. Selama count ini positif,
+command tetap exit 1, termasuk tick dengan `requests=0`. `failed` per kelas
+hanya menghitung exception pada tick itu; `carry_over`/`exhausted` berbicara
+tentang kandidat **due**, bukan menyatakan deferred money sudah selesai.
+Managed-task alert tetap failed; liveness heartbeat tidak diubah.
+
+### Operator remediation
+
+1. Pisahkan scheduler heartbeat dari `klikqris:reconcile` task failure dan
+   unresolved Payment. Jangan menghapus alert, cursor, row atau credential
+   history untuk membuat badge hijau.
+2. Baca metadata berikut dengan akses database terotorisasi, dalam transaksi
+   read-only yang bounded. Jangan mengekspor merchant reference, signature,
+   API key atau provider payload:
+
+   ```sql
+   BEGIN READ ONLY;
+   SET LOCAL statement_timeout = '4s';
+   SET LOCAL lock_timeout = '1s';
+   SELECT left(md5(id::text), 12) AS payment_fingerprint,
+          status, provider_create_state, created_at::date,
+          klikqris_status_failure_count,
+          klikqris_status_next_check_at, klikqris_status_last_error
+   FROM payments
+   WHERE provider = 'klikqris'
+     AND klikqris_status_last_error IS NOT NULL
+   ORDER BY created_at, id
+   LIMIT 25;
+   ROLLBACK;
+   ```
+
+3. Cocokkan tanggal create, event authoritative existing dan konteks
+   merchant/environment dengan catatan provider asli melalui kanal aman.
+   Credential rotation, penggantian endpoint, provider probe, dan sweep manual
+   memerlukan otorisasi terpisah. Jangan mencoba create kedua untuk reference
+   yang outcome-nya masih unknown.
+4. Simpan kasus operator dan evidence otoritatif. Tanpa bukti tersebut,
+   pertahankan row unresolved dan discovery harian. Jangan mengubahnya menjadi
+   paid/unpaid, me-release stock, menghapus histori atau menganggap invoice
+   provider tidak pernah ada. Provider recovery/callback yang valid tetap
+   memakai processor dan Manual Fulfillment Review existing.
+
+### Local verification
+
+Regression deterministik mencakup cache loss/wrap, delay 5m/30m/24h,
+history melewati 72 jam, fairness kuota dua Payment terhadap lima old ambiguous
+rows dan satu active, recovery pending, late paid, serta callback saat deferred
+dan replay tanpa receipt kedua.
+
+Smoke memakai actual Console Kernel, command provider, dan
+`ops:schedule-run` pada SQLite WAL/file cache disposable, dengan HTTP nyata
+hanya ke fixture loopback dan semua queue fake. Tidak ada Telegram/provider
+production. Lima terminal unknown + satu Sakurupiah pending + satu Order due:
+
+- Tiga sweep KlikQRIS `--max-payments=2` membuat request `2, 2, 1`, lalu
+  sweep keempat membuat `0`, tetap exit 1 dan menyimpan lima unresolved.
+- Pool tetap maksimum dua child. Expiry memproses satu Order. Sakurupiah
+  membuat satu HTTP request dan melaporkan `pending=1`, exit 0.
+  Sakurupiah mulai pada +1366.56 ms, sebelum KlikQRIS selesai pada +2778.46 ms;
+  angka ini satu observasi lokal, bukan distribusi/SLA.
+- Setelah fixture mengembalikan success dan next-check dibuat due hanya
+  dalam disposable DB, command menemukan lima late Payment, membuat lima
+  Manual Fulfillment Review dan menghapus lima metadata 404. Sweep berikut
+  membuat nol request dan tidak menambah review.
+
+Focused SQLite suite: 151 tests / 1041 assertions lulus, mencakup
+reconciliation, webhook, native lifecycle, gateway, Telegram checkout/status
+verification, bounded scheduler dan isolation. Pint dijalankan pada PHP yang
+diubah. Smoke scaffolding dihapus setelah pengukuran. Tidak ada klaim CI,
+deploy, pembayaran nyata, provider qualification atau fix production.
+
+PostgreSQL 16.15 disposable (`issue663_test`, loopback port 18663):
+
+```sh
+DB_HOST=127.0.0.1 DB_PORT=18663 DB_USERNAME=baseline \
+DB_PASSWORD=baseline DB_DATABASE=issue663_test \
+php vendor/bin/phpunit -c phpunit.postgres.xml \
+  tests/Feature/KlikQrisReconciliationTest.php \
+  tests/Feature/KlikQrisWebhookTest.php \
+  tests/Feature/KlikQrisNativeQrisTest.php
+# 96 tests / 700 assertions passed.
+```
+
+Dua assertion lama yang bergantung pada urutan key JSON dihapus dari test
+unknown callback. PostgreSQL JSONB tidak menjamin urutan itu; test tetap
+memeriksa status unknown, tidak adanya mutasi/HTTP/receipt, coalescing replay,
+merchant-reference hashing dan tidak tersimpannya secret fixture.
+Final SQLite tetap 151 / 1041, dan final Pint `--test` lulus.
+Smoke actual command diulang pada source final dan database disposable baru:
+lima unresolved tetap fail closed saat deferred, lalu lima late reviews setelah
+recovery. Tidak ada layanan atau file smoke yang dipertahankan.
+
 

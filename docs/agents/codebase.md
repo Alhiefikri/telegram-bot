@@ -1266,7 +1266,29 @@ tepat satu kali ke `StoreBalanceTopUpService`/`StoreBalanceLedger`.
 `klikqris:reconcile-balance-top-ups` merekonsiliasi top-up secara bounded.
 Sandbox/production readiness dipisahkan oleh [`KlikQrisEnvironment`](../../src/app/Enums/KlikQrisEnvironment.php).
 
-`ReconcileKlikQrisPayments` membagi kandidat menjadi tiga kelas **disjoint**, masing-masing dengan cursor `(created_at, id)` durable per environment (`klikqris:reconcile:{active|outcome_unknown|history}:cursor:{environment}`): `active` adalah Payment `pending` selain `outcome_unknown`; `outcome_unknown` adalah create ambigu apa pun statusnya, termasuk Payment yang sudah dibayar lokal tetapi masih membutuhkan signature authoritative; `history` adalah Payment `expired`/`failed` dalam lookback 72 jam selain `outcome_unknown`. Setiap sweep memberi giliran minimum ke setiap kelas non-kosong, mereservasi `max(1, floor(max-payments/4))` untuk history (dibatasi agar active dan outcome_unknown tetap mendapat minimum satu), lalu memakai sisa kuota dengan prioritas active → outcome_unknown → history. Bila `--max-payments` lebih kecil dari jumlah kelas non-kosong, rotasi durable di `klikqris:reconcile:rotation:{environment}` memastikan setiap kelas maju dalam beberapa sweep. Cursor hanya berputar untuk kelasnya sendiri setelah seluruh kandidat kelas itu mendapat giliran; kelas yang belum selesai melanjutkan dari posisi tersimpan, sehingga kandidat baru, create ambigu, dan history yang masih stuck tidak saling men-starve. Sweep tetap dibatasi `--max-payments` (default 10, maksimum 100) **dan** execution budget (`services.klikqris.reconcile_max_execution_seconds`, default 45s) yang diukur dengan jam monotonik; batas ini lebih pendek dari mutex `withoutOverlapping` scheduler sehingga satu provider lambat tidak membuat sweep berikutnya overlap. Stdout `classes:` dan log `klikqris.reconciliation.completed` melaporkan budget/selected/processed/skipped/failed per kelas, `rotation_used`, `pages_fetched`, `cursor_scan_cap`, `budget_exhausted`, `selected`, dan durasi. Override manual `--after=<timestamp>` menyemai cursor ketiga kelas dan mereset rotasi agar sweep dimulai setelah timestamp `created_at` tersebut. Kontrak alokasi dan bukti before/after lokal: [klikqris-reconcile-candidate-classes.md](../klikqris-reconcile-candidate-classes.md).
+`ReconcileKlikQrisPayments` membagi kandidat menjadi tiga kelas **disjoint**,
+masing-masing dengan cursor `(created_at, id)` per environment:
+`active` adalah Payment pending selain create ambigu; `outcome_unknown`
+mencakup state `outcome_unknown` dan `recovery_unconfirmed`, apa pun status
+lokalnya; `history` mencakup expired/failed dalam lookback 72 jam atau dengan
+lookup 404 yang belum terverifikasi, selain create ambigu. Setiap kelas
+non-kosong mendapat minimum satu giliran, history mendapat reserved share,
+dan sisa kuota mengikuti prioritas active, unknown, history. Cap di bawah
+jumlah kelas memakai rotasi lintas sweep. Cursor hanya wrap setelah kelasnya
+habis; `--after` menyemai posisi ketiga kelas.
+
+Issue #663 menambahkan metadata discovery pada Payment, bukan lifecycle kedua.
+`KlikQrisNativeQrisService` menunda lookup 404 selama 5 menit, 30 menit, lalu
+maksimum satu discovery per 24 jam. Selection mengecualikan row yang belum
+due sebelum menghitung kuota; cache loss dan cursor reset tidak menghapus
+delay. Metadata tidak mengubah `updated_at`, status, stok atau histori.
+Evidence authoritative yang lolos processor existing menghapus metadata,
+termasuk callback saat cooldown. Late paid tetap masuk Manual Fulfillment
+Review. `unresolved_status_404>0` tetap membuat command exit 1 walaupun tick
+tidak melakukan HTTP; liveness scheduler tetap terpisah dari task failure.
+Sweep mempertahankan batas 10 Payment default (maksimum 100), execution
+deadline monotonik 45 detik default, scan cap dan mutex existing.
+Lihat [kontrak, sanitized evidence dan remediasi operator](../klikqris-reconcile-candidate-classes.md#legacy-http-404-and-durable-discovery-663).
 
 Issue #654 propagates the remaining monotonic sweep deadline through `ProviderVerificationProfiles` to each KlikQRIS HTTP attempt and retry pause, including balance top-ups. Dispatch middleware rechecks the deadline immediately before transport and clamps request/connect timeouts to the remaining milliseconds; a sub-millisecond remainder never becomes cURL's unlimited zero timeout. Local DB/finalization work may finish after the I/O deadline. Completion reports `http_attempt_count`, `stop_reason` and `carry_over`; #650's class selection, quotas and cursors are unchanged.
 

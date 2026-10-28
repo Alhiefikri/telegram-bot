@@ -297,6 +297,9 @@ class KlikQrisNativeQrisService
 
         try {
             $payment->refresh();
+            if ($payment->klikqris_status_next_check_at?->isFuture()) {
+                return null;
+            }
 
             if ($payment->status !== PaymentStatus::Pending || $this->hasNonRecoverableState($payment)) {
                 $transaction = $this->provider->transactionStatus($payment);
@@ -329,9 +332,50 @@ class KlikQrisNativeQrisService
             $onAuthoritativeStatus($payment, $transaction);
 
             return $work['result'];
+        } catch (KlikQrisStatusResponseException $exception) {
+            if ($exception->httpStatus === 404) {
+                $this->deferMissingStatus($payment);
+            }
+
+            throw $exception;
         } finally {
             $lock->release();
         }
+    }
+
+    private function deferMissingStatus(Payment $payment): void
+    {
+        // Discovery metadata must not refresh the terminal-history lookback.
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment): void {
+            $failures = min(3, (int) $lockedPayment->klikqris_status_failure_count + 1);
+            $delay = match ($failures) {
+                1 => 300,
+                2 => 1800,
+                default => 86_400,
+            };
+            Payment::withoutTimestamps(fn () => $lockedPayment->forceFill([
+                'klikqris_status_failure_count' => $failures,
+                'klikqris_status_next_check_at' => now()->addSeconds($delay),
+                'klikqris_status_last_error' => 'status_http_404',
+            ])->save());
+        });
+        $payment->refresh();
+    }
+
+    public function recordAuthoritativeStatusObserved(Payment $payment, KlikQrisTransaction $transaction): void
+    {
+        $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($transaction): void {
+            if ($lockedPayment->klikqris_status_last_error === null) {
+                return;
+            }
+
+            $transaction->assertMatches($lockedPayment);
+            Payment::withoutTimestamps(fn () => $lockedPayment->forceFill([
+                'klikqris_status_failure_count' => 0,
+                'klikqris_status_next_check_at' => null,
+                'klikqris_status_last_error' => null,
+            ])->save());
+        });
     }
 
     /**
