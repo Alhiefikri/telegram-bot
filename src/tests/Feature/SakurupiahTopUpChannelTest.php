@@ -7,24 +7,30 @@ use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
+use App\Enums\UserRole;
 use App\Events\StoreBalanceTopUpSettled;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
+use App\Models\StoreBalanceTopUpEvent;
 use App\Models\TelegramNavigationRoot;
+use App\Models\User;
+use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahCreatePreRequestException;
 use App\Services\Sakurupiah\SakurupiahInvoice;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahStatus;
+use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResolver;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
@@ -261,6 +267,282 @@ final class SakurupiahTopUpChannelTest extends TestCase
 
         $this->assertTrue($service->lifecycle($topUp)->isPayable());
         $this->assertSame('QRIS', $topUp->fresh()->sakurupiah_channel);
+    }
+
+    public function test_partial_success_without_history_is_missing_evidence_not_identity_mismatch(): void
+    {
+        $topUp = $this->topUp();
+        $topUp->update([
+            'provider_reference' => 'trx-'.$topUp->id,
+            'provider_total_payment' => 5000,
+            'provider_fee' => 0,
+            'provider_expires_at' => now()->addHour(),
+        ]);
+        Http::fake([
+            '*/status-transaction.php' => Http::response(['status' => '200', 'data' => [['status' => 'berhasil']]]),
+            '*/transaction.php' => Http::response(['status' => '200', 'data' => []]),
+        ]);
+
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+
+        $this->assertSame('provider_evidence_missing', $topUp->fresh()->provider_create_last_error);
+        $this->assertSame(StoreBalanceTopUpStatus::InvalidProviderResult, $topUp->fresh()->status);
+        $this->assertDatabaseCount('store_balance_entries', 0);
+    }
+
+    public function test_partial_success_with_bound_history_credits_original_amount_not_fee_once(): void
+    {
+        $topUp = $this->topUp();
+        $topUp->update([
+            'amount' => 250000,
+            'provider_reference' => 'trx-'.$topUp->id,
+            'provider_total_payment' => 252100,
+            'provider_fee' => 2100,
+            'provider_expires_at' => now()->addHour(),
+        ]);
+        Http::fake([
+            '*/status-transaction.php' => Http::response(['status' => '200', 'data' => [['status' => 'berhasil']]]),
+            '*/transaction.php' => Http::response(['status' => '200', 'data' => [[
+                'trx_id' => $topUp->provider_reference,
+                'merchant_ref' => $topUp->merchant_ref,
+                'payment_kode' => 'QRIS',
+                'amount' => '252100',
+                'status' => 'berhasil',
+            ]]]),
+        ]);
+
+        $service = app(StoreBalanceTopUpService::class);
+        $service->reconcile($topUp);
+        $service->reconcile($topUp);
+        $callback = [
+            'trx_id' => $topUp->provider_reference,
+            'merchant_ref' => $topUp->merchant_ref,
+            'status' => 'berhasil',
+            'status_kode' => 1,
+        ];
+        app(SakurupiahCallbackProcessor::class)->processCallback($callback);
+        app(SakurupiahCallbackProcessor::class)->processCallback($callback);
+
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(250000, StoreBalanceEntry::query()->sole()->amount);
+        $this->assertSame(250000, StoreBalanceEntry::query()->sole()->balance_after);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/transaction.php')
+            && $request['mechant'] === 1 && $request['trx_id'] === $topUp->provider_reference
+            && $request['merchant_ref'] === $topUp->merchant_ref);
+    }
+
+    #[DataProvider('conflictingStatusFields')]
+    public function test_explicit_status_conflicts_are_not_overridden_by_history(array $overrides, string $field): void
+    {
+        $topUp = $this->topUp();
+        $topUp->update([
+            'provider_reference' => 'trx-'.$topUp->id,
+            'provider_total_payment' => 5000,
+            'provider_fee' => 0,
+            'provider_expires_at' => now()->addHour(),
+        ]);
+        $adapter = Mockery::mock(SakurupiahProviderAdapter::class);
+        $adapter->shouldReceive('transactionStatus')->once()->andReturn($this->providerStatus($topUp, 'QRIS', $overrides));
+        $adapter->shouldNotReceive('transactionHistory');
+        $this->app->instance(SakurupiahProviderAdapter::class, $adapter);
+        $this->app->forgetInstance(StoreBalanceTopUpLifecycleResolver::class);
+
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+
+        $this->assertSame('provider_identity_mismatch', $topUp->fresh()->provider_create_last_error);
+        $this->assertDatabaseCount('store_balance_entries', 0);
+        $observation = StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation_evidence')->sole();
+        $this->assertContains($field, $observation->raw_payload['conflicting_fields']);
+    }
+
+    public static function conflictingStatusFields(): array
+    {
+        return [
+            'transaction' => [['trx_id' => 'foreign-transaction'], 'trx_id'],
+            'merchant' => [['merchant_ref' => 'foreign-merchant'], 'merchant_ref'],
+            'channel' => [['payment_kode' => 'QRISC'], 'payment_kode'],
+            'currency' => [['currency' => 'USD'], 'currency'],
+            'amount' => [['amount' => 4999], 'amount'],
+            'total' => [['total' => 5001], 'total'],
+            'fee' => [['fee' => 1], 'fee'],
+        ];
+    }
+
+    #[DataProvider('unusableHistory')]
+    public function test_partial_status_never_credits_unbound_or_conflicting_history(array $overrides, bool $duplicate = false): void
+    {
+        $topUp = $this->topUp();
+        $topUp->update([
+            'provider_reference' => 'trx-'.$topUp->id,
+            'provider_total_payment' => 5000,
+            'provider_fee' => 0,
+            'provider_expires_at' => now()->addHour(),
+        ]);
+        $row = array_replace([
+            'trx_id' => $topUp->provider_reference,
+            'merchant_ref' => $topUp->merchant_ref,
+            'payment_kode' => 'QRIS',
+            'amount' => '5000',
+            'status' => 'berhasil',
+        ], $overrides);
+        Http::fake([
+            '*/status-transaction.php' => Http::response(['status' => '200', 'data' => [['status' => 'berhasil']]]),
+            '*/transaction.php' => Http::response(['status' => '200', 'data' => $duplicate ? [$row, $row] : [$row]]),
+        ]);
+
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+
+        $this->assertDatabaseCount('store_balance_entries', 0);
+        $this->assertNotSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+    }
+
+    public static function unusableHistory(): array
+    {
+        return [
+            'transaction' => [['trx_id' => 'foreign-transaction']],
+            'merchant' => [['merchant_ref' => 'foreign-merchant']],
+            'channel' => [['payment_kode' => 'QRISC']],
+            'currency' => [['currency' => 'USD']],
+            'amount' => [['amount' => '4999']],
+            'total' => [['total' => 5001]],
+            'fee' => [['fee' => 1]],
+            'malformed total' => [['total' => 'not-money']],
+            'contradictory status' => [['payment_status' => 'pending']],
+            'pending' => [['status' => 'pending']],
+            'duplicate' => [[], true],
+            'missing amount' => [['amount' => null]],
+        ];
+    }
+
+    public function test_requested_id_fallback_cannot_authorize_otherwise_complete_status(): void
+    {
+        $topUp = $this->topUp();
+        $topUp->update([
+            'provider_reference' => 'trx-'.$topUp->id,
+            'provider_total_payment' => 5000,
+            'provider_fee' => 0,
+            'provider_expires_at' => now()->addHour(),
+        ]);
+        Http::fake([
+            '*/status-transaction.php' => Http::response(['status' => '200', 'data' => [[
+                'status' => 'berhasil',
+                'merchant_ref' => $topUp->merchant_ref,
+                'payment_kode' => 'QRIS',
+                'total' => 5000,
+            ]]]),
+            '*/transaction.php' => Http::response(['status' => '200', 'data' => []]),
+        ]);
+
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+
+        $this->assertSame('provider_evidence_missing', $topUp->fresh()->provider_create_last_error);
+        $this->assertDatabaseCount('store_balance_entries', 0);
+        $event = StoreBalanceTopUpEvent::query()->where('event_type', 'reconciliation_evidence')->sole();
+        $this->assertSame(['trx_id'], $event->raw_payload['missing_fields']);
+        $this->assertSame([], $event->raw_payload['conflicting_fields']);
+    }
+
+    public function test_review_and_expired_topups_remain_owner_review_without_network(): void
+    {
+        $topUp = $this->topUp();
+        $topUp->update(['provider_reference' => 'trx-'.$topUp->id, 'status' => StoreBalanceTopUpStatus::InvalidProviderResult]);
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+        $this->assertSame(StoreBalanceTopUpStatus::InvalidProviderResult, $topUp->fresh()->status);
+        $topUp->update(['status' => StoreBalanceTopUpStatus::Expired]);
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+        $this->assertSame(StoreBalanceTopUpStatus::Expired, $topUp->fresh()->status);
+        Http::assertNothingSent();
+        $this->assertDatabaseCount('store_balance_entries', 0);
+    }
+
+    public function test_compensated_incident_is_not_reopened_by_reconciliation_or_duplicate_callback(): void
+    {
+        Queue::fake();
+        $topUp = $this->topUp();
+        $topUp->update([
+            'amount' => 250000,
+            'provider_reference' => 'trx-'.$topUp->id,
+            'provider_total_payment' => 252100,
+            'provider_fee' => 2100,
+            'status' => StoreBalanceTopUpStatus::InvalidProviderResult,
+        ]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        app(StoreBalanceOwnerCompensationService::class)->release(
+            $topUp->id, $owner, $topUp->provider_reference, 'Owner authorized sanitized incident fixture.',
+        );
+        $callback = [
+            'trx_id' => $topUp->provider_reference,
+            'merchant_ref' => $topUp->merchant_ref,
+            'status' => 'berhasil',
+            'status_kode' => 1,
+        ];
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+        $processor = app(SakurupiahCallbackProcessor::class);
+        $processor->processCallback($callback);
+        $processor->processCallback($callback);
+
+        $this->assertSame(StoreBalanceTopUpStatus::Compensated, $topUp->fresh()->status);
+        $this->assertSame(250000, StoreBalanceEntry::query()->sole()->amount);
+        $this->assertSame(250000, StoreBalanceEntry::query()->sole()->balance_after);
+        $this->assertDatabaseCount('store_balance_compensations', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_history_outage_leaves_target_unresolved_and_later_evidence_settles_once(): void
+    {
+        $topUp = $this->topUp();
+        $topUp->update([
+            'provider_reference' => 'trx-'.$topUp->id,
+            'provider_total_payment' => 5000,
+            'provider_fee' => 0,
+            'provider_expires_at' => now()->addHour(),
+        ]);
+        Http::fake([
+            '*/status-transaction.php' => Http::response(['status' => '200', 'data' => [['status' => 'berhasil']]]),
+            '*/transaction.php' => Http::sequence()
+                ->push(['status' => '400', 'message' => 'Lookup unavailable'])
+                ->push(['status' => '200', 'data' => [[
+                    'trx_id' => $topUp->provider_reference,
+                    'merchant_ref' => $topUp->merchant_ref,
+                    'payment_kode' => 'QRIS',
+                    'amount' => '5000',
+                    'status' => 'berhasil',
+                ]]]),
+        ]);
+        $service = app(StoreBalanceTopUpService::class);
+        $service->reconcile($topUp);
+        $this->assertDatabaseCount('store_balance_entries', 0);
+        $this->assertSame(StoreBalanceTopUpStatus::Pending, $topUp->fresh()->status);
+
+        $service->reconcile($topUp);
+        $service->reconcile($topUp);
+
+        $this->assertSame(StoreBalanceTopUpStatus::Paid, $topUp->fresh()->status);
+        $this->assertSame(5000, StoreBalanceEntry::query()->sole()->amount);
+    }
+
+    public function test_stale_expiry_response_cannot_overwrite_compensation_committed_during_lookup(): void
+    {
+        Queue::fake();
+        $topUp = $this->topUp();
+        $topUp->update([
+            'provider_reference' => 'trx-'.$topUp->id,
+            'status' => StoreBalanceTopUpStatus::RecoveryPending,
+        ]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        Http::fake(function () use ($topUp, $owner) {
+            app(StoreBalanceOwnerCompensationService::class)->release(
+                $topUp->id, $owner, $topUp->provider_reference, 'Concurrent Owner resolution fixture.',
+            );
+
+            return Http::response(['status' => '200', 'data' => [['status' => 'expired']]]);
+        });
+
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+
+        $this->assertSame(StoreBalanceTopUpStatus::Compensated, $topUp->fresh()->status);
+        $this->assertSame(5000, StoreBalanceEntry::query()->sole()->amount);
+        $this->assertDatabaseCount('store_balance_compensations', 1);
     }
 
     private function topUp(): StoreBalanceTopUp

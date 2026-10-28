@@ -14,6 +14,71 @@ Automated release evidence is recorded in
 [`docs/sakurupiah-release-evidence.md`](sakurupiah-release-evidence.md). This
 runbook and the evidence document never contain production credentials.
 
+## Store Balance partial status evidence (#665)
+
+The [official status example](https://sakurupiah.id/developers/api-dokumentasi)
+contains only `data[0].status`; absent merchant reference and amounts are normal
+for that documented shape. They are not proof of an identity conflict, nor
+authorization to credit. The existing [sanitized sandbox observations](agents/sakurupiah-api-research.md#2026-10-13--fee-payer-and-reported-amount-semantics-live-sandbox-qrisc)
+show history `amount` as the final payable total in buyer-fee mode. This is
+contract evidence, not a new production qualification.
+
+For an unresolved, nonterminal top-up, reconciliation first rejects every
+explicit conflicting status field. Successful but insufficient status triggers
+one authenticated history lookup through the existing bounded client, outside
+money transactions, with `mechant=1`, the stored `trx_id` and `merchant_ref`.
+Exactly one returned row must independently match both references, the original
+channel snapshot, successful status and the exact recorded invoice total.
+Explicit currency, fee and total conflicts also fail closed. The request-ID
+fallback is correlation only; it never counts as a returned transaction ID.
+History filters alone are not binding evidence.
+
+Only the original requested top-up amount reaches the existing settlement
+boundary and global receipt claim. An invoice with credit 250000, fee 2100 and
+payable total 252100 credits 250000, never 252100. This change does not alter
+receipt namespaces, source claims, compensation reservations or money locks.
+
+`reconciliation_evidence` events retain the source (`status` or `history`) and
+`missing_fields` / `conflicting_fields` names, without copying Customer data,
+credentials or QR values into diagnostics. Review reasons distinguish
+`provider_evidence_missing`, `provider_evidence_ambiguous`,
+`provider_evidence_unusable` and `provider_identity_mismatch`. A provider lookup
+failure leaves the existing target unresolved and eligible for a later check;
+an empty/ambiguous/conflicting authoritative result enters Owner review.
+
+ADR-0011 policy is unchanged: `invalid_provider_result` and `expired` are not
+automatically reopened. Resolve ambiguous money only through the existing
+Owner compensation boundary after verifying attribution. Never reset a status,
+edit a historical invoice, or replay credit to force recovery. `paid` and
+`compensated` remain closed, including when compensation commits while a status
+lookup is in flight. Incident top-up #71 is already compensated and must not
+receive another credit.
+
+Regression entry points: `SakurupiahTopUpChannelTest`,
+`Telegram/StoreBalanceTopUpSakurupiahRailTest`,
+`Unit/Services/Sakurupiah/SakurupiahDtoTest`, and the
+`sakurupiahResolutionRaces` cases in `StoreBalancePostgresConcurrencyTest`.
+Framework reference checked through Context7: Laravel 13
+[transactions and retries](https://github.com/laravel/docs/blob/13.x/database.md)
+and [pessimistic locking](https://github.com/laravel/docs/blob/13.x/queries.md).
+
+Local verification on 2026-10-28: the six focused SQLite suites passed
+103 tests / 546 assertions. On clean disposable PostgreSQL 16 databases,
+`StoreBalancePostgresConcurrencyTest` passed 23 / 337 and the two
+`ExternalMoneyReceipt*PostgresConcurrencyTest` suites passed 8 / 65. These
+include four-worker history/settlement and Owner-compensation races; provider
+lookup asserts transaction depth zero. Targeted Pint and PHP LSP diagnostics
+passed.
+
+A standalone application bootstrap ran the actual
+`sakurupiah:reconcile-balance-top-ups` command against sanitized HTTP fixtures.
+The bound-history case produced one 250000 credit/projection from a 252100
+invoice; status-only with empty history produced zero entries and
+`provider_evidence_missing`. Both full-history ledger inspections were
+consistent. A second command pass issued zero provider requests and changed
+neither result. This is local fixture evidence, not live provider acceptance,
+CI, deployment, or authorization to alter incident #71.
+
 ## Owner-selected QRIS channel
 
 After the channel-selection migration, the default for new Sakurupiah checkouts

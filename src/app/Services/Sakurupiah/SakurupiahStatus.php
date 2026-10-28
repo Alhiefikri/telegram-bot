@@ -51,6 +51,7 @@ final readonly class SakurupiahStatus
         ?string $checkoutUrl = null,
         ?int $merchantFee = null,
         ?string $currency = null,
+        public bool $transactionIdReturned = true,
     ) {
         $this->trxId = self::text($trxId, 'transaction ID', 255);
         $this->status = $status;
@@ -70,8 +71,8 @@ final readonly class SakurupiahStatus
 
     /**
      * Accept either a response envelope or a single provider data row.
-     * The requested transaction ID is the authoritative identity when the
-     * status endpoint omits trx_id from its response row.
+     * The requested transaction ID correlates the lookup but does not prove
+     * that the provider independently returned the transaction identity.
      *
      * @param  array<mixed>  $payload
      */
@@ -107,6 +108,7 @@ final readonly class SakurupiahStatus
             currency: SakurupiahPayloadReader::optionalString($data, 'currency', 16),
             qr: SakurupiahPayloadReader::optionalString($data, 'qr', 1_000_000),
             checkoutUrl: self::optionalCheckoutUrl($data),
+            transactionIdReturned: $responseTrxId !== null,
         );
     }
 

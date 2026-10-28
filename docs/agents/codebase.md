@@ -679,6 +679,17 @@ provider-neutral dan tidak pernah memindahkan saldo: `StoreBalanceTopUpService`
 tetap pemilik transaksi top-up, urutan lock, validasi settlement evidence,
 transisi status, dan satu identity kredit ledger `balance_top_up:<id>:credit`.
 
+For Sakurupiah partial successful status (#665), the rail records sanitized
+missing/conflicting field diagnostics before review. Missing independently
+returned identity/channel/total evidence requires authenticated merchant-scoped
+history outside DB transactions; exactly one successful row must bind both
+stored references, channel snapshot and final payable total. A requested-ID
+fallback is not independently returned identity. Explicit status conflicts
+cannot be repaired by history. Credit still uses the original amount, with the
+existing `StoreBalanceTopUpService` receipt/ledger boundary and lock order.
+Sakurupiah review/expired recovery remains Owner compensation under ADR-0011;
+paid/compensated never reopen. See the [partial-evidence runbook](../runbook-sakurupiah-payment.md#store-balance-partial-status-evidence-665).
+
 Store Balance checkout memakai `StoreBalanceCheckoutIntent` dan
 `StoreBalanceCheckoutPaymentPreparation` sebagai rail internal IDR penuh.
 `OrderCheckoutService` menjaga satu transaksi bersama: callback Telegram tidak

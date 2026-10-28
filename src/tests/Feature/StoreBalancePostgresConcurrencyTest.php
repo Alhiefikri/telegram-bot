@@ -39,6 +39,7 @@ use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderStateMachine;
+use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\StoreBalance\StoreBalanceFundingIntentInput;
 use App\Services\StoreBalance\StoreBalanceFundingIntentService;
@@ -55,6 +56,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use RuntimeException;
 use Tests\TestCase;
@@ -590,6 +592,93 @@ final class StoreBalancePostgresConcurrencyTest extends TestCase
             ->where('kind', StoreBalanceEntryKind::OwnerCompensationCredit)
             ->where('source_id', 'top_up:'.$topUp->id)
             ->count());
+    }
+
+    #[DataProvider('sakurupiahResolutionRaces')]
+    public function test_postgres_sakurupiah_partial_history_and_compensation_share_one_resolution(bool $compensate): void
+    {
+        $this->requirePostgresConcurrency();
+        Queue::fake();
+        $topUp = $this->createSettlementTopUp(45665, 'sakurupiah-partial-'.bin2hex(random_bytes(8)));
+        $topUp->forceFill([
+            'provider' => PaymentProvider::SAKURUPIAH,
+            'sakurupiah_channel' => 'QRIS',
+            'status' => StoreBalanceTopUpStatus::RecoveryPending,
+            'amount' => 250000,
+            'provider_fee' => 2100,
+            'provider_total_payment' => 252100,
+        ])->save();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'issue665-fixture',
+            'sandbox_api_key' => 'issue665-fixture-secret',
+            'sandbox_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+            'sandbox_return_url' => 'https://store.example.test/shop/orders',
+            'sandbox_allowed_hosts' => ['sakurupiah.id'],
+            'sandbox_callback_allowed_hosts' => ['store.example.test'],
+            'sandbox_return_allowed_hosts' => ['store.example.test'],
+        ]));
+        Http::fake(function ($request) use ($topUp) {
+            $this->assertSame(0, DB::transactionLevel(), 'Provider lookup must not hold money locks.');
+            if (str_ends_with($request->url(), '/status-transaction.php')) {
+                return Http::response(['status' => '200', 'data' => [['status' => 'berhasil']]]);
+            }
+
+            return Http::response(['status' => '200', 'data' => [[
+                'trx_id' => $topUp->provider_reference,
+                'merchant_ref' => $topUp->merchant_ref,
+                'payment_kode' => 'QRIS',
+                'amount' => '252100',
+                'status' => 'berhasil',
+            ]]]);
+        });
+
+        $results = $this->runConcurrentWorkers(4, function (int $index) use ($topUp, $owner, $compensate): string {
+            if ($compensate && $index === 0) {
+                try {
+                    app(StoreBalanceOwnerCompensationService::class)->release(
+                        $topUp->id, $owner, $topUp->provider_reference, 'Sanitized Sakurupiah race fixture.',
+                    );
+                } catch (StoreBalanceCompensationRejected $exception) {
+                    if ($exception->reason !== 'already_paid') {
+                        throw $exception;
+                    }
+                }
+            } else {
+                if ($index === 2) {
+                    app(SakurupiahCallbackProcessor::class)->processCallback([
+                        'trx_id' => $topUp->provider_reference,
+                        'merchant_ref' => $topUp->merchant_ref,
+                        'status' => 'berhasil',
+                        'status_kode' => 1,
+                    ]);
+                }
+                app(StoreBalanceTopUpService::class)->reconcile(StoreBalanceTopUp::findOrFail($topUp->id));
+            }
+
+            return 'resolved';
+        });
+
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(1, StoreBalanceEntry::whereHas('account', fn ($query) => $query->where('customer_id', $topUp->customer_id))->count(), json_encode([
+            'status' => $topUp->fresh()->status,
+            'error' => $topUp->fresh()->provider_create_last_error,
+            'observations' => StoreBalanceTopUpEvent::where('store_balance_top_up_id', $topUp->id)->pluck('raw_payload'),
+        ], JSON_THROW_ON_ERROR));
+        $this->assertProjectionMatchesLedger($topUp->customer, 250000);
+        $terminal = $topUp->fresh()->status;
+        $this->assertContains($terminal, [StoreBalanceTopUpStatus::Paid, StoreBalanceTopUpStatus::Compensated]);
+        app(StoreBalanceTopUpService::class)->reconcile($topUp);
+        $this->assertSame($terminal, $topUp->fresh()->status);
+        $this->assertSame(1, StoreBalanceEntry::whereHas('account', fn ($query) => $query->where('customer_id', $topUp->customer_id))->count());
+        $this->assertProjectionMatchesLedger($topUp->customer, 250000);
+    }
+
+    public static function sakurupiahResolutionRaces(): array
+    {
+        return ['parallel reconciliation' => [false], 'owner compensation race' => [true]];
     }
 
     public function test_postgres_competing_debits_never_commit_a_negative_balance(): void

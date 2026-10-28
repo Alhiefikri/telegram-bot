@@ -12,12 +12,14 @@ use App\Services\Sakurupiah\SakurupiahChannelPolicy;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahCreatePreRequestException;
 use App\Services\Sakurupiah\SakurupiahFee;
+use App\Services\Sakurupiah\SakurupiahHistoryFilter;
 use App\Services\Sakurupiah\SakurupiahInvoice;
 use App\Services\Sakurupiah\SakurupiahInvoiceIntegrityException;
 use App\Services\Sakurupiah\SakurupiahPayableInvoice;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahQrisImage;
+use App\Services\Sakurupiah\SakurupiahSchemaException;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahStatusUnavailableException;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
@@ -195,10 +197,80 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
             return StoreBalanceTopUpReconciliation::state(StoreBalanceTopUpOutcome::RecoveryPending);
         }
 
-        if (! $this->statusMatchesTopUp($topUp, $status)) {
+        $diagnostics = $this->statusDiagnostics($topUp, $status);
+        $this->recordObservation($topUp, $status, $diagnostics, 'status');
+        if ($diagnostics['conflicting_fields'] !== []) {
             $this->reviews->mark($topUp, 'provider_identity_mismatch', self::STATE_OUTCOME_UNKNOWN);
 
             return StoreBalanceTopUpReconciliation::state(StoreBalanceTopUpOutcome::InvalidProviderResult);
+        }
+
+        if ($status->isSuccessful() && $diagnostics['missing_fields'] !== []) {
+            try {
+                $history = $this->provider->transactionHistory(new SakurupiahHistoryFilter(
+                    mechant: 1,
+                    trxId: (string) $topUp->provider_reference,
+                    merchantRef: (string) $topUp->merchant_ref,
+                ));
+            } catch (Throwable $exception) {
+                report($exception);
+
+                return StoreBalanceTopUpReconciliation::state(StoreBalanceTopUpOutcome::RecoveryPending);
+            }
+
+            if (count($history) !== 1) {
+                $this->reviews->mark($topUp, count($history) === 0 ? 'provider_evidence_missing' : 'provider_evidence_ambiguous', self::STATE_OUTCOME_UNKNOWN);
+
+                return StoreBalanceTopUpReconciliation::state(StoreBalanceTopUpOutcome::InvalidProviderResult);
+            }
+
+            $item = $history[0];
+            try {
+                $historyStatus = $item->sanitizedPayload === [] ? null
+                    : SakurupiahStatus::fromPayload($item->sanitizedPayload, $item->trxId);
+            } catch (SakurupiahSchemaException $exception) {
+                $this->reviews->mark($topUp, 'provider_evidence_unusable', self::STATE_OUTCOME_UNKNOWN);
+
+                return StoreBalanceTopUpReconciliation::state(StoreBalanceTopUpOutcome::InvalidProviderResult);
+            }
+            $historyConflicts = $historyStatus === null ? []
+                : $this->statusDiagnostics($topUp, $historyStatus)['conflicting_fields'];
+            if ($historyStatus !== null && ! $historyStatus->isSuccessful()) {
+                $historyConflicts[] = 'status';
+            }
+            $status = new SakurupiahStatus(
+                trxId: $item->trxId,
+                status: $item->status,
+                merchantRef: $item->merchantRef,
+                paymentCode: $item->paymentCode,
+                amount: $item->amount,
+                occurredAt: $item->occurredAt,
+                expiresAt: $item->expiresAt,
+                currency: $item->currency,
+                // History amount is the final payable total, not ledger credit.
+                total: $item->amount,
+                sanitizedPayload: [
+                    'status' => $item->statusValue(),
+                    'payment_kode' => $item->paymentCode,
+                    'amount' => $item->amountValue(),
+                    'total' => $item->amountValue(),
+                    'currency' => $item->currency,
+                ],
+            );
+            $diagnostics = $this->statusDiagnostics($topUp, $status);
+            $diagnostics['conflicting_fields'] = array_values(array_unique([
+                ...$historyConflicts,
+                ...$diagnostics['conflicting_fields'],
+            ]));
+            if (! $status->isSuccessful()) {
+                $diagnostics['conflicting_fields'][] = 'status';
+            }
+            $this->recordObservation($topUp, $status, $diagnostics, 'history');
+            if ($diagnostics['conflicting_fields'] !== [] || $diagnostics['missing_fields'] !== []) {
+                $this->reviews->mark($topUp, $diagnostics['conflicting_fields'] !== [] ? 'provider_identity_mismatch' : 'provider_evidence_missing', self::STATE_OUTCOME_UNKNOWN);
+
+                return StoreBalanceTopUpReconciliation::state(StoreBalanceTopUpOutcome::InvalidProviderResult);
+            }
         }
 
         $event = $this->events->record(
@@ -230,6 +302,9 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
         }
 
         if ($status->isPending()
+            && $status->transactionIdReturned
+            && $status->merchantRef !== null
+            && $status->paymentCode !== null
             && ! $this->classify($topUp)->isPayable()
             && $status->qrPayload() !== null
             && $status->totalValue() !== null) {
@@ -499,7 +574,11 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
                 ->first();
-            if ($locked === null || $locked->status === StoreBalanceTopUpStatus::Paid) {
+            if ($locked === null || in_array($locked->status, [
+                StoreBalanceTopUpStatus::Paid,
+                StoreBalanceTopUpStatus::Compensated,
+                StoreBalanceTopUpStatus::InvalidProviderResult,
+            ], true)) {
                 return;
             }
 
@@ -511,37 +590,58 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
         }, 5);
     }
 
-    private function statusMatchesTopUp(StoreBalanceTopUp $topUp, SakurupiahStatus $status): bool
+    /** @return array{missing_fields: list<string>, conflicting_fields: list<string>} */
+    private function statusDiagnostics(StoreBalanceTopUp $topUp, SakurupiahStatus $status): array
     {
-        if ($status->transactionId() !== (string) $topUp->provider_reference) {
-            return false;
+        $missing = [];
+        $conflicting = [];
+        $fields = [
+            'trx_id' => [$status->transactionIdReturned ? $status->transactionId() : null, (string) $topUp->provider_reference],
+            'merchant_ref' => [$status->merchantRef, (string) $topUp->merchant_ref],
+            'payment_kode' => [$status->paymentCode, SakurupiahChannelPolicy::forTopUp($topUp)],
+        ];
+        foreach ($fields as $field => [$actual, $expected]) {
+            if ($actual === null) {
+                $missing[] = $field;
+            } elseif ($actual !== $expected) {
+                $conflicting[] = $field;
+            }
         }
-
-        if (trim((string) $status->merchantRef) !== trim((string) $topUp->merchant_ref)) {
-            return false;
+        foreach ([
+            'currency' => [$status->currency, 'IDR'],
+            'merchant_fee' => [$status->merchantFee(), $this->merchantFee()],
+            'fee' => [$status->feeValue(), $topUp->provider_fee === null ? null : (int) $topUp->provider_fee],
+        ] as $field => [$actual, $expected]) {
+            if ($actual !== null && $expected !== null && $actual !== $expected) {
+                $conflicting[] = $field;
+            }
         }
-
-        if ($status->paymentCode !== null
-            && $status->paymentCode !== SakurupiahChannelPolicy::forTopUp($topUp)) {
-            return false;
-        }
-        if ($status->currency !== null && $status->currency !== 'IDR') {
-            return false;
-        }
-
-        if ($status->merchantFee() !== null && $status->merchantFee() !== $this->merchantFee()) {
-            return false;
+        $total = $topUp->provider_total_payment;
+        if ($total === null || ($status->totalValue() === null && $status->amountValue() !== $total)) {
+            $missing[] = 'total';
         }
         if ($status->amountValue() !== null
-            && ! in_array($status->amountValue(), [(int) $topUp->amount, (int) $topUp->provider_total_payment], true)) {
-            return false;
+            && ! in_array($status->amountValue(), [(int) $topUp->amount, $total], true)) {
+            $conflicting[] = 'amount';
         }
-        if ($status->totalValue() !== null && $topUp->provider_total_payment !== null
-            && $status->totalValue() !== (int) $topUp->provider_total_payment) {
-            return false;
+        if ($status->totalValue() !== null
+            && (($total !== null && $status->totalValue() !== $total) || $status->totalValue() < (int) $topUp->amount)) {
+            $conflicting[] = 'total';
         }
 
-        return $status->totalValue() === null || $status->totalValue() >= (int) $topUp->amount;
+        return ['missing_fields' => $missing, 'conflicting_fields' => $conflicting];
+    }
+
+    private function recordObservation(StoreBalanceTopUp $topUp, SakurupiahStatus $status, array $diagnostics, string $source): void
+    {
+        $this->events->record(
+            $topUp,
+            PaymentProvider::SAKURUPIAH,
+            'reconciliation_evidence',
+            $status->statusValue(),
+            ['source' => $source, ...$diagnostics],
+            (string) $topUp->provider_reference,
+        );
     }
 
     private function evidence(
