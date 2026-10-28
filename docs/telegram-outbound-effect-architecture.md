@@ -614,3 +614,167 @@ mark fulfillment complete while skipping a pending Auth Token.
 Telegram API reference checked through Context7:
 <https://core.telegram.org/bots/api#senddocument> (multipart uploads, caption
 limit of 1024 characters, and content-protection behavior).
+
+## Manual notification retention evidence (#676)
+
+`telegram:notification-retention-dry-run` implements the read-only contract from
+[#675](https://github.com/Alhiefikri/telegram-bot/issues/675#issuecomment-6466168454).
+It does not archive, purge, compact payloads, repair projections, materialize
+effects, dispatch jobs or alter recovery cadence. There is no mutation option,
+new retention schema, scheduler, ENV setting or second ledger.
+
+Example for a **disposable/local database**, from `src/`:
+
+```bash
+php artisan telegram:notification-retention-dry-run \
+  --family=effects --policy-version=notification-retention-s09-v1 \
+  --as-of=2026-10-28T12:00:00+07:00 --timezone=Asia/Jakarta \
+  --horizon=90 --json
+```
+
+`--as-of` and `--timezone` are mandatory, including the numeric offset matching
+the application's IANA timezone. Horizon must explicitly be 30, 90 or 180 days.
+These are sensitivity scenarios, not approved retention periods.
+
+### Roots, classification and evidence limits
+
+| `--family` | Root table |
+| --- | --- |
+| `effects` | `telegram_outbound_effects`, including financial/credential and unsupported families |
+| `supplier-health` | `supplier_health_events`, without inspecting message text |
+| `stock-events` / `stock-recipients` | `stock_notification_events` / `stock_notification_recipients` |
+| `price-events` / `price-recipients` | `product_price_change_events` / `product_price_change_notification_recipients` |
+| `broadcasts` / `broadcast-recipients` | `telegram_broadcasts` / `telegram_broadcast_recipients` |
+
+The classifier reads scalar allowlists, not model relations or decrypted
+payloads. It follows source/parent, audience, all discovered effect versions,
+indexed group membership and incoming/outgoing supersedes references under a
+shared dependency budget. Stock movement completion and price Store Channel
+projection are included. Missing source/effect, incomplete audience/cursor,
+stale projection, unsupported state/family, pending/sending/lease, ambiguity
+and manual review remain protected. Failed/manual-retry determination calls
+`TelegramOutboundEffectPolicy`; it does not copy attempt limits or error-code
+semantics. Paused or dependency-blocked work cannot become eligible simply
+because it is not currently dispatchable.
+
+**Every root is currently protected.** The schema has no complete, indexed
+reverse metadata/audit/hold proof, qualified archive evidence, or structured
+SupplierHealthEvent episode discriminator. Consequently `reference_unproven`,
+`hold_unproven`, `archive_unverified` and `age_unproven` remain explicit.
+No operator assertion can override them; this command accepts no evidence
+override. This is intentional fail-closed classification, not an archive
+qualification tool. `state_only_terminal` is intermediate ledger/source
+classification, never full archive eligibility. `archive_review_candidates`
+and `delete_candidates` are zero. Existing sources remain replayable.
+
+`age_bucket` compares the latest bounded observed source/child/delivery/review
+activity against the scenario cutoff, inclusive at exactly the cutoff.
+Missing/inconsistent/future timestamps make this bucket unproven. Even a valid
+bucket does not prove the age of untraced audit/reference activity, hence the
+separate `age_unproven` exclusion. Supplier health/price announcements remain
+unclassified and episode-unresolved; message parsing is not evidence.
+
+### Budgets, cursor and exit codes
+
+Hard maxima/defaults: `--page=100`, `--roots=1000`, `--dependencies=1000`,
+`--per-root=200`, `--seconds=10`, `--details=20`. Options may only lower caps;
+dependency caps must be at least two. Dependency reads reserve one slot inside
+the remaining hard cap for a truncation probe (cap+1 relative to usable rows).
+Repeated dependency observations count again; there is no hidden free graph
+traversal. Cap exhaustion reports an exclusion and exit 2, never a candidate.
+
+The private DB connection disables query listeners/logging and uses PostgreSQL
+session read-only plus short repeatable-read/read-only transactions per page.
+Connection timeout is one second; statements are limited to the smaller of
+two seconds and remaining scan time, lock wait to 100 ms, idle-in-transaction
+to two seconds. SQLite uses `query_only`, but is not PostgreSQL locking proof.
+The scan timer includes connection setup, stop-key discovery and dependency
+queries, not framework startup. SELECT still takes ordinary locks and consumes
+I/O. This is not zero-cost or a production resource-saving claim.
+
+Root reads use PK order and LIMIT **before** state/family/age classification.
+The observed stop key is a bounded descending-PK lookup. No OFFSET, global
+COUNT/GROUP BY, full-history anti-join or payload-size aggregation is used.
+Dependency ordering follows existing indexes; the graph itself is not loaded
+without a cap. Closure too large or references without a bounded path remain
+unproven.
+
+Exit codes: **0** for a completed bounded window, **2** for partial/budget/
+statement/lock timeout, **1** for invalid input or other sanitized error.
+`roots_visited` counts fetched root rows, including an interrupted page;
+`roots_evaluated` counts published evaluations. A failed page never advances
+its cursor or publishes its staged classifications. Dependency-truncated
+roots may advance only as protected exclusions with `partial=true`.
+
+Public JSON/text omit raw PK/cursor/resume data. For restricted operator
+output, add `--operator-artifact` and store stdout with owner-only permissions.
+The `operator_artifact` contains cursor before/after, observed stop key and a
+base64 resume manifest. Resume by repeating family/policy/as-of/timezone/horizon
+and passing `--resume=<manifest>` instead of `--after`/`--stop`. A starting
+window may instead supply validated PK `--after` and inclusive `--stop`.
+The manifest is structured/versioned context, not signed authority, evidence
+or a database snapshot. Do not publish it in issues or public reports.
+
+Cursor means the last evaluated root, not the last candidate. UUID ordering
+does not represent insertion time. Pages/runs are observational under concurrent
+inserts, workers and review; a fresh sweep is needed for earlier-key insertions
+or changed roots. `partial=false` does not certify all production history.
+Reason counts count each reason once per evaluated root, overlap across reasons,
+and are independent of the capped details. Details contain per-run opaque
+correlation, allowlisted family/state, age bucket, classification and reasons.
+Exceptions, SQL bindings, raw keys, message/chat/credential content and metadata
+are not rendered or logged by the scanner.
+
+### Local verification and approval boundary
+
+Implementation evidence used Laravel **13.34.0**, existing migrations and
+disposable PostgreSQL **16.15**. A SELECT-only, non-superuser role with default
+read-only enabled executed the actual command against 100,000 ledger rows.
+The complete table COPY-data checksum was unchanged before/after dry-run.
+The actual CLI evaluated 1,000 roots within the 1,000 dependency cap in one
+observed 2,041 ms run, exiting 2 rather than claiming a completed database.
+A shared-source closure hit 200 dependency rows after one protected evaluation.
+The root-cap scenario evaluated exactly 37 roots with page size 10 and detail
+cap 4. These timings describe local fixtures, not production.
+
+A source-view probe asserted transaction read-only, statement/lock/idle
+settings, then slept: actual mid-page cancellation returned sanitized
+`query_timeout` after about 2,042 ms, with 100 roots visited, zero evaluated
+and unchanged cursor. Lowering the wall budget to one second cancelled after
+about 1,002 ms. An AccessExclusive root-table lock returned `lock_timeout`
+after about 150 ms without advancing the cursor. A concurrent row-level
+worker/review transaction did not block the ten-root scan (about 52 ms);
+after its rollback the complete COPY-data checksum still matched. HTTP and
+queue fakes observed zero sends/jobs; the Redis connection expectation
+observed no connection.
+
+Disposable EXPLAIN ANALYZE showed PK, group, supersedes and source-index paths
+with bounded actual rows and no rows removed by filter on the 100,000-row
+fixture. No production EXPLAIN ANALYZE, scan, backup, deploy or CI/CD was run.
+`NotificationRetentionDryRunTest` preserves deterministic regression coverage
+for fail-closed state/age/audience/Store Channel/lineage, redaction, caps,
+resume, query failure and ledger review/strict receipt ordering after dry-run.
+
+Context7 was queried for Laravel 13
+[keyset chunking/grouped predicates](https://github.com/laravel/docs/blob/13.x/queries.md)
+and PostgreSQL 16 [read-only transactions](https://www.postgresql.org/docs/16/sql-set-transaction.html)
+and [statement/lock/idle timeouts](https://www.postgresql.org/docs/16/runtime-config-client.html).
+The report labels S01's 28 October 14:00-14:05 WIB baseline as historical;
+SupplierHealthEvent size/population remains unmeasured, and runtime revision
+is `unavailable` unless the application's revision configuration supplies it.
+Local source is not evidence of the production image revision.
+
+Recommendation: review this implementation before separately authorizing any
+bounded production dry-run. Purge, compaction and moving rows out of the active
+database remain **NO-GO**. No production savings or qualified archive/restore
+is claimed. Reuse [the existing restore protocol](runbook-balance-restore-rollback.md)
+and encrypted backup tooling; archive copies do not replace paired APP_KEY,
+offsite backup/WAL, RPO/RTO approval or isolated restore without blind resend.
+
+Final focused regression run: **152 tests / 1,683 assertions passed** across
+retention, operator review, broadcast, price notification, balance receipt pause,
+owned Customer API Order history, ledger protocol and lifecycle effects.
+Pint and PHP language-server diagnostics passed for the new implementation.
+The final current-state PostgreSQL smoke executed all eight root commands and
+again preserved the complete COPY-data checksum with zero HTTP/jobs/Redis
+connections under the probe guards.
