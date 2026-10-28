@@ -20,6 +20,7 @@ class ProductPriceChangeEvent extends Model
             'old_usdt_price_amount' => 'integer',
             'new_usdt_price_amount' => 'integer',
             'recipients_materialized_at' => 'datetime',
+            'recipient_effect_cursor' => 'integer',
             'store_channel_sent_at' => 'datetime',
             'store_channel_failed_at' => 'datetime',
             'store_channel_attempts' => 'integer',

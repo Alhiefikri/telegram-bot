@@ -16,6 +16,7 @@ use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
 use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
 use App\Services\Telegram\CheckoutInstructionDeliveryPipeline;
+use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\SalesProofDeliveryPipeline;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramBroadcastService;
@@ -493,6 +494,7 @@ class RecoverTelegramOutboundEffects extends Command
                     ->orderBy('id');
                 $pages->load('price_change_events', $priceChangeEvents, $pageLimit)
                     ->each(function ($event) use (&$dispatched): void {
+                        app(ProductPriceChangeNotificationService::class)->recoverMissingRecipientEffects($event);
                         SendProductPriceChangeNotifications::dispatch($event->id, now()->toISOString())
                             ->onQueue('telegram-broadcast');
                         $dispatched++;

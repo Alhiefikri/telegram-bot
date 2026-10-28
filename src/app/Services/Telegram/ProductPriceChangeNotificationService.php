@@ -14,6 +14,7 @@ use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Storefront\StorefrontUrl;
 use App\Support\DogfoodTiming;
 use App\Support\Money;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -86,7 +87,7 @@ class ProductPriceChangeNotificationService
         }
 
         $event = ProductPriceChangeEvent::query()->findOrFail($eventId);
-        $this->materializeEvent($event);
+        $this->materializeEvent($event, max(1, $batchSize));
 
         $storeChannelOutcome = $this->sendStoreChannelEffect($event);
         $effects = $this->dueRecipientEffects($event->id, $batchSize);
@@ -104,7 +105,10 @@ class ProductPriceChangeNotificationService
             processed: $effects->count(),
             transientFailures: $transientFailures,
             terminalFailures: $terminalFailures,
-            hasMore: $transientFailures > 0 || $this->hasPendingEffects($event->id),
+            hasMore: $transientFailures > 0
+                || ProductPriceChangeNotificationRecipient::query()->where('event_id', $event->id)
+                    ->where('id', '>', $event->recipient_effect_cursor)->exists()
+                || $this->hasPendingEffects($event->id),
         );
     }
 
@@ -121,20 +125,21 @@ class ProductPriceChangeNotificationService
         return $this->sendEffect($event, $effect, true);
     }
 
-    private function materializeEvent(ProductPriceChangeEvent $event): void
+    private function materializeEvent(ProductPriceChangeEvent $event, ?int $limit = null): void
     {
-        if ($event->recipients_materialized_at === null) {
-            Customer::query()
-                ->whereNotNull('telegram_id')
-                ->select(['id', 'telegram_id', 'locale'])
-                ->orderBy('id')
-                ->chunkById(200, function ($customers) use ($event): void {
-                    DB::transaction(function () use ($customers, $event): void {
+        DB::transaction(function () use ($event, $limit): void {
+            $locked = ProductPriceChangeEvent::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            if ($locked->recipients_materialized_at === null) {
+                Customer::query()
+                    ->whereNotNull('telegram_id')
+                    ->select(['id', 'telegram_id', 'locale'])
+                    ->orderBy('id')
+                    ->chunkById(200, function ($customers) use ($locked): void {
                         $now = now();
                         $rows = $customers
                             ->filter(fn (Customer $customer): bool => trim((string) $customer->telegram_id) !== '')
                             ->map(fn (Customer $customer): array => [
-                                'event_id' => $event->id,
+                                'event_id' => $locked->id,
                                 'customer_id' => $customer->id,
                                 'telegram_id' => (string) $customer->telegram_id,
                                 'locale' => $this->locale->code($customer),
@@ -143,28 +148,54 @@ class ProductPriceChangeNotificationService
                             ])
                             ->values()
                             ->all();
-
                         if ($rows !== []) {
                             ProductPriceChangeNotificationRecipient::query()->insertOrIgnore($rows);
                         }
-                    }, 5);
-                });
+                    });
+                $locked->forceFill(['recipients_materialized_at' => now()])->save();
+            }
 
-            $event->forceFill(['recipients_materialized_at' => now()])->save();
-        }
+            do {
+                $recipients = ProductPriceChangeNotificationRecipient::query()
+                    ->where('event_id', $locked->id)
+                    ->where('id', '>', $locked->recipient_effect_cursor)
+                    ->orderBy('id')
+                    ->limit($limit ?? 200)->get();
+                foreach ($recipients as $recipient) {
+                    $this->materializeRecipientEffect($locked, $recipient);
+                }
+                if ($recipients->isNotEmpty()) {
+                    // Commit the cursor with its effects, never ahead of them.
+                    $locked->forceFill(['recipient_effect_cursor' => $recipients->last()->id])->save();
+                }
+            } while ($limit === null && $recipients->count() === 200);
+            $this->materializeStoreChannelEffect($locked);
+            $event->setRawAttributes($locked->getAttributes(), true);
+        }, 5);
+    }
 
-        ProductPriceChangeNotificationRecipient::query()
-            ->where('event_id', $event->id)
-            ->orderBy('id')
-            ->chunkById(200, function ($recipients) use ($event): void {
-                DB::transaction(function () use ($recipients, $event): void {
-                    foreach ($recipients as $recipient) {
-                        $this->materializeRecipientEffect($event, $recipient);
-                    }
-                }, 5);
+    public function recoverMissingRecipientEffects(ProductPriceChangeEvent $event): void
+    {
+        DB::transaction(function () use ($event): void {
+            $locked = ProductPriceChangeEvent::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $firstMissing = $this->missingRecipientEffects($locked->id)->min('id');
+            if ($firstMissing !== null && $firstMissing <= $locked->recipient_effect_cursor) {
+                $locked->forceFill(['recipient_effect_cursor' => $firstMissing - 1])->save();
+            }
+        }, 5);
+    }
+
+    private function missingRecipientEffects(int $eventId): Builder
+    {
+        return ProductPriceChangeNotificationRecipient::query()
+            ->where('event_id', $eventId)
+            ->whereNotExists(function ($effects): void {
+                $effects->selectRaw('1')
+                    ->from('telegram_outbound_effects')
+                    ->where('source_type', ProductPriceChangeNotificationRecipient::class)
+                    ->where('effect_type', TelegramOutboundEffectType::PriceChangeNotificationRecipient->value)
+                    ->whereRaw('source_id = CAST(product_price_change_notification_recipients.id AS TEXT)');
             });
-
-        $this->materializeStoreChannelEffect($event);
     }
 
     private function materializeRecipientEffect(

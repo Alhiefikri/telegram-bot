@@ -41,6 +41,107 @@ class ProductPriceChangeNotificationTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_missing_effect_recovery_is_bounded_and_preserves_snapshot_and_terminal_effects(): void
+    {
+        config()->set('services.telegram.token', 'local-fixture');
+        Queue::fake();
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+        Customer::factory()->count(7)->sequence(fn ($sequence) => [
+            'telegram_id' => 9500 + $sequence->index,
+            'locale' => 'en',
+        ])->create();
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0, 'is_active' => true]);
+        $service = app(ProductPriceChangeNotificationService::class);
+        $event = $service->createEventForCommittedUpdate(
+            $product,
+            ['price_amount' => 30000, 'usdt_price_amount' => null],
+            ['price_amount' => 25000, 'usdt_price_amount' => null],
+        );
+        $effects = TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_PRICE_CHANGE_NOTIFICATION)
+            ->orderByRaw('CAST(source_id AS BIGINT)')->get();
+        $sent = $effects[0];
+        $unknown = $effects[1];
+        $sent->forceFill(['state' => TelegramOutboundEffectState::Sent, 'sent_at' => now(), 'next_attempt_at' => null])->save();
+        $unknown->forceFill(['state' => TelegramOutboundEffectState::Unknown, 'unknown_at' => now(), 'next_attempt_at' => null])->save();
+        TelegramOutboundEffect::query()->whereIn('id', $effects->slice(2)->modelKeys())->delete();
+        Customer::query()->update(['locale' => 'id']);
+        Customer::factory()->create(['telegram_id' => 9599]);
+        $this->artisan('telegram:recover-outbound')->assertSuccessful();
+
+        $first = $service->processBatch($event->id, 2);
+
+        $this->assertSame(2, $first->processed);
+        $this->assertTrue($first->hasMore);
+        $this->assertSame(4, TelegramOutboundEffect::query()->count());
+        // Dropping the continuation must not strand the remaining snapshot.
+        $this->artisan('telegram:recover-outbound')->assertSuccessful();
+        Queue::assertPushed(SendProductPriceChangeNotifications::class, fn ($job) => $job->eventId === $event->id);
+        $second = $service->processBatch($event->id, 2);
+        $last = $service->processBatch($event->id, 2);
+        $replay = $service->processBatch($event->id, 2);
+
+        $this->assertTrue($second->hasMore);
+        $this->assertFalse($last->hasMore);
+        $this->assertSame(1, $last->processed);
+        $this->assertSame(0, $replay->processed);
+        $this->assertSame(7, $event->recipients()->count());
+        $this->assertSame(7, TelegramOutboundEffect::query()->count());
+        $this->assertSame(TelegramOutboundEffectState::Sent, $sent->fresh()->state);
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $unknown->fresh()->state);
+        $messages = Http::recorded(fn ($request) => str_ends_with($request->url(), '/sendMessage'));
+        $this->assertSame(['9502', '9503', '9504', '9505', '9506'], $messages->map(fn ($pair) => (string) $pair[0]['chat_id'])->all());
+        foreach ($messages as [$request]) {
+            $this->assertStringContainsString('Price Drop', $request['text']);
+        }
+    }
+
+    public function test_interrupted_materialization_rolls_back_only_the_batch_and_recovers_all_recipients(): void
+    {
+        config()->set('services.telegram.token', 'local-fixture');
+        Http::fake(['https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+        Customer::factory()->count(5)->sequence(fn ($sequence) => ['telegram_id' => 9600 + $sequence->index])->create();
+        $product = Product::factory()->create();
+        $event = ProductPriceChangeEvent::create([
+            'event_key' => (string) str()->uuid(),
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'old_price_amount' => 30000,
+            'new_price_amount' => 25000,
+        ]);
+        $service = app(ProductPriceChangeNotificationService::class);
+        $service->processBatch($event->id, 2);
+        $attempts = 0;
+        $interrupt = true;
+        DB::connection()->beforeExecuting(function (string $query) use (&$attempts, &$interrupt): void {
+            if ($interrupt && str_starts_with($query, 'insert') && str_contains($query, '"telegram_outbound_effects"') && ++$attempts === 2) {
+                throw new RuntimeException('materialization interrupted');
+            }
+        });
+        try {
+            try {
+                $service->processBatch($event->id, 2);
+                $this->fail('Expected materialization interruption.');
+            } catch (RuntimeException $exception) {
+                $this->assertSame('materialization interrupted', $exception->getMessage());
+            }
+            $this->assertNotNull($event->fresh()->recipients_materialized_at);
+            $this->assertSame(5, $event->recipients()->count());
+            $this->assertSame(2, TelegramOutboundEffect::query()->count());
+            Http::assertSentCount(2);
+            $interrupt = false;
+            Customer::factory()->create(['telegram_id' => 9699]);
+            do {
+                $result = $service->processBatch($event->id, 2);
+            } while ($result->hasMore);
+            $this->assertSame(5, $event->recipients()->whereNotNull('sent_at')->count());
+            $this->assertSame(5, TelegramOutboundEffect::query()->where('state', TelegramOutboundEffectState::Sent)->count());
+            Http::assertSentCount(5);
+        } finally {
+            $interrupt = false;
+        }
+    }
+
     public function test_committed_decrease_sends_localized_price_drop_messages_with_product_cta(): void
     {
         config()->set('services.telegram.token', 'bot-token');
