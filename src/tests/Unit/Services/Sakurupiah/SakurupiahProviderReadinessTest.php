@@ -6,8 +6,10 @@ use App\Enums\SakurupiahEnvironment;
 use App\Models\ManualPaymentSetting;
 use App\Services\Sakurupiah\SakurupiahChannel;
 use App\Services\Sakurupiah\SakurupiahChannelAddition;
+use App\Services\Sakurupiah\SakurupiahFee;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -123,7 +125,6 @@ class SakurupiahProviderReadinessTest extends TestCase
 
         $this->assertTrue($first->isReady());
         $this->assertTrue($second->isReady());
-        $this->assertSame($channel, $second->qrisChannel());
         $this->assertSame(1, $calls);
         $this->assertIsString($first->configurationFingerprint());
         $this->assertStringNotContainsString('sandbox-key', $first->configurationFingerprint());
@@ -135,6 +136,66 @@ class SakurupiahProviderReadinessTest extends TestCase
         $readiness->invalidate();
         $readiness->observe(SakurupiahEnvironment::Sandbox, $reader);
         $this->assertSame(3, $calls);
+    }
+
+    #[DataProvider('cachedObservationStates')]
+    public function test_serialized_cache_reuses_readiness_until_the_observation_expires(bool $initiallyReady): void
+    {
+        config()->set('cache.stores.array.serialize', true);
+        config()->set('cache.serializable_classes', false);
+        Cache::purge('array');
+        config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
+            'sandbox_enabled' => true,
+            'sandbox_base_url' => 'https://sakurupiah.id/api-sanbox/',
+            'sandbox_api_id' => 'sandbox-id',
+            'sandbox_api_key' => 'sandbox-key',
+            'qris_contract' => $this->qualifiedQrisContract(),
+        ]));
+        $readiness = app(SakurupiahProviderReadiness::class);
+        $calls = 0;
+        $available = $initiallyReady;
+        $reader = function () use (&$calls, &$available): array {
+            $calls++;
+            if (! $available) {
+                throw new \RuntimeException('Provider metadata unavailable.');
+            }
+
+            return [new SakurupiahChannel('QRISC', 'QRISC Merchant', 500, 2_000_000, 'DIRECT', 'Aktif',
+                fee: SakurupiahFee::from('0.7%'),
+                percent: '0.7',
+                addition: new SakurupiahChannelAddition(
+                    additionalFee: SakurupiahFee::from('50'),
+                    kind: 'fixture',
+                    defaultExpiredHours: 24,
+                    settlement: 'H+1',
+                ))];
+        };
+
+        $first = $readiness->observe(SakurupiahEnvironment::Sandbox, $reader);
+        $available = ! $initiallyReady;
+        $second = $readiness->observe(SakurupiahEnvironment::Sandbox, $reader);
+        $this->assertSame($initiallyReady, $first->isReady());
+        $this->assertSame($initiallyReady, $second->isReady());
+        $this->assertSame(1, $calls);
+        if ($initiallyReady) {
+            $this->assertSame(500, $second->qrisChannel()?->minimumAmount());
+            $this->assertSame(2_000_000, $second->qrisChannel()?->maximumAmount());
+            $this->assertSame('0.7%', $second->qrisChannel()?->fee?->submitted());
+            $this->assertSame('0.7', $second->qrisChannel()?->percent);
+            $this->assertSame(50, $second->qrisChannel()?->addition?->additionalFee?->fixedAmount());
+            $this->assertSame(24, $second->qrisChannel()?->addition?->defaultExpiredHours());
+            $this->assertSame('H+1', $second->qrisChannel()?->addition?->settlement());
+        }
+
+        $this->travel(61)->seconds();
+        $recovered = $readiness->observe(SakurupiahEnvironment::Sandbox, $reader);
+        $this->assertSame(! $initiallyReady, $recovered->isReady());
+        $this->assertSame(2, $calls);
+    }
+
+    public static function cachedObservationStates(): array
+    {
+        return ['ready' => [true], 'unavailable' => [false]];
     }
 
     public function test_unqualified_qris_contract_fails_closed_after_channel_observation(): void

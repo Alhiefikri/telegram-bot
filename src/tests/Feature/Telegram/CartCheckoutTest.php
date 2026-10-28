@@ -109,7 +109,7 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertSame(0, Cart::where('status', CartStatus::Active)->count());
     }
 
-    public function test_checkout_revalidates_changed_stock_and_prompts_cart_update(): void
+    public function test_checkout_retains_cart_when_stock_changes(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
         $this->fakeTelegramHttp();
@@ -122,9 +122,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(1955, 'checkout-changed-stock-confirm', 'checkout:current'))->assertOk();
 
         $this->assertSame(0, Order::count());
-        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/sendMessage')
-            && str_contains($r['text'], 'stok berubah')
-            && str_contains($r['text'], 'pilih produk ulang'));
+        $this->assertSame(0, Payment::count());
+        $this->assertSame(1, CartItem::query()->sole()->quantity);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
     }
 
     public function test_katalog_clears_selected_product_and_invalid_callback_answers_once(): void

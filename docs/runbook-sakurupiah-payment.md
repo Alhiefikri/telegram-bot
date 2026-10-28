@@ -64,6 +64,70 @@ providers and Store Balance top-ups are untouched. Rollback does not extend
 deadlines or re-reserve stock.
 
 
+## Intermittent checkout rejection and delayed QRIS
+
+The 2026-10-28 production audit found Outlook IMAP at Rp600 per unit with
+sufficient supplier capacity. Ten units total Rp6,000, within the active QRIS
+channel's Rp500–Rp2,000,000 range. A clean Telegram checkout using that snapshot
+accepted ten units. A read-only production preflight instead encountered an
+application-status `400` while loading channel metadata.
+
+Telegram previously grouped payment readiness, QRIS amount limits, Cart state
+and stock conflicts under the same invalid-cart message. `CheckoutPaymentUnavailable`
+and `CheckoutPaymentAmountOutsideLimits` remain `InvalidCheckout` subtypes for
+service and Web callers. Telegram reports unavailable payment, the observed QRIS
+amount range, and insufficient stock separately. Rejections retain the Cart and
+create no Order, Payment or supplier hold. A provider setting change during
+preflight also rejects checkout rather than using a stale payment snapshot.
+
+Sakurupiah readiness now caches only scalar and array data. With
+`cache.serializable_classes=false`, the previous cached report object was read
+back as an incomplete class, so a warm Redis cache could call the channel API
+again instead of reusing its observation. Old or malformed cache entries are
+replaced after a fresh observation; classes remain disallowed. Ready and failed
+observations retain the configured TTL (60 seconds by default), so retry after
+provider recovery still waits for that observation to expire.
+
+The OOM-related deployment preceded the reported failures, but the available
+incident evidence does not identify which guard rejected either Outlook attempt.
+The Redis defect predates that deployment and can increase metadata traffic; it
+does not prove the cause or establish the provider's request-frequency limit.
+Git blob comparison from `c5bdfcda` through `bd11ea91`, `4f645b4d` and
+`1a46d9e7` found identical Cart, direct Telegram checkout, Order checkout,
+supplier sync and Sakurupiah preparation/readiness source files. Scheduler
+launcher and registrations changed in that range; identical checkout source
+alone cannot rule out an indirect scheduling or provider-pressure effect.
+The Product Detail payment action also retains other items in an existing Cart.
+An unavailable old item can therefore reject the whole Cart even when the
+selected Product has stock.
+
+The prior read-only audit recorded the two QRIS updates created at 08:33:40 and
+08:34:57 WIB, and processed at 08:33:41 and 08:34:59 respectively. Those
+one-second and two-second end-to-end intervals include queueing and processing;
+they do not separately measure queue wait or identify the rejecting guard.
+Read-only scheduler logs for 08:32–08:35 WIB showed completed cycles of
+33, 38, 32 and 33 seconds. `suppliers:sync` exited zero at 08:32:05, 08:33:13,
+08:34:04 and 08:35:04. The aggregate results do not prove the Outlook supplier
+snapshot was fresh at either tap. The application log volume was not readable
+by the unprivileged audit account, and an authorized `sudo -n` read could not
+authenticate.
+
+Additional local verification used disposable Redis and SQLite with the actual
+Telegram webhook, synchronous jobs, Sakurupiah adapter and Telegram transport
+against HTTP fixtures. A metadata rejection left no Order, Payment or hold; after
+recovery, ten supplier units produced a Rp6,000 Order, Payment and QRIS PNG.
+Duplicate tap retained one Order/hold, and a new purchase created one more.
+The cache probe made two metadata reads before the serialization fix and one
+after it; a new PHP process reused the same observation without a lookup. No
+live provider invoice or supplier purchase was made.
+
+The [official API documentation](https://sakurupiah.id/developers/api-dokumentasi)
+publishes channel limits and application-status `400` failures, but no numeric
+request-frequency contract was found during this audit. Do not invent a
+merchant-wide request rate or bypass readiness to make a rejected checkout pass.
+Escalate repeated “Permintaan terlalu cepat” responses to provider support with
+sanitized evidence.
+
 ## Channel lookup failure with an active QRISC channel
 
 The 2026-10-21 production investigation found HTTP 200 from

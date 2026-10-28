@@ -3,7 +3,7 @@
 namespace App\Services\Sakurupiah;
 
 use App\Enums\SakurupiahEnvironment;
-use App\Exceptions\InvalidCheckout;
+use App\Exceptions\CheckoutPaymentUnavailable;
 use App\Models\ManualPaymentSetting;
 use App\Support\PaymentProvider;
 use App\Support\QueueTopology;
@@ -217,7 +217,7 @@ final class SakurupiahProviderReadiness
     ): void {
         if ($report === null || ! $report->isReady()) {
             $message = trim((string) $report?->configurationMessage());
-            throw new InvalidCheckout(
+            throw new CheckoutPaymentUnavailable(
                 'Sakurupiah QRIS checkout is not ready.'
                 .($message === '' ? '' : ' '.$message),
             );
@@ -231,14 +231,14 @@ final class SakurupiahProviderReadiness
                 selectedChannel: SakurupiahChannelPolicy::selected($setting),
             )
         ) {
-            throw new InvalidCheckout('Sakurupiah QRIS checkout readiness changed. Try again.');
+            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS checkout readiness changed. Try again.');
         }
 
         if ($setting === null
             || ! $setting->is_active
             || $setting->paymentProvider() !== PaymentProvider::SAKURUPIAH
         ) {
-            throw new InvalidCheckout('Sakurupiah QRIS provider selection changed. Try again.');
+            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS provider selection changed. Try again.');
         }
 
         if (! $report->channelObserved()
@@ -247,7 +247,7 @@ final class SakurupiahProviderReadiness
             || ! $report->qrisChannel()->isActive()
             || $report->qrisChannel()->code !== SakurupiahChannelPolicy::selected($setting)
         ) {
-            throw new InvalidCheckout('Sakurupiah QRIS channel is no longer ready. Try again.');
+            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS channel is no longer ready. Try again.');
         }
     }
 
@@ -687,32 +687,143 @@ final class SakurupiahProviderReadiness
             return $this->channelObservationFailure($configuration, $fingerprint);
         }
 
-        $factory = fn (): SakurupiahProviderReadinessReport => $this->evaluateChannelObservation(
-            $environment,
-            $configuration,
-            $fingerprint,
-            $reader,
-            $selectedChannel,
-        );
-
         try {
-            $cached = Cache::remember(
-                $cacheKey,
-                now()->addSeconds($this->cacheSeconds()),
-                $factory,
-            );
-            if ($cached instanceof SakurupiahProviderReadinessReport
-                && $cached->environment() === $environment
-                && $cached->configurationFingerprint() === $fingerprint
-            ) {
+            $cached = $this->cachedReport(Cache::get($cacheKey), $environment, $fingerprint, $selectedChannel);
+            if ($cached !== null) {
                 return $cached;
             }
         } catch (Throwable) {
-            // A cache outage must not turn a fresh failed observation into a
-            // potentially stale success. Evaluate the provider once instead.
+            // The provider observation below remains authoritative if cache is unavailable.
         }
 
-        return $factory();
+        $report = $this->evaluateChannelObservation($environment, $configuration, $fingerprint, $reader, $selectedChannel);
+        try {
+            Cache::put($cacheKey, $this->reportCachePayload($report), now()->addSeconds($this->cacheSeconds()));
+        } catch (Throwable) {
+            // Return the fresh observation even if it cannot be cached.
+        }
+
+        return $report;
+    }
+
+    /** @return array<string, mixed> */
+    private function reportCachePayload(SakurupiahProviderReadinessReport $report): array
+    {
+        $channel = $report->qrisChannel();
+        $addition = $channel?->addition;
+
+        return [
+            'version' => 1,
+            'environment' => $report->environment()?->value,
+            'fingerprint' => $report->configurationFingerprint(),
+            'missing' => $report->missing(),
+            'invalid' => $report->invalid(),
+            'enabled' => $report->enabled(),
+            'observed' => $report->channelObserved(),
+            'checked_at' => $report->checkedAt()?->toISOString(),
+            'channel' => $channel === null ? null : [
+                'code' => $channel->code,
+                'name' => $channel->name,
+                'minimum' => $channel->minimum,
+                'maximum' => $channel->maximum,
+                'type' => $channel->type,
+                'status' => $channel->status,
+                'fee' => $channel->fee?->submitted(),
+                'percent' => $channel->percent,
+                'addition' => $addition === null ? null : [
+                    'fee' => $addition->additionalFee?->submitted(),
+                    'kind' => $addition->kind,
+                    'expiry' => $addition->defaultExpiredHours,
+                    'settlement' => $addition->settlement,
+                ],
+            ],
+        ];
+    }
+
+    private function cachedReport(mixed $payload, SakurupiahEnvironment $environment, string $fingerprint, string $selectedChannel): ?SakurupiahProviderReadinessReport
+    {
+        if (! is_array($payload)
+            || ($payload['version'] ?? null) !== 1
+            || ($payload['environment'] ?? null) !== $environment->value
+            || ($payload['fingerprint'] ?? null) !== $fingerprint
+            || ! is_array($payload['missing'] ?? null)
+            || ! array_is_list($payload['missing'])
+            || ! is_array($payload['invalid'] ?? null)
+            || ! is_bool($payload['enabled'] ?? null)
+            || ($payload['observed'] ?? null) !== true
+            || ! is_string($payload['checked_at'] ?? null)
+            || ! array_key_exists('channel', $payload)
+        ) {
+            return null;
+        }
+        foreach ($payload['missing'] as $label) {
+            if (! is_string($label)) {
+                return null;
+            }
+        }
+        foreach ($payload['invalid'] as $label => $message) {
+            if (! is_string($label) || ! is_string($message)) {
+                return null;
+            }
+        }
+
+        try {
+            $channel = null;
+            $data = $payload['channel'];
+            if ($data !== null) {
+                if (! is_array($data) || ! array_key_exists('addition', $data)) {
+                    return null;
+                }
+                $addition = null;
+                if ($data['addition'] !== null) {
+                    $extra = $data['addition'];
+                    if (! is_array($extra)) {
+                        return null;
+                    }
+                    $addition = new SakurupiahChannelAddition(
+                        additionalFee: SakurupiahFee::from($extra['fee'] ?? null),
+                        kind: $extra['kind'] ?? null,
+                        defaultExpiredHours: $extra['expiry'] ?? null,
+                        settlement: $extra['settlement'] ?? null,
+                    );
+                }
+                $channel = new SakurupiahChannel(
+                    code: $data['code'],
+                    name: $data['name'],
+                    minimum: $data['minimum'],
+                    maximum: $data['maximum'],
+                    type: $data['type'],
+                    status: $data['status'],
+                    fee: SakurupiahFee::from($data['fee'] ?? null),
+                    percent: $data['percent'] ?? null,
+                    addition: $addition,
+                );
+                if ($channel->code !== $selectedChannel) {
+                    return null;
+                }
+            }
+            if ($payload['missing'] === [] && $payload['invalid'] === []
+                && ($channel === null
+                    || ! $channel->isQris()
+                    || ! $channel->isActive()
+                    || ! in_array(strtoupper($channel->type), ['DIRECT', 'REDIRECT'], true)
+                    || $this->invalidQrisContract($channel) !== [])) {
+                return null;
+            }
+
+            return new SakurupiahProviderReadinessReport(
+                missing: $payload['missing'],
+                invalid: $payload['invalid'],
+                environment: $environment,
+                enabled: $payload['enabled'],
+                qrisChannel: $channel,
+                channelObserved: true,
+                checkedAt: CarbonImmutable::parse($payload['checked_at']),
+                configurationFingerprint: $fingerprint,
+            );
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function evaluateChannelObservation(

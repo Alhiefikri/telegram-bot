@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\CheckoutPaymentUnavailable;
 use App\Exceptions\InvalidCheckout;
 use App\Models\Cart;
 use App\Models\Customer;
@@ -193,7 +194,7 @@ final class SakurupiahCheckoutPaymentPreparationTest extends TestCase
 
         config()->set('services.sakurupiah.qris_contract.expiry_hours', 12);
 
-        $this->expectException(InvalidCheckout::class);
+        $this->expectException(CheckoutPaymentUnavailable::class);
         $items = new Collection($cart->cartItems()->get()->all());
         $products = new Collection([$product->id => $product]);
         $preparation->prepare(new CheckoutPaymentPreparationContext(

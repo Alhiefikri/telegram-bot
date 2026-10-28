@@ -2,7 +2,8 @@
 
 namespace App\Services\Checkout;
 
-use App\Exceptions\InvalidCheckout;
+use App\Exceptions\CheckoutPaymentAmountOutsideLimits;
+use App\Exceptions\CheckoutPaymentUnavailable;
 use App\Services\Checkout\PaymentPlan\SakurupiahCheckoutPaymentSnapshot;
 use App\Services\Sakurupiah\SakurupiahChannelPolicy;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
@@ -43,12 +44,12 @@ final readonly class SakurupiahCheckoutPaymentPreparation implements CheckoutPay
 
         $channel = $report->qrisChannel();
         if ($channel === null || ! $channel->isQris() || ! $channel->isActive()) {
-            throw new InvalidCheckout('Sakurupiah QRIS checkout is not ready. Try again later or contact support.');
+            throw new CheckoutPaymentUnavailable('Sakurupiah QRIS checkout is not ready. Try again later or contact support.');
         }
 
         $amount = $context->pricing->idrTotal();
         if ($amount < $channel->minimumAmount() || $amount > $channel->maximumAmount()) {
-            throw new InvalidCheckout('Sakurupiah QRIS amount is outside the provider limits. Try again later or contact support.');
+            throw new CheckoutPaymentAmountOutsideLimits($channel->minimumAmount(), $channel->maximumAmount());
         }
 
         $expiresAt = now()->addMinutes(15);

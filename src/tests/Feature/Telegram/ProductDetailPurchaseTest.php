@@ -7,7 +7,9 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\TelegramOutboundEffectType;
+use App\Jobs\ProcessTelegramUpdate;
 use App\Models\Cart;
+use App\Models\CartItem;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
@@ -16,19 +18,280 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\ProductStockItem;
+use App\Models\ProductSupplierSource;
 use App\Models\StoreBalanceEntry;
+use App\Models\Supplier;
+use App\Models\SupplierCatalogItem;
+use App\Models\SupplierPricePolicy;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUiIcon;
+use App\Services\CartService;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Telegram\TelegramIntentSession;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TelegramBotTestSupport;
 
 class ProductDetailPurchaseTest extends TelegramBotTestSupport
 {
+    #[DataProvider('outlookCheckouts')]
+    public function test_outlook_checkout_revalidates_stock_and_provider_availability(int $quantity, int $local, bool $providerAvailable, bool $existingCart = false, bool $owner = false, ?string $stockChange = null, bool $settingChange = false, ?string $otherCartProblem = null): void
+    {
+        config()->set('cache.stores.array.serialize', true);
+        config()->set('cache.serializable_classes', false);
+        Cache::purge('array');
+        Queue::fakeExcept([ProcessTelegramUpdate::class]);
+        config()->set('services.sakurupiah.sandbox_enabled', true);
+        config()->set('services.sakurupiah.sandbox_api_id', 'fixture-id');
+        config()->set('services.sakurupiah.sandbox_api_key', 'fixture-key');
+        config()->set('services.sakurupiah.sandbox_callback_url', 'https://store.example.test/api/webhook/sakurupiah');
+        config()->set('services.sakurupiah.sandbox_return_url', 'https://store.example.test/shop/orders');
+        config()->set('services.sakurupiah.sandbox_callback_allowed_hosts', ['store.example.test']);
+        config()->set('services.sakurupiah.sandbox_return_allowed_hosts', ['store.example.test']);
+        $channels = [
+            'status' => '200',
+            'data' => [[
+                'kode' => 'QRIS', 'nama' => 'QRIS', 'minimal' => 500,
+                'maksimal' => 2_000_000, 'tipe' => 'DIRECT', 'status' => 'Aktif',
+                'addition' => ['default_expired' => 24],
+            ]],
+        ];
+        $setting = null;
+        $channelResponse = $settingChange
+            ? function () use (&$setting, $channels) {
+                $setting->increment('payment_provider_version');
+
+                return Http::response($channels);
+            }
+        : Http::sequence()
+            ->push($providerAvailable ? $channels : ['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'])
+            ->push($channels);
+        $this->fakeTelegramHttp(['https://sakurupiah.id/api-sanbox/list-payment.php' => $channelResponse]);
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => 'sakurupiah',
+            'sakurupiah_channel' => 'QRIS',
+            'admin_telegram_chat_id' => $owner ? '318091' : null,
+            'is_active' => true,
+        ]);
+        $customer = Customer::factory()->create(['telegram_id' => 318091, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'Outlook IMAP', 'stock' => $local, 'reserved_stock' => 0,
+            'price_amount' => 600, 'usdt_price_amount' => 30_000, 'is_active' => true,
+        ]);
+        for ($unit = 0; $unit < $local; $unit++) {
+            ProductStockItem::create(['product_id' => $product->id, 'secret' => 'outlook-local-'.$unit]);
+        }
+        $supplier = Supplier::forceCreate([
+            'name' => 'Outlook supplier', 'provider' => 'csxstore', 'api_key' => 'fixture-key',
+            'currency' => 'USD', 'currency_confirmed' => true, 'exchange_rate_idr' => 18_200,
+            'balance_micros' => 4_490_000, 'is_active' => true,
+            'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(5),
+        ]);
+        $sku = SupplierCatalogItem::create([
+            'supplier_id' => $supplier->id, 'external_id' => 'outlook', 'name' => 'Outlook',
+            'unit_price_micros' => 10_000, 'stock' => 3178, 'orderable' => true,
+            'requires_input' => false, 'synced_at' => now(), 'price_tiers' => [], 'bulk_discounts' => [],
+        ]);
+        SupplierPricePolicy::create(['product_id' => $product->id, 'mode' => 'manual', 'minimum_profit_idr' => 0, 'rounding_idr' => 1]);
+        ProductSupplierSource::create(['product_id' => $product->id, 'supplier_catalog_item_id' => $sku->id, 'is_active' => true, 'priority' => 10]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        if ($existingCart) {
+            $cart = app(CartService::class)->activeCartFor($customer);
+            app(CartService::class)->setItemQuantity($cart, $product, 1);
+            if ($otherCartProblem !== null) {
+                $other = Product::factory()->create(['price_amount' => 1_000, 'stock' => 1, 'reserved_stock' => 0, 'is_active' => true]);
+                app(CartService::class)->setItemQuantity($cart, $other, 1);
+                if ($otherCartProblem === 'stock') {
+                    $other->forceFill(['stock' => 0])->save();
+                } else {
+                    $other->update(['is_active' => false]);
+                }
+            }
+        }
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $this->postTelegramWebhook($this->callbackUpdate(3180911, 'outlook-custom', 'detail:qty:manual:'.$product->id.':'.$state['interactionToken'], [], 318091, 'private', 88091))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(3180912, (string) $quantity, [], 318091))->assertOk();
+        $state = $this->selection($customer);
+        if ($quantity > 449 && $local === 0) {
+            $this->assertSame('awaiting_custom_quantity', $state['mode']);
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+            $this->assertSame(1, CartItem::query()->sole()->quantity);
+            $this->assertStringContainsString('exceeds the available stock', $this->lastMessageText('Outlook IMAP'));
+
+            return;
+        }
+        $this->assertSame($quantity, $state['quantity']);
+        if ($stockChange === 'stale') {
+            $supplier->forceFill(['sync_expires_at' => now()->subSecond()])->save();
+        } elseif ($stockChange === 'depleted') {
+            $sku->update(['stock' => 0]);
+        }
+        $this->postTelegramWebhook($this->callbackUpdate(3180913, 'outlook-pay', 'detail:pay:qris:'.$product->id.':'.$state['interactionToken'], [], 318091, 'private', 88091))->assertOk();
+
+        if ($otherCartProblem !== null) {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+            $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+            $this->assertSame(2, CartItem::query()->count());
+            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && (string) ($request['chat_id'] ?? '') === '318091'
+                && str_contains((string) ($request['text'] ?? ''), $otherCartProblem === 'stock' ? 'Stock ' : 'cart is empty'));
+            Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/list-payment.php'));
+
+            return;
+        }
+
+        if ($stockChange !== null) {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+            $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+            $this->assertSame(0, $sku->fresh()->reserved_quantity);
+            $this->assertSame($quantity, CartItem::query()->sole()->quantity);
+            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && (string) ($request['chat_id'] ?? '') === '318091'
+                && str_contains((string) ($request['text'] ?? ''), 'Stock '));
+            Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && (string) ($request['chat_id'] ?? '') === '318091'
+                && str_contains((string) ($request['text'] ?? ''), 'cart is empty'));
+
+            return;
+        }
+        if ($settingChange) {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, Payment::query()->count());
+            $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+            $this->assertSame($quantity, CartItem::query()->sole()->quantity);
+            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && (string) ($request['chat_id'] ?? '') === '318091'
+                && str_contains((string) ($request['text'] ?? ''), 'payment method is not ready'));
+            Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && (string) ($request['chat_id'] ?? '') === '318091'
+                && str_contains((string) ($request['text'] ?? ''), 'cart is empty'));
+
+            return;
+        }
+
+        if (! $providerAvailable) {
+            $this->assertSame(0, Order::query()->count());
+            $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+            $this->assertSame($quantity, CartItem::query()->sole()->quantity);
+            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+                && (string) ($request['chat_id'] ?? '') === '318091'
+                && str_contains((string) ($request['text'] ?? ''), 'payment method is not ready'));
+
+            $this->travel(61)->seconds();
+            $this->postTelegramWebhook($this->callbackUpdate(3180914, 'outlook-reopen', 'product:'.$product->id, [], 318091))->assertOk();
+            $state = $this->selection($customer);
+            $this->postTelegramWebhook($this->callbackUpdate(3180915, 'outlook-retry-custom', 'detail:qty:manual:'.$product->id.':'.$state['interactionToken'], [], 318091, 'private', 88091))->assertOk();
+            $this->postTelegramWebhook($this->messageUpdate(3180916, (string) $quantity, [], 318091))->assertOk();
+            $state = $this->selection($customer);
+            $this->postTelegramWebhook($this->callbackUpdate(3180917, 'outlook-retry-pay', 'detail:pay:qris:'.$product->id.':'.$state['interactionToken'], [], 318091, 'private', 88091))->assertOk();
+        }
+
+        $order = Order::query()->sole();
+        $external = $quantity - min($quantity, $local);
+        $this->assertSame($quantity * 600, $order->total_amount);
+        $this->assertSame($external, $order->orderItems()->sole()->supplier_quantity);
+        $this->assertSame($external * 10_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame($external, $sku->fresh()->reserved_quantity);
+        $this->assertSame('sakurupiah', $order->payments()->sole()->provider);
+        $this->postTelegramWebhook($this->callbackUpdate(3180918, 'outlook-duplicate-pay', 'detail:pay:qris:'.$product->id.':'.$state['interactionToken'], [], 318091, 'private', 88091))->assertOk();
+        $this->assertSame(1, Order::query()->count());
+        $this->assertSame($external * 10_000, $supplier->fresh()->reserved_balance_micros);
+    }
+
+    public static function outlookCheckouts(): array
+    {
+        $cases = [];
+        foreach ([1, 10, 100, 449] as $quantity) {
+            foreach (['supplier', 'local', 'mixed'] as $stock) {
+                if ($stock === 'mixed' && $quantity === 1) {
+                    continue;
+                }
+                $local = match ($stock) {
+                    'local' => $quantity,
+                    'mixed' => intdiv($quantity, 2),
+                    default => 0,
+                };
+                foreach ([false, true] as $owner) {
+                    $cases["{$quantity} {$stock} ".($owner ? 'owner' : 'customer')] = [$quantity, $local, true, true, $owner];
+                }
+            }
+        }
+
+        return $cases + [
+            'metadata throttled for ten' => [10, 0, false, true],
+            'metadata throttled for one' => [1, 0, false, true],
+            'supplier snapshot expired after selection' => [10, 0, true, true, false, 'stale'],
+            'supplier stock depleted after selection' => [10, 0, true, true, false, 'depleted'],
+            'provider setting changes during preflight' => [10, 0, true, true, false, null, true],
+            'quantity exceeds supplier capacity' => [450, 0, true, true],
+            'existing cart contains an unavailable product' => [10, 0, true, true, false, null, false, 'unavailable'],
+            'existing cart has insufficient stock' => [10, 0, true, true, false, null, false, 'stock'],
+        ];
+    }
+
+    #[DataProvider('qrisAmountLimits')]
+    public function test_qris_amount_limit_rejection_preserves_the_cart_and_reports_the_provider_range(int $minimum, int $maximum, string $range): void
+    {
+        Queue::fakeExcept([ProcessTelegramUpdate::class]);
+        config()->set('services.sakurupiah.sandbox_enabled', true);
+        config()->set('services.sakurupiah.sandbox_api_id', 'fixture-id');
+        config()->set('services.sakurupiah.sandbox_api_key', 'fixture-key');
+        config()->set('services.sakurupiah.sandbox_callback_url', 'https://store.example.test/api/webhook/sakurupiah');
+        config()->set('services.sakurupiah.sandbox_return_url', 'https://store.example.test/shop/orders');
+        config()->set('services.sakurupiah.sandbox_callback_allowed_hosts', ['store.example.test']);
+        config()->set('services.sakurupiah.sandbox_return_allowed_hosts', ['store.example.test']);
+        $this->fakeTelegramHttp([
+            'https://sakurupiah.id/api-sanbox/list-payment.php' => Http::response([
+                'status' => '200',
+                'data' => [[
+                    'kode' => 'QRIS', 'nama' => 'QRIS', 'minimal' => $minimum,
+                    'maksimal' => $maximum, 'tipe' => 'DIRECT', 'status' => 'Aktif',
+                    'addition' => ['default_expired' => 24],
+                ]],
+            ]),
+        ]);
+        ManualPaymentSetting::create(['payment_mode' => 'sakurupiah', 'sakurupiah_channel' => 'QRIS', 'is_active' => true]);
+        $customer = Customer::factory()->create(['telegram_id' => 318092, 'locale' => 'en']);
+        $product = Product::factory()->create([
+            'name' => 'QRIS limit product', 'stock' => 1, 'reserved_stock' => 0,
+            'price_amount' => 6_000, 'is_active' => true,
+        ]);
+
+        $this->openDetail($customer, $product);
+        $state = $this->selection($customer);
+        $this->postTelegramWebhook($this->callbackUpdate(3180921, 'qris-limit', 'detail:pay:qris:'.$product->id.':'.$state['interactionToken'], [], 318092, 'private', 88092))->assertOk();
+
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, Payment::query()->count());
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(1, CartItem::query()->sole()->quantity);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '318092'
+            && str_contains((string) ($request['text'] ?? ''), $range));
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '318092'
+            && str_contains((string) ($request['text'] ?? ''), 'cart is empty'));
+    }
+
+    public static function qrisAmountLimits(): array
+    {
+        return [
+            'below minimum' => [7_000, 10_000, 'Rp7.000 and Rp10.000'],
+            'above maximum' => [1_000, 5_000, 'Rp1.000 and Rp5.000'],
+        ];
+    }
+
     public function test_detail_header_follows_the_family_icon_when_the_plan_has_none(): void
     {
         $this->fakeTelegramHttp();

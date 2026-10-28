@@ -470,6 +470,8 @@
   "checkout.continue_button": "💳 Teruskan Checkout",
   "checkout.orders_button": "📦 Semak Pesanan",
   "checkout.invalid_cart": "Checkout tidak dapat diselesaikan.\nTroli kosong, stok berubah atau produk tidak lagi tersedia.\n\nBuka /produk dan pilih produk sekali lagi.",
+  "checkout.qris_amount_limits": "QRIS menerima jumlah antara Rp:minimum dan Rp:maximum. Ubah troli dan cuba lagi.",
+  "checkout.stock_conflict": "Stok produk dalam troli belum dapat dipastikan atau tidak lagi mencukupi. Semak troli dan cuba lagi.",
   "checkout.processing": "Checkout sedang diproses. Sila tunggu sebentar.",
   "checkout.balance.unavailable": "Baki buat sementara tidak tersedia",
   "checkout.balance.insufficient": "Baki anda tidak mencukupi untuk Order ini. Tambah baki, kemudian cuba checkout semula.",

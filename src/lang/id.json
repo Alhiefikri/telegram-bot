@@ -470,6 +470,8 @@
   "checkout.continue_button": "💳 Lanjut Checkout",
   "checkout.orders_button": "📦 Cek Pesanan",
   "checkout.invalid_cart": "Checkout belum berhasil.\nKeranjang kosong, stok berubah, atau produknya sudah tidak tersedia.\n\nCoba buka /produk lagi dan pilih produk ulang.",
+  "checkout.qris_amount_limits": "QRIS menerima total antara Rp:minimum dan Rp:maximum. Ubah keranjang lalu coba lagi.",
+  "checkout.stock_conflict": "Stok produk di keranjang belum bisa dipastikan atau tidak lagi cukup. Periksa keranjang lalu coba lagi.",
   "checkout.payment_method": "Pilih metode pembayaran di bawah.",
   "checkout.cart_item": "📦 :product × :quantity · Rp:unit/unit · Rp:subtotal",
   "checkout.cart_item_dual": "📦 :product × :quantity · Rp:unit/unit · 💎 :usdt_unit USDT/unit · Total Rp:subtotal · 💎 :usdt_subtotal USDT",

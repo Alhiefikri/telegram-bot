@@ -470,6 +470,8 @@
   "checkout.continue_button": "💳 Continue to Checkout",
   "checkout.orders_button": "📦 Check Orders",
   "checkout.invalid_cart": "Checkout could not be completed.\nYour cart is empty, stock changed, or the product is no longer available.\n\nOpen /products and choose the product again.",
+  "checkout.qris_amount_limits": "QRIS accepts totals between Rp:minimum and Rp:maximum. Adjust your cart and try again.",
+  "checkout.stock_conflict": "Stock cannot be confirmed or is no longer sufficient for the items in your cart. Review your cart and try again.",
   "checkout.processing": "Checkout is being processed. Please wait a moment.",
   "checkout.balance.unavailable": "Balance is temporarily unavailable",
   "checkout.balance.insufficient": "Your balance is not enough for this Order. Add funds, then try checkout again.",

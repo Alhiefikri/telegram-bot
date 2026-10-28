@@ -5,6 +5,8 @@ namespace App\Services\Telegram\Callbacks;
 use App\Enums\BalancePaymentPreference;
 use App\Enums\PaymentStatus;
 use App\Exceptions\CheckoutMaintenanceActive;
+use App\Exceptions\CheckoutPaymentAmountOutsideLimits;
+use App\Exceptions\CheckoutPaymentUnavailable;
 use App\Exceptions\CustomerUsdtFundingUnavailable;
 use App\Exceptions\InsufficientCheckoutBalance;
 use App\Exceptions\InsufficientStock;
@@ -236,7 +238,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         } else {
             $cart = $this->carts->currentActiveCartFor($context->customer);
             $preview = $cart === null ? null : $this->cartPricing($cart);
-            if ($preview === null) {
+            if (! is_array($preview)) {
                 $this->sendRailSelectionStale($context);
 
                 return;
@@ -339,7 +341,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         } else {
             $cart = $this->carts->currentActiveCartFor($context->customer);
             $preview = $cart === null ? null : $this->cartPricing($cart);
-            if ($preview === null || (int) $cart->getKey() !== $state['cartId']
+            if (! is_array($preview) || (int) $cart->getKey() !== $state['cartId']
                 || $this->cartFingerprint($cart) !== $state['cartFingerprint']
                 || ($currency === 'usd' ? $preview['snapshot']->usdtTotal() !== $state['usdTotal'] : $preview['snapshot']->idrTotal() !== $state['idrTotal'])) {
                 $this->sendRailSelectionStale($context);
@@ -372,7 +374,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
         $cart = $this->carts->currentActiveCartFor($context->customer);
         $preview = $cart === null ? null : $this->cartPricing($cart);
-        if ($preview === null || $preview['snapshot']->usdtTotal() === null) {
+        if (! is_array($preview) || $preview['snapshot']->usdtTotal() === null) {
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'cart.binance_unavailable_cart'));
 
             return;
@@ -733,9 +735,10 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         }
 
         $preview = $this->cartPricing($cart);
-        if ($preview === null) {
+        if (! is_array($preview)) {
             $this->bot->answerCallbackQuery($context->callbackQueryId);
-            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.invalid_cart'));
+            $key = $preview === 'stock_conflict' ? 'checkout.stock_conflict' : 'checkout.invalid_cart';
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, $key));
 
             return;
         }
@@ -898,6 +901,9 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
                 throw new InvalidCheckout('Cart is empty.');
             }
             $preview = $this->cartPricing($cart);
+            if ($preview === 'stock_conflict') {
+                throw new InsufficientStock('Cart stock changed.');
+            }
             if ($preview === null) {
                 throw new InvalidCartState('Cart pricing is no longer available.');
             }
@@ -967,7 +973,22 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.balance.recovery'));
 
             return;
-        } catch (InvalidCheckout|InvalidCartState|InsufficientStock) {
+        } catch (CheckoutPaymentAmountOutsideLimits $exception) {
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.qris_amount_limits', [
+                'minimum' => number_format($exception->minimum, 0, ',', '.'),
+                'maximum' => number_format($exception->maximum, 0, ',', '.'),
+            ]));
+
+            return;
+        } catch (CheckoutPaymentUnavailable) {
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'balance.topup.provider_unavailable'));
+
+            return;
+        } catch (InsufficientStock) {
+            $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.stock_conflict'));
+
+            return;
+        } catch (InvalidCheckout|InvalidCartState) {
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'checkout.invalid_cart'));
 
             return;
@@ -980,9 +1001,9 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     }
 
     /**
-     * @return array{snapshot: CheckoutPricingSnapshot, products: Collection<int, Product>}|null
+     * @return array{snapshot: CheckoutPricingSnapshot, products: Collection<int, Product>}|'stock_conflict'|null
      */
-    private function cartPricing(Cart $cart): ?array
+    private function cartPricing(Cart $cart): array|string|null
     {
         $cart->loadMissing('cartItems');
         $items = $cart->cartItems;
@@ -1009,8 +1030,11 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         foreach ($items as $item) {
             $product = $products->get((int) $item->product_id);
             $quantity = (int) $item->quantity;
-            if (! $product instanceof Product || $quantity < 1 || $product->availableStock() < $quantity) {
+            if (! $product instanceof Product || $quantity < 1) {
                 return null;
+            }
+            if ($product->availableStock() < $quantity) {
+                return 'stock_conflict';
             }
         }
 

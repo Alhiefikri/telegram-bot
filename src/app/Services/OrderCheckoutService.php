@@ -6,6 +6,7 @@ use App\Enums\BalancePaymentPreference;
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Exceptions\CheckoutPaymentUnavailable;
 use App\Exceptions\InvalidCheckout;
 use App\Models\BalanceRestoreGate;
 use App\Models\Cart;
@@ -247,7 +248,7 @@ class OrderCheckoutService
         );
         if (! $preflight->matches($preflightContext)) {
             if ($preflight->hasState()) {
-                throw new InvalidCheckout('Checkout payment preflight is stale.');
+                throw new CheckoutPaymentUnavailable('Checkout payment preflight is stale.');
             }
 
             $preflight = CheckoutPaymentPreflight::none($preflightContext);
