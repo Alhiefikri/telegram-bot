@@ -140,6 +140,103 @@ final class SupplierPriceChangeNotificationTest extends NonTransactionalDatabase
         $this->assertSame([0], array_values(array_unique($this->httpTransactionLevels)));
     }
 
+    public static function inactiveMappings(): iterable
+    {
+        yield 'inactive source' => [false, true, false];
+        yield 'inactive product' => [true, false, false];
+        yield 'deleted product' => [true, true, true];
+    }
+
+    #[DataProvider('inactiveMappings')]
+    public function test_ineligible_changes_are_quiet_but_observations_advance(bool $sourceActive, bool $productActive, bool $deleted): void
+    {
+        $supplier = $this->supplier();
+        [$product, $item] = $this->mapped($supplier, 'filtered', 'Filtered product', stock: 4);
+        $source = ProductSupplierSource::query()->sole();
+        $source->update(['is_active' => $sourceActive]);
+        $product->update(['is_active' => $productActive]);
+        if ($deleted) {
+            $product->delete();
+        }
+        $this->catalog = [$this->row('filtered', '1')];
+        $this->sync($supplier);
+        $this->assertQuiet();
+        $policyBefore = $product->supplierPricePolicy()->sole()->getRawOriginal();
+        $capacityBefore = $product->fresh()->supplier_available_stock;
+        $baseline = $item->fresh()->synced_at;
+        $this->travel(1)->minutes();
+        $this->catalog = [$this->row('filtered', '1.1')];
+        $this->sync($supplier);
+
+        $this->assertQuiet();
+        $this->assertSame(1100000, $item->fresh()->unit_price_micros);
+        $this->assertTrue($item->fresh()->synced_at->greaterThan($baseline));
+        $this->assertTrue($supplier->fresh()->sync_expires_at->isFuture());
+        $this->assertSame(20000, $product->fresh()->price_amount);
+        $this->assertSame(4, $product->fresh()->stock);
+        $this->assertSame($capacityBefore, $product->fresh()->supplier_available_stock);
+        $this->assertSame($policyBefore, $product->supplierPricePolicy()->sole()->getRawOriginal());
+
+        $source->update(['is_active' => true]);
+        $product->update(['is_active' => true]);
+        if ($deleted) {
+            $product->restore();
+        }
+        $this->sync($supplier);
+        $this->assertQuiet();
+        $this->catalog = [$this->row('filtered', '1.2')];
+        $this->sync($supplier);
+        $this->assertSame(1, $this->effects()->count());
+        $message = $this->text(SupplierHealthEvent::query()->sole()->message);
+        $this->assertStringContainsString('1.100000 -> 1.200000', $message);
+    }
+
+    public function test_mixed_mappings_filter_each_product_even_when_the_changed_sku_is_shared(): void
+    {
+        $supplier = $this->supplier();
+        [$active, $shared] = $this->mapped($supplier, 'shared', 'Eligible shared product');
+        foreach (['inactive source', 'inactive product', 'deleted product'] as $state) {
+            $product = Product::factory()->create(['name' => 'Excluded '.$state, 'is_active' => $state !== 'inactive product']);
+            ProductSupplierSource::query()->create([
+                'product_id' => $product->id, 'supplier_catalog_item_id' => $shared->id,
+                'priority' => 1, 'is_active' => $state !== 'inactive source',
+            ]);
+            if ($state === 'deleted product') {
+                $product->delete();
+            }
+        }
+        [$unchanged] = $this->mapped($supplier, 'unchanged', 'Eligible unchanged product');
+        $this->catalog = [$this->row('shared', '1'), $this->row('unchanged', '1')];
+        $this->sync($supplier);
+        $this->catalog = [$this->row('shared', '1.1'), $this->row('unchanged', '1')];
+        $this->sync($supplier);
+
+        $this->assertSame(1, SupplierHealthEvent::query()->count());
+        $this->assertSame(1, $this->effects()->count());
+        $message = $this->text(SupplierHealthEvent::query()->sole()->message);
+        $this->assertSame(1, substr_count($message, 'Produk #'.$active->id.':'));
+        $this->assertStringNotContainsString('Excluded', $message);
+        $this->assertStringNotContainsString($unchanged->name, $message);
+    }
+
+    public function test_changed_inactive_source_does_not_create_a_header_only_alert_for_an_unchanged_active_source(): void
+    {
+        $supplier = $this->supplier();
+        [$product] = $this->mapped($supplier, 'inactive', 'Inactive change');
+        ProductSupplierSource::query()->where('product_id', $product->id)->update(['is_active' => false]);
+        $this->mapped($supplier, 'active', 'Unchanged active product');
+        $this->catalog = [$this->row('inactive', '1'), $this->row('active', '1')];
+        $this->sync($supplier);
+        $this->catalog = [$this->row('inactive', '1.1'), $this->row('active', '1')];
+        $this->sync($supplier);
+        $this->assertQuiet();
+
+        $supplier->forceFill(['balance_micros' => 0, 'low_balance_threshold_micros' => 1000000])->save();
+        $this->assertSame(1, app(SupplierHealthService::class)->materialize());
+        $this->assertSame(1, $this->effects()->count());
+        $this->assertStringContainsString('Saldo tersedia:', SupplierHealthEvent::query()->sole()->message);
+    }
+
     public static function availabilityCases(): iterable
     {
         yield 'only affected source' => [0, false, false];

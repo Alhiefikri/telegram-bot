@@ -55,16 +55,20 @@ final class SupplierPriceChangeNotificationService
             return;
         }
         $productMap = $products->keyBy('id');
-        $rows = ['Supplier #'.$supplier->id.': '.$supplier->name];
+        $rows = [];
         foreach ($sources as $source) {
             $change = $changes[$source->supplier_catalog_item_id] ?? null;
             $product = $productMap->get($source->product_id);
-            if ($change === null || $product === null) {
+            if ($change === null || ! $source->is_active || $product === null || ! $product->is_active || $product->trashed()) {
                 continue;
             }
             [$old, $new, $example] = $change;
-            $rows[] = $this->row($supplier, $product, $old, $new, $example, (bool) $source->is_active, $previousSupplierStock[$product->id] ?? 0);
+            $rows[] = $this->row($supplier, $product, $old, $new, $example, $previousSupplierStock[$product->id] ?? 0);
         }
+        if ($rows === []) {
+            return;
+        }
+        array_unshift($rows, 'Supplier #'.$supplier->id.': '.$supplier->name);
         $rows[] = 'Kebijakan harga tidak diubah oleh notifikasi ini. Kebijakan otomatis yang sudah aktif tetap diterapkan saat sinkronisasi. Profit qty 1 bukan jaminan kelayakan semua jumlah, tier retail, atau harga reseller.';
         foreach ($this->messages($rows) as $message) {
             $event = SupplierHealthEvent::create(['supplier_id' => $supplier->id, 'message' => $message, 'created_at' => now()]);
@@ -73,7 +77,7 @@ final class SupplierPriceChangeNotificationService
         }
     }
 
-    private function row(Supplier $supplier, Product $product, SupplierCatalogItem $old, SupplierCatalogItem $new, ?array $example, bool $sourceActive, int $previousSupplierStock): string
+    private function row(Supplier $supplier, Product $product, SupplierCatalogItem $old, SupplierCatalogItem $new, ?array $example, int $previousSupplierStock): string
     {
         $currency = $supplier->currency;
         $lines = ['Produk #'.$product->id.': '.$product->name, 'SKU #'.$new->id.': '.$new->external_id.' ('.$new->name.')'];
@@ -109,12 +113,6 @@ final class SupplierPriceChangeNotificationService
         $local = $product->localAvailableStock();
         $total = $product->availableStock();
         $lines[] = 'Ketersediaan total (lokal + semua source supplier): '.($local + $previousSupplierStock).' -> '.$total.' unit; '.($total > 0 ? 'masih tersedia' : 'tidak tersedia').'. Lokal: '.$local.'; supplier layak saat ini: '.$product->supplierAvailableStock().'.';
-        if (! $sourceActive) {
-            $lines[] = 'Mapping source ini nonaktif.';
-        }
-        if (! $product->is_active || $product->trashed()) {
-            $lines[] = 'Produk toko nonaktif/dihapus; kapasitas di atas bukan status listing.';
-        }
 
         return implode("\n", $lines);
     }

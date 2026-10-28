@@ -458,12 +458,15 @@ The normal CI suite includes these tests on PRs and pushes to `main`. `.github/w
 
 ## Notifikasi perubahan harga supplier
 
-Sinkronisasi yang berhasil membandingkan harga lama dan baru hanya untuk SKU
-yang terhubung ke Product toko. Harga dasar naik maupun turun memberi notifikasi;
-perubahan tier/diskon juga memberi notifikasi bila mengubah biaya efektif pada
-quantity checkout 1–10.000. Observasi pertama, SKU tanpa mapping, dan harga yang
-tidak berubah tidak membuat pesan. Perubahan berikutnya tetap dikabarkan,
-termasuk harga yang kembali ke nilai sebelumnya.
+Sinkronisasi yang berhasil membandingkan harga lama dan baru untuk SKU yang
+terhubung melalui mapping aktif ke Product aktif yang tidak dihapus. Harga dasar
+naik maupun turun memberi notifikasi; perubahan tier/diskon juga memberi notifikasi
+bila mengubah biaya efektif pada quantity checkout 1–10.000. Observasi pertama,
+SKU tanpa mapping yang layak, harga tetap, dan tier/diskon efektif setara tetap
+senyap. Pada SKU bersama, filter berlaku per mapping/Product. Jika seluruh baris
+tersaring, tidak ada event/effect baru atau pesan berisi header/peringatan saja.
+Baseline dan freshness tetap maju; aktivasi ulang tidak mengirim perubahan lama.
+Perubahan baru setelah aktivasi tetap dikabarkan, termasuk pembalikan harga.
 
 Pesan hanya ditujukan ke private chat `TELEGRAM_ADMIN_CHAT_ID` existing.
 Target kosong, nol, atau grup tidak membuat event; perubahan selama target tidak
@@ -474,8 +477,8 @@ menerima biaya supplier atau profit ini.
 Ringkasan memuat identitas Product/SKU, arah dan nilai perubahan dalam mata uang
 supplier, biaya rupiah, harga retail normal quantity satu, profit quantity satu,
 minimum profit, serta ketersediaan gabungan stok lokal dan semua sumber supplier.
-Mapping nonaktif dan Product nonaktif/dihapus ditandai. Angka profit quantity satu
-bukan jaminan kelayakan semua quantity, tier retail, atau harga reseller.
+Angka profit quantity satu bukan jaminan kelayakan semua quantity, tier retail,
+atau harga reseller.
 Notifikasi tidak mengubah kebijakan harga/profit; mode otomatis yang sebelumnya
 aktif tetap diterapkan oleh sinkronisasi seperti biasa.
 
@@ -497,6 +500,23 @@ tetap → turun menghasilkan event **0 → 1 → 1 → 2**, kapasitas **10 → 0
 delapan supplier GET untuk empat sync, dan dua pesan privat setelah lost-wakeup
 recovery. Semua HTTP berada di luar transaksi; replay delivery tidak mengirim
 ulang. Ini bukan bukti delivery Telegram live atau pengukuran beban produksi.
+
+Verifikasi lokal #669 (28 Oktober 2026): lima skenario regresi baru gagal sebelum
+filter diterapkan. Suite notifikasi sesudah fix lulus 19 tests / 788 assertions;
+78 tests health/availability juga lulus. Cakupan meliputi mapping nonaktif,
+Product nonaktif/dihapus, SKU bersama, aktivasi ulang, baseline/freshness,
+harga tetap/tier efektif setara, snapshot aman, rollback dan recovery existing.
+Smoke bootstrap SQLite memori dengan HTTP fixture menghasilkan event/effect
+0/0 saat baseline dan kenaikan harga pada mapping nonaktif, tetap 0/0 setelah
+aktivasi tanpa perubahan harga, lalu 1/1 saat harga aktif berubah. Materialisasi
+alarm saldo menambahnya menjadi 2/2. Retail tetap Rp25.000 dan stok lokal tetap
+empat; kapasitas supplier 0 saat mapping nonaktif dan 20 setelah aktivasi.
+Delapan supplier GET fixture, nol request Telegram, tanpa provider nyata.
+Filter tidak menghapus histori/pending effects atau menonaktifkan alarm health.
+Referensi Context7 Laravel 13:
+[soft deletion dan `trashed()`](https://github.com/laravel/docs/blob/13.x/eloquent.md#soft-deleting)
+serta [dispatch setelah commit](https://github.com/laravel/docs/blob/13.x/queues.md#jobs-and-database-transactions).
+Hasil ini bukan bukti deploy, delivery live, atau penghematan CPU/RAM production.
 
 ## Alert health supplier privat
 
