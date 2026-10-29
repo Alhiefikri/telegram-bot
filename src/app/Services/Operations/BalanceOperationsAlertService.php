@@ -751,6 +751,8 @@ final class BalanceOperationsAlertService
      */
     private function fingerprint(string $key, BalanceAlertSeverity $severity, array $evidence): string
     {
+        // Run provenance remains in episode evidence, not the risk identity.
+        unset($evidence['run_id'], $evidence['checked_at']);
         ksort($evidence);
 
         $parts = ['alert='.$key, 'severity='.$severity->value];

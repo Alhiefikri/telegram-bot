@@ -79,6 +79,43 @@ final class BalanceOperationsAlertTest extends TestCase
         $this->assertCount(1, $effects);
     }
 
+    public function test_new_reconciliation_run_does_not_repeat_an_unchanged_treasury_incident(): void
+    {
+        $condition = [
+            'verdict' => UsdtReconciliationVerdict::Findings,
+            'liability_micro' => 2000000,
+            'custody_state' => 'missing',
+            'findings' => ['treasury' => ['findings' => ['missing_custody_input']]],
+        ];
+        $this->fullRun($condition);
+        $this->assertSame(1, $this->service()->evaluate()->notified);
+
+        $this->travel(5)->minutes();
+        $latest = $this->fullRun($condition);
+        $this->assertSame(0, $this->service()->evaluate()->notified);
+        $this->assertCount(1, $this->alertEffects());
+        $episode = BalanceOperationsAlertEpisode::query()
+            ->where('alert_key', BalanceOperationsAlertService::ALERT_TREASURY_COVERAGE)->sole();
+        $this->assertSame($latest->id, $episode->evidence['run_id']);
+        $this->assertSame(2, $episode->occurrences);
+    }
+
+    public function test_changed_treasury_risk_notifies_and_resolution_can_reopen(): void
+    {
+        $this->fullRun(['liability_micro' => 2000000, 'custody_state' => 'missing']);
+        $this->assertSame(1, $this->service()->evaluate()->notified);
+
+        $this->fullRun(['liability_micro' => 4000000, 'custody_state' => 'missing']);
+        $this->assertSame(1, $this->service()->evaluate()->notified);
+
+        $this->fullRun(['liability_micro' => 4000000, 'custody_state' => 'available']);
+        $this->assertSame(1, $this->service()->evaluate()->resolved);
+
+        $this->fullRun(['liability_micro' => 4000000, 'custody_state' => 'missing']);
+        $this->assertSame(1, $this->service()->evaluate()->notified);
+        $this->assertSame(4, $this->alertEffects()->count());
+    }
+
     public function test_runtime_failure_notifies_once_per_episode_and_resolution(): void
     {
         $first = $this->service()->reconcileSchedulerRuntime('outbound-recovery', false, 'recovery_timeout');
