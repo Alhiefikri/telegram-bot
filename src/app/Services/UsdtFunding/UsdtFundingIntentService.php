@@ -80,7 +80,7 @@ final class UsdtFundingIntentService
                     return new UsdtFundingIntentResult('unavailable');
                 }
                 try {
-                    $amountMicro = $this->sharedAmounts->allocate($amountMicro);
+                    $amountMicro = $this->sharedAmounts->allocate($amountMicro, $feeMicro);
                 } catch (\RuntimeException) {
                     return new UsdtFundingIntentResult('unavailable');
                 }

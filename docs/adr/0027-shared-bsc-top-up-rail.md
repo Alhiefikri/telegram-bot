@@ -21,14 +21,19 @@ credits the same transfer twice.
 
 Add a new `bsc_shared` rail:
 
-- One active shared BSC address is stored in `usdt_shared_top_up_receivers`
-  and permanently claimed in `usdt_receiver_address_claims` under the
-  `shared_top_up` channel. It can never also serve checkout or a
-  Customer-exclusive deposit binding.
+- One active shared BSC address is stored in `usdt_shared_top_up_receivers`.
+  Dedicated addresses retain a permanent `shared_top_up` claim. As explicitly
+  authorized by the Owner on 2026-10-29, an active, verified BSC USDT checkout
+  receiver can also serve top-ups by referencing its existing immutable
+  `checkout` claim. Customer-exclusive deposit bindings remain isolated.
 - Each intent receives a unique exact payable amount. The requested base is
   used when free; otherwise a bounded micro-USDT suffix (at most 1% of the
-  base) is added. The full payable amount is credited, so the suffix is not a
-  hidden fee.
+  base) is added. The suffix is credited with the requested base rather than
+  retained as a hidden fee; any policy application fee remains separate.
+  Checkout and shared top-ups reserve payable amounts across both channels,
+  including the snapshotted funding fee, under the existing payment-setting row
+  lock. Pending intents and recent top-up targets remain occupied for checkout;
+  recent or pending checkout payments remain occupied for top-up.
 - The Customer sends the exact amount to the shared address and submits the
   transaction hash or a BscScan transaction link. The hash/link is only a
   lookup hint.
@@ -51,6 +56,9 @@ Add a new `bsc_shared` rail:
 - One shared address concentrates custody. The application stores only the
   public address and no key material; the Owner remains responsible for
   custody, monitoring and withdrawals.
+- Selecting the checkout address is explicit, not an automatic fallback or
+  retargeting rule. Rotating checkout does not rewrite existing top-up
+  instructions or history; the Owner must configure the intended shared address.
 - The legacy `bsc_usdt` rail and its historical rows remain readable; new
   funding intents use `bsc_shared`.
 - The release-readiness report still treats primary BSC activation as NO-GO

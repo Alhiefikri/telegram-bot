@@ -11,8 +11,8 @@ use RuntimeException;
  * The preferred amount is the Customer's requested base. When another open
  * invoice already holds that exact amount, a bounded micro-USDT suffix is added
  * (at most 1% of the base) so concurrent Customers never share one payable
- * amount. The caller holds the funding policy row lock, which serializes
- * allocation and intent insertion.
+ * amount. The caller holds the payment-setting row lock shared with checkout
+ * across allocation and intent insertion.
  */
 final class SharedBscTopUpAmountAllocator
 {
@@ -20,20 +20,21 @@ final class SharedBscTopUpAmountAllocator
 
     private const LOOKBACK_HOURS = 24;
 
-    public function allocate(int $baseMicro): int
+    public function allocate(int $baseMicro, int $feeMicro = 0): int
     {
-        if ($baseMicro < 1) {
-            throw new RuntimeException('Shared BSC top-up base amount must be positive.');
+        if ($baseMicro < 1 || $feeMicro < 0 || $feeMicro > PHP_INT_MAX - $baseMicro) {
+            throw new RuntimeException('Shared BSC top-up amount and fee must fit positive integer micro-USDT.');
         }
 
         // Keep the matching suffix under 1% of the requested amount, with a
         // small floor so low-value top-ups still have a usable tag range.
-        $maxSuffix = max(9, min(self::MAX_SUFFIX_MICRO, intdiv($baseMicro, 100)));
+        $maxSuffix = min(PHP_INT_MAX - $baseMicro - $feeMicro, max(9, min(self::MAX_SUFFIX_MICRO, intdiv($baseMicro, 100))));
         $minimumCreatedAt = now()->subHours(self::LOOKBACK_HOURS);
 
-        $occupied = $this->occupiedAmounts($baseMicro, $baseMicro + $maxSuffix, $minimumCreatedAt);
-        for ($candidate = $baseMicro; $candidate <= $baseMicro + $maxSuffix; $candidate++) {
-            if (! isset($occupied[$candidate])) {
+        $occupied = $this->occupiedAmounts($baseMicro + $feeMicro, $baseMicro + $feeMicro + $maxSuffix, $minimumCreatedAt);
+        for ($suffix = 0; $suffix <= $maxSuffix; $suffix++) {
+            $candidate = $baseMicro + $suffix;
+            if (! isset($occupied[$candidate + $feeMicro])) {
                 return $candidate;
             }
         }
@@ -48,17 +49,23 @@ final class SharedBscTopUpAmountAllocator
             ->where('rail', 'bsc_shared')
             ->where('state', 'pending')
             ->where('expires_at', '>', now())
-            ->whereBetween('amount_micro', [$fromMicro, $toMicro])
-            ->pluck('amount_micro');
+            ->whereBetween('payable_micro', [$fromMicro, $toMicro])
+            ->pluck('payable_micro');
 
         $topUps = DB::table('customer_usdt_top_ups')
             ->where('rail', 'bsc_shared')
             ->where('created_at', '>=', $minimumCreatedAt)
-            ->whereBetween('amount_micro', [$fromMicro, $toMicro])
-            ->pluck('amount_micro');
+            ->whereBetween('payable_micro', [$fromMicro, $toMicro])
+            ->pluck('payable_micro');
+
+        $checkouts = DB::table('payments')
+            ->where('provider', 'manual')->where('method', 'USDT_BEP20')->where('currency', 'USDT')
+            ->where(fn ($query) => $query->where('created_at', '>=', $minimumCreatedAt)->orWhere('status', 'pending'))
+            ->whereBetween('amount', [$fromMicro, $toMicro])
+            ->pluck('amount');
 
         $occupied = [];
-        foreach ($intents->merge($topUps) as $amount) {
+        foreach ($intents->merge($topUps)->merge($checkouts) as $amount) {
             $occupied[(int) $amount] = true;
         }
 

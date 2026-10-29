@@ -12,15 +12,15 @@ use Throwable;
 /**
  * Registers or deactivates the single shared BSC address used by the
  * bsc_shared top-up rail. The address is public; the private key never enters
- * the application. A claimed address can never be reused for checkout or a
- * Customer-exclusive deposit binding.
+ * the application. Dedicated shared addresses and explicitly selected verified
+ * checkout addresses are supported; Customer-exclusive deposits stay isolated.
  */
 final class ConfigureUsdtSharedTopUpReceiver extends Command
 {
     use ResolvesOperatorActor;
 
     protected $signature = 'usdt-topup:shared-receiver
-        {--address= : Public BSC address dedicated to shared top-ups.}
+        {--address= : Public BSC address, either dedicated or an active verified checkout receiver.}
         {--label=Top-up BSC : Admin label for the address.}
         {--actor= : Owner user ID or email recorded as the acting Owner.}
         {--deactivate : Deactivate the current shared top-up address without registering a new one.}

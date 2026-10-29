@@ -40,9 +40,8 @@ final class BscReceiverManager
                     throw new BscReceiverChallengeException('BSC Receiving Address sudah terdaftar. Nonaktifkan record lama atau gunakan address lain.');
                 }
 
-                // The global receiver registry rejects addresses already owned by
-                // the Customer-exclusive USDT deposit channel, so the checkout
-                // pool and top-up receivers can never share an address.
+                // Customer-exclusive deposits stay isolated. Shared top-ups may
+                // explicitly reference an existing verified checkout claim.
                 try {
                     $claim = $this->addressClaims->claim($chainId, $address, UsdtReceiverChannel::Checkout);
                 } catch (UsdtReceiverAddressConflict $exception) {

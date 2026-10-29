@@ -7,11 +7,12 @@ namespace App\Services\Bsc;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Keeps the catalog amount when free, then tries 0.001-USDT steps.
  * Checkout holds the payment-setting row lock across allocation and insert.
- * Only pending Payments on pending Orders occupy an amount.
+ * Pending checkout Payments and recent shared top-up targets reserve an amount.
  */
 final class BscUniquePaymentAmount
 {
@@ -39,6 +40,16 @@ final class BscUniquePaymentAmount
                 ->pluck('amount')
                 ->mapWithKeys(fn (int|string $amount): array => [(int) $amount => true])
                 ->all();
+
+            $intents = DB::table('customer_usdt_funding_intents')
+                ->where('rail', 'bsc_shared')->where('state', 'pending')->where('expires_at', '>', now())
+                ->whereBetween('payable_micro', [$rangeStart, $rangeEnd])->pluck('payable_micro');
+            $topUps = DB::table('customer_usdt_top_ups')
+                ->where('rail', 'bsc_shared')->where('created_at', '>=', now()->subHours(24))
+                ->whereBetween('payable_micro', [$rangeStart, $rangeEnd])->pluck('payable_micro');
+            foreach ($intents->merge($topUps) as $amount) {
+                $occupied[(int) $amount] = true;
+            }
 
             for ($candidate = $rangeStart; $candidate <= $rangeEnd; $candidate += $increment) {
                 if (! isset($occupied[$candidate])) {

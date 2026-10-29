@@ -3,6 +3,7 @@
 namespace App\Services\UsdtFunding;
 
 use App\Enums\UsdtReceiverChannel;
+use App\Models\BscPaymentReceiver;
 use App\Models\UsdtSharedTopUpReceiver;
 use App\Models\User;
 use App\Services\AuditLogger;
@@ -14,8 +15,8 @@ use InvalidArgumentException;
 
 /**
  * Owner-only lifecycle for the one active shared BSC top-up address. The
- * address is permanently claimed in the global receiver registry before it is
- * stored, so it can never also serve checkout or a Customer-exclusive binding.
+ * address is permanently claimed in the global receiver registry. An existing
+ * verified checkout claim may also back this rail; Customer deposits stay exclusive.
  * Rotation deactivates the current row; history and the claim stay immutable.
  */
 final class SharedTopUpReceiverRegistry
@@ -59,7 +60,18 @@ final class SharedTopUpReceiverRegistry
                 );
             }
 
-            $claim = $this->claims->claim($chainId, $address, UsdtReceiverChannel::SharedTopUp);
+            $claim = $this->claims->find($chainId, $address);
+            if ($claim?->channel === UsdtReceiverChannel::Checkout) {
+                $checkout = BscPaymentReceiver::query()->where('address_claim_id', $claim->getKey())
+                    ->lockForUpdate()->first();
+                if ($checkout === null || ! $checkout->is_active || ! $checkout->isVerified()
+                    || $checkout->chain_id !== $chainId || $checkout->token_contract !== $contract
+                    || $checkout->token_decimals !== $decimals) {
+                    throw new InvalidArgumentException('Shared top-ups require an active, verified checkout receiver for the approved BSC USDT token.');
+                }
+            } else {
+                $claim = $this->claims->claim($chainId, $address, UsdtReceiverChannel::SharedTopUp);
+            }
 
             $receiver = UsdtSharedTopUpReceiver::query()->create([
                 'address_claim_id' => $claim->getKey(),

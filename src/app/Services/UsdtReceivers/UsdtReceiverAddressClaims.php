@@ -11,8 +11,9 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Owns the permanent, channel-exclusive claim of one normalized
- * (chain_id, address) across every USDT receiver table.
+ * Owns the permanent channel claim of one normalized (chain_id, address).
+ * Shared top-ups may reference an existing verified checkout claim without
+ * changing its channel; Customer deposit claims remain exclusive.
  *
  * A checkout claim may be re-used for checkout again only after its receiver
  * row was deleted (the address then never served a payment). A Customer
