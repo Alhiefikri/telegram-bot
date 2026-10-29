@@ -72,7 +72,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
     private function handleQuantityAction(TelegramCallbackContext $context, string $action, int $productId, string $token): void
     {
         $this->session->withLock($context->customer, function () use ($context, $action, $productId, $token): void {
-            $selection = $this->currentSelection($context->customer, $productId, $token);
+            $selection = $this->currentSelection($context->customer, $productId, $token, quantityControl: in_array($action, ['+', '-'], true));
             if ($selection === null) {
                 $this->sendStale($context);
 
@@ -96,7 +96,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 return;
             }
 
-            $product = Product::query()->withAvailability()->publicVisible()->whereKey($productId)->first();
+            $product = Product::query()->with('quantityPriceTiers')->withAvailability()->publicVisible()->whereKey($productId)->first();
             $availableStock = $product ? max(0, $product->availableStock()) : 0;
             $selectedQuantity = (int) $selection['quantity'];
             if (! $product || $availableStock < 1) {
@@ -323,12 +323,12 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
     }
 
     /** @param  list<string>  $modes */
-    private function currentSelection(Customer $customer, int $productId, string $token, array $modes = ['browsing', 'awaiting_custom_quantity']): ?array
+    private function currentSelection(Customer $customer, int $productId, string $token, array $modes = ['browsing', 'awaiting_custom_quantity'], bool $quantityControl = false): ?array
     {
         $selection = $this->session->get($customer);
         if ($selection === null
             || (int) $selection['productId'] !== $productId
-            || ! hash_equals((string) $selection['interactionToken'], $token)
+            || ! hash_equals((string) $selection[$quantityControl ? 'quantityToken' : 'interactionToken'], $token)
             || ! in_array($selection['mode'], $modes, true)
         ) {
             return null;

@@ -25,6 +25,7 @@ class TelegramIntentSession
      *     productId: int,
      *     quantity: int,
      *     interactionToken: string,
+     *     quantityToken: string,
      *     locale: string,
      *     mode: 'browsing'|'awaiting_custom_quantity',
      *     previousQuantity?: int,
@@ -39,13 +40,15 @@ class TelegramIntentSession
     {
         $state = Cache::get($this->key($customer));
         if (! is_array($state)
-            || ! isset($state['productId'], $state['quantity'], $state['interactionToken'], $state['locale'], $state['mode'])
+            || ! isset($state['productId'], $state['quantity'], $state['interactionToken'], $state['quantityToken'], $state['locale'], $state['mode'])
             || ! is_int($state['productId'])
             || $state['productId'] < 1
             || ! is_int($state['quantity'])
             || $state['quantity'] < 1
             || ! is_string($state['interactionToken'])
             || preg_match('/\A[a-f0-9]{16}\z/D', $state['interactionToken']) !== 1
+            || ! is_string($state['quantityToken'])
+            || preg_match('/\A[a-f0-9]{16}\z/D', $state['quantityToken']) !== 1
             || ! is_string($state['locale'])
             || ! in_array($state['locale'], TelegramTranslationCatalog::SUPPORTED_LOCALES, true)
             || ! in_array($state['mode'], ['browsing', 'awaiting_custom_quantity'], true)
@@ -85,7 +88,7 @@ class TelegramIntentSession
 
     /**
      * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}  $context
-     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
+     * @return array{productId: int, quantity: int, interactionToken: string, quantityToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
      */
     public function start(Customer $customer, int $productId, int $quantity, string $locale, array $context = []): array
     {
@@ -97,10 +100,12 @@ class TelegramIntentSession
             throw new RuntimeException('Telegram product selection quantity must be positive.');
         }
 
+        $token = $this->newInteractionToken();
         $state = [
             'productId' => $productId,
             'quantity' => $quantity,
-            'interactionToken' => $this->newInteractionToken(),
+            'interactionToken' => $token,
+            'quantityToken' => $token,
             'locale' => in_array($locale, TelegramTranslationCatalog::SUPPORTED_LOCALES, true)
                 ? $locale
                 : TelegramLocale::DEFAULT_LOCALE,
@@ -113,7 +118,7 @@ class TelegramIntentSession
     }
 
     /**
-     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'awaiting_custom_quantity', previousQuantity: int, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
+     * @return array{productId: int, quantity: int, interactionToken: string, quantityToken: string, locale: string, mode: 'awaiting_custom_quantity', previousQuantity: int, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
      */
     public function awaitCustomQuantity(Customer $customer, array $state, string $locale): array
     {
@@ -121,6 +126,7 @@ class TelegramIntentSession
             'productId' => (int) $state['productId'],
             'quantity' => (int) $state['quantity'],
             'interactionToken' => $this->newInteractionToken(),
+            'quantityToken' => $this->newInteractionToken(),
             'locale' => $locale,
             'mode' => 'awaiting_custom_quantity',
             'previousQuantity' => (int) $state['quantity'],
@@ -132,11 +138,31 @@ class TelegramIntentSession
     }
 
     /**
-     * @return array{productId: int, quantity: int, interactionToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
+     * @return array{productId: int, quantity: int, interactionToken: string, quantityToken: string, locale: string, mode: 'browsing', familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}
      */
     public function browsing(Customer $customer, array $state, int $quantity, string $locale): array
     {
-        return $this->start($customer, (int) $state['productId'], $quantity, $locale, $this->navigationContext($state));
+        if ($quantity < 1) {
+            throw new RuntimeException('Telegram product selection quantity must be positive.');
+        }
+
+        $next = [
+            'productId' => (int) $state['productId'],
+            'quantity' => $quantity,
+            // Payment controls expire on every change; +/- survive only this browsing session.
+            'interactionToken' => $this->newInteractionToken(),
+            'quantityToken' => $state['mode'] === 'browsing'
+                ? $state['quantityToken']
+                : $this->newInteractionToken(),
+            'locale' => in_array($locale, TelegramTranslationCatalog::SUPPORTED_LOCALES, true)
+                ? $locale
+                : TelegramLocale::DEFAULT_LOCALE,
+            'mode' => 'browsing',
+            ...$this->navigationContext($state),
+        ];
+        $this->put($customer, $next);
+
+        return $next;
     }
 
     public function put(Customer $customer, array $state): void

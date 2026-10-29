@@ -384,71 +384,6 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->assertSame('5368324170671202286', $balance['icon_custom_emoji_id'] ?? null);
     }
 
-    public function test_product_detail_has_isolated_quantity_and_payment_rows_and_rotates_stale_controls(): void
-    {
-        $this->fakeTelegramHttp();
-        $customer = Customer::factory()->create(['telegram_id' => 318001, 'locale' => 'en']);
-        $product = Product::factory()->create([
-            'name' => 'Detail Product',
-            'price_amount' => 10000,
-            'stock' => 3,
-            'reserved_stock' => 0,
-            'is_active' => true,
-        ]);
-
-        $this->openDetail($customer, $product);
-        $detail = $this->lastDetailMessage('Detail Product');
-        $keyboard = $detail['reply_markup']['inline_keyboard'];
-
-        $this->assertCount(5, $keyboard);
-        $this->assertCount(3, $keyboard[0]);
-        $this->assertCount(1, $keyboard[1]);
-        $this->assertCount(1, $keyboard[2]);
-        $this->assertCount(1, $keyboard[3]);
-        $this->assertCount(1, $keyboard[4]);
-        $this->assertSame('primary', $keyboard[2][0]['style'] ?? null);
-        $this->assertSame('💳 QRIS · Rp10.000', $keyboard[2][0]['text']);
-        $this->assertStringStartsWith('detail:pay:balance:', $keyboard[3][0]['callback_data']);
-        $this->assertStringContainsString('Price: Rp10.000', (string) $detail['text']);
-        $this->assertStringContainsString('Available stock: 3', (string) $detail['text']);
-        $this->assertStringContainsString('Quantity: 1', (string) $detail['text']);
-        $this->assertStringContainsString('Total: Rp10.000', (string) $detail['text']);
-        $this->assertStringContainsString('Product details', (string) $detail['text']);
-        $this->assertStringNotContainsString('Sold:', (string) $detail['text']);
-        $this->assertStringContainsString('🌍 Cross-Border QRIS', (string) $detail['text']);
-        $this->assertMatchesRegularExpression('/<blockquote>🌍 Cross-Border QRIS.*<\/blockquote>/su', (string) $detail['text']);
-        $this->assertStringNotContainsString('checkout.payment_method', json_encode($detail, JSON_THROW_ON_ERROR));
-
-        $state = $this->selection($customer);
-        $oldToken = $state['interactionToken'];
-        $this->assertSame('browsing', $state['mode']);
-        $this->assertSame(1, $state['quantity']);
-        $this->assertMatchesRegularExpression('/^detail:qty:\+:'.$product->id.':[A-Za-z0-9_-]+$/', $keyboard[0][2]['callback_data']);
-
-        $this->postTelegramWebhook($this->callbackUpdate(3180011, 'decrease-at-floor', 'detail:qty:-:'.$product->id.':'.$oldToken, [], 318001, 'private', 88001))->assertOk();
-        $this->assertSame(1, $this->selection($customer)['quantity']);
-        $this->assertSame($oldToken, $this->selection($customer)['interactionToken']);
-        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
-            && (string) ($request['callback_query_id'] ?? '') === 'decrease-at-floor'
-            && str_contains((string) ($request['text'] ?? ''), 'minimum'));
-
-        $this->postTelegramWebhook($this->callbackUpdate(318002, 'increase', 'detail:qty:+:'.$product->id.':'.$oldToken, [], 318001, 'private', 88001))->assertOk();
-        $next = $this->selection($customer);
-        $this->assertSame(2, $next['quantity']);
-        $this->assertNotSame($oldToken, $next['interactionToken']);
-        $nextDetail = $this->lastDetailMessage('Detail Product');
-        $this->assertStringContainsString('Total: Rp20.000', (string) $nextDetail['text']);
-        $this->assertSame('💳 QRIS · Rp20.000', $nextDetail['reply_markup']['inline_keyboard'][2][0]['text']);
-
-        $messagesBeforeStale = $this->detailMessageCount('Detail Product');
-        $this->postTelegramWebhook($this->callbackUpdate(318003, 'stale-increase', 'detail:qty:+:'.$product->id.':'.$oldToken, [], 318001, 'private', 88001))->assertOk();
-        $this->assertSame($messagesBeforeStale, $this->detailMessageCount('Detail Product'));
-        $this->assertSame(0, Cart::count());
-        $this->assertSame(0, Order::count());
-        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
-            && str_contains((string) ($request['text'] ?? ''), 'expired'));
-    }
-
     public function test_product_detail_renders_dynamic_replacement_refund_policy_after_description_in_customer_locale(): void
     {
         $this->fakeTelegramHttp();
@@ -756,7 +691,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(
             3180071,
             'threshold-increase',
-            'detail:qty:+:'.$product->id.':'.$state['interactionToken'],
+            'detail:qty:+:'.$product->id.':'.$state['quantityToken'],
             [],
             318007,
             'private',
@@ -808,7 +743,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(
             3180041,
             'inline-increase',
-            'detail:qty:+:'.$product->id.':'.$state['interactionToken'],
+            'detail:qty:+:'.$product->id.':'.$state['quantityToken'],
             [],
             318004,
             'private',
@@ -819,7 +754,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(
             3180042,
             'inline-decrease',
-            'detail:qty:-:'.$product->id.':'.$state['interactionToken'],
+            'detail:qty:-:'.$product->id.':'.$state['quantityToken'],
             [],
             318004,
             'private',
@@ -966,7 +901,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
 
         $this->openDetail($customer, $product);
         $state = $this->selection($customer);
-        $this->postTelegramWebhook($this->callbackUpdate(318022, 'increase', 'detail:qty:+:'.$product->id.':'.$state['interactionToken'], [], 318021, 'private', 88003))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(318022, 'increase', 'detail:qty:+:'.$product->id.':'.$state['quantityToken'], [], 318021, 'private', 88003))->assertOk();
         $state = $this->selection($customer);
         $this->assertSame(2, $state['quantity']);
         $this->postTelegramWebhook($this->callbackUpdate(318023, 'manual', 'detail:qty:manual:'.$product->id.':'.$state['interactionToken'], [], 318021, 'private', 88004))->assertOk();
@@ -1060,7 +995,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(
             3180272,
             'live-stock-increment',
-            'detail:qty:+:'.$product->id.':'.$state['interactionToken'],
+            'detail:qty:+:'.$product->id.':'.$state['quantityToken'],
             [],
             3180271,
             'private',
@@ -1090,13 +1025,13 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
 
         $this->openDetail($customer, $product);
         $state = $this->selection($customer);
-        $this->postTelegramWebhook($this->callbackUpdate(3180274, 'increment-to-two', 'detail:qty:+:'.$product->id.':'.$state['interactionToken'], [], 3180273, 'private', 880273))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180274, 'increment-to-two', 'detail:qty:+:'.$product->id.':'.$state['quantityToken'], [], 3180273, 'private', 880273))->assertOk();
         $state = $this->selection($customer);
-        $this->postTelegramWebhook($this->callbackUpdate(3180275, 'increment-to-three', 'detail:qty:+:'.$product->id.':'.$state['interactionToken'], [], 3180273, 'private', 880273))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180275, 'increment-to-three', 'detail:qty:+:'.$product->id.':'.$state['quantityToken'], [], 3180273, 'private', 880273))->assertOk();
         $state = $this->selection($customer);
         $product->forceFill(['stock' => 1])->save();
 
-        $this->postTelegramWebhook($this->callbackUpdate(3180276, 'decrement-after-stock-drop', 'detail:qty:-:'.$product->id.':'.$state['interactionToken'], [], 3180273, 'private', 880273))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180276, 'decrement-after-stock-drop', 'detail:qty:-:'.$product->id.':'.$state['quantityToken'], [], 3180273, 'private', 880273))->assertOk();
 
         $current = $this->selection($customer);
         $this->assertSame(1, $current['quantity']);
@@ -1128,7 +1063,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
 
         $this->openDetail($customer, $product);
         $state = $this->selection($customer);
-        $this->postTelegramWebhook($this->callbackUpdate(3180278, 'custom-increment', 'detail:qty:+:'.$product->id.':'.$state['interactionToken'], [], 3180277, 'private', 880277))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180278, 'custom-increment', 'detail:qty:+:'.$product->id.':'.$state['quantityToken'], [], 3180277, 'private', 880277))->assertOk();
         $state = $this->selection($customer);
         $this->postTelegramWebhook($this->callbackUpdate(3180279, 'custom-open', 'detail:qty:manual:'.$product->id.':'.$state['interactionToken'], [], 3180277, 'private', 880277))->assertOk();
         $product->forceFill(['stock' => 1])->save();
@@ -1161,7 +1096,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
 
         $this->openDetail($customer, $product);
         $state = $this->selection($customer);
-        $this->postTelegramWebhook($this->callbackUpdate(3180282, 'cancel-increment', 'detail:qty:+:'.$product->id.':'.$state['interactionToken'], [], 3180281, 'private', 880281))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180282, 'cancel-increment', 'detail:qty:+:'.$product->id.':'.$state['quantityToken'], [], 3180281, 'private', 880281))->assertOk();
         $state = $this->selection($customer);
         $this->postTelegramWebhook($this->callbackUpdate(3180283, 'cancel-open', 'detail:qty:manual:'.$product->id.':'.$state['interactionToken'], [], 3180281, 'private', 880281))->assertOk();
         $awaiting = $this->selection($customer);
@@ -1197,7 +1132,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
 
         $this->openDetail($customer, $product);
         $state = $this->selection($customer);
-        $this->postTelegramWebhook($this->callbackUpdate(3180286, 'payment-increment', 'detail:qty:+:'.$product->id.':'.$state['interactionToken'], [], 3180285, 'private', 880285))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180286, 'payment-increment', 'detail:qty:+:'.$product->id.':'.$state['quantityToken'], [], 3180285, 'private', 880285))->assertOk();
         $state = $this->selection($customer);
         $product->forceFill(['stock' => 1])->save();
 
@@ -1419,7 +1354,7 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
         $this->postTelegramWebhook($this->callbackUpdate(
             3180561,
             'quantity-during-maintenance',
-            'detail:qty:+:'.$product->id.':'.$quantityState['interactionToken'],
+            'detail:qty:+:'.$product->id.':'.$quantityState['quantityToken'],
             [],
             318056,
             'private',
@@ -1758,6 +1693,87 @@ class ProductDetailPurchaseTest extends TelegramBotTestSupport
             'source_id' => (string) $order->id,
             'amount' => 15_000,
         ]);
+    }
+
+    public function test_rapid_quantity_taps_accumulate_once_and_invalidate_the_old_payment_revision(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318093, 'locale' => 'en']);
+        $product = Product::factory()->withQuantityPriceTiers([
+            ['minimum_quantity' => 5, 'price_amount' => 8_000, 'usdt_price_amount' => null],
+        ])->create(['name' => 'Rapid Quantity', 'stock' => 10, 'reserved_stock' => 0, 'price_amount' => 10_000, 'is_active' => true]);
+        $this->openDetail($customer, $product);
+        $buttons = $this->lastDetailMessage($product->name)['reply_markup']['inline_keyboard'];
+        $increase = $buttons[0][2]['callback_data'];
+        $oldPayment = collect($buttons)->flatten(1)->first(
+            fn (array $button): bool => str_starts_with($button['callback_data'] ?? '', 'detail:pay:qris:'))['callback_data'];
+
+        for ($tap = 1; $tap <= 5; $tap++) {
+            $payload = $this->callbackUpdate(3180930 + $tap, 'rapid-'.$tap, $increase, [], 318093, 'private', 88093);
+            $this->postTelegramWebhook($payload)->assertOk();
+            $this->postTelegramWebhook($payload)->assertOk();
+        }
+
+        $this->assertSame(6, $this->selection($customer)['quantity']);
+        $detail = $this->lastDetailMessage($product->name);
+        $this->assertStringContainsString('Total: Rp48.000', $detail['text']);
+        $this->postTelegramWebhook($this->callbackUpdate(3180936, 'old-payment', $oldPayment, [], 318093, 'private', 88093))->assertOk();
+        $this->assertSame(6, $this->selection($customer)['quantity']);
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertDatabaseCount('carts', 0);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+            && ($request['callback_query_id'] ?? '') === 'old-payment'
+            && str_contains((string) ($request['text'] ?? ''), 'expired'));
+    }
+
+    public function test_quantity_burst_obeys_live_stock_and_reopened_detail_rejects_previous_controls(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318094, 'locale' => 'en']);
+        $product = Product::factory()->create(['name' => 'Bounded Burst', 'stock' => 3, 'reserved_stock' => 0, 'price_amount' => 10_000, 'is_active' => true]);
+        $this->openDetail($customer, $product);
+        $increase = $this->lastDetailMessage($product->name)['reply_markup']['inline_keyboard'][0][2]['callback_data'];
+        $decrease = $this->lastDetailMessage($product->name)['reply_markup']['inline_keyboard'][0][0]['callback_data'];
+        for ($tap = 1; $tap <= 5; $tap++) {
+            $this->postTelegramWebhook($this->callbackUpdate(3180940 + $tap, 'bounded-'.$tap, $increase, [], 318094, 'private', 88094))->assertOk();
+        }
+        $this->assertSame(3, $this->selection($customer)['quantity']);
+        $product->forceFill(['stock' => 1])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(3180946, 'stock-rebase', $increase, [], 318094, 'private', 88094))->assertOk();
+        $this->assertSame(1, $this->selection($customer)['quantity']);
+        for ($tap = 1; $tap <= 3; $tap++) {
+            $this->postTelegramWebhook($this->callbackUpdate(3180950 + $tap, 'floor-'.$tap, $decrease, [], 318094, 'private', 88094))->assertOk();
+        }
+        $this->assertSame(1, $this->selection($customer)['quantity']);
+
+        $product->forceFill(['stock' => 3])->save();
+        $this->postTelegramWebhook($this->callbackUpdate(3180947, 'reopen', 'product:'.$product->id, [], 318094))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180948, 'previous-detail', $increase, [], 318094, 'private', 88094))->assertOk();
+        $this->assertSame(1, $this->selection($customer)['quantity']);
+        $this->assertDatabaseCount('orders', 0);
+    }
+
+    public function test_manual_quantity_mode_invalidates_previous_burst_controls_even_after_cancel(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 318096, 'locale' => 'en']);
+        $product = Product::factory()->create(['name' => 'Manual Burst Boundary', 'stock' => 5, 'reserved_stock' => 0, 'price_amount' => 10_000, 'is_active' => true]);
+        $this->openDetail($customer, $product);
+        $buttons = $this->lastDetailMessage($product->name)['reply_markup']['inline_keyboard'];
+        $increase = $buttons[0][2]['callback_data'];
+        $manual = collect($buttons)->flatten(1)->first(
+            fn (array $button): bool => str_starts_with($button['callback_data'] ?? '', 'detail:qty:manual:'))['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(3180961, 'manual', $manual, [], 318096, 'private', 88096))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180962, 'late-increase', $increase, [], 318096, 'private', 88096))->assertOk();
+        $awaiting = $this->selection($customer);
+        $this->assertSame('awaiting_custom_quantity', $awaiting['mode']);
+        $this->assertSame(1, $awaiting['quantity']);
+        $this->postTelegramWebhook($this->callbackUpdate(3180963, 'cancel', 'detail:qty:cancel:'.$product->id.':'.$awaiting['interactionToken'], [], 318096, 'private', 88096))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(3180964, 'late-after-cancel', $increase, [], 318096, 'private', 88096))->assertOk();
+        $this->assertSame(1, $this->selection($customer)['quantity']);
+        $freshIncrease = $this->lastDetailMessage($product->name)['reply_markup']['inline_keyboard'][0][2]['callback_data'];
+        $this->postTelegramWebhook($this->callbackUpdate(3180965, 'fresh-after-cancel', $freshIncrease, [], 318096, 'private', 88096))->assertOk();
+        $this->assertSame(2, $this->selection($customer)['quantity']);
     }
 
     private function openDetail(Customer $customer, Product $product): void

@@ -459,7 +459,7 @@ class TelegramCatalogIntents
     }
 
     /**
-     * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}|null  $selection
+     * @param  array{productId: int, quantity: int, interactionToken: string, quantityToken: string, locale: string, mode: string, familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}|null  $selection
      * @param  array{familyId?: int, familyPage?: int, familyListPage?: int, familyOriginToken?: string, originToken?: string}|null  $navigation
      */
     public function renderProductDetail(Customer $customer, string $chatId, Product $product, ?array $selection, ?int $availableStock = null, ?int $messageId = null, ?array $navigation = null): void
@@ -504,15 +504,16 @@ class TelegramCatalogIntents
         if ($selectionCanPay) {
             $productId = (int) $product->getKey();
             $token = $selection['interactionToken'];
+            $quantityToken = $selection['quantityToken'];
             $keyboard[] = [[
                 'text' => $this->locale->translate($customer, 'catalog.detail.decrease'),
-                'callback_data' => 'detail:qty:-:'.$productId.':'.$token,
+                'callback_data' => 'detail:qty:-:'.$productId.':'.$quantityToken,
             ], [
                 'text' => (string) $quantity,
                 'callback_data' => 'detail:qty:current:'.$productId.':'.$token,
             ], [
                 'text' => $this->locale->translate($customer, 'catalog.detail.increase'),
-                'callback_data' => 'detail:qty:+:'.$productId.':'.$token,
+                'callback_data' => 'detail:qty:+:'.$productId.':'.$quantityToken,
             ]];
             if ($nextTier !== null) {
                 $keyboard[] = [[
@@ -708,7 +709,7 @@ class TelegramCatalogIntents
     }
 
     /**
-     * @param  array{productId: int, quantity: int, interactionToken: string, locale: string, mode: string}  $selection
+     * @param  array{productId: int, quantity: int, interactionToken: string, quantityToken: string, locale: string, mode: string}  $selection
      */
     public function sendCustomQuantityPrompt(Customer $customer, string $chatId, Product $product, array $selection, ?string $feedback = null): void
     {
