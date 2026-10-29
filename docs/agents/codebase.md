@@ -169,6 +169,17 @@ Observed U8 runtime proof (2026-10-06): actual authenticated Admin browser on di
 
 Observed focused U8 regression lane passed 98 tests / 569 assertions across settlement, operator review, reorg, reservation, treasury/receipt reconciliation and shared authorization filters. The separate corrected scanner/trusted external-return scenarios passed 3 tests / 16 assertions. Targeted Pint formatting passed.
 
+#### BSC transfers without a top-up invoice
+
+`usdt-funding:recover-transfer --actor=<owner-id> --telegram-id=<exact-id> --receiver=<checkout-receiver-id> --amount=<USDT-decimal> --txid=<hash> --reason=<attribution-reason>` is an interactive Owner operation. It verifies one exact, canonical finalized USDT transfer to an already verified checkout receiver, then shows the Customer, amount, receiver and transaction before asking for the Owner password without echo. Password arguments, environment variables, non-interactive input and visible-input fallback are rejected.
+
+`UsdtTransferRecovery` records a five-minute immutable Owner/session/credential-bound request, re-inspects chain evidence before confirmation and uses the existing durable password lockout/lease protocol. Owner attribution is explicit: a public transaction hash and exchange sending address do not establish Customer ownership. It does not fabricate a customer confirmation or historical invoice, activate a funding rail or change receiver-channel ownership. The global receipt/log and parent-transaction claims arbitrate against checkout and normal top-ups; a claimed or held receipt cannot fund another request.
+
+`customer_usdt_recovery` is the receipt target and ledger source identity, using the recovery request UUID. `creditVerifiedRecovery()` requires exact receipt/Customer/amount linkage and request-bound password authority. Request resolution, receipt claim, ledger/projection/accounting, audit and Customer/Owner notification obligations commit together. PostgreSQL rejects updates/deletes of requests and resolutions; receipt reconciliation includes this funding source. The existing top-up reorg monitor selects invoice resolutions, not these standalone recoveries; operators must retain the finalized receipt evidence for incident handling.
+
+Verification: `UsdtTransferRecoveryTest` covers replay, cross-Customer receipt reuse, password rejection, evidence changes, wrong receiver, session binding and receipt reconciliation. Disposable PostgreSQL 16 command smoke exercised the hidden password prompt, exact 2-USDT credit, immutable-ledger rejection and durable notifications. The receiver and RPC facts in that smoke are synthetic, not production funding.
+
+
 ### Telegram balance, USDT top-up and personal history (U9 #554)
 
 `TelegramMenuIntents::usdtBalanceSection()` owns the USDT part of the private Saldo screen: the IDR rows keep their existing callbacks and semantics, and the USDT section shows an exact `UsdtMicroAmount::formatUnits()` balance with `balance:usdt` (Top-up) and `usdt:history` rows. A drifted projection (`CustomerUsdtBalanceLedger::snapshot()` unavailable) or a frozen account renders a localized unavailable/frozen line instead of a fabricated zero and hides the funding action while history stays readable. The top-up row only appears when `CustomerUsdtFundingGate::availability()` reports the rail available, so Owner pauses/activation are honoured without duplicating policy logic.

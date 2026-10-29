@@ -591,7 +591,7 @@ class TelegramOutboundEffectService
     }
 
     /** Materialize the obligation inside the money/auth transaction. Recovery dispatches it. */
-    public function recordBalanceAdjustmentNotice(string $sourceId, string $target, string $message, ?Customer $customer = null): TelegramOutboundEffect
+    public function recordBalanceAdjustmentNotice(string $sourceId, string $target, string $message, ?Customer $customer = null, string $sourceType = BalanceAdjustmentRequest::class): TelegramOutboundEffect
     {
         $chatId = $target === 'customer' ? (string) $customer?->telegram_id : trim((string) config('services.telegram.admin_telegram_chat_id'));
         if (! in_array($target, ['customer', 'owner'], true) || ! preg_match('/^-?[1-9][0-9]{0,18}$/D', $chatId)) {
@@ -602,7 +602,7 @@ class TelegramOutboundEffectService
         return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
             'effect_group_key' => $key, 'sequence' => 1,
             'effect_type' => TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
-            'source_type' => BalanceAdjustmentRequest::class, 'source_id' => $sourceId,
+            'source_type' => $sourceType, 'source_id' => $sourceId,
             'target_type' => $target === 'owner' ? 'admin' : 'customer', 'telegram_chat_id' => $chatId,
             'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE, 'telegram_method' => 'sendMessage',
             'locale' => $customer?->locale ?? 'id', 'template_version' => 'balance-adjustment-v1',

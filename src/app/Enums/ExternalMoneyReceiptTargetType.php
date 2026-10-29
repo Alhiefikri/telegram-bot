@@ -15,4 +15,6 @@ enum ExternalMoneyReceiptTargetType: string
      * canonical economic identity.
      */
     case CustomerUsdtTopUp = 'customer_usdt_top_up';
+
+    case CustomerUsdtRecovery = 'customer_usdt_recovery';
 }

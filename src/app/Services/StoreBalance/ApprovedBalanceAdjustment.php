@@ -7,6 +7,7 @@ use App\Exceptions\BalanceAdjustmentRejected;
 use App\Models\BalanceAdjustmentRequest;
 use App\Models\UsdtReorgRecoveryRequest;
 use App\Models\UsdtTopUpReviewRequest;
+use App\Models\UsdtTransferRecoveryRequest;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +23,7 @@ final readonly class ApprovedBalanceAdjustment
         private int $expiresAt,
     ) {}
 
-    public static function fromVerifiedLease(User $actor, BalanceAdjustmentRequest|UsdtTopUpReviewRequest|UsdtReorgRecoveryRequest $request, string $token): self
+    public static function fromVerifiedLease(User $actor, BalanceAdjustmentRequest|UsdtTopUpReviewRequest|UsdtReorgRecoveryRequest|UsdtTransferRecoveryRequest $request, string $token): self
     {
         $lease = DB::table('balance_adjustment_auth_states')->where('user_id', $actor->id)->first();
         $fresh = $actor->fresh();
@@ -38,7 +39,7 @@ final readonly class ApprovedBalanceAdjustment
         return new self($token, $request->id, $request->fingerprint, (int) $actor->id, now()->addSeconds(30)->timestamp);
     }
 
-    public function assertMatches(BalanceAdjustmentRequest|UsdtTopUpReviewRequest|UsdtReorgRecoveryRequest $request): void
+    public function assertMatches(BalanceAdjustmentRequest|UsdtTopUpReviewRequest|UsdtReorgRecoveryRequest|UsdtTransferRecoveryRequest $request): void
     {
         if ($request->id !== $this->requestId || ! hash_equals($request->fingerprint, $this->fingerprint)
             || (int) $request->owner_user_id !== $this->actorId || now()->timestamp >= $this->expiresAt) {

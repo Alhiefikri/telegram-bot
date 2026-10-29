@@ -97,24 +97,26 @@ final class UsdtReceiptReconciliation
     {
         return DB::table('external_money_receipts as receipts')
             ->leftJoin('customer_usdt_top_ups as top_ups', DB::raw('CAST(top_ups.id AS TEXT)'), '=', 'receipts.target_id')
+            ->leftJoin('usdt_transfer_recovery_requests as recoveries', DB::raw('CAST(recoveries.id AS TEXT)'), '=', 'receipts.target_id')
             ->leftJoin('customer_usdt_top_up_resolutions as resolutions', DB::raw('CAST(resolutions.top_up_id AS TEXT)'), '=', 'receipts.target_id')
             ->leftJoin('external_money_receipts as returned', 'returned.id', '=', 'resolutions.refund_receipt_id')
             ->leftJoin('external_money_receipts as deposited', 'deposited.id', '=', 'resolutions.receipt_id')
             ->leftJoin('customer_usdt_balance_entries as entries', function ($join): void {
                 $join->on('entries.source_id', '=', 'receipts.target_id')
-                    ->where('entries.source_type', '=', self::FUNDING_SOURCE_TYPE)
+                    ->whereColumn('entries.source_type', 'receipts.target_type')
                     ->where('entries.kind', '=', UsdtBalanceEntryKind::FundingCredit->value)
                     ->where(fn ($receipt) => $receipt->whereNull('resolutions.top_up_id')
                         ->orWhereColumn('resolutions.receipt_id', 'receipts.id'));
             })
             ->leftJoin('customer_usdt_balance_accounts as accounts', 'accounts.id', '=', 'entries.customer_usdt_balance_account_id')
             ->leftJoin('customer_usdt_top_up_fee_events as fees', 'fees.receipt_id', '=', 'receipts.id')
-            ->where('receipts.target_type', ExternalMoneyReceiptTargetType::CustomerUsdtTopUp->value)
+            ->whereIn('receipts.target_type', [ExternalMoneyReceiptTargetType::CustomerUsdtTopUp->value, ExternalMoneyReceiptTargetType::CustomerUsdtRecovery->value])
             ->when($afterReceiptId !== null, fn ($query) => $query->where('receipts.id', '>', $afterReceiptId))
             ->when($customerId !== null, fn ($query) => $query->where(fn ($scoped) => $scoped
                 ->where('accounts.customer_id', $customerId)
                 ->orWhere('top_ups.customer_id', $customerId)
-                ->orWhere(fn ($unattributed) => $unattributed->whereNull('entries.id')->whereNull('top_ups.id'))))
+                ->orWhere('recoveries.customer_id', $customerId)
+                ->orWhere(fn ($unattributed) => $unattributed->whereNull('entries.id')->whereNull('top_ups.id')->whereNull('recoveries.id'))))
             ->orderBy('receipts.id')
             ->limit($limit + 1)
             ->select([
@@ -127,7 +129,7 @@ final class UsdtReceiptReconciliation
                 'receipts.target_id',
                 'entries.id as entry_id',
                 'entries.amount_micro as credited_micro',
-                DB::raw('COALESCE(accounts.customer_id, top_ups.customer_id) AS customer_id'),
+                DB::raw('COALESCE(accounts.customer_id, top_ups.customer_id, recoveries.customer_id) AS customer_id'),
                 'fees.amount_micro as accounted_fee_micro',
                 'resolutions.kind as resolution_kind',
                 'resolutions.receipt_id as resolution_receipt_id',
@@ -144,10 +146,10 @@ final class UsdtReceiptReconciliation
             ->join('customer_usdt_balance_accounts as accounts', 'accounts.id', '=', 'entries.customer_usdt_balance_account_id')
             ->leftJoin('external_money_receipts as receipts', function ($join): void {
                 $join->on('receipts.target_id', '=', 'entries.source_id')
-                    ->where('receipts.target_type', '=', ExternalMoneyReceiptTargetType::CustomerUsdtTopUp->value);
+                    ->whereColumn('receipts.target_type', 'entries.source_type');
             })
             ->where('entries.kind', UsdtBalanceEntryKind::FundingCredit->value)
-            ->where('entries.source_type', self::FUNDING_SOURCE_TYPE)
+            ->whereIn('entries.source_type', [self::FUNDING_SOURCE_TYPE, ExternalMoneyReceiptTargetType::CustomerUsdtRecovery->value])
             ->whereNull('receipts.id')
             ->when($customerId !== null, fn ($query) => $query->where('accounts.customer_id', $customerId))
             ->when($afterCreditId !== null, fn ($query) => $query->where('entries.id', '>', $afterCreditId))

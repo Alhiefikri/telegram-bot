@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceAccount;
 use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\UsdtTopUpReviewRequest;
+use App\Models\UsdtTransferRecoveryRequest;
 use App\Services\Operations\BalanceOperationEventRecorder;
 use App\Services\Operations\BalanceOperationRetry;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -112,6 +113,24 @@ final class CustomerUsdtBalanceLedger
                 || (int) $review->amount_micro - (int) $target->fee_micro !== $source->amountMicro()
                 || UsdtMicroAmount::fromRawTokenUnits($receipt->amount_units, (int) $receipt->decimals)->units() !== (int) $review->amount_micro) {
                 throw new InvalidArgumentException('Reviewed funding requires its exact globally claimed verified source.');
+            }
+        });
+    }
+
+    public function creditVerifiedRecovery(Customer $customer, VerifiedUsdtRecovery $source): UsdtBalanceMutationResult
+    {
+        return $this->apply($customer, $source, 'usdt-recovery:'.$source->requestId, function () use ($customer, $source): void {
+            $request = UsdtTransferRecoveryRequest::query()->findOrFail($source->requestId);
+            $source->authority->assertMatches($request);
+            $receipt = DB::table('external_money_receipts')->where('id', $source->receiptId)
+                ->where('target_type', 'customer_usdt_recovery')->where('target_id', $request->id)
+                ->where('beneficiary', 'customer:'.$customer->id)->where('currency', 'USDT')
+                ->where('status', 'claimed')->first();
+            if ((int) $request->customer_id !== (int) $customer->id || $request->expires_at->isPast()
+                || $request->amount_micro !== $source->amountMicro() || $receipt === null
+                || $receipt->tx_hash !== $request->transaction_hash
+                || UsdtMicroAmount::fromRawTokenUnits($receipt->amount_units, (int) $receipt->decimals)->units() !== $source->amountMicro()) {
+                throw new InvalidArgumentException('Recovery requires its exact password-authorized verified receipt.');
             }
         });
     }
