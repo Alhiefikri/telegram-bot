@@ -1,0 +1,54 @@
+{
+  "dataset": "p03-synthetic-compatibility-v1",
+  "base_revision": "2e3100929dde7f340e9584d8337b9c446002145f",
+  "branch": "migration/p03-compatibility-685",
+  "working_tree": "uncommitted implementation; source SHA-256 below identifies exercised code",
+  "sources": {
+    "candidate/lhie_candidate/compat/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "candidate/lhie_candidate/compat/crypto.py": "574d48703bd55568ef60be449998f3009cd3eb5c6646d732f9e0da0a817037bc",
+    "candidate/lhie_candidate/compat/identity.py": "94d31ab30dde9c036aff6d45a1ddbfd20dfb564545577f50a7c508bf28fa8b11",
+    "candidate/lhie_candidate/legacy.py": "37c81b6ae91c4a35306d429f6f5dc9a3d53cd47e14f7921c068edc7aae17538a",
+    "candidate/requirements.in": "00f4cf329c2ed2ef60899031c9f8e2650f0016cef143eb79d7570aa9ad27bb23",
+    "candidate/requirements.lock": "cec345654c8591cd5cf1129a29061fa4e78614eb21687d6532e062be518c6575",
+    "candidate/tests/test_legacy_crypto.py": "0625a2b1a3107c3fae7184a0cd9c94c9874145ab6f9ffc63ab9b9c4b5ce02862",
+    "candidate/tests/test_legacy_fields.py": "d6688d88cf5b0271aeb6bdf5ee10c364d0714c283c9ef6e9c8be7aa6c9eac3f3",
+    "candidate/tests/test_legacy_identity.py": "8145534bf352ec6701dc348253efd3977823f28d202fb4e6ec74eef043c0f67a",
+    "src/composer.lock": "55c3490b964f10f631720f979f13b933bbc0b4f5189fd58cb9843085a551940a",
+    "tools/migration_compat/crypto_vectors.php": "0ce5041900b13451058add2689f5aec843684b576b1018bbd00736bb36f4e3fa",
+    "tools/migration_compat/crypto_vectors.py": "759f0d7aa073bd57a89a548aa7df55bc0884b8b60f298186cea0a44c6d066c84",
+    "tools/migration_compat/identity_vectors.php": "160e8fef03cad03fe4bfc8042fc8198901ddac85ae5a4f0efd14ead1445feb3a",
+    "tools/migration_compat/identity_vectors.py": "dddb03d4414f52512e17d79ee59e14a20d14f75407e997a03a9ac72b4ad41524",
+    "tools/migration_compat/rollback_reader.php": "0371dc0977d2b53c1dc6dce31af720bffb12e197d69f34b980e7bfa3bdb250c8",
+    "tools/migration_compat/schema_probe.py": "7416c6d48177194e6be38e046e5f00d4bca049ca4aea9f9e543ddbf62db64647",
+    "tools/migration_compat/schema_rehearsal.py": "a5b6abe581ee7cbf86c52cf3a2193ce497c1496a471b981d0e03d3c2e5edaec9"
+  },
+  "runtime": {
+    "host_python": "Python 3.13.14",
+    "host_php": "8.5.9",
+    "postgres": "postgres (PostgreSQL) 16.15",
+    "php": "8.4.27",
+    "candidate": "3.13.18 5.2.18"
+  },
+  "outcomes": {
+    "candidate_tests": 64,
+    "harness_regressions": 14,
+    "crypto_vector_scenarios": 71,
+    "identity_password_vectors_each_direction": 30,
+    "identity_wrong_password_vectors_each_direction": 30,
+    "identity_primitive_groups_each_direction": 17,
+    "postgres_schema_and_php_rollback": "passed"
+  },
+  "public_artifacts": [
+    "crypto-vectors.json",
+    "identity-vectors.json",
+    "schema-result.json"
+  ],
+  "unknowns": [
+    "Actual production catalog/roles/default ACLs/extensions/sequences/timezones: HD #684",
+    "Actual historical current/previous key coverage and hash/identity formats: HD #684",
+    "Downstream business-writer and full rollback parity remain their owning issues"
+  ],
+  "synthetic_keys_only": true,
+  "production_access": false,
+  "ci_cd_operations": false
+}

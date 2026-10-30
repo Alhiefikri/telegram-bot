@@ -31,6 +31,17 @@ verification is recorded in the P02 evidence. It accepts no operator archive,
 never disables guards and leaves P01 quarantine sticky. P03 proves synthetic
 PHP/Python compatibility; actual historical coverage belongs to HD after H1.
 
+P03 [synthetic compatibility](../migration/python-django/p03/README.md) owns
+`candidate/lhie_candidate/compat/` (Laravel authenticated envelopes and explicit
+hash/identity primitives) and reviewed unmanaged `legacy.py` projections.
+`tools/migration_compat/{crypto,identity}_vectors.py` prove PHP/Python round trips
+without publishing plaintext; `schema_rehearsal.py` applies the repository's
+migrations only in P01 quarantine and exercises real PostgreSQL grants/guards,
+precision, sequence/timezone mappings and the Eloquent rollback reader.
+`candidate/tests/test_legacy_*.py` are its regression entry points. Candidate
+startup/public-schema grants remain unchanged; these helpers are not auth or
+money write authority. Actual catalog/key/hash coverage remains HD #684.
+
 HD [operator readiness](../migration/python-django/h0/README.md) records #684's
 deferred production-data checks in the historical `h0/` directory. It grants no
 acquisition or runtime authority. HD follows an explicit H1 continue decision and
