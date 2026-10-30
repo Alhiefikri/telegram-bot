@@ -11,8 +11,15 @@ transport boundary, mail sink, sticky restore quarantine and guarded reset.
 production Compose or starts workers/schedulers. Each alternating stack is capped
 at a total 2 CPU/2 GiB. `tests/migration_harness/test_admission.py` and the real
 Docker/PostgreSQL/Redis `tools/migration_harness/smoke.py` are its verification
-entry points. Candidate application bootstrap remains P05; actual test-bot and
-sandbox target verification belongs to P01/P08, independent of the HD data gate.
+entry points. [P05 Django bootstrap](../migration/python-django/p05/README.md)
+replaces the candidate slot with `candidate/`: supported/hash-locked dependencies,
+strict local startup, payload-free health/readiness, exact money and ID-only job
+contracts, separate metadata schema/runtime role and no automatic producers.
+`candidate/tests/` owns boundary/unit regressions;
+`tools/migration_harness/smoke_candidate.py` exercises actual HTTP, dependency
+failure/recovery, template/static setup, privilege denial and the synchronized
+real-PostgreSQL `candidate/smoke_postgres.py`. No business parity is implied.
+Actual test-bot/sandbox target verification belongs to P01/P08, independent of HD.
 
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
 adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.

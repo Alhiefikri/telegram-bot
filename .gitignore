@@ -64,3 +64,7 @@ tests/migration_harness/__pycache__/
 tools/migration_data/__pycache__/
 !tools/migration_data/schema.sql
 .claude/
+!candidate/postgres-init.sql
+candidate/.venv/
+candidate/**/__pycache__/
+candidate/__pycache__/

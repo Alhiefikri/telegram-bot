@@ -100,10 +100,12 @@ print('isolated transport and mail sink passed')
             # PHP is still serving; this is transport smoke, not application parity.
             port = 18801 if stack == "laravel" else 18802
             try:
-                response = urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5)
-                response.close()
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as response:
+                    if stack == "candidate":
+                        assert response.status == 200 and json.load(response) == {"status": "ok"}
             except urllib.error.HTTPError:
-                pass
+                if stack == "candidate":
+                    raise
             db = container(stack, "database")
             docker("exec", db, "psql", "-U", "harness", "-d", "disposable", "-c",
                    "CREATE TABLE p01_isolation (id int); INSERT INTO p01_isolation VALUES (1)")
