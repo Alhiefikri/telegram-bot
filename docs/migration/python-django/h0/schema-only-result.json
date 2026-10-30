@@ -1,0 +1,68 @@
+{
+  "record_version": 1,
+  "issue": 684,
+  "reviewed_on": "2026-10-30",
+  "scope": "operator-authorized-schema-only-and-synthetic-data",
+  "production_checkout_revision": "d830709bb98cffacc6369847383c850ff89088f2",
+  "local_source_revision": "d95657b7c20768d8c6579dfbf4c9a21d8591515d",
+  "production": {
+    "server_version": "16.14",
+    "pg_dump_version": "16.14",
+    "database_bytes": 7785913367,
+    "user_tables": 138,
+    "extensions": {"plpgsql": "1.0", "pg_stat_statements": "1.10"},
+    "query_boundary": "BEGIN READ ONLY; statement_timeout=5s; lock_timeout=1s; catalog/size only; ROLLBACK",
+    "dump_options": ["--schema-only", "--no-comments", "--no-security-labels", "--lock-wait-timeout=1s"],
+    "dump_pgoptions": "default_transaction_read_only=on statement_timeout=15000 lock_timeout=1000",
+    "business_rows_acquired": false,
+    "application_secrets_or_keys_acquired": false,
+    "files_acquired": false,
+    "full_backup": "deferred-by-user-current-work-is-schema-only",
+    "business_or_configuration_mutations": false
+  },
+  "schema_artifact": {
+    "private_path": ".local/migration-h0/schema-only-20261030/schema.sql",
+    "bytes": 457926,
+    "sha256": "c599b74e572fd933fdbf1ed98a69679a0b99cf48e986ff6594b3cd6f6d4e36b1",
+    "contains_production_rows": false,
+    "review": "28 trigger function bodies reviewed; external execution/security-definer/foreign connectivity constructs absent in scan; no COPY/INSERT/role-password statements or detected email/token/private-key/credentialed-URL literals. Shape scans are not complete semantic confidentiality proof."
+  },
+  "local_schema_smoke": {
+    "postgres": "16.15",
+    "namespace": "P01 candidate fake-mode sticky quarantine",
+    "database": "h0_schema_684",
+    "restore": "single-transaction ON_ERROR_STOP=1 passed",
+    "owner_mapping": "source owner name provisioned as local NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION role; actual source role attributes/grants not qualified",
+    "tables": 138,
+    "trigger_functions": 28,
+    "triggers": 43,
+    "disabled_triggers": 0,
+    "foreign_keys": 201,
+    "sequences": 103,
+    "indexes": 557,
+    "all_application_tables_empty_before_and_after_smoke": true,
+    "dummy_identity_probe": "Two synthetic Customers and one canonical Telegram identity inserted locally; foreign-owner identity insertion, ownership reassignment and linked Telegram-ID rewrite rejected; original owner/identity unchanged; transaction rolled back",
+    "guards_disabled": false,
+    "source_schema_bytes_unchanged": true
+  },
+  "separate_existing_p02_fixture": {
+    "manifest": ".local/migration-p02/synthetic-918c314cbf6c82e7/manifest.json",
+    "status": "audited-quarantine-not-released",
+    "scope": "synthetic-only-not-production-compatible",
+    "postgres": "16.15",
+    "python": "3.14.7",
+    "cryptography": "50.0.1",
+    "cardinality": {"accounts": 2, "credentials": 2, "customers": 2, "effects": 4, "identities": 2, "ledger": 3, "orders": 4},
+    "regression_command": "python3 -m unittest discover -s tests/migration_harness -v",
+    "regression_result": "14 tests passed"
+  },
+  "limits": [
+    "Schema artifact is not a backup of customer/business data and cannot recover production transactions.",
+    "No historical data/key coverage, actual role/default-grant inventory or feature activation proof.",
+    "Schema definitions/sequences do not establish current production sequence values or historical dataset scale/distribution.",
+    "P02 fixture has its own bounded synthetic schema; it is not a full dummy population of the 138-table production schema.",
+    "Full-domain dummy fixtures belong to the migration domain owners; this smoke proves restored identity guards only.",
+    "No Testing Bot, sandbox, mail or HTTPS callback qualification, performance/race proof, deployment or CI/CD execution.",
+    "Original H0 acceptance remains incomplete; no automatic closure or runtime admission."
+  ]
+}

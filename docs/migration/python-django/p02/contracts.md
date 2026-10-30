@@ -2,7 +2,7 @@
 
 ## Scope and evidence boundary
 
-This contract applies only to `migration/python-django-experiment`. P02 starts with local synthetic data, not a production export. Actual database, file and secret acquisition belongs to the H0 operator under a separate explicit authorization. No production connection, SSH, ENV inspection, webhook change, provider call, CI operation or deployment is authorized here.
+This contract applies only to `migration/python-django-experiment`. Initial experiments use synthetic/representative data, repository schema and test keys without a full production snapshot. Actual database, file and secret qualification belongs to HD (#684, formerly H0), only after H1 continues and before #710. P03 proves synthetic compatibility; P01/P08 own test-target verification independently. No production connection, SSH, ENV inspection, webhook change, provider call, CI operation or deployment is authorized here.
 
 [P00](../p00/README.md) freezes source baseline `d830709bb98cffacc6369847383c850ff89088f2`. [inventory.json](inventory.json) records current SHA-256 values, P00 SHA-256 values, line numbers, source text and discovery classifications for 466 matched source files and 1,938 matching lines. All those matched source hashes agree with P00 at inventory creation. Installed framework files are separately hashed supporting evidence, not proof of the deployed dependency versions. This is a **lexical discovery inventory, not complete semantic classification**. Its matches locate review obligations; they do not establish runtime reachability, production activation, current catalog objects or exhaustive indirect dataflow.
 
@@ -121,7 +121,7 @@ The installed framework default is bcrypt, 12 rounds (`HASH_DRIVER`/`BCRYPT_ROUN
 
 `scripts/backup-db.sh:65-90` emits GPG-encrypted gzip plain SQL using `pg_dump --no-owner --no-privileges`. It verifies decryptable gzip, not isolated restore, APP_KEY backup, storage coverage, full role/ACL capture or offsite retention. `scripts/restore-db.sh` defaults to normal Compose/DB names, accepts plaintext formats, and its `--dry-run` only prints the target; it is not P01 admission or P02 quarantine. Do not invoke either script with defaults for this experiment. Its encrypted restore path expects a passphrase; it is not a general recipient-key restore procedure.
 
-At H0 the authorized operator must capture the actual catalog privately, alongside a consistent full database dump and file manifest:
+At HD, after H1 continues, the authorized operator must capture the actual catalog privately and prove complete relevant historical coverage and actual backup restoration. An existing consistent backup or approved isolated environment near the data may supply this evidence; a new full dump or laptop restore is not mandatory. Capture the following facts:
 
 | Capture | Required facts |
 | --- | --- |
@@ -168,15 +168,15 @@ The **per-bot remap** is keyed by `(source_bot_identity, source_file_reference)`
 
 `TelegramWelcomeBanner.php:98-164` caches the returned file ID in the setting after upload and binds it to banner version/path. Replacing only the banner path while retaining a production file ID is unsafe. Remap version-sensitive navigation/media references consistently without rewriting historical sent-delivery state or issuing Telegram sends.
 
-## 7. H0 operator handoff and downstream gates
+## 7. HD operator handoff and downstream gates
 
-Before real input can be admitted, H0 must provide all of the following through the approved custody boundary:
+Before real input can be admitted, HD must provide the following through the approved custody boundary. Earlier H0 references in this contract mean this deferred actual-data procedure, not a prerequisite for synthetic P03/P04/P08 or #683.
 
-- Explicit acquisition authorization, approved consistent snapshot/window and named custodians; no permission is inferred from this issue.
-- Encrypted immutable full database artifact and authenticated manifest, source revision/image/tool versions, actual catalog inventory and role/ACL/default-privilege/sequence evidence. Any missing scope is marked unknown and blocks that mapping.
+- Explicit acquisition/inspection authorization, approved consistent checkpoint/window and named custodians; no permission is inferred from this issue.
+- Actual catalog inventory and role/ACL/default-privilege/sequence evidence, source revision/image/tool versions, and authenticated consistent backup with isolated restore/reconciliation proof. A full new export is required only when necessary to obtain that proof; no mandatory laptop copy. Missing complete relevant coverage remains no-go.
 - Separately transferred Laravel current/previous keys and key identifiers sufficient to prove decryption coverage; original credential fingerprint key and readiness digest continuity; optional waitlist key lineage; archive decryption access. Do not transfer wallet seed/private keys: the watch-only source application does not own them.
 - Private physical/logical storage and per-bot remote-reference inventory, acquisition/availability states, protected artifact classification and safe replacement approvals. No promise that remote Telegram artifacts remain retrievable.
 - Explicit local role/object mapping, unknown-object disposition and trigger-compatible transform-before-insert plan for every sensitive immutable binding and nested payload. P03 and subsequent parity owners must expand the synthetic allowlist from actual observed schema; P02 does not claim production-wide sanitization coverage.
-- Raw/secret/mapping/derived retention expiries, access-revocation/deletion procedure and evidence location. Approved test-bot identity, sandbox targets and later adapter qualifications stay separate from raw acquisition.
+- Raw/secret/mapping/derived retention expiries, access-revocation/deletion procedure and evidence location. Approved test-bot identity and sandbox targets belong to P01/P08 independently, not to closure of HD.
 
-P02 completion is source contracts plus the parent's synthetic quarantine/sanitization evidence. It is not H0 acquisition, production activation, a grant to unquarantine, or H1 approval for a full rewrite. Context7 guidance and executed local verification are integrated by the main implementation owner in the P02 README/verification record; this contract claims no external lookup or runtime test execution of its own.
+P02 completion is source contracts plus synthetic quarantine/sanitization evidence, not actual-data acceptance, production activation or permission to unquarantine. HD blocks full acceptance #710 after H1 continues; P03/P04/P08 proceed without it. Historical verification remains evidence of the commands then run, not a current production qualification.

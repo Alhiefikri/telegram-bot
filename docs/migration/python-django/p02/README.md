@@ -7,9 +7,14 @@ Prerequisite #681 is closed. Work belongs to the
 `migration/python-django-experiment` integration branch, never main.
 
 [contracts.md](contracts.md) defines acquisition, field/schema/file inventories,
-separate key transfer and the H0 operator handoff. [inventory.json](inventory.json)
+separate key transfer and the deferred HD operator handoff. [inventory.json](inventory.json)
 records source paths, hashes and discovery anchors. [verification.md](verification.md)
 records the exercised scope and remaining human gates.
+
+HD's [operator readiness record](../h0/README.md) tracks actual-material checks
+after H1 decides to continue, before full acceptance #710. It does not block
+synthetic experiments or #683. Testing Bot/sandbox readiness belongs to P01/P08.
+A completed P02 rehearsal does not approve acquisition or release quarantine.
 
 ## Run locally
 
@@ -81,9 +86,10 @@ production-schema sanitizer. It has no input archive/key/path flags and cannot i
 operator data. Unknown tables/columns/nested structured fields fail closed. Production
 identity formats, immutable receipt aliases, arbitrary encrypted payload variants,
 legacy PHP serialization and source-specific guard dependencies need reviewed
-H0/P03 mappings before any derived production dataset can be admitted. Do not edit
+HD mappings before any derived production dataset can be admitted. Do not edit
 this allowlist until failures disappear, disable guards, or reuse original keys
-in a running application. P03 owns bidirectional PHP/Python crypto qualification.
+in a running application. P03 owns synthetic PHP/Python crypto qualification;
+HD checks actual historical coverage after H1.
 
 ## Private artifacts and retention
 
@@ -120,8 +126,8 @@ exact private run/key directories as part of local housekeeping.
 source/target bot identity and source/target file ID. Entries start as
 `requires-reupload`, with no testing-bot ID. `mapping_file_id` fails closed on pending,
 cross-bot, changed asset bytes or source-ID reuse. The positive synthetic mapping
-probe is not an upload. H0 supplies approved test files; a future qualified Testing
-Bot uploader must record its real ACK and new target ID. Never overwrite original
+probe is not an upload. P01/P08 qualify approved safe test files and Testing
+Bot uploads with real ACKs and new target IDs. Never overwrite original
 production references or assume a production `file_id` works with the testing bot.
 Customer receipt/proof originals remain isolated, not copied into public test assets.
 

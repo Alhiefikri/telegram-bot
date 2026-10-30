@@ -95,14 +95,14 @@ log channel. HTTP body size, SMTP message size/line count and I/O time are bound
   `POST /telegram` accepts exactly `{"chat_id":1,"text":"synthetic"}` when chat 1
   is explicitly listed in `safe_chat_ids`; it returns a fake ACK. All provider,
   supplier, purchase and arbitrary routes are denied.
-- `testing-bot` is an **H0 operator-only** option. It requires a separate token,
+- `testing-bot` is an **operator-attested P01/P08** option. It requires a separate token,
   numeric bot identity, exact `LhiestoreTestingBot` username, and positive private
   test/admin chat IDs. Before admitting dependent services, `getMe` must prove
   that token belongs to that exact testing identity. A production/other bot token
   fails startup without being printed. The relay only permits `sendMessage` to
   listed private chats with plain bounded text; no webhook changes, arbitrary
   Telegram method, group/channel, inline routing, media URLs or keyboards.
-- `sandbox` is another **H0 operator-only** option. It permits only an exact,
+- `sandbox` is another **operator-attested P01/P08** option. It permits only an exact,
   attested HTTPS GET status endpoint, on `klikqris.com/api/sandbox/…/status` or
   `sakurupiah.id/api-sanbox/…/status`. Production paths, alternate ports, credentials
   in URLs, query strings, redirects, path traversal and non-public DNS resolutions
@@ -110,7 +110,7 @@ log channel. HTTP body size, SMTP message size/line count and I/O time are bound
   hostname. A bearer sandbox credential stays in the boundary config. Only
   `POST /sandbox/status` with `{}` invokes this GET; payment create and supplier
   purchase have no route. These path restrictions are an admission contract,
-  **not proof that a provider offers that status endpoint**; H0/P08 must qualify
+  **not proof that a provider offers that status endpoint**; P01/P08 must qualify
   the actual sandbox API before adapting the relay for checkout.
 
 Live modes require `approval` with exactly `gate: H0-approved-test-targets-only`
@@ -118,9 +118,12 @@ and `scope_sha256`: SHA256 of Python `json.dumps(scope, sort_keys=True).encode()
 where scope is all configuration fields except `approval`. This binds the operator's
 attestation to the exact dataset, credentials, bot, recipients and destination;
 changing any field invalidates admission. It is a recorded human attestation,
-not a cryptographic authorization system. Agents must not invent it or close H0.
-If the actual approved testing username differs, reconcile this contract through
-H0 before changing it; never substitute a production bot to make startup pass.
+not a cryptographic authorization system. The `H0-approved-test-targets-only` value
+is the existing transport contract identifier, not a requirement to close #684.
+P01/P08 own this scoped target attestation; agents must not invent it. HD (#684)
+now follows H1 and concerns actual production data, not initial test targets.
+If the approved testing username differs, reconcile the P01/P08 target contract;
+never substitute a production bot to make startup pass.
 
 Live mode grants outbound TCP 443 and Docker DNS only to the relay UID. The
 application still has no general outbound access and never receives the real
@@ -142,7 +145,7 @@ Quarantine requires fake mode and starts only boundary, PostgreSQL and Redis.
 It sets a sticky marker **before** starting services: a later normal start remains
 refused even after stop/restart. P02 owns the audited sanitize/release seam;
 P01 only clears this marker after a successful disposable reset. There is no raw
-restore/import command or automatic scheduler startup. H0 alone owns acquisition.
+restore/import command or automatic scheduler startup. HD owns later actual-data acquisition.
 
 `stop` retains data. `reset` regenerates Compose from the admitted fixed contract,
 then checks exact project volume names plus disposable stack ownership labels and
@@ -198,7 +201,8 @@ resource ceilings, OOM/restarts, workers/scheduler policy and host memory. Only
 allowlisted inspection fields are emitted. Config/ENV/payloads are excluded.
 P02 supplies sanitized dataset/file provenance; P04 supplies measurements and
 background policy. Live test-bot/sandbox observations remain separate and require
-H0; fake success never qualifies them. See [verification.md](verification.md).
+operator target verification in P01/P08; fake success never qualifies them.
+See [verification.md](verification.md).
 
 Context7 consulted on 2026-10-30: resolve `Docker Compose`, then `/docker/compose`,
 separate queries for namespace/resource semantics and network/security semantics.

@@ -12,17 +12,23 @@ production Compose or starts workers/schedulers. Each alternating stack is cappe
 at a total 2 CPU/2 GiB. `tests/migration_harness/test_admission.py` and the real
 Docker/PostgreSQL/Redis `tools/migration_harness/smoke.py` are its verification
 entry points. Candidate application bootstrap remains P05; actual test-bot and
-sandbox credentials remain H0, and adapter qualification remains P04/P08.
+sandbox target verification belongs to P01/P08, independent of the HD data gate.
 
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
-adds source-backed crypto/schema/file discovery and the H0 operator handoff.
+adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.
 `tools/migration_data/rehearse.py` exercises authenticated encrypted synthetic backup,
 read-only raw restore, transform-before-INSERT into a guarded derived schema,
 historical invariant audits and per-bot asset mapping refusal. Its regression
 entry point is `tests/migration_harness/test_sanitization.py`; real PostgreSQL
 verification is recorded in the P02 evidence. It accepts no operator archive,
-never disables guards and leaves P01 quarantine sticky. Actual acquisition and
-production-schema/crypto qualification remain H0/P03, not implied by this fixture.
+never disables guards and leaves P01 quarantine sticky. P03 proves synthetic
+PHP/Python compatibility; actual historical coverage belongs to HD after H1.
+
+HD [operator readiness](../migration/python-django/h0/README.md) records #684's
+deferred production-data checks in the historical `h0/` directory. It grants no
+acquisition or runtime authority. HD follows an explicit H1 continue decision and
+blocks P28 (#710), not P03/P04/P08 or Django bootstrap (#683). Initial work uses
+synthetic/representative data and test keys without a full production snapshot.
 
 The [P00 inventory and parity matrix](../migration/python-django/p00/README.md) freeze
 baseline `d830709bb98cffacc6369847383c850ff89088f2`, source hashes, historical

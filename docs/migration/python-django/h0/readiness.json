@@ -1,0 +1,76 @@
+{
+  "record_version": 2,
+  "issue": 684,
+  "parent_issue": 679,
+  "integration_branch": "migration/python-django-experiment",
+  "reviewed_on": "2026-10-30",
+  "record_kind": "sanitized-deferred-readiness",
+  "gate_name": "HD",
+  "historical_path": "h0",
+  "gate_status": "deferred-until-H1-continue",
+  "blocked_by": [
+    682,
+    693
+  ],
+  "blocks": [
+    710
+  ],
+  "does_not_block": [
+    683,
+    685,
+    686,
+    689
+  ],
+  "authority": {
+    "current_acquisition_authorized": false,
+    "owner_approval": null,
+    "automatic_gate_closure": false,
+    "runtime_admission_authority": false,
+    "historical_evidence": "authorization.md"
+  },
+  "initial_experiment": {
+    "dataset": "synthetic-or-representative",
+    "keys": "test-only",
+    "full_snapshot_required": false,
+    "target_readiness_owner": [
+      "P01",
+      "P08"
+    ],
+    "actual_external_smoke_required_before_H1": true
+  },
+  "checks": [
+    {
+      "area": "actual-schema-grants",
+      "status": "deferred-unverified",
+      "required": "Compare actual schema, roles/grants/extensions/sequences and file dependencies with P03 baseline; resolve drift."
+    },
+    {
+      "area": "historical-compatibility",
+      "status": "deferred-unverified",
+      "required": "Audit all relevant historical crypto/key/hash/identity and financial/history/stock obligations; samples are not complete proof."
+    },
+    {
+      "area": "backup-recovery",
+      "status": "deferred-unverified",
+      "required": "Prove actual backup/files/grants/keys restore and reconciliation in an approved isolated location; full new snapshot and laptop storage are not mandatory."
+    },
+    {
+      "area": "operator-acceptance",
+      "status": "deferred-unverified",
+      "required": "Explicit owner approval after H1 continue, with scope/location/resource budget/custody/retention and safe evidence before #710."
+    }
+  ],
+  "historical_schema_evidence": "schema-only-result.json",
+  "actual_material": {
+    "historical_rows_files_keys_acquired": false,
+    "historical_compatibility": "unknown",
+    "backup_restore": "unknown",
+    "testing_bot": "unverified",
+    "sandbox": "unverified"
+  },
+  "limits": [
+    "Record is bookkeeping, not harness configuration or approval.",
+    "Historical schema-only smoke is not full production compatibility.",
+    "No current production acquisition, deployment or CI/CD authority."
+  ]
+}

@@ -74,7 +74,7 @@ Failed attempts remained quarantined without a completed admission manifest.
   cgroups. This is not performance/resource-capacity acceptance.
 - H0 remains a human gate; its acquisition, retention, test-bot/sandbox identities,
   credentials and approval have not been supplied or approved by this implementation.
-  Read [contracts.md section 7](contracts.md#7-h0-operator-handoff-and-downstream-gates).
+  Read [contracts.md section 7](contracts.md#7-hd-operator-handoff-and-downstream-gates).
 - No CI/CD, workflow, SSH, production ENV/data/file access, push, deployment,
   webhook change, funding activation or real customer message occurred.
 
