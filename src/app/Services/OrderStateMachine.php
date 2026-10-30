@@ -323,7 +323,7 @@ class OrderStateMachine implements OrderLifecycle
         $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
         $order->update([
             'payment_status' => PaymentStatus::Paid,
-            'order_status' => $this->supplierFulfillment()->hasPending($order) ? OrderStatus::Processing : $this->paidOrderStatus($payment),
+            'order_status' => $this->supplierFulfillment()->hasPending($order) ? OrderStatus::Processing : $this->paidOrderStatus($payment, $order),
         ]);
         if ($this->needsLocalCredentialReview($order)) {
             $review = ManualFulfillmentReview::query()->firstOrCreate(
@@ -398,9 +398,12 @@ class OrderStateMachine implements OrderLifecycle
         }
     }
 
-    private function paidOrderStatus(Payment $payment): OrderStatus
+    private function paidOrderStatus(Payment $payment, Order $order): OrderStatus
     {
         return strtolower((string) $payment->provider) === 'pakasir'
+            || (strtolower((string) $payment->provider) !== 'manual'
+                && ! ManualFulfillmentReview::query()->where('order_id', $order->id)->open()->exists()
+                && app(LocalCredentialCompletion::class)->isComplete($order))
             ? OrderStatus::Completed
             : OrderStatus::Processing;
     }

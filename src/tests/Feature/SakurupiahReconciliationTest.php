@@ -229,6 +229,101 @@ class SakurupiahReconciliationTest extends TestCase
         $this->assertSame(OrderStatus::Expired, $expired->order->fresh()->order_status);
     }
 
+    public function test_provider_expired_payment_is_rechecked_at_a_lower_frequency(): void
+    {
+        $this->freezeTime();
+        $payment = $this->sakurupiahPayment();
+        Http::fake(['*status-transaction.php' => Http::response([
+            'status' => '200', 'data' => [['status' => 'expired']],
+        ])]);
+
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
+        Http::assertSentCount(1);
+
+        foreach (range(1, 14) as $_minute) {
+            $this->travel(1)->minute();
+            $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        }
+        Http::assertSentCount(1);
+
+        $this->travel(1)->minute();
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        Http::assertSentCount(2);
+    }
+
+    public function test_active_payments_remain_frequent_and_late_money_is_reviewed_when_recheck_is_due(): void
+    {
+        $this->freezeTime();
+        $active = $this->sakurupiahPayment();
+        $late = $this->sakurupiahPayment();
+        app(OrderLifecycle::class)->applyPaymentExpired($late);
+        $latePaid = false;
+        Http::fake(['*status-transaction.php' => function ($request) use ($late, &$latePaid) {
+            $isLate = $request['trx_id'] === $late->provider_reference;
+            $data = ['status' => $isLate ? ($latePaid ? 'berhasil' : 'expired') : 'pending'];
+            if ($isLate && $latePaid) {
+                $data['amount'] = (string) $late->amount;
+            }
+
+            return Http::response(['status' => '200', 'data' => [$data]]);
+        }]);
+
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        Http::assertSentCount(2);
+        $latePaid = true;
+        $this->travel(1)->minute();
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        Http::assertSentCount(3);
+        $this->assertSame(PaymentStatus::Expired, $late->fresh()->status);
+        $this->assertSame(PaymentStatus::Pending, $active->fresh()->status);
+
+        $this->travel(14)->minutes();
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        Http::assertSentCount(5);
+        $this->assertSame(PaymentStatus::Paid, $late->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $late->order->fresh()->order_status);
+        $this->assertSame(1, ManualFulfillmentReview::query()->where('payment_id', $late->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
+        $this->assertSame(0, InventoryMovement::query()->where('order_id', $late->order_id)->where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_repeated_expired_checks_do_not_trigger_a_simulated_provider_limit(): void
+    {
+        $this->freezeTime();
+        foreach (range(1, 3) as $_) {
+            $payment = $this->sakurupiahPayment();
+            app(OrderLifecycle::class)->applyPaymentExpired($payment);
+        }
+        $active = null;
+        $rateEnabled = false;
+        $callsByMinute = [];
+        Http::fake(['*status-transaction.php' => function ($request) use (&$active, &$rateEnabled, &$callsByMinute) {
+            if ($rateEnabled) {
+                $minute = now()->format('Y-m-d H:i');
+                $callsByMinute[$minute] = ($callsByMinute[$minute] ?? 0) + 1;
+                if ($callsByMinute[$minute] > 2) {
+                    return Http::response(['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'], 400);
+                }
+            }
+
+            return Http::response(['status' => '200', 'data' => [[
+                'status' => $active !== null && $request['trx_id'] === $active->provider_reference ? 'pending' : 'expired',
+            ]]]);
+        }]);
+
+        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        Http::assertSentCount(3);
+        $active = $this->sakurupiahPayment();
+        $rateEnabled = true;
+
+        foreach (range(1, 5) as $_minute) {
+            $this->travel(1)->minute();
+            $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        }
+        $this->assertSame([1, 1, 1, 1, 1], array_values($callsByMinute));
+        $this->assertSame(PaymentStatus::Pending, $active->fresh()->status);
+    }
+
     public function test_command_marks_late_paid_on_terminal_order_as_manual_review_without_fulfilling(): void
     {
         $late = $this->sakurupiahPayment(['merchant_ref' => 'SAKU-LATE']);

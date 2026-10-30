@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
 use App\Models\Payment;
@@ -13,8 +14,10 @@ use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahReconciliationOutcome;
 use App\Services\Sakurupiah\SakurupiahReconciliationQuery;
 use App\Services\Sakurupiah\SakurupiahRequestBackpressure;
+use App\Services\Sakurupiah\SakurupiahTransactionStatus;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Support\PaymentProvider;
 use DateTimeImmutable;
 use DateTimeInterface;
 use Illuminate\Console\Command;
@@ -25,6 +28,8 @@ use Throwable;
 final class ReconcileSakurupiahPayments extends Command
 {
     private const CURSOR_TTL_SECONDS = 86_400;
+
+    private const PROVIDER_EXPIRED_RECHECK_MINUTES = 15;
 
     protected $signature = 'sakurupiah:reconcile {--chunk=100}';
 
@@ -118,6 +123,19 @@ final class ReconcileSakurupiahPayments extends Command
                     $page = $reconciliationQuery
                         ->eligible($releasedCutoff)
                         ->where('status', $lane === 'active' ? '=' : '<>', PaymentStatus::Pending->value)
+                        // Pace confirmed provider expiries without delaying uncertain money.
+                        ->when($lane === 'released', function (Builder $query): void {
+                            $query->where(function (Builder $due): void {
+                                $due->whereNull('provider_create_state')
+                                    ->orWhere('provider_create_state', '<>', SakurupiahInvoiceLifecycleService::STATE_PROVIDER_EXPIRED)
+                                    ->orWhereDoesntHave('paymentEvents', function (Builder $events): void {
+                                        $events->where('provider', PaymentProvider::SAKURUPIAH)
+                                            ->where('event_type', PaymentEventType::Reconciliation->value)
+                                            ->where('provider_status', SakurupiahTransactionStatus::Expired->value)
+                                            ->where('last_received_at', '>', now()->subMinutes(self::PROVIDER_EXPIRED_RECHECK_MINUTES));
+                                    });
+                            });
+                        })
                         ->when($cursor !== null, fn (Builder $query): Builder => $this->applyCursor($query, $cursor))
                         ->when($processed !== [], fn (Builder $query): Builder => $query->whereNotIn('id', $processed))
                         ->with(['order:id,order_status,expires_at'])

@@ -31,6 +31,21 @@ evidence. Test entry points: `SakurupiahProviderReadinessTest`,
 `SakurupiahCheckoutRecoveryPostgresConcurrencyTest` (explicit isolated Redis opt-in).
 Worker counts and resource limits are intentionally unchanged.
 
+## Local credential completion
+
+The paid Order lifecycle marks a local-only Order completed when every Order
+Item has its full quantity of allocated, non-retired local credentials. A
+missing credential remains in processing/review; supplier fulfillment keeps
+its existing completion authority. Completion means fulfillment is authorized,
+not that Telegram has acknowledged delivery.
+
+`orders:recover-local-completion` runs every ten minutes in bounded pages to
+repair older paid processing Orders. Under the Order and Payment locks it
+requires a paid non-manual Payment, inventory sale proof, all local credentials,
+no supplier fulfillment, no open manual review and no Order Refund. It only
+changes the Order status; it does not resend receipts or issue payments. Its
+cursor rotates through candidates so ineligible rows cannot block later Orders.
+
 ## Read-only notification retention (#676)
 
 `telegram:notification-retention-dry-run` delegates to

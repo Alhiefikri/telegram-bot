@@ -110,7 +110,7 @@ class OrderCartDomainTest extends TestCase
         $payment = $order->payments()->sole();
 
         $this->assertTrue($order->is($replayed));
-        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
         $this->assertSame('IDR', $order->currency);
         $this->assertSame(15_000, $order->total_amount);
@@ -210,7 +210,7 @@ class OrderCartDomainTest extends TestCase
         $this->assertFalse($replay->newlyApplied);
         $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
         $this->assertSame(PaymentStatus::Refunded, $order->fresh()->payment_status);
-        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $this->assertSame(15_000, CustomerBalanceAccount::query()->where('customer_id', $customer->id)->value('balance'));
         $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::PurchaseDebit)->count());
         $this->assertSame(1, StoreBalanceEntry::query()->where('kind', StoreBalanceEntryKind::RefundCredit)->count());

@@ -379,9 +379,20 @@ rows without a deadline, rather than mutable `updated_at`. Paid Payments and
 definitively rejected terminal creates do not occupy recovery work. Uncertain
 `outcome_unknown` and `recovery_unconfirmed` Payments retain discovery beyond
 the ordinary lookback; verified late money still enters Manual Fulfillment
-Review without fulfillment. Retry intervals, provider limits, stock and
+Review without fulfillment. Create retry intervals, provider limits, stock and
 supplier-wallet guards, the local 15-minute deadline and the ban on repeating
 ambiguous creates are unchanged.
+
+Payments that are locally terminal and have an authoritative provider `expired`
+reconciliation observation are checked again no sooner than 15 minutes after
+that observation. This uses the persisted event timestamp and does not change
+the 72-hour late-money lookback. Active payments and terminal payments without
+that confirmed state remain eligible on the normal sweep; callbacks and manual
+verification are not delayed by this scheduling rule. Late money can therefore
+take longer to discover by this sweep, including when a provider throttle or
+backlog delays the next due check. The interval is an application policy, not a
+documented Sakurupiah quota. Bursts and provider
+throttling can still occur, especially when many rechecks become due together.
 
 Regression entry points: the Outlook scenario matrix in
 `Telegram/ProductDetailPurchaseTest`, `SakurupiahReconciliationTest`, and the

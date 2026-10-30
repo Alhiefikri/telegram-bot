@@ -91,6 +91,7 @@ Schedule::command('binance:reconcile --chunk=100')->everyMinute()->withoutOverla
 Schedule::command('bsc:reconcile --chunk=100')->everyMinute()->withoutOverlapping()
     ->runInBackground()->sendOutputTo(storage_path('logs/bsc-reconciliation.log'));
 Schedule::command('orders:expire-pending')->everyMinute()->withoutOverlapping();
+Schedule::command('orders:recover-local-completion --limit=100')->everyTenMinutes()->withoutOverlapping(2)->runInBackground();
 // Credential emails are durable per order row; the queue is only the wakeup
 // path and this run also materializes handoffs that a lifecycle hook missed.
 Schedule::command('orders:recover-credential-mails --limit=100 --since-hours=72')->everyMinute()->withoutOverlapping(2)->runInBackground();

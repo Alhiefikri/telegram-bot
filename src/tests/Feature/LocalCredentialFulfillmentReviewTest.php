@@ -2,14 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Enums\UserRole;
 use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\TelegramOutboundEffect;
+use App\Models\User;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\CustomerApi\CustomerApiCredentials;
@@ -59,6 +64,7 @@ final class LocalCredentialFulfillmentReviewTest extends NonTransactionalDatabas
         $this->assertSame($currency === 'IDR' ? 5000 : 2_000_000, $review->amount);
         $this->assertSame($currency, $review->currency);
         $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
         $this->assertSame(4, $product->fresh()->stock);
         $this->assertSame(0, ProductStockItem::count());
         $this->assertSame($currency === 'IDR' ? 15_000 : 20_000, app(StoreBalanceLedger::class)->snapshot($order->customer)->balance());
@@ -84,8 +90,76 @@ final class LocalCredentialFulfillmentReviewTest extends NonTransactionalDatabas
         $replay();
         app(OrderLifecycle::class)->applyPaymentPaid($order->payments()->sole());
         $this->assertSame(1, ProductStockItem::whereIn('order_item_id', $order->orderItems()->select('id'))->count());
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
         $this->assertDatabaseCount('manual_fulfillment_reviews', 0);
         $this->assertSame(0, TelegramOutboundEffect::where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)->count());
+    }
+
+    public function test_fully_allocated_local_stock_order_appears_completed_in_order_history(): void
+    {
+        [$order] = $this->purchase('bot', managed: true);
+
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(1, ProductStockItem::whereIn('order_item_id', $order->orderItems()->select('id'))->count());
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $customer = $order->customer;
+        $customer->forceFill(['email_verified_at' => now()])->save();
+        $this->actingAs($customer, 'customer')->get(route('customer.orders.index'))
+            ->assertOk()->assertSee($order->invoice_number)->assertSee('Selesai');
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]))
+            ->get(route('admin.dashboard', ['tab' => 'penjualan', 'sales_filter' => 'completed']))
+            ->assertOk()->assertSee($order->invoice_number)->assertSee('data-order-filter-groups="all completed"', false);
+    }
+
+    public function test_recovery_completes_old_fully_allocated_local_orders_but_not_missing_credentials(): void
+    {
+        [$completed] = $this->purchase('bot', managed: true);
+        $completed->forceFill(['order_status' => OrderStatus::Processing])->save();
+        $missing = Order::factory()->create(['order_status' => OrderStatus::Processing, 'payment_status' => PaymentStatus::Paid]);
+
+        $this->artisan('orders:recover-local-completion')->assertSuccessful();
+        $this->assertSame(OrderStatus::Completed, $completed->fresh()->order_status);
+        $this->assertSame(OrderStatus::Processing, $missing->fresh()->order_status);
+        $this->artisan('orders:recover-local-completion')->assertSuccessful();
+        $this->assertSame(OrderStatus::Completed, $completed->fresh()->order_status);
+    }
+
+    public function test_recovery_does_not_complete_an_order_with_open_manual_review(): void
+    {
+        [$order] = $this->purchase('bot', managed: true);
+        $order->forceFill(['order_status' => OrderStatus::Processing])->save();
+        $payment = $order->payments()->sole();
+        ManualFulfillmentReview::create([
+            'order_id' => $order->id,
+            'payment_id' => $payment->id,
+            'amount' => $payment->amount,
+            'currency' => $payment->currency,
+            'reason' => ManualFulfillmentReview::REASON_LATE_PAYMENT,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+        ]);
+
+        $this->artisan('orders:recover-local-completion')->assertSuccessful();
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+    }
+
+    public function test_recovery_cursor_moves_past_ineligible_orders(): void
+    {
+        [$eligible] = $this->purchase('bot', managed: true);
+        $eligible->forceFill(['order_status' => OrderStatus::Processing])->save();
+        $blocked = Order::factory()->create([
+            'id' => '00000000-0000-4000-8000-000000000001',
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $product = Product::factory()->create();
+        $item = OrderItem::factory()->for($blocked, 'order')->for($product, 'product')->create();
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $item->id, 'secret' => 'fixture']);
+
+        $this->artisan('orders:recover-local-completion --limit=1')->assertSuccessful();
+        $this->assertSame(OrderStatus::Processing, $eligible->fresh()->order_status);
+        $this->artisan('orders:recover-local-completion --limit=1')->assertSuccessful();
+        $this->assertSame(OrderStatus::Completed, $eligible->fresh()->order_status);
+        $this->assertSame(OrderStatus::Processing, $blocked->fresh()->order_status);
     }
 
     public function test_late_legacy_payment_preserves_one_late_review_and_one_owner_notice(): void
