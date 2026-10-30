@@ -8,6 +8,7 @@ use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
+use App\Jobs\PollActiveSakurupiahPayment;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\VerifySakurupiahWebhookPayment;
@@ -33,18 +34,23 @@ use App\Services\Sakurupiah\SakurupiahHistoryItem;
 use App\Services\Sakurupiah\SakurupiahHttpException;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderAdapter;
+use App\Services\Sakurupiah\SakurupiahRequestBackpressure;
 use App\Services\Sakurupiah\SakurupiahStatus;
 use App\Services\Sakurupiah\SakurupiahStatusUnavailableException;
 use App\Services\Sakurupiah\SakurupiahTransactionStatus;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\PaymentProvider;
+use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Response;
 use Illuminate\Queue\WorkerOptions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\URL;
 use Mockery;
 use Tests\TestCase;
 
@@ -306,6 +312,176 @@ class SakurupiahWebhookTest extends TestCase
         $event = PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole();
         $this->assertNull($event->processed_at);
         Queue::assertPushed(VerifySakurupiahWebhookPayment::class, fn (VerifySakurupiahWebhookPayment $job): bool => $job->eventId === $event->id);
+    }
+
+    public function test_customer_check_without_callback_verifies_payment_and_enqueues_credentials_immediately(): void
+    {
+        Queue::fake();
+        $payment = $this->payment(['provider_presentation' => [
+            'mode' => 'hosted',
+            'qris_payload' => null,
+            'checkout_url' => 'https://sakurupiah.id/pay/invoice',
+            'effective_expires_at' => now()->addHour()->toIso8601String(),
+        ]]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $payment->order, null, false))
+            ->assertOk()->assertJsonPath('payment_status', 'paid');
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(1, InventoryMovement::query()->where('order_id', $payment->order_id)->where('type', InventoryMovementType::Sale)->count());
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+    }
+
+    public function test_active_poll_detects_paid_without_callback_and_enqueues_receipt(): void
+    {
+        config()->set('queue.default', 'database');
+        $queue = Queue::getFacadeRoot();
+        $this->freezeTime();
+        $payment = $this->payment();
+        $payment->order->customer()->update(['telegram_id' => 123456]);
+        config()->set('services.telegram.token', 'bot-token');
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 930002]])]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->twice()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Pending),
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        PollActiveSakurupiahPayment::schedule($payment);
+        PollActiveSakurupiahPayment::schedule($payment);
+        $this->assertSame(1, DB::table('jobs')->where('queue', 'payments')->count());
+        $delay = DB::table('jobs')->where('queue', 'payments')->value('available_at') - now()->timestamp;
+        $this->assertGreaterThanOrEqual(20, $delay);
+        $this->assertLessThanOrEqual(24, $delay);
+        $worker = app('queue.worker');
+        $worker->setManager($queue);
+        $this->travel($delay - 1)->seconds();
+        $worker->runNextJob('database', 'payments', new WorkerOptions(sleep: 0));
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->travel(1)->second();
+        $worker->runNextJob('database', 'payments', new WorkerOptions(sleep: 0));
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(1, DB::table('jobs')->where('queue', 'payments')->count());
+        $nextDelay = DB::table('jobs')->where('queue', 'payments')->value('available_at') - now()->timestamp;
+        $this->travel($nextDelay)->seconds();
+        $worker->runNextJob('database', 'payments', new WorkerOptions(sleep: 0));
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Completed, $payment->order->fresh()->order_status);
+        $this->assertSame(1, InventoryMovement::query()->where('order_id', $payment->order_id)->where('type', InventoryMovementType::Sale)->count());
+        $this->assertSame(0, DB::table('jobs')->where('queue', 'payments')->count());
+        $this->assertSame(1, DB::table('jobs')->where('queue', 'telegram-receipts')->count());
+        $worker->runNextJob('database', 'telegram-receipts', new WorkerOptions(sleep: 0));
+        $this->assertTrue(TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->where('source_id', (string) $payment->order_id)
+            ->where('state', TelegramOutboundEffectState::Sent->value)
+            ->exists());
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'api.telegram.org')
+            && str_contains($request->body(), 'sakurupiah-fixture@example.test'));
+    }
+
+    public function test_active_poll_stops_without_provider_request_after_expiry_or_cancellation(): void
+    {
+        Queue::fake();
+        $expired = $this->payment();
+        app(OrderLifecycle::class)->applyPaymentExpired($expired);
+        $cancelled = $this->payment();
+        app(OrderLifecycle::class)->applyPendingCancellation($cancelled->order);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        (new PollActiveSakurupiahPayment((string) $expired->id))->handle(app(SakurupiahCallbackProcessor::class));
+        (new PollActiveSakurupiahPayment((string) $cancelled->id))->handle(app(SakurupiahCallbackProcessor::class));
+        Queue::assertNotPushed(PollActiveSakurupiahPayment::class);
+    }
+
+    public function test_fast_poll_respects_existing_provider_cooldown_without_busy_wakeups(): void
+    {
+        config()->set('queue.default', 'database');
+        $this->freezeTime();
+        $payment = $this->payment();
+        (new SakurupiahRequestBackpressure)->observe(new Response(new PsrResponse(429, ['Retry-After' => '80'])));
+
+        PollActiveSakurupiahPayment::schedule($payment);
+
+        $job = DB::table('jobs')->where('queue', 'payments')->sole();
+        $this->assertGreaterThanOrEqual(now()->timestamp + 80, $job->available_at);
+        $this->assertLessThanOrEqual(now()->timestamp + 84, $job->available_at);
+    }
+
+    public function test_long_cooldown_keeps_one_delayed_poll_even_after_two_minutes(): void
+    {
+        config()->set('queue.default', 'database');
+        $this->freezeTime();
+        $payment = $this->payment();
+        (new SakurupiahRequestBackpressure)->observe(new Response(new PsrResponse(429, ['Retry-After' => '180'])));
+        PollActiveSakurupiahPayment::schedule($payment);
+        $this->travel(121)->seconds();
+        PollActiveSakurupiahPayment::schedule($payment->fresh());
+
+        $this->assertSame(1, DB::table('jobs')->where('queue', 'payments')->count());
+        $job = DB::table('jobs')->where('queue', 'payments')->sole();
+        $this->assertGreaterThanOrEqual(now()->timestamp + 59, $job->available_at);
+        $this->assertLessThanOrEqual(now()->timestamp + 63, $job->available_at);
+    }
+
+    public function test_final_poll_is_scheduled_before_deadline_but_not_during_cooldown_past_it(): void
+    {
+        config()->set('queue.default', 'database');
+        $this->freezeTime();
+        $payment = $this->payment(['expired_at' => now()->addSeconds(10)]);
+        PollActiveSakurupiahPayment::schedule($payment);
+        $job = DB::table('jobs')->where('queue', 'payments')->sole();
+        $this->assertSame(now()->timestamp + 9, $job->available_at);
+
+        $other = $this->payment(['expired_at' => now()->addSeconds(30)]);
+        (new SakurupiahRequestBackpressure)->observe(new Response(new PsrResponse(429, ['Retry-After' => '80'])));
+        PollActiveSakurupiahPayment::schedule($other);
+        $this->assertSame(1, DB::table('jobs')->where('queue', 'payments')->count());
+    }
+
+    public function test_active_poll_retries_an_uncertain_status_without_creating_another_invoice(): void
+    {
+        config()->set('queue.default', 'database');
+        $queue = Queue::getFacadeRoot();
+        $this->freezeTime();
+        $payment = $this->payment();
+        $calls = 0;
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->twice()->andReturnUsing(function () use (&$calls, $payment) {
+            if (++$calls === 1) {
+                throw new \RuntimeException('temporary provider outage');
+            }
+
+            return $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount);
+        });
+        $provider->shouldReceive('createInvoice')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        PollActiveSakurupiahPayment::schedule($payment);
+        $worker = app('queue.worker');
+        $worker->setManager($queue);
+        $delay = DB::table('jobs')->where('queue', 'payments')->value('available_at') - now()->timestamp;
+        $this->travel($delay)->seconds();
+        $worker->runNextJob('database', 'payments', new WorkerOptions(sleep: 0));
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED, $payment->fresh()->provider_create_state);
+        $this->assertSame(1, DB::table('jobs')->where('queue', 'payments')->count());
+
+        $nextDelay = DB::table('jobs')->where('queue', 'payments')->value('available_at') - now()->timestamp;
+        $this->travel($nextDelay)->seconds();
+        $worker->runNextJob('database', 'payments', new WorkerOptions(sleep: 0));
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(1, Payment::query()->where('order_id', $payment->order_id)->count());
+        $this->assertSame(1, DB::table('jobs')->where('queue', 'telegram-receipts')->count());
     }
 
     public function test_queued_verification_retries_when_authoritative_status_remains_pending(): void
@@ -719,6 +895,103 @@ class SakurupiahWebhookTest extends TestCase
         $this->assertSame(1, ManualFulfillmentReview::query()->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
         $this->assertSame(0, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
         $this->assertNotNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
+    }
+
+    public function test_success_callback_after_cancellation_requires_review_without_selling_stock(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        app(OrderLifecycle::class)->applyPendingCancellation($payment->order);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->postCallback($this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]))->assertOk();
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Cancelled, $payment->order->fresh()->order_status);
+        $this->assertSame(1, ManualFulfillmentReview::query()->where('payment_id', $payment->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
+        $this->assertSame(0, InventoryMovement::query()->where('order_id', $payment->order_id)->where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_success_callback_recovers_missing_reference_after_outage_without_creating_another_invoice(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $reference = $payment->provider_reference;
+        $status = $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, $payment->amount);
+        $body = $this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]);
+        $payment->update(['provider_reference' => null, 'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN]);
+        app(OrderLifecycle::class)->applyPaymentExpired($payment);
+
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($reference)->andThrow(new \RuntimeException('outage'));
+        $provider->shouldReceive('createInvoice')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->postCallback($body)->assertOk();
+        $this->assertNull($payment->fresh()->provider_reference);
+        $this->assertNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
+
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($reference)->andReturn($status);
+        $provider->shouldReceive('transactionHistory')->never();
+        $provider->shouldReceive('createInvoice')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->artisan('sakurupiah:reconcile')->assertExitCode(0);
+        $this->assertSame($reference, $payment->fresh()->provider_reference);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $payment->order->fresh()->order_status);
+        $this->assertSame(1, ManualFulfillmentReview::query()->where('payment_id', $payment->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
+        $this->assertSame(0, InventoryMovement::query()->where('order_id', $payment->order_id)->where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_missing_reference_can_be_verified_by_one_matching_history_lookup(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $reference = $payment->provider_reference;
+        $body = $this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]);
+        $status = new SakurupiahStatus(trxId: $reference, status: SakurupiahTransactionStatus::Successful);
+        $history = new SakurupiahHistoryItem(
+            trxId: $reference,
+            merchantRef: $payment->merchant_ref,
+            paymentCode: 'QRISC',
+            amount: $payment->amount,
+            status: SakurupiahTransactionStatus::Successful,
+        );
+        $payment->update(['provider_reference' => null, 'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn($status);
+        $provider->shouldReceive('transactionHistory')->once()->andReturn([$history]);
+        $provider->shouldReceive('createInvoice')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->postCallback($body)->assertOk();
+        $this->assertSame($reference, $payment->fresh()->provider_reference);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+    }
+
+    public function test_success_callback_missing_reference_requires_matching_authoritative_merchant(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $body = $this->callbackBody($payment, ['status' => 'berhasil', 'status_kode' => 1]);
+        $status = new SakurupiahStatus(
+            trxId: $payment->provider_reference,
+            status: SakurupiahTransactionStatus::Successful,
+            merchantRef: 'OTHER-ORDER',
+            paymentCode: 'QRISC',
+            amount: SakurupiahAmount::from($payment->amount),
+        );
+        $payment->update(['provider_reference' => null, 'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn($status);
+        $provider->shouldReceive('createInvoice')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->postCallback($body)->assertOk();
+        $this->assertNull($payment->fresh()->provider_reference);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
     }
 
     public function test_unknown_payment_is_acknowledged_without_provider_lookup_and_is_stored_unlinked(): void

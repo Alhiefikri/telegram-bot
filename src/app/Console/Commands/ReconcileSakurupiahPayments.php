@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
+use App\Jobs\PollActiveSakurupiahPayment;
 use App\Models\Payment;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
@@ -29,7 +30,7 @@ final class ReconcileSakurupiahPayments extends Command
 {
     private const CURSOR_TTL_SECONDS = 86_400;
 
-    private const PROVIDER_EXPIRED_RECHECK_MINUTES = 15;
+    private const ACTIVE_PENDING_RECHECK_MINUTES = 1;
 
     protected $signature = 'sakurupiah:reconcile {--chunk=100}';
 
@@ -77,7 +78,6 @@ final class ReconcileSakurupiahPayments extends Command
             return self::FAILURE;
         }
 
-        $releasedCutoff = now()->subHours($this->releasedLookbackHours());
         $deadline = $this->executionDeadline();
         $carryOver = false;
         $requests = 0;
@@ -96,7 +96,7 @@ final class ReconcileSakurupiahPayments extends Command
         $rateLimited = false;
 
         try {
-            foreach (['active', 'released'] as $lane) {
+            foreach (['verification', 'active'] as $lane) {
                 if ($backpressure->isCoolingDown()) {
                     $rateLimited = true;
                     $carryOver = true;
@@ -105,14 +105,14 @@ final class ReconcileSakurupiahPayments extends Command
                     break;
                 }
                 $cursorKey = $this->cursorKey($environment).':'.$lane;
-                // Reserve half the I/O window for late-money verification even
-                // when active checkouts encounter a provider outage.
-                $laneDeadline = $lane === 'active'
+                // Verify known payment signals first, while reserving half the
+                // window for ordinary active checkout fallback.
+                $laneDeadline = $lane === 'verification'
                     ? hrtime(true) + intdiv(max(0, $deadline - hrtime(true)), 2)
                     : $deadline;
 
                 ProviderVerificationProfiles::until($laneDeadline, function () use (
-                    $lane, $cursorKey, $releasedCutoff, $chunk, $reconciliationQuery,
+                    $lane, $cursorKey, $chunk, $reconciliationQuery,
                     $lifecycle, $processor, $outboundEffects, $outboundEffectDispatcher,
                     $backpressure, &$rateLimited,
                     &$carryOver, &$requests, &$stopReasons, &$budgetExhausted, &$processed,
@@ -121,19 +121,21 @@ final class ReconcileSakurupiahPayments extends Command
                     $cursor = $this->resumeCursor($cursorKey);
                     $stoppedEarly = false;
                     $page = $reconciliationQuery
-                        ->eligible($releasedCutoff)
-                        ->where('status', $lane === 'active' ? '=' : '<>', PaymentStatus::Pending->value)
-                        // Pace confirmed provider expiries without delaying uncertain money.
-                        ->when($lane === 'released', function (Builder $query): void {
-                            $query->where(function (Builder $due): void {
-                                $due->whereNull('provider_create_state')
-                                    ->orWhere('provider_create_state', '<>', SakurupiahInvoiceLifecycleService::STATE_PROVIDER_EXPIRED)
-                                    ->orWhereDoesntHave('paymentEvents', function (Builder $events): void {
-                                        $events->where('provider', PaymentProvider::SAKURUPIAH)
-                                            ->where('event_type', PaymentEventType::Reconciliation->value)
-                                            ->where('provider_status', SakurupiahTransactionStatus::Expired->value)
-                                            ->where('last_received_at', '>', now()->subMinutes(self::PROVIDER_EXPIRED_RECHECK_MINUTES));
-                                    });
+                        ->eligible()
+                        ->when($lane === 'verification', fn (Builder $query) => $query->where(
+                            fn (Builder $signals) => $reconciliationQuery->orWithSuccessIndication($signals),
+                        ))
+                        ->when($lane === 'active', fn (Builder $query) => $query->where('status', PaymentStatus::Pending->value))
+                        // Successful signals bypass the ordinary fallback cadence.
+                        ->when($lane === 'active', function (Builder $query) use ($reconciliationQuery): void {
+                            $query->where(function (Builder $due) use ($reconciliationQuery): void {
+                                $due->whereDoesntHave('paymentEvents', function (Builder $events): void {
+                                    $events->where('provider', PaymentProvider::SAKURUPIAH)
+                                        ->where('event_type', PaymentEventType::Reconciliation->value)
+                                        ->where('provider_status', SakurupiahTransactionStatus::Pending->value)
+                                        ->where('last_received_at', '>', now()->subMinutes(self::ACTIVE_PENDING_RECHECK_MINUTES));
+                                });
+                                $reconciliationQuery->orWithSuccessIndication($due);
                             });
                         })
                         ->when($cursor !== null, fn (Builder $query): Builder => $this->applyCursor($query, $cursor))
@@ -161,7 +163,7 @@ final class ReconcileSakurupiahPayments extends Command
                         $processed[] = (string) $payment->getKey();
                         $payableBefore = $lifecycle->classify($payment)->isPayable();
                         try {
-                            $outcome = $processor->reconcilePayment($payment);
+                            $outcome = $processor->reconcilePayment($payment, scheduled: true);
                         } catch (Throwable $exception) {
                             $failed++;
                             $stoppedEarly = true;
@@ -171,6 +173,10 @@ final class ReconcileSakurupiahPayments extends Command
                         }
 
                         $cursor = $paymentCursor;
+                        $freshPayment = $payment->fresh();
+                        if ($freshPayment !== null) {
+                            PollActiveSakurupiahPayment::schedule($freshPayment);
+                        }
                         match ($outcome) {
                             SakurupiahReconciliationOutcome::Paid => $paid++,
                             SakurupiahReconciliationOutcome::Expired => $expired++,
@@ -362,11 +368,6 @@ final class ReconcileSakurupiahPayments extends Command
         }
 
         return $chunk;
-    }
-
-    private function releasedLookbackHours(): int
-    {
-        return max(1, (int) config('services.sakurupiah.reconcile_terminal_lookback_hours', 72));
     }
 
     private function redactedPaymentId(Payment $payment): string

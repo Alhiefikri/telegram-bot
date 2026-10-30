@@ -16,8 +16,10 @@ use App\Services\Pakasir\PakasirProviderReadiness;
 use App\Services\PaymentReceiptReport;
 use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
+use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\Sakurupiah\SakurupiahReconciliationOutcome;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Support\Money;
@@ -40,6 +42,7 @@ class TelegramOrderIntents
         private KlikQrisNativeQrisService $klikQrisNativeQris,
         private KlikQrisProviderReadiness $klikQrisReadiness,
         private SakurupiahInvoiceLifecycleService $sakurupiahLifecycle,
+        private SakurupiahCallbackProcessor $sakurupiahProcessor,
         private SakurupiahProviderReadiness $sakurupiahReadiness,
         private TelegramLocale $locale,
         private TelegramMenuIntents $menu,
@@ -634,9 +637,11 @@ class TelegramOrderIntents
         RateLimiter::hit($key, 60);
 
         try {
-            ProviderVerificationProfiles::using(
+            $result = ProviderVerificationProfiles::using(
                 ProviderVerificationProfile::Interactive,
-                fn () => $this->sakurupiahLifecycle->tryRefreshStatus($payment),
+                fn () => $this->isSakurupiahPayable($payment)
+                    ? $this->sakurupiahProcessor->reconcilePayment($payment)
+                    : $this->sakurupiahLifecycle->tryRefreshStatus($payment),
             );
         } catch (Throwable $exception) {
             report($exception);
@@ -644,6 +649,9 @@ class TelegramOrderIntents
             return $this->locale->translate($customer, 'order.refresh.unavailable');
         }
 
+        if ($result === SakurupiahReconciliationOutcome::Busy) {
+            return $this->locale->translate($customer, 'order.refresh.unavailable');
+        }
         if ($payment->fresh()->status === PaymentStatus::Paid) {
             return $this->locale->translate($customer, 'order.refresh.verified');
         }

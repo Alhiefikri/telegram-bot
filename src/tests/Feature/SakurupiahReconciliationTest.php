@@ -5,19 +5,23 @@ namespace Tests\Feature;
 use App\Console\Commands\ReconcileSakurupiahPayments;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
+use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
+use App\Jobs\PollActiveSakurupiahPayment;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\PaymentEvent;
 use App\Models\Product;
 use App\Models\TelegramOutboundEffect;
 use App\Services\OrderLifecycle;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
 use App\Services\Sakurupiah\SakurupiahAmount;
+use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahFee;
 use App\Services\Sakurupiah\SakurupiahInvoice;
@@ -34,6 +38,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Mockery;
 use Tests\TestCase;
 
@@ -68,7 +73,7 @@ class SakurupiahReconciliationTest extends TestCase
             'reconcile_terminal_lookback_hours' => 72,
             'reconcile_max_execution_seconds' => 45,
         ]));
-        foreach (['active', 'released'] as $lane) {
+        foreach (['active', 'verification'] as $lane) {
             Cache::forget('sakurupiah:reconcile:cursor:'.SakurupiahEnvironment::runtime()->value.':'.$lane);
         }
     }
@@ -88,7 +93,7 @@ class SakurupiahReconciliationTest extends TestCase
             ->push(['status' => '200', 'data' => [['status' => 'pending']]]);
 
         $this->artisan('sakurupiah:reconcile --chunk=10')
-            ->expectsOutputToContain('stop_reason=provider_throttled carry_over=yes')
+            ->expectsOutputToContain('provider_throttled carry_over=yes')
             ->assertExitCode(1);
         Http::assertSentCount(1);
         $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $next->fresh()->provider_create_state);
@@ -103,7 +108,7 @@ class SakurupiahReconciliationTest extends TestCase
         $this->travel(61)->seconds();
         $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
         Http::assertSent(fn ($request): bool => $request['trx_id'] === $next->provider_reference);
-        Http::assertSent(fn ($request): bool => $request['trx_id'] === $late->provider_reference);
+        Http::assertNotSent(fn ($request): bool => $request['trx_id'] === $late->provider_reference);
         $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
         $this->assertSame(2, Http::recorded(fn ($request): bool => ($request['trx_id'] ?? null) === $first->provider_reference)->count());
         $this->assertSame(3, Payment::query()->count());
@@ -210,6 +215,60 @@ class SakurupiahReconciliationTest extends TestCase
         );
     }
 
+    public function test_success_observed_before_history_outage_is_recovered_after_local_expiry(): void
+    {
+        $payment = $this->sakurupiahPayment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn($this->providerStatus($payment, SakurupiahTransactionStatus::Successful));
+        $provider->shouldReceive('transactionHistory')->once()->andThrow(new \RuntimeException('outage'));
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->artisan('sakurupiah:reconcile')->assertExitCode(0);
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED, $payment->fresh()->provider_create_state);
+        $this->assertTrue($payment->paymentEvents()->where('provider_status', 'berhasil')->exists());
+        app(OrderLifecycle::class)->applyPaymentExpired($payment);
+
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn($this->providerStatus($payment, SakurupiahTransactionStatus::Successful, (int) $payment->amount));
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->artisan('sakurupiah:reconcile')->assertExitCode(0);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $payment->order->fresh()->order_status);
+        $this->assertSame(1, ManualFulfillmentReview::query()->where('payment_id', $payment->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
+        $this->assertSame(0, InventoryMovement::query()->where('order_id', $payment->order_id)->where('type', InventoryMovementType::Sale)->count());
+    }
+
+    public function test_conflicting_expired_observation_does_not_discard_an_unverified_success(): void
+    {
+        $payment = $this->sakurupiahPayment(['provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn($this->providerStatus($payment, SakurupiahTransactionStatus::Expired));
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->artisan('sakurupiah:reconcile')->expectsOutputToContain('verification_pending=1')->assertExitCode(0);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $payment->order->fresh()->order_status);
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL, $payment->fresh()->provider_create_state);
+    }
+
+    public function test_successful_create_observation_survives_a_later_uncertain_recovery_state(): void
+    {
+        $payment = $this->sakurupiahPayment(['provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED]);
+        PaymentEvent::factory()->for($payment)->create([
+            'provider' => PaymentProvider::SAKURUPIAH,
+            'event_type' => PaymentEventType::ProviderCreate,
+            'merchant_ref' => $payment->merchant_ref,
+            'provider_reference' => $payment->provider_reference,
+            'provider_status' => SakurupiahTransactionStatus::Successful->value,
+        ]);
+        app(OrderLifecycle::class)->applyPaymentExpired($payment);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn($this->providerStatus($payment, SakurupiahTransactionStatus::Successful, (int) $payment->amount));
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->artisan('sakurupiah:reconcile')->assertExitCode(0);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(1, ManualFulfillmentReview::query()->where('payment_id', $payment->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
+    }
+
     public function test_command_applies_authoritative_expired(): void
     {
         $expired = $this->sakurupiahPayment(['merchant_ref' => 'SAKU-EXPIRED']);
@@ -229,105 +288,84 @@ class SakurupiahReconciliationTest extends TestCase
         $this->assertSame(OrderStatus::Expired, $expired->order->fresh()->order_status);
     }
 
-    public function test_provider_expired_payment_is_rechecked_at_a_lower_frequency(): void
-    {
-        $this->freezeTime();
-        $payment = $this->sakurupiahPayment();
-        Http::fake(['*status-transaction.php' => Http::response([
-            'status' => '200', 'data' => [['status' => 'expired']],
-        ])]);
-
-        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
-        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
-        Http::assertSentCount(1);
-
-        foreach (range(1, 14) as $_minute) {
-            $this->travel(1)->minute();
-            $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
-        }
-        Http::assertSentCount(1);
-
-        $this->travel(1)->minute();
-        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
-        Http::assertSentCount(2);
-    }
-
-    public function test_active_payments_remain_frequent_and_late_money_is_reviewed_when_recheck_is_due(): void
+    public function test_active_minute_sweep_and_ended_orders_are_never_polled_without_success_indication(): void
     {
         $this->freezeTime();
         $active = $this->sakurupiahPayment();
+        $expired = $this->sakurupiahPayment();
+        app(OrderLifecycle::class)->applyPaymentExpired($expired);
+        $unknown = $this->sakurupiahPayment(['provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN]);
+        app(OrderLifecycle::class)->applyPaymentExpired($unknown);
+        $cancelled = $this->sakurupiahPayment();
+        $cancelled->order->update(['order_status' => OrderStatus::Cancelled]);
+        $overdue = $this->sakurupiahPayment(['expired_at' => now()]);
+        Http::fake(['*status-transaction.php' => Http::response(['status' => '200', 'data' => [['status' => 'pending']]])]);
+
+        foreach (range(0, 15) as $minute) {
+            if ($minute > 0) {
+                $this->travel(1)->minute();
+            }
+            $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
+        }
+        Http::assertSentCount(16);
+        Http::assertSent(fn ($request) => $request['trx_id'] === $active->provider_reference);
+        Http::assertNotSent(fn ($request) => in_array($request['trx_id'] ?? null, [$expired->provider_reference, $unknown->provider_reference, $cancelled->provider_reference, $overdue->provider_reference], true));
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN, $unknown->fresh()->provider_create_state);
+        $this->assertSame(PaymentStatus::Pending, $active->fresh()->status);
+    }
+
+    public function test_success_indication_is_verified_before_older_ordinary_active_payment(): void
+    {
+        $active = $this->sakurupiahPayment(['created_at' => now()->subHour()]);
         $late = $this->sakurupiahPayment();
         app(OrderLifecycle::class)->applyPaymentExpired($late);
-        $latePaid = false;
-        Http::fake(['*status-transaction.php' => function ($request) use ($late, &$latePaid) {
-            $isLate = $request['trx_id'] === $late->provider_reference;
-            $data = ['status' => $isLate ? ($latePaid ? 'berhasil' : 'expired') : 'pending'];
-            if ($isLate && $latePaid) {
-                $data['amount'] = (string) $late->amount;
-            }
+        $late->update(['provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL]);
+        $calls = [];
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->twice()->andReturnUsing(function ($reference) use (&$calls, $active, $late) {
+            $calls[] = $reference;
 
-            return Http::response(['status' => '200', 'data' => [$data]]);
-        }]);
-
-        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
-        Http::assertSentCount(2);
-        $latePaid = true;
-        $this->travel(1)->minute();
-        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
-        Http::assertSentCount(3);
-        $this->assertSame(PaymentStatus::Expired, $late->fresh()->status);
-        $this->assertSame(PaymentStatus::Pending, $active->fresh()->status);
-
-        $this->travel(14)->minutes();
-        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
-        Http::assertSentCount(5);
+            return $reference === $late->provider_reference
+                ? $this->providerStatus($late, SakurupiahTransactionStatus::Successful, (int) $late->amount)
+                : $this->providerStatus($active, SakurupiahTransactionStatus::Pending);
+        });
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+        $this->artisan('sakurupiah:reconcile')->assertExitCode(0);
+        $this->assertSame([$late->provider_reference, $active->provider_reference], $calls);
         $this->assertSame(PaymentStatus::Paid, $late->fresh()->status);
-        $this->assertSame(OrderStatus::Expired, $late->order->fresh()->order_status);
-        $this->assertSame(1, ManualFulfillmentReview::query()->where('payment_id', $late->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
-        $this->assertSame(0, InventoryMovement::query()->where('order_id', $late->order_id)->where('type', InventoryMovementType::Sale)->count());
     }
 
-    public function test_repeated_expired_checks_do_not_trigger_a_simulated_provider_limit(): void
+    public function test_minute_sweep_restarts_a_missing_fast_poll_for_active_payment(): void
     {
-        $this->freezeTime();
-        foreach (range(1, 3) as $_) {
-            $payment = $this->sakurupiahPayment();
-            app(OrderLifecycle::class)->applyPaymentExpired($payment);
-        }
-        $active = null;
-        $rateEnabled = false;
-        $callsByMinute = [];
-        Http::fake(['*status-transaction.php' => function ($request) use (&$active, &$rateEnabled, &$callsByMinute) {
-            if ($rateEnabled) {
-                $minute = now()->format('Y-m-d H:i');
-                $callsByMinute[$minute] = ($callsByMinute[$minute] ?? 0) + 1;
-                if ($callsByMinute[$minute] > 2) {
-                    return Http::response(['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'], 400);
-                }
-            }
+        config()->set('queue.default', 'database');
+        Queue::fake();
+        $payment = $this->sakurupiahPayment();
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn($this->providerStatus($payment, SakurupiahTransactionStatus::Pending));
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
 
-            return Http::response(['status' => '200', 'data' => [[
-                'status' => $active !== null && $request['trx_id'] === $active->provider_reference ? 'pending' : 'expired',
-            ]]]);
-        }]);
+        $this->artisan('sakurupiah:reconcile')->assertExitCode(0);
+        Queue::assertPushed(PollActiveSakurupiahPayment::class, fn (PollActiveSakurupiahPayment $job) => $job->paymentId === (string) $payment->id);
+    }
 
-        $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
-        Http::assertSentCount(3);
-        $active = $this->sakurupiahPayment();
-        $rateEnabled = true;
+    public function test_selected_payment_is_rechecked_under_lock_after_order_expires(): void
+    {
+        $payment = $this->sakurupiahPayment();
+        app(OrderLifecycle::class)->applyPaymentExpired($payment);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->never();
+        $provider->shouldReceive('createInvoice')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
 
-        foreach (range(1, 5) as $_minute) {
-            $this->travel(1)->minute();
-            $this->artisan('sakurupiah:reconcile --chunk=10')->assertExitCode(0);
-        }
-        $this->assertSame([1, 1, 1, 1, 1], array_values($callsByMinute));
-        $this->assertSame(PaymentStatus::Pending, $active->fresh()->status);
+        app(SakurupiahCallbackProcessor::class)->reconcilePayment($payment, scheduled: true);
+        $this->assertSame(PaymentStatus::Expired, $payment->fresh()->status);
     }
 
     public function test_command_marks_late_paid_on_terminal_order_as_manual_review_without_fulfilling(): void
     {
         $late = $this->sakurupiahPayment(['merchant_ref' => 'SAKU-LATE']);
         app(OrderLifecycle::class)->applyPaymentExpired($late);
+        $late->update(['provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL]);
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('transactionStatus')
             ->once()
@@ -666,6 +704,7 @@ class SakurupiahReconciliationTest extends TestCase
         $active = $this->sakurupiahPayment();
         $late = $this->sakurupiahPayment();
         app(OrderLifecycle::class)->applyPaymentExpired($late);
+        $late->update(['provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL]);
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('transactionStatus')->with((string) $active->provider_reference)
             ->andReturnUsing(function (): never {
@@ -684,7 +723,7 @@ class SakurupiahReconciliationTest extends TestCase
         $this->assertSame(1, ManualFulfillmentReview::query()->where('payment_id', $late->id)->count());
     }
 
-    public function test_old_uncertain_money_still_reconciles_into_late_payment_review(): void
+    public function test_old_success_indication_still_reconciles_into_late_payment_review(): void
     {
         $late = $this->sakurupiahPayment([
             'created_at' => now()->subDays(5),
@@ -692,6 +731,7 @@ class SakurupiahReconciliationTest extends TestCase
             'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED,
         ]);
         app(OrderLifecycle::class)->applyPaymentExpired($late);
+        $late->update(['provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL]);
         $provider = Mockery::mock(SakurupiahProviderAdapter::class);
         $provider->shouldReceive('transactionStatus')->with((string) $late->provider_reference)
             ->andReturn($this->providerStatus($late, SakurupiahTransactionStatus::Successful, (int) $late->amount));

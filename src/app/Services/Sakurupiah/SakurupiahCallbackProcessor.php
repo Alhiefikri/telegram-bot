@@ -35,6 +35,7 @@ final class SakurupiahCallbackProcessor
         private readonly SakurupiahInvoiceLifecycleService $lifecycle,
         private readonly SakurupiahPaymentEventLogger $events,
         private readonly ExternalMoneyReceiptWriter $receipts,
+        private readonly SakurupiahReconciliationQuery $reconciliationQuery,
     ) {}
 
     public function authenticatesCallback(
@@ -92,26 +93,46 @@ final class SakurupiahCallbackProcessor
      * pending. Authoritative successful/expired observations are delegated to
      * OrderLifecycle exactly like verified callbacks.
      */
-    public function reconcilePayment(Payment $payment): SakurupiahReconciliationOutcome
+    public function reconcilePayment(Payment $payment, bool $scheduled = false): SakurupiahReconciliationOutcome
     {
 
         if ($payment->status === PaymentStatus::Paid || ! $this->isEligiblePayment($payment)) {
             return SakurupiahReconciliationOutcome::Pending;
         }
 
+        if (blank($payment->provider_reference)) {
+            $event = $payment->paymentEvents()->where('provider', PaymentProvider::SAKURUPIAH)
+                ->where('event_type', PaymentEventType::Callback->value)
+                ->where('provider_status', SakurupiahTransactionStatus::Successful->value)
+                ->whereNull('processed_at')->oldest('received_at')->first();
+            if ($event !== null) {
+                try {
+                    $this->processQueuedEvent($event);
+                } catch (SakurupiahStatusUnavailableException) {
+                    return SakurupiahReconciliationOutcome::VerificationPending;
+                }
+
+                return $payment->fresh()->status === PaymentStatus::Paid
+                    ? SakurupiahReconciliationOutcome::Paid
+                    : SakurupiahReconciliationOutcome::VerificationPending;
+            }
+        }
+
         $result = $this->lifecycle->tryWithPaymentLock(
             $payment,
-            fn (): SakurupiahReconciliationOutcome => $this->reconcileLocked($payment),
+            fn (): SakurupiahReconciliationOutcome => $this->reconcileLocked($payment, $scheduled),
         );
 
         return $result ?? SakurupiahReconciliationOutcome::Busy;
     }
 
-    private function reconcileLocked(Payment $payment): SakurupiahReconciliationOutcome
+    private function reconcileLocked(Payment $payment, bool $scheduled): SakurupiahReconciliationOutcome
     {
         $this->refreshPaymentAttributes($payment);
 
-        if ($payment->status === PaymentStatus::Paid) {
+        // The order may have expired or been cancelled after the scan selected it.
+        if ($payment->status === PaymentStatus::Paid
+            || ($scheduled && ! $this->reconciliationQuery->eligible()->whereKey($payment->getKey())->exists())) {
             return SakurupiahReconciliationOutcome::Pending;
         }
 
@@ -130,7 +151,17 @@ final class SakurupiahCallbackProcessor
         try {
             $status = $this->fetchStatus($payment);
         } catch (SakurupiahStatusUnavailableException) {
-            $this->lifecycle->persistRecoveryUnconfirmed($payment, 'status_unavailable');
+            if ($this->lifecycle->classify($payment)->isPayable()) {
+                // A lookup outage or pre-dispatch deferral says nothing about
+                // an already validated QR. Keep that invoice usable.
+                $this->events->logRecoveryObservation(
+                    $payment,
+                    SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED,
+                    'status_unavailable',
+                );
+            } else {
+                $this->lifecycle->persistRecoveryUnconfirmed($payment, 'status_unavailable');
+            }
 
             return SakurupiahReconciliationOutcome::VerificationPending;
         }
@@ -148,6 +179,14 @@ final class SakurupiahCallbackProcessor
         }
 
         if ($status->isSuccessful()) {
+            // Keep the authoritative success indication durable even if the
+            // subsequent amount/history lookup fails or the order expires.
+            $this->lifecycle->persistAuthoritativeStatusObservation(
+                $payment,
+                $status,
+                SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL,
+                'authoritative_amount_unverified',
+            );
             try {
                 $evidenceStatus = $this->statusWithAmountEvidence($payment, $status);
             } catch (SakurupiahStatusUnavailableException) {
@@ -185,6 +224,11 @@ final class SakurupiahCallbackProcessor
         }
 
         if ($status->isExpired()) {
+            if ($this->reconciliationQuery->hasSuccessIndication($payment)) {
+                $this->events->logReconciliation($payment, $status);
+
+                return SakurupiahReconciliationOutcome::VerificationPending;
+            }
             $this->lifecycle->persistAuthoritativeStatusObservation(
                 $payment,
                 $status,
@@ -198,7 +242,11 @@ final class SakurupiahCallbackProcessor
             return SakurupiahReconciliationOutcome::Expired;
         }
 
-        $this->events->logReconciliation($payment, $status);
+        if (! $this->lifecycle->classify($payment)->isPayable()) {
+            $this->lifecycle->recoverPendingObservationWhileLocked($payment, $status);
+        } else {
+            $this->events->logReconciliation($payment, $status);
+        }
 
         return SakurupiahReconciliationOutcome::Pending;
     }
@@ -223,7 +271,7 @@ final class SakurupiahCallbackProcessor
             return $this->markProcessed($event);
         }
 
-        if (trim((string) $payment->provider_reference) === '') {
+        if (trim((string) $payment->provider_reference) === '' && ! $callback->isSuccessful()) {
             if (! $deferVerification) {
                 throw new SakurupiahStatusUnavailableException;
             }
@@ -292,7 +340,40 @@ final class SakurupiahCallbackProcessor
         $providerReference = trim((string) $payment->provider_reference);
 
         if ($providerReference === '') {
-            return ['processed' => false, 'defer' => true];
+            // A signed success signal supplies a lookup key, not payment proof.
+            // Bind it only after the provider independently confirms identity.
+            try {
+                $status = $this->provider->transactionStatus($callback->trxId);
+            } catch (Throwable $exception) {
+                $this->logLookupFailure($payment, 'transactionStatus', $exception);
+                throw new SakurupiahStatusUnavailableException(previous: $exception);
+            }
+            $payment->provider_reference = $callback->trxId;
+            if (! $status->isSuccessful() || $this->statusIdentityMismatchReason($payment, $status) !== null) {
+                return ['processed' => false, 'defer' => true];
+            }
+            $history = null;
+            if ($status->merchantRef === null || $status->paymentCode === null) {
+                $history = $this->fetchMatchingHistory($payment);
+                if ($history === null || ! in_array($history->amountValue(), SakurupiahInvoiceLifecycleService::expectedProviderAmounts($payment), true)
+                    || ($history->currency !== null && strtoupper(trim($history->currency)) !== strtoupper(trim((string) $payment->currency)))) {
+                    return ['processed' => false, 'defer' => true];
+                }
+            } elseif ($status->merchantRef !== (string) $payment->merchant_ref) {
+                return ['processed' => false, 'defer' => true];
+            }
+            $evidenceStatus = $this->statusWithAmountEvidence($payment, $status, $history);
+            if ($evidenceStatus === null) {
+                return ['processed' => false, 'defer' => true];
+            }
+            $this->lifecycle->persistAuthoritativeStatusObservation($payment, $evidenceStatus, SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL);
+            $this->expireOverduePendingPayment($payment);
+            if ($this->receipts->claimProviderPayment($payment)->isHeld()) {
+                return ['processed' => false, 'defer' => false];
+            }
+            $this->orders->applyPaymentPaid($payment);
+
+            return ['processed' => true, 'defer' => false];
         }
 
         if ($providerReference !== $callback->trxId) {
@@ -319,6 +400,12 @@ final class SakurupiahCallbackProcessor
                 return ['processed' => false, 'defer' => true];
             }
 
+            $this->lifecycle->persistAuthoritativeStatusObservation(
+                $payment,
+                $status,
+                SakurupiahInvoiceLifecycleService::STATE_PROVIDER_BERHASIL,
+                'authoritative_amount_unverified',
+            );
             $evidenceStatus = $this->statusWithAmountEvidence($payment, $status);
             if ($evidenceStatus === null) {
                 $this->lifecycle->persistAuthoritativeStatusObservation(
@@ -349,6 +436,12 @@ final class SakurupiahCallbackProcessor
 
         if ($callback->isExpired()) {
             if (! $status->isExpired()) {
+                $this->events->logReconciliation($payment, $status);
+
+                return ['processed' => false, 'defer' => true];
+            }
+
+            if ($this->reconciliationQuery->hasSuccessIndication($payment)) {
                 $this->events->logReconciliation($payment, $status);
 
                 return ['processed' => false, 'defer' => true];
@@ -408,7 +501,7 @@ final class SakurupiahCallbackProcessor
         }
     }
 
-    private function statusWithAmountEvidence(Payment $payment, SakurupiahStatus $status): ?SakurupiahStatus
+    private function statusWithAmountEvidence(Payment $payment, SakurupiahStatus $status, ?SakurupiahHistoryItem $history = null): ?SakurupiahStatus
     {
         $expectedAmounts = SakurupiahInvoiceLifecycleService::expectedProviderAmounts($payment);
 
@@ -416,7 +509,7 @@ final class SakurupiahCallbackProcessor
             return in_array($status->amountValue(), $expectedAmounts, true) ? $status : null;
         }
 
-        $history = $this->fetchMatchingHistory($payment);
+        $history ??= $this->fetchMatchingHistory($payment);
         if ($history === null
             || ! in_array($history->amountValue(), $expectedAmounts, true)
             || ($history->currency !== null

@@ -6,6 +6,7 @@ use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\PollActiveSakurupiahPayment;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
@@ -141,15 +142,27 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
     public function test_callback_reconciliation_and_expiry_race_preserves_one_valid_terminal_outcome(): void
     {
         $this->prepareReleaseRaceLane();
+        if (env('RUN_SAKURUPIAH_REDIS_TESTS') === '1' && extension_loaded('redis')) {
+            config()->set('cache.default', 'redis');
+            config()->set('database.redis.cache.host', env('REDIS_HOST', '127.0.0.1'));
+            config()->set('database.redis.cache.port', (int) env('REDIS_PORT', 6379));
+            config()->set('database.redis.cache.database', 7);
+            config()->set('database.redis.cache.password', null);
+            config()->set('database.redis.cache.url', null);
+            Cache::purge('redis');
+            Cache::flush();
+        }
         $payment = $this->prepareRacePayment('INV-PG-416-MIXED');
         $payload = $this->callbackPayload($payment);
 
         DB::disconnect();
         $results = $this->runConcurrently([
             fn (): int => app(SakurupiahCallbackProcessor::class)->processCallback($payload)->id,
-            fn (): string => app(SakurupiahCallbackProcessor::class)
-                ->reconcilePayment(Payment::findOrFail($payment->id))
-                ->value,
+            function () use ($payment): string {
+                (new PollActiveSakurupiahPayment((string) $payment->id))->handle(app(SakurupiahCallbackProcessor::class));
+
+                return 'poll_complete';
+            },
             fn (): string => $this->expireRacePayment((string) $payment->id),
         ]);
         DB::reconnect();
@@ -522,6 +535,10 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
     {
         DB::disconnect();
         Cache::purge('database');
+        if (config('cache.default') === 'redis') {
+            app('redis')->purge('cache');
+            Cache::purge('redis');
+        }
         $deadline = microtime(true) + 10;
         while (! is_file($releaseFile)) {
             if (microtime(true) > $deadline) {

@@ -20,9 +20,10 @@ use App\Services\Pakasir\PakasirNativeQrisService;
 use App\Services\Pakasir\PakasirProviderAdapter;
 use App\Services\ProviderVerification\ProviderVerificationProfile;
 use App\Services\ProviderVerification\ProviderVerificationProfiles;
-use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleResult;
+use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
+use App\Services\Sakurupiah\SakurupiahReconciliationOutcome;
 use App\Support\PaymentProvider;
 use Throwable;
 
@@ -35,6 +36,7 @@ class StorefrontShopPaymentStatusRefresh
         private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
         private readonly KlikQrisCallbackProcessor $klikQrisProcessor,
         private readonly SakurupiahInvoiceLifecycleService $sakurupiahLifecycle,
+        private readonly SakurupiahCallbackProcessor $sakurupiahProcessor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
@@ -44,7 +46,7 @@ class StorefrontShopPaymentStatusRefresh
         private readonly StorefrontPaymentTerminalCopy $terminalCopy,
     ) {}
 
-    public function execute(Order $order): StorefrontShopSignedStatusRefreshResult
+    public function execute(Order $order, bool $automatic = false): StorefrontShopSignedStatusRefreshResult
     {
         $payment = $this->latestPayment($order);
 
@@ -144,7 +146,10 @@ class StorefrontShopPaymentStatusRefresh
 
         $projection = $this->orders->project($order, $payment);
         $recoveryOutcome = null;
-        if ($this->shouldRecoverQris($projection, $payment)) {
+        // Browser polling reads persisted Sakurupiah state only. Callbacks and
+        // the bounded sweep perform provider I/O; the explicit check remains interactive.
+        $localOnly = $automatic && $this->isSakurupiahPayment($payment);
+        if (! $localOnly && $this->shouldRecoverQris($projection, $payment)) {
             try {
                 $recoveryOutcome = $this->attemptNativeQrisRecovery($payment);
             } catch (Throwable $exception) {
@@ -183,7 +188,7 @@ class StorefrontShopPaymentStatusRefresh
             );
         }
 
-        if ($this->shouldRefreshFromProvider($projection, $payment)) {
+        if (! $localOnly && $this->shouldRefreshFromProvider($projection, $payment)) {
             $lock = null;
             $skipProviderLookup = $qrisRecoveredDuringRetry
                 || $this->coordinator->recentlyRefreshed($payment);
@@ -209,10 +214,10 @@ class StorefrontShopPaymentStatusRefresh
                 } elseif (! $skipProviderLookup && $this->isSakurupiahPayment($payment)) {
                     $lookupResult = ProviderVerificationProfiles::using(
                         ProviderVerificationProfile::Interactive,
-                        fn (): ?SakurupiahInvoiceLifecycleResult => $this->sakurupiahLifecycle->tryRefreshStatus($payment),
+                        fn (): SakurupiahReconciliationOutcome => $this->sakurupiahProcessor->reconcilePayment($payment),
                     );
 
-                    if ($lookupResult === null) {
+                    if ($lookupResult === SakurupiahReconciliationOutcome::Busy) {
                         $this->events->checkoutSubmitted(null, $order, [
                             'status_endpoint_result' => 'in_progress',
                         ]);

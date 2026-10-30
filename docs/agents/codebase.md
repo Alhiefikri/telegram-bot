@@ -15,6 +15,14 @@ Dokumen ini menjelaskan _mengapa_ file-file utama saling berhubungan. Source cod
 
 ## Sakurupiah checkout recovery (#677)
 
+Issue #678 supersedes #677's ordinary terminal-payment polling: the
+`SakurupiahReconciliationQuery` selects active orders and durable successful
+payment indications only. `PollActiveSakurupiahPayment` runs on the supervised
+payments queue approximately every 20–24 seconds while the checkout is active; the
+minute sweep repairs lost wakeups. Browser auto polls read local Sakurupiah state; explicit checks
+and verified callbacks remain provider-facing. See the [monitoring policy](../runbook-sakurupiah-payment.md#checkout-monitoring-policy-678)
+for late-payment handling, remaining requests and verification limits.
+
 `SakurupiahProviderReadiness` owns scalar v2 observation caching, absolute
 transient deadlines and single-flight cold/expired refresh. `SakurupiahRequestBackpressure`
 owns merchant/environment cooldown and bounded request dispatch coordination.

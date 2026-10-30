@@ -4,7 +4,6 @@ namespace App\Services\Sakurupiah;
 
 use App\Enums\PaymentStatus;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Carbon;
 
 /**
  * Bounded local metrics for Sakurupiah reconciliation and admin visibility.
@@ -18,15 +17,13 @@ final class SakurupiahOperationalMetrics
 {
     public function __construct(
         private readonly SakurupiahReconciliationQuery $reconciliationQuery,
-        private readonly ?int $terminalLookbackHours = null,
     ) {}
 
     /**
      * Local Payments that still need an authoritative provider observation.
      *
      * The predicate matches the bounded reconciliation scan: only Payments
-     * that carry a persisted provider reference (pending or recently released
-     * terminal), or an unresolved create/recovery state. Payments that never
+     * that are active or have a persisted success indication. Payments that never
      * attempted creation belong to the post-commit create worker and are not
      * part of the reconciliation backlog.
      *
@@ -35,8 +32,7 @@ final class SakurupiahOperationalMetrics
     public function pendingVerification(): array
     {
         try {
-            $releasedCutoff = $this->releasedCutoff();
-            $base = $this->reconcilableQuery($releasedCutoff);
+            $base = $this->reconcilableQuery();
             $pending = (clone $base)
                 ->where('status', PaymentStatus::Pending->value)
                 ->count();
@@ -77,18 +73,8 @@ final class SakurupiahOperationalMetrics
         ];
     }
 
-    private function reconcilableQuery(Carbon $releasedCutoff): Builder
+    private function reconcilableQuery(): Builder
     {
-        return $this->reconciliationQuery->eligible($releasedCutoff);
-    }
-
-    private function releasedCutoff(): Carbon
-    {
-        $hours = $this->terminalLookbackHours ?? max(
-            1,
-            (int) config('services.sakurupiah.reconcile_terminal_lookback_hours', 72),
-        );
-
-        return now()->subHours(max(1, $hours));
+        return $this->reconciliationQuery->eligible();
     }
 }

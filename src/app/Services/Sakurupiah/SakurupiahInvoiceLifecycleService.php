@@ -5,6 +5,7 @@ namespace App\Services\Sakurupiah;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\SakurupiahEnvironment;
+use App\Jobs\PollActiveSakurupiahPayment;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
@@ -368,6 +369,8 @@ final class SakurupiahInvoiceLifecycleService
                 return SakurupiahInvoiceLifecycleResult::state($localOutcome);
             }
 
+            PollActiveSakurupiahPayment::schedule($payment);
+
             return SakurupiahInvoiceLifecycleResult::payableResult($assessment['payable']);
         }
 
@@ -424,6 +427,26 @@ final class SakurupiahInvoiceLifecycleService
             return SakurupiahInvoiceLifecycleResult::state(SakurupiahInvoiceOutcome::RecoveryPending);
         }
 
+        return $this->recoverFromStatusWhileLocked($payment, $status);
+    }
+
+    /** Reuse the sweep's pending observation without making a second provider request. */
+    public function recoverPendingObservationWhileLocked(Payment $payment, SakurupiahStatus $status): SakurupiahInvoiceLifecycleResult
+    {
+        if (! $status->isPending()) {
+            throw new InvalidArgumentException('A pending Sakurupiah observation is required.');
+        }
+        $payment->refresh();
+        $localOutcome = $this->classifyLocalState($payment);
+        if ($localOutcome !== null) {
+            return SakurupiahInvoiceLifecycleResult::state($localOutcome);
+        }
+
+        return $this->recoverFromStatusWhileLocked($payment, $status);
+    }
+
+    private function recoverFromStatusWhileLocked(Payment $payment, SakurupiahStatus $status): SakurupiahInvoiceLifecycleResult
+    {
         $identityReason = $this->statusIdentityMismatchReason($payment, $status);
         if ($identityReason !== null) {
             try {
@@ -458,6 +481,8 @@ final class SakurupiahInvoiceLifecycleService
             if ($localOutcome !== null) {
                 return SakurupiahInvoiceLifecycleResult::state($localOutcome);
             }
+
+            PollActiveSakurupiahPayment::schedule($payment);
 
             return SakurupiahInvoiceLifecycleResult::payableResult($assessment['payable']);
         }

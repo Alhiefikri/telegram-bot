@@ -1,5 +1,91 @@
 # Runbook: Sakurupiah QRIS Payment Provider
 
+## Checkout monitoring policy (#678)
+
+This section supersedes the historical 72-hour terminal polling descriptions
+and measurements below. It applies only to Sakurupiah **order checkout**, not
+balance top-ups or other payment rails. The scheduled command still runs each
+minute, but it sends no periodic lookup for an expired, cancelled or past-deadline
+order without a success indication, including an ambiguous create outcome.
+An ambiguous outcome is never evidence that a create failed and does not permit
+creating a replacement invoice for that Payment.
+
+A payable active Payment starts a delayed job on the supervised `payments`
+queue. It checks after 20–24 seconds and, while the Payment remains active, schedules
+the next check 20–24 seconds after the preceding job finishes. A stable per-Payment
+offset spreads bursts without delaying the foreground checkout. The per-Payment unique
+job and shared Payment lock prevent overlapping checks; checkout and webhook
+verification retain foreground priority. The minute sweep remains a recovery
+path for a lost queue wakeup and observes a one-minute pending-event interval.
+The unique-job lease covers the scheduled delay plus 120 seconds, including
+longer provider cooldowns; a final wakeup may be scheduled just before the
+local deadline. Cooldowns beyond that deadline do not create futile wakeups.
+If queue wait exceeds the lease, stale wakeups can coexist; the shared Payment
+lock, terminal-state checks and receipt idempotency remain the correctness
+boundary. The lease expiry also allows the minute sweep to recover a lost job.
+Queue delay, provider response time, outages, backpressure and the existing
+merchant cooldown can make actual detection exceed 20–30 seconds. A successful
+callback or successful provider observation remains eligible after expiry,
+even if a later amount/history lookup failed. A conflicting provider-expired
+observation does not resolve or erase an earlier success indication.
+Authenticated callbacks are still
+verified against the provider and receipt ownership. If the create response was
+lost and a successful callback identifies a transaction, recovery requires an
+independent matching merchant, transaction, channel and amount before binding
+the reference. Unknown or mismatched results remain unverified. A verified late
+payment goes to Late Payment review, without stock sale or automatic fulfillment.
+Provider callbacks and checkout use the existing foreground coordination;
+background work yields to foreground intent, but cannot preempt an in-flight call.
+
+The storefront's automatic status polling reads persisted Sakurupiah state and
+does not itself call the provider; the explicit customer check can still do so
+and immediately applies a verified paid result. Once paid is committed, the
+existing receipt queue sends credentials when fulfillment is eligible.
+Checkout instructions warn against paying an old QR after expiry or cancellation.
+When a customer reports late payment without a received callback, the owner must
+check the provider transaction and handle the case manually; the sweep no longer
+discovers that payment automatically. When the reference is known, the Admin
+order's explicit reconciliation action can verify it against the provider and
+create Late Payment review. Do not fulfill from an unverified report.
+
+Illustrative successful-request comparison, excluding callbacks, customer checks,
+retries, backlogs and provider errors:
+
+| Work | Previous | Current |
+| --- | --- | --- |
+| One active pending Payment, without callback | Approximately one scheduled status request per minute | Approximately three fast checks per minute, plus any due sweep/retry |
+| One released Payment with provider-expired status, at minutes 0 through 15 | 2 status requests | 0 without a success signal |
+| Storefront automatic polls | Up to 9 provider checks in the default three-minute window per open page | 0 provider checks; browser-to-store requests remain |
+
+Remaining provider traffic includes checkout `list-payment.php` on readiness
+cache misses (60-second default), `create.php` for a new invoice, status and
+possibly history for callback/manual/success verification, active fallback and
+same-reference recovery. Top-up, admin and health/readiness traffic are separate.
+Retries can add HTTP attempts; foreground requests can still encounter a throttle.
+These are local policy and fixture counts, not a provider quota or a production
+traffic measurement. Local tests include a simulated shared quota and do not prove
+that real provider throttling has ceased.
+
+With 30 active Payments and no callbacks, the intended 20–24 second cadence is
+roughly 75–90 status checks per minute before retries. A single payments worker
+serializes jobs: if provider responses or competing work are slow, actual
+intervals become longer. Watch queue wait and provider attempt outcomes before
+making any production capacity or latency claim.
+
+Verification: `SakurupiahReconciliationTest`, `SakurupiahWebhookTest`,
+`Storefront/SakurupiahStorefrontTest`, and `Telegram/SakurupiahCheckoutTest`.
+Framework reference: [Laravel 13 queue retries and rate-limited jobs](https://github.com/laravel/docs/blob/13.x/queues.md)
+via Context7; this implementation retains the existing bounded command and shared
+coordination rather than imposing an undocumented provider rate.
+
+An isolated PostgreSQL/Redis fixture on 2026-10-30 ran 30 active pending
+Payments through one real queue worker with a mocked 100 ms provider response:
+30 observations produced exactly 30 delayed successor jobs, in 4,855 ms total,
+with a local per-job p95 of 174 ms. The 30 wakeups were also spread across the
+five-second scheduling window. This fixture excludes real provider and Telegram
+latency, production resource limits and network failures, and does not establish
+a safe production capacity.
+
 This runbook covers activation, observation, recovery, and rollback of the
 Sakurupiah QRIS Payment rail.
 

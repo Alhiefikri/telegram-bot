@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
+use App\Jobs\PollActiveSakurupiahPayment;
 use App\Jobs\SendSakurupiahCheckoutInstructions;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
@@ -66,6 +67,8 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
 
     public function test_undispatched_create_recovers_the_same_order_without_the_rejection_delay(): void
     {
+        config()->set('queue.default', 'database');
+        Queue::fake();
         [$order, $payment] = $this->payment([
             'provider_reference' => null,
             'provider_payment_method' => null,
@@ -110,12 +113,63 @@ class SakurupiahCheckoutTest extends TelegramBotTestSupport
         app(TelegramCheckoutIntents::class)->sendSakurupiahPaymentInstructions('7412001', $order, $payment);
         app(SakurupiahInvoiceLifecycleService::class)->classify($payment);
         $this->assertSame('trx-after-local-deferral', $payment->fresh()->provider_reference);
+        Queue::assertPushed(PollActiveSakurupiahPayment::class, fn (PollActiveSakurupiahPayment $job) => $job->paymentId === (string) $payment->id);
         $this->assertSame('created', $payment->fresh()->provider_create_state);
         $this->assertSame(1, Payment::where('order_id', $order->id)->count());
         $this->assertCount(1, Http::recorded(fn (Request $request) => str_ends_with($request->url(), '/create.php')));
         $photos = Http::recorded(fn (Request $request) => str_ends_with($request->url(), '/sendPhoto'));
         $this->assertCount(1, $photos);
         $this->assertStringContainsString("\x89PNG\r\n\x1A\n", $photos->sole()[0]->body());
+    }
+
+    public function test_expired_background_orders_leave_simulated_provider_capacity_for_checkout(): void
+    {
+        [$order, $payment] = $this->payment([
+            'provider_reference' => null, 'provider_payment_method' => null,
+            'provider_total_payment' => null, 'provider_fee' => null,
+            'provider_created_at' => null, 'provider_expires_at' => null,
+            'provider_payload' => null, 'provider_create_state' => null,
+        ]);
+        ManualPaymentSetting::create([
+            'payment_mode' => 'sakurupiah', 'sakurupiah_channel' => 'QRISC',
+            'is_active' => true, 'whatsapp_support_number' => '08123456789',
+        ]);
+        foreach (range(1, 3) as $index) {
+            $old = Order::factory()->create(['order_status' => OrderStatus::Expired, 'payment_status' => PaymentStatus::Expired, 'expires_at' => now()->subHour()]);
+            Payment::factory()->for($old)->create([
+                'provider' => 'sakurupiah', 'method' => 'QRIS', 'currency' => 'IDR',
+                'status' => PaymentStatus::Expired, 'provider_reference' => 'old-'.$index,
+                'provider_create_state' => 'created', 'expired_at' => now()->subHour(),
+            ]);
+        }
+        $requests = 0;
+        $this->fakeTelegramHttp([
+            'https://sakurupiah.id/api-sanbox/status-transaction.php' => function () use (&$requests) {
+                $requests++;
+
+                return Http::response(['status' => '200', 'data' => [['payment_status' => 'pending']]]);
+            },
+            'https://sakurupiah.id/api-sanbox/create.php' => function (Request $request) use (&$requests) {
+                if (++$requests > 1) {
+                    return Http::response(['status' => '400', 'message' => 'Permintaan terlalu cepat silahkan coba lagi nanti.'], 400);
+                }
+
+                return Http::response(['status' => '200', 'data' => [[
+                    'trx_id' => 'trx-capacity', 'merchant_ref' => $request['merchant_ref'],
+                    'payment_kode' => 'QRISC', 'payment_status' => 'pending',
+                    'amount' => '20000', 'total' => '20000', 'fee' => '0',
+                    'merchant_fee' => 'Merchant', 'qr' => self::DIRECT_QRIS_20_000,
+                    'expired' => now()->addDay()->format('Y-m-d H:i:s'),
+                ]]]);
+            },
+        ]);
+        $this->artisan('sakurupiah:reconcile')->assertExitCode(0);
+        $this->assertSame(0, $requests);
+        app(TelegramCheckoutIntents::class)->sendSakurupiahPaymentInstructions('7412001', $order, $payment);
+        $this->assertSame(1, $requests);
+        $this->assertSame('trx-capacity', $payment->fresh()->provider_reference);
+        $this->assertSame(1, Payment::where('order_id', $order->id)->count());
+        $this->assertCount(1, Http::recorded(fn (Request $request) => str_ends_with($request->url(), '/sendPhoto')));
     }
 
     public function test_direct_sakurupiah_effect_dispatches_and_delivers_provider_qr_content(): void

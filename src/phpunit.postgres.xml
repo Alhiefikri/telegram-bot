@@ -22,6 +22,7 @@
             <file>tests/Feature/KlikQrisWebhookPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SakurupiahInvoiceLifecyclePostgresConcurrencyTest.php</file>
             <file>tests/Feature/SakurupiahCheckoutRecoveryPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/SakurupiahFastPollPostgresConcurrencyTest.php</file>
             <file>tests/Feature/PostgresExtensionLifecycleTest.php</file>
             <file>tests/Feature/AdminBalanceAdjustmentTest.php</file>
             <file>tests/Feature/AdminBalanceAdjustmentPostgresConcurrencyTest.php</file>

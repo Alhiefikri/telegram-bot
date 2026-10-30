@@ -8,6 +8,7 @@ use App\Console\Commands\ReconcileSakurupiahBalanceTopUps;
 use App\Console\Commands\ReconcileSakurupiahPayments;
 use App\Enums\SakurupiahEnvironment;
 use App\Http\Controllers\SakurupiahWebhookController;
+use App\Jobs\PollActiveSakurupiahPayment;
 use App\Jobs\VerifySakurupiahWebhookPayment;
 use App\Services\Admin\AdminPaymentOperations;
 use App\Services\Admin\SakurupiahChannelSettings;
@@ -28,6 +29,7 @@ final class SakurupiahRequestEvidence
             $origin = match ($frame['class'] ?? '') {
                 ReconcileSakurupiahPayments::class => 'reconciliation_command',
                 ReconcileSakurupiahBalanceTopUps::class => 'top_up_reconciliation_command',
+                PollActiveSakurupiahPayment::class => 'active_checkout_poll',
                 CheckSakurupiahReadiness::class,
                 HealthCheck::class => 'provider_readiness',
                 AdminPaymentOperations::class => 'admin_manual_reconciliation',

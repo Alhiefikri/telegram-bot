@@ -61,7 +61,7 @@ final class SakurupiahRequestBackpressure
     public function acquireRequest(string $operation, bool $lookup, string $caller): Lock
     {
         $this->assertAvailable($operation, $lookup);
-        $background = in_array($caller, ['reconciliation_command', 'top_up_reconciliation_command'], true);
+        $background = in_array($caller, ['reconciliation_command', 'top_up_reconciliation_command', 'active_checkout_poll'], true);
         try {
             if ($background) {
                 if (Cache::has($this->cacheKey().':foreground')) {

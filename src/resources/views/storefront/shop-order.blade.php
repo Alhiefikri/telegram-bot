@@ -41,7 +41,9 @@
                         };
                         $summary = match ($order->order_status?->value) {
                             'cancelled' => 'sudah dibatalkan. Stok dan data akun sudah dilepas. Jangan bayar invoice ini.',
-                            'expired' => 'sudah kedaluwarsa. Buat order baru jika masih ingin membeli.',
+                            'expired' => strtolower((string) $payment?->provider) === 'sakurupiah'
+                                ? 'sudah kedaluwarsa. Jangan bayar QR lama. Jika terlanjur bayar, hubungi bantuan dengan nomor invoice dan bukti pembayaran.'
+                                : 'sudah kedaluwarsa. Buat order baru jika masih ingin membeli.',
                             default => 'sudah berada di status akhir. Jangan lakukan pembayaran untuk invoice ini.',
                         };
                     }

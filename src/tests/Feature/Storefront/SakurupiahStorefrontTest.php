@@ -4,12 +4,14 @@ namespace Tests\Feature\Storefront;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\PollActiveSakurupiahPayment;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\Sakurupiah\SakurupiahAmount;
+use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
 use App\Services\Sakurupiah\SakurupiahFee;
 use App\Services\Sakurupiah\SakurupiahInvoice;
@@ -110,7 +112,7 @@ class SakurupiahStorefrontTest extends TestCase
         $html = $this->get($invoice->redirectUrl)->assertOk()->getContent();
         $this->assertStringContainsString('Pembayaran QRIS', $html);
         $this->assertStringContainsString('Invoice QRIS', $html);
-        $this->assertStringContainsString('Bayar total QRIS final pada invoice', $html);
+        $this->assertStringContainsString('Jangan bayar QR lama setelah kedaluwarsa atau dibatalkan', $html);
         $this->assertStringContainsString('data-native-qris-crop="top-square"', $html);
         $this->assertStringNotContainsString(self::DIRECT_QRIS, $html);
         $this->assertStringNotContainsString('secret-provider-value', $html);
@@ -207,6 +209,68 @@ class SakurupiahStorefrontTest extends TestCase
         $this->assertStringNotContainsString('provider-opaque-qr-content', $html);
         $this->assertStringNotContainsString('https://sakurupiah.id/pay/invoice', $html);
         $this->assertStringNotContainsString('secret-provider-value', $html);
+    }
+
+    public function test_automatic_status_poll_reads_local_state_but_explicit_check_can_query_provider(): void
+    {
+        [$order, $payment] = $this->payment();
+        $status = new SakurupiahStatus(
+            trxId: (string) $payment->provider_reference,
+            status: SakurupiahTransactionStatus::Pending,
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+        );
+        $provider = $this->mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->with($payment->provider_reference)->andReturn($status);
+        $provider->shouldReceive('createInvoice')->never();
+        $url = URL::signedRoute('storefront.shop.orders.status', $order, null, false);
+        foreach (range(1, 3) as $_) {
+            $this->postJson($url, [], ['X-Storefront-Auto-Poll' => '1'])->assertOk()->assertJsonPath('payment_status', 'pending');
+            $this->travel(20)->seconds();
+        }
+        $this->postJson($url)->assertOk();
+    }
+
+    public function test_background_lookup_failure_does_not_hide_a_valid_checkout_invoice(): void
+    {
+        [$order, $payment] = $this->payment();
+        $provider = $this->mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andThrow(new \RuntimeException('temporarily unavailable'));
+        $provider->shouldReceive('createInvoice')->never();
+
+        (new PollActiveSakurupiahPayment((string) $payment->id))->handle(app(SakurupiahCallbackProcessor::class));
+
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
+        $this->assertTrue(app(StorefrontShopSignedInvoice::class)->read($order->fresh())->isQrisPayable);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+    }
+
+    public function test_waiting_page_observes_sweep_recovering_qr_without_an_extra_provider_lookup(): void
+    {
+        [$order, $payment] = $this->payment([
+            'provider_create_state' => SakurupiahInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
+            'provider_presentation' => null,
+        ]);
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($order);
+        $this->get($invoice->redirectUrl)->assertOk()->assertSee('data-qris-waiting="true"', false);
+        $status = new SakurupiahStatus(
+            trxId: (string) $payment->provider_reference,
+            status: SakurupiahTransactionStatus::Pending,
+            merchantRef: (string) $payment->merchant_ref,
+            paymentCode: SakurupiahCreateInvoice::METHOD_QRISC,
+            amount: SakurupiahAmount::from(20_000),
+            expiresAt: $payment->expired_at->toImmutable(),
+            total: SakurupiahAmount::from(20_450),
+            fee: SakurupiahFee::from(450),
+            checkoutUrl: 'https://sakurupiah.id/pay/invoice',
+        );
+        $provider = $this->mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn($status);
+        $provider->shouldReceive('createInvoice')->never();
+        $this->artisan('sakurupiah:reconcile')->assertExitCode(0);
+        $this->postJson(URL::signedRoute('storefront.shop.orders.status', $order, null, false), [], ['X-Storefront-Auto-Poll' => '1'])
+            ->assertOk()->assertJsonPath('qris_ready', true);
+        $this->assertSame(SakurupiahInvoiceLifecycleService::STATE_CREATED, $payment->fresh()->provider_create_state);
     }
 
     public function test_status_refresh_recovers_the_same_sakurupiah_reference_once(): void

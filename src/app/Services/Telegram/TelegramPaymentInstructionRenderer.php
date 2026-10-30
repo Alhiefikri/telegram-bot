@@ -377,6 +377,7 @@ class TelegramPaymentInstructionRenderer
                 'date' => $this->formatDate($payable->effectiveExpiresAt(), $locale),
             ]),
             $this->text($locale, 'payment.qris_deadline_guidance'),
+            $this->text($locale, 'payment.sakurupiah.expiry_warning'),
             '',
             $this->text($locale, 'payment.auto_delivery'),
             $this->text($locale, 'payment.check_if_missing'),

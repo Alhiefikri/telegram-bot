@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
@@ -93,6 +95,27 @@ class SakurupiahAdminReconcileTest extends TestCase
 
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->assertSame(0, AuditLog::query()->where('action', 'payment.manually_reconciled')->count());
+    }
+
+    public function test_owner_can_manually_verify_late_payment_without_a_callback(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $payment = $this->sakurupiahPayment();
+        $payment->order->update(['order_status' => OrderStatus::Expired, 'payment_status' => PaymentStatus::Expired]);
+        $payment->update(['status' => PaymentStatus::Expired]);
+        $provider = Mockery::mock(SakurupiahProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()->andReturn(
+            $this->providerStatus($payment, SakurupiahTransactionStatus::Successful, amount: (int) $payment->amount),
+        );
+        $provider->shouldReceive('transactionHistory')->never();
+        $this->app->instance(SakurupiahProviderAdapter::class, $provider);
+
+        $this->actingAs($owner)->post(route('admin.payments.reconcile', $payment))
+            ->assertRedirect(route('admin.orders.show', $payment->order_id));
+
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame(OrderStatus::Expired, $payment->order->fresh()->order_status);
+        $this->assertSame(1, ManualFulfillmentReview::query()->where('payment_id', $payment->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->count());
     }
 
     public function test_order_detail_bounds_payment_events_and_preserves_total_count(): void

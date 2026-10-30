@@ -116,6 +116,7 @@
                 <div class="mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-muted)]"
                      data-shop-payment-status
                      data-payment-kind="qris"
+                     data-qris-waiting="{{ $isSakurupiah && ! $isQrisPayable ? 'true' : 'false' }}"
                      data-status-url="{{ $statusUrl }}"
                      data-redirect-url="{{ $redirectUrl }}"
                      data-terminal="{{ $isTerminal ? 'true' : 'false' }}"

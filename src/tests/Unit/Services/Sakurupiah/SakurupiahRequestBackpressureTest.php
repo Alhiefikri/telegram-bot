@@ -13,10 +13,11 @@ use Tests\TestCase;
 
 class SakurupiahRequestBackpressureTest extends TestCase
 {
-    public function test_waiting_checkout_gets_a_retry_window_before_the_sweep_can_reacquire(): void
+    #[DataProvider('backgroundCallers')]
+    public function test_waiting_checkout_gets_a_retry_window_before_background_can_reacquire(string $caller): void
     {
         $policy = new SakurupiahRequestBackpressure;
-        $background = $policy->acquireRequest('transactionStatus', true, 'reconciliation_command');
+        $background = $policy->acquireRequest('transactionStatus', true, $caller);
         try {
             $policy->acquireRequest('createInvoice', false, 'telegram_checkout');
             $this->fail('A concurrent request must not overlap the sweep.');
@@ -28,7 +29,7 @@ class SakurupiahRequestBackpressureTest extends TestCase
         }
 
         try {
-            $lock = $policy->acquireRequest('transactionStatus', true, 'reconciliation_command');
+            $lock = $policy->acquireRequest('transactionStatus', true, $caller);
             $lock->release();
             $this->fail('The sweep must yield to the waiting checkout.');
         } catch (SakurupiahProviderException $exception) {
@@ -37,8 +38,13 @@ class SakurupiahRequestBackpressureTest extends TestCase
         $foreground = $policy->acquireRequest('createInvoice', false, 'telegram_checkout');
         $foreground->release();
         $this->travel(3)->seconds();
-        $resumed = $policy->acquireRequest('transactionStatus', true, 'reconciliation_command');
+        $resumed = $policy->acquireRequest('transactionStatus', true, $caller);
         $resumed->release();
+    }
+
+    public static function backgroundCallers(): array
+    {
+        return [['reconciliation_command'], ['active_checkout_poll']];
     }
 
     #[DataProvider('retryHeaders')]

@@ -864,6 +864,7 @@ function initShopPaymentStatus() {
           headers: {
             Accept: "application/json",
             "X-Requested-With": "XMLHttpRequest",
+            ...(automatic ? { "X-Storefront-Auto-Poll": "1" } : {}),
             ...(csrfToken ? { "X-CSRF-TOKEN": csrfToken } : {}),
           },
         });
@@ -912,7 +913,12 @@ function initShopPaymentStatus() {
           return;
         }
 
-        if (data.should_reload === true) {
+        if (
+          data.should_reload === true ||
+          (container.getAttribute("data-qris-waiting") === "true" &&
+            data.qris_ready === true &&
+            data.is_terminal !== true)
+        ) {
           setStatus(
             copy.qris_ready_title,
             data.message || copy.qris_ready_message
