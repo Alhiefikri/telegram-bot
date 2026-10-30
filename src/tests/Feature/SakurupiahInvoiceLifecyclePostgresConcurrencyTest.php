@@ -168,7 +168,7 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
             ->count();
 
         $paidOutcome = $freshPayment->status === PaymentStatus::Paid
-            && $order->order_status === OrderStatus::Processing
+            && $order->order_status === OrderStatus::Completed
             && $saleCount === 1
             && $releaseCount === 0;
         $expiredOutcome = $order->order_status === OrderStatus::Expired
@@ -325,7 +325,7 @@ class SakurupiahInvoiceLifecyclePostgresConcurrencyTest extends TestCase
         $productId = $this->raceProductId($order);
 
         $this->assertSame(PaymentStatus::Paid, $freshPayment->status);
-        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
         $this->assertSame(1, InventoryMovement::query()->where('order_id', $order->id)->where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(1, ProductStockItem::query()->where('product_id', $productId)->whereNotNull('order_item_id')->count());
         $this->assertSame(1, SalesProofPost::query()->where('order_id', $order->id)->count());
