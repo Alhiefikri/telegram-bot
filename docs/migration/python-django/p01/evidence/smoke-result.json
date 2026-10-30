@@ -1,0 +1,18 @@
+[
+  {
+    "stack": "candidate",
+    "manifest": "evidence/candidate-manifest.json",
+    "cgroup": "passed",
+    "egress_mail": "passed",
+    "alternation": "passed",
+    "stop_persistence_reset_quarantine": "passed"
+  },
+  {
+    "stack": "laravel",
+    "manifest": "evidence/laravel-manifest.json",
+    "cgroup": "passed",
+    "egress_mail": "passed",
+    "alternation": "passed",
+    "stop_persistence_reset_quarantine": "passed"
+  }
+]

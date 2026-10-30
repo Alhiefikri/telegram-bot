@@ -4,6 +4,16 @@ Dokumen ini adalah peta implementasi aktual repository. Gunakan bersama [CONTEXT
 
 ## Python migration source parity contract (#680)
 
+P01 [local comparison harness](../migration/python-django/p01/README.md) owns
+configuration admission, separate disposable namespaces/storage, the default-deny
+transport boundary, mail sink, sticky restore quarantine and guarded reset.
+`tools/migration_harness/harness.py` generates local-only Compose; it never uses
+production Compose or starts workers/schedulers. Each alternating stack is capped
+at a total 2 CPU/2 GiB. `tests/migration_harness/test_admission.py` and the real
+Docker/PostgreSQL/Redis `tools/migration_harness/smoke.py` are its verification
+entry points. Candidate application bootstrap remains P05; actual test-bot and
+sandbox credentials remain H0, and adapter qualification remains P04/P08.
+
 The [P00 inventory and parity matrix](../migration/python-django/p00/README.md) freeze
 baseline `d830709bb98cffacc6369847383c850ff89088f2`, source hashes, historical
 obligations, successor issues and acceptance scenarios. Source implementation is

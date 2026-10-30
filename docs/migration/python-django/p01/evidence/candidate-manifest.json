@@ -1,0 +1,112 @@
+{
+  "time_utc": "2026-10-30T11:49:17Z",
+  "command": "start",
+  "revision": "cdfda12f3048dfe1e2748b64e3e860713d6a8790",
+  "stack": "candidate",
+  "mode": "fake",
+  "dataset": "synthetic-empty",
+  "config_sha256": "02940ff5649fc43888f430b7248c61208f468dde85ed0fb75d5db29c53f64c40",
+  "docker_version": "29.7.2",
+  "compose_version": "5.5.0",
+  "harness_source_sha256": {
+    "tools/migration_harness/Dockerfile": "0b29e3b02f426b4a223527494cfa34cba8dfa3626a57af365cec6c77027b11a5",
+    "tools/migration_harness/candidate.py": "fe82fe7ed38d9eb0fc2b1121e951f4a4abab954db057b5f8e0f6ec650e4eee3a",
+    "tools/migration_harness/comparator.sh": "87eb0a947b8d28c28b598fa9345e98ae511788448c5722ca307f67e8d51fa67a",
+    "tools/migration_harness/boundary.py": "afe9b40b2207c8e5640efd096520095fe063353034d5f3c0bcb4e495dc6a29dd",
+    "tools/migration_harness/harness.py": "f1e36cce3801a12c488b79f57b385babe79074d7fe637afee1a241d524da6ed0",
+    "tools/migration_harness/.dockerignore": "9d719ec6e60e5b92f4c8fea934ed673ac3904545630a56948cc8f008ea42c365",
+    "tools/migration_harness/smoke.py": "d63831ee06e5fa20768f4cc12c3f6b627811d95fe5208878f7c630aa3212408d"
+  },
+  "runtime_versions": {
+    "app": "Python 3.13.18",
+    "boundary": "Python 3.13.18",
+    "database": "postgres (PostgreSQL) 16.15",
+    "redis": "Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=6467c31a802b9aff"
+  },
+  "host_mem_total": "MemTotal:        7972028 kB",
+  "containers": [
+    {
+      "service": "app",
+      "image_id": "sha256:cba10fa05753f55f9ba7bb222ece518e37275b5014b6541c494db91643ce8acb",
+      "memory": 1275068416,
+      "memory_swap": 1275068416,
+      "nano_cpus": 1250000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [
+        {
+          "name": "lhie-p01-candidate_storage",
+          "destination": "/disposable"
+        }
+      ],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:73e76d8e68d15f0e88ad69a18055cc14481f15f99b30165c2be5789ef487b813"
+    },
+    {
+      "service": "boundary",
+      "image_id": "sha256:cba10fa05753f55f9ba7bb222ece518e37275b5014b6541c494db91643ce8acb",
+      "memory": 67108864,
+      "memory_swap": 67108864,
+      "nano_cpus": 100000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [],
+      "published_ports": {
+        "8080/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "18802"
+          }
+        ]
+      },
+      "networks": [
+        "lhie-p01-candidate_isolated"
+      ],
+      "network_mode": "lhie-p01-candidate_isolated"
+    },
+    {
+      "service": "database",
+      "image_id": "sha256:deb28ee471183cb0c303113dac9b2433c51eeeeb678def7af9a9ec5820367815",
+      "memory": 671088640,
+      "memory_swap": 671088640,
+      "nano_cpus": 500000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [
+        {
+          "name": "lhie-p01-candidate_database",
+          "destination": "/var/lib/postgresql/data"
+        }
+      ],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:73e76d8e68d15f0e88ad69a18055cc14481f15f99b30165c2be5789ef487b813"
+    },
+    {
+      "service": "redis",
+      "image_id": "sha256:892022f9f18c26c92c30e15194d132f90044af87b94a491a75429bbc3982eab1",
+      "memory": 134217728,
+      "memory_swap": 134217728,
+      "nano_cpus": 150000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:73e76d8e68d15f0e88ad69a18055cc14481f15f99b30165c2be5789ef487b813"
+    }
+  ],
+  "scheduler": "disabled",
+  "workers": 0,
+  "limit": "2 CPU / 2048 MiB, no swap; host OS/daemon headroom required",
+  "application_parity": "unproven; candidate is a P05 slot"
+}
