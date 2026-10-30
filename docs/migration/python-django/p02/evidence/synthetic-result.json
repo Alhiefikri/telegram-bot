@@ -1,0 +1,75 @@
+{
+  "cardinality": {
+    "accounts": 2,
+    "credentials": 2,
+    "customers": 2,
+    "effects": 4,
+    "identities": 2,
+    "ledger": 3,
+    "orders": 4
+  },
+  "created_at": "2026-10-30T12:21:18.027430+00:00",
+  "cryptography": "50.0.1",
+  "database_settings": "{\"timezone\" : \"UTC\", \"encoding\" : \"UTF8\", \"collation\" : \"en_US.utf8\", \"ctype\" : \"en_US.utf8\"}",
+  "dataset": "synthetic-356d09c0c650b7e2",
+  "extensions": "[{\"extname\":\"plpgsql\",\"extversion\":\"1.0\"}]",
+  "invariant_sha256": "1be378a18fa16cd64f3a465f5e3fec94e3f4872cd5ba4d6e55b38b1e464635f5",
+  "limits": [
+    "synthetic schema only; H0 actual source/schema/files/keys not acquired",
+    "P03 owns PHP/Python crypto compatibility",
+    "no bot upload; pending reupload remains blocked",
+    "no app release; sticky quarantine remains",
+    "not money/stock concurrency evidence",
+    "trusted local Docker administrator; DB owner can override read-only policy",
+    "host driver/crypto memory outside P01 cgroup budget"
+  ],
+  "negative_probes": [
+    "archive-tamper",
+    "wrong-archive-key",
+    "wrong-field-key",
+    "fingerprint-divergence",
+    "unknown-field",
+    "FK-rollback",
+    "runtime-update-denied",
+    "ledger-trigger",
+    "identity-trigger",
+    "unmapped-file",
+    "cross-bot-file"
+  ],
+  "postgres": "16.15",
+  "provenance": {
+    "derived_archive_sha256": "a98a410d0454bb9ff891d7a2f73d0eec41c2ba0a73218cb8f47576025dda85c3",
+    "files_sha256": "4f4f9e317ac640b70e48b509ba2d5c7a48916f1b922f8027e794a632077adc30",
+    "source": "generated mixed legacy/structured fixture",
+    "source_archive_sha256": "bd23874d87ddbd79069f5cae26c3a2ccad1a3963c88206fd85e847b1b89c2638"
+  },
+  "python": "3.14.7",
+  "retention": {
+    "action": "P01 reset DB volumes after rehearsal; at raw expiry delete source.dump.aesgcm and source.json; at derived expiry delete this run and remaining key directory; record deletion",
+    "derived_expires_at": "2026-11-29T12:21:18.027430+00:00",
+    "owner": "local operator",
+    "raw_expires_at": "2026-11-06T12:21:18.027430+00:00"
+  },
+  "revision": "d08232a6f62f714187257aa8af5bbd066f07d7a9",
+  "schema_guard_sha256": "7b564d29db27c1c4849362daee65c6d7a831d6cc580098bfa5b03fe10a0a2fb2",
+  "scope": "synthetic-only-not-production-compatible",
+  "sequence": "3|t",
+  "status": "audited-quarantine-not-released",
+  "tool_sha256": {
+    "rehearse.py": "9ba6f9247ebb6910f8d89910c3d54a2c9cacdb3e47bc4d9c3acc881fb1088112",
+    "requirements.txt": "4026896996503d662ae0d9b5db045d1d5ff511c681dbfc09f5d5a11ee06b28c5",
+    "schema.sql": "37c37835b804201c1a2cf1087493a5b7e9b9ee7e7b6b75719531cb81754b7e0e"
+  },
+  "transport": "P01 fake default-deny",
+  "version": 1,
+  "workers": 0,
+  "additional_observations": [
+    "all 466 inventory source hashes and 1938 source line anchors verified",
+    "manifest checksum and source hashes verified against current code",
+    "artifact modes 0700 directories, 0400 dumps, 0600 keys verified",
+    "repeat with existing datasets refused",
+    "normal P01 start refused under sticky quarantine",
+    "actual unknown PostgreSQL table refused; probe table removed and guard definitions unchanged",
+    "external IP and Telegram connections denied from actual quarantine namespace"
+  ]
+}

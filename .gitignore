@@ -59,4 +59,7 @@ src/lhie_store_admin_dashboard.html
 .local/migration-p01/
 tools/migration_harness/__pycache__/
 tests/migration_harness/__pycache__/
+.local/migration-p02/
+tools/migration_data/__pycache__/
+!tools/migration_data/schema.sql
 .claude/

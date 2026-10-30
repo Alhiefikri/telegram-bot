@@ -14,6 +14,16 @@ Docker/PostgreSQL/Redis `tools/migration_harness/smoke.py` are its verification
 entry points. Candidate application bootstrap remains P05; actual test-bot and
 sandbox credentials remain H0, and adapter qualification remains P04/P08.
 
+P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
+adds source-backed crypto/schema/file discovery and the H0 operator handoff.
+`tools/migration_data/rehearse.py` exercises authenticated encrypted synthetic backup,
+read-only raw restore, transform-before-INSERT into a guarded derived schema,
+historical invariant audits and per-bot asset mapping refusal. Its regression
+entry point is `tests/migration_harness/test_sanitization.py`; real PostgreSQL
+verification is recorded in the P02 evidence. It accepts no operator archive,
+never disables guards and leaves P01 quarantine sticky. Actual acquisition and
+production-schema/crypto qualification remain H0/P03, not implied by this fixture.
+
 The [P00 inventory and parity matrix](../migration/python-django/p00/README.md) freeze
 baseline `d830709bb98cffacc6369847383c850ff89088f2`, source hashes, historical
 obligations, successor issues and acceptance scenarios. Source implementation is
