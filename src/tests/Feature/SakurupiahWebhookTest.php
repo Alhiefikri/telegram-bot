@@ -103,7 +103,7 @@ class SakurupiahWebhookTest extends TestCase
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame('QRIS', $payment->fresh()->sakurupiah_channel);
-        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $payment->order->fresh()->order_status);
     }
 
     public function test_historical_qrisc_paid_callback_remains_valid_after_setting_switches_to_qris(): void
@@ -367,7 +367,7 @@ class SakurupiahWebhookTest extends TestCase
         }
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $payment->order->fresh()->order_status);
         $this->assertNotNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
         $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
         Queue::assertPushed(SendTelegramReceipt::class, 1);
@@ -430,7 +430,7 @@ class SakurupiahWebhookTest extends TestCase
             ->assertExactJson(['success' => true]);
 
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $payment->order->fresh()->order_status);
         $this->assertNotNull(PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole()->processed_at);
     }
 
@@ -476,7 +476,7 @@ class SakurupiahWebhookTest extends TestCase
         $payment->refresh();
         $this->assertSame(PaymentStatus::Paid, $payment->status);
         $this->assertSame(PaymentStatus::Paid, $payment->order->fresh()->payment_status);
-        $this->assertSame(OrderStatus::Processing, $payment->order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $payment->order->fresh()->order_status);
         $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
     }
 
@@ -544,7 +544,7 @@ class SakurupiahWebhookTest extends TestCase
         $order = $payment->order->fresh();
         $this->assertSame(PaymentStatus::Paid, $payment->status);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
-        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
         $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(1, SalesProofPost::query()->count());
         $event = PaymentEvent::query()->where('event_type', PaymentEventType::Callback->value)->sole();
@@ -601,7 +601,7 @@ class SakurupiahWebhookTest extends TestCase
 
         $order = $payment->order->fresh();
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
         $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(1, ProductStockItem::query()->where('order_item_id', $orderItem->id)->count());
         $this->assertSame(1, SalesProofPost::query()->where('order_id', $order->id)->count());
@@ -823,7 +823,7 @@ class SakurupiahWebhookTest extends TestCase
         $orderItem = $order->orderItems()->sole();
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(PaymentStatus::Paid, $order->payment_status);
-        $this->assertSame(OrderStatus::Processing, $order->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->order_status);
         $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovementType::Sale)->count());
         $this->assertSame(1, ProductStockItem::query()->where('order_item_id', $orderItem->id)->count());
         $this->assertSame(1, SalesProofPost::query()->where('order_id', $order->id)->count());

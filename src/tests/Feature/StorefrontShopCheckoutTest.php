@@ -1268,7 +1268,7 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertTrue($orderItem->usage_guide_snapshotted);
         $this->assertSame('account@example.test|Allocated-account-password', $orderItem->stockItems()->sole()->secret);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
 
         $this->app['session']->flush();
         $this->actingAs(Customer::factory()->create(), 'customer');
