@@ -1,0 +1,298 @@
+{
+  "id": "p03-synthetic-crypto-v1",
+  "outcome": "pass",
+  "scenarios": [
+    {
+      "id": "php-to-python/string-unicode",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/string-empty",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/string-null-column",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/string-long-legacy",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/string-balance-cursor-json",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/json-credential",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/json-list",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/json-empty-list",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/json-null-column",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/json-false",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/json-zero",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-null",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-false",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-true",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-int-min",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-int-max",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-float",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-unicode",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-credential",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-list",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/php-empty-array",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/rotation-string",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/rotation-json",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-to-python/rotation-php",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/string-unicode",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/string-empty",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/string-null-column",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/string-long-legacy",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/string-balance-cursor-json",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/json-credential",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/json-list",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/json-empty-list",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/json-null-column",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/json-false",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/json-zero",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-null",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-false",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-true",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-int-min",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-int-max",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-float",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-unicode",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-credential",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-list",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/php-empty-array",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/rotation-string",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/rotation-json",
+      "outcome": "pass"
+    },
+    {
+      "id": "python-to-php/rotation-php",
+      "outcome": "pass"
+    },
+    {
+      "id": "wrong-key",
+      "outcome": "pass"
+    },
+    {
+      "id": "missing-previous-key",
+      "outcome": "pass"
+    },
+    {
+      "id": "tamper-iv",
+      "outcome": "pass"
+    },
+    {
+      "id": "tamper-value",
+      "outcome": "pass"
+    },
+    {
+      "id": "tamper-mac",
+      "outcome": "pass"
+    },
+    {
+      "id": "malformed-outer-base64",
+      "outcome": "pass"
+    },
+    {
+      "id": "malformed-outer-json",
+      "outcome": "pass"
+    },
+    {
+      "id": "malformed-shape",
+      "outcome": "pass"
+    },
+    {
+      "id": "unsupported-tag",
+      "outcome": "pass"
+    },
+    {
+      "id": "unsupported-extra-field",
+      "outcome": "pass"
+    },
+    {
+      "id": "malformed-inner-base64",
+      "outcome": "pass"
+    },
+    {
+      "id": "malformed-json-plaintext",
+      "outcome": "pass"
+    },
+    {
+      "id": "unsupported-json-nan",
+      "outcome": "pass"
+    },
+    {
+      "id": "duplicate-json-key",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-object",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-custom-object",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-reference",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-enum",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-trailing",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-string-length",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-duplicate-key",
+      "outcome": "pass"
+    },
+    {
+      "id": "php-nonfinite",
+      "outcome": "pass"
+    },
+    {
+      "id": "legacy-absent-tag",
+      "outcome": "pass"
+    }
+  ],
+  "source_checksums": {
+    "codec": "574d48703bd55568ef60be449998f3009cd3eb5c6646d732f9e0da0a817037bc",
+    "framework-casts": "1cabf1764355b8a8a6ac7c26c11d6826252e035c51cf77d678f0e16a1c4f06b5",
+    "framework-encrypter": "6c2a5294e230975b3a29478de02ce705f2b533336f7b94228b764243e4d000cc",
+    "framework-key-provider": "208096ec3803ca90981bcf717e1c3413229369fe9fd1b78eebd0bf15d8fb74ea",
+    "php-oracle": "0ce5041900b13451058add2689f5aec843684b576b1018bbd00736bb36f4e3fa",
+    "python-oracle": "759f0d7aa073bd57a89a548aa7df55bc0884b8b60f298186cea0a44c6d066c84"
+  }
+}
