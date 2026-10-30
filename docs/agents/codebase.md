@@ -2,6 +2,14 @@
 
 Dokumen ini adalah peta implementasi aktual repository. Gunakan bersama [CONTEXT.md](../../CONTEXT.md) dan [ADR](../adr/). `CONTEXT.md` hanya berisi bahasa domain; detail modul, flow, dan invariant berada di sini.
 
+## Python migration source parity contract (#680)
+
+The [P00 inventory and parity matrix](../migration/python-django/p00/README.md) freeze
+baseline `d830709bb98cffacc6369847383c850ff89088f2`, source hashes, historical
+obligations, successor issues and acceptance scenarios. Source implementation is
+separate from unknown production activation; no Python runtime or provider
+activation is implied. Refresh the inventory on main drift before migration gates.
+
 ## Cara memakai dokumen ini
 
 Sebelum mengubah behavior:
