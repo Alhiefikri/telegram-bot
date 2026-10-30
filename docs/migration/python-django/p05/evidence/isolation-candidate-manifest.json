@@ -1,0 +1,147 @@
+{
+  "time_utc": "2026-10-30T14:16:53Z",
+  "command": "start",
+  "revision": "339539bb141f66fa439e570e34581f96895f6e7b",
+  "stack": "candidate",
+  "mode": "fake",
+  "dataset": "synthetic-empty",
+  "config_sha256": "02940ff5649fc43888f430b7248c61208f468dde85ed0fb75d5db29c53f64c40",
+  "docker_version": "29.7.2",
+  "compose_version": "5.5.0",
+  "harness_source_sha256": {
+    "tools/migration_harness/Dockerfile": "0b29e3b02f426b4a223527494cfa34cba8dfa3626a57af365cec6c77027b11a5",
+    "tools/migration_harness/comparator.sh": "87eb0a947b8d28c28b598fa9345e98ae511788448c5722ca307f67e8d51fa67a",
+    "tools/migration_harness/boundary.py": "afe9b40b2207c8e5640efd096520095fe063353034d5f3c0bcb4e495dc6a29dd",
+    "tools/migration_harness/harness.py": "3c11cf4da9f357cbb180a400186f930a073c3eab2aca811388e72637d46832b7",
+    "tools/migration_harness/.dockerignore": "9d719ec6e60e5b92f4c8fea934ed673ac3904545630a56948cc8f008ea42c365",
+    "tools/migration_harness/smoke.py": "b299687626086b789728019bfbe23810b4db066851f3a260c5390f323862af81",
+    "tools/migration_harness/smoke_candidate.py": "ab26ba7b20e2fffa25177d86e76b293150c8147fdef70b1476e088f8c17fdfbd",
+    "candidate/smoke_postgres.py": "6431620df96b0e6fcee0a276380956b8508ce299256f098b86cd3573fcf676bb",
+    "candidate/postgres-init.sql": "3925e1fa3f7ccafdd53aa2c3b2ab4f4b4b490c263f8e9928c869c8f81860349a",
+    "candidate/manage.py": "848a4f07aab0f14020c6769765140b4faac5f4c2b70f33fbf338281827f03ca5",
+    "candidate/serve.py": "c13aefcfb4a43e9daca49e0b774c6bbeec1886148dce56b031c5491ca5c0b4ba",
+    "candidate/Dockerfile": "056d48932af1afc67c20a879b88b4a987cd43a57b31d44aa9dccbba97bc9afc9",
+    "candidate/requirements.lock": "99901128affc8f1d5a94894f1db081e914571798b8a870075eb1bf698fd73a26",
+    "candidate/requirements.in": "744c69ae8956d5fb6bf7bd0a0221e1d90a08a637a6662afe01a560233dac5ada",
+    "candidate/tests/test_postgres_smoke_safety.py": "e96ff6c78f14932614b05d4630c19825adad910e9d9dc34420c4ded6ffe5ece2",
+    "candidate/tests/test_http.py": "f01ccdd05d87fab5af9ec2942a5ee4986b402a355a79dee73f80ba1ba818b4ea",
+    "candidate/tests/test_jobs.py": "3c84686af313b6bb4e4da2fb0f170175aa1d53c9f230788b2606913319d77669",
+    "candidate/tests/test_runtime.py": "668029897618530353ec2f0d471d95aafb15e377eabf3a3626c9a411f91058a3",
+    "candidate/tests/test_purchase.py": "aaff034b7e64309687fe91c45393fb5be5786f1edf888874f960d72907f1a6fb",
+    "candidate/tests/test_money.py": "1cd6db91caa6f41544dcd0e86016cf577b40246121b54e201f39d5fec28af69a",
+    "candidate/tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "candidate/lhie_candidate/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "candidate/lhie_candidate/wsgi.py": "a4ef279cd308868ad60a9c9b1b26457609554df98b9b147ad296d3cc069ce04d",
+    "candidate/lhie_candidate/startup.py": "98347101bb5eafc3353227bf4707ae3d51c8124fb57e90530481970eb72e1b37",
+    "candidate/lhie_candidate/urls.py": "98bb6e2e9b3629c0ada6ff03812bb749c96e12e2cd7c98a9be74ff59e55b4f22",
+    "candidate/lhie_candidate/http.py": "9164c570ac7c8033c224f9a227a1fc5244a970a3ffd9954a6f687d2ed827ef47",
+    "candidate/lhie_candidate/readiness.py": "bd028cd8af0036198c14562ec6da6c52da9bac864bfe2051431b1b4d18afd81b",
+    "candidate/lhie_candidate/metadata.py": "1ec8ab81aa859c4ffbc413ecbbc5136465fee2448f7ea2caddaa90547b8fceb0",
+    "candidate/lhie_candidate/settings.py": "2fab02408acf020a75679dd252b2fc5c214cd0ca815e56ea2bdce745ae93624b",
+    "candidate/lhie_candidate/runtime.py": "bdfdcfa310910c67308583c253fe5515408c2a4571baef72316c9671dac51b6c",
+    "candidate/lhie_candidate/adapters/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "candidate/lhie_candidate/adapters/jobs.py": "105b83d90cf02efcef5ea1d206f22c4ebeab9b568cc9484093c862e6884809e1",
+    "candidate/lhie_candidate/domain/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "candidate/lhie_candidate/domain/purchase.py": "332af4bda3ea561e2e56c02f9afebf11c266b105d0d019e905c67fc84b9b1217",
+    "candidate/lhie_candidate/domain/money.py": "70ff4223a3a1892f912ae0bd64d70ac199046f1fb798fb3d79f58eb0a90311c9"
+  },
+  "runtime_versions": {
+    "app": "Python 3.13.18",
+    "candidate_dependencies": {
+      "Django": "5.2.18",
+      "psycopg": "3.3.4",
+      "psycopg-binary": "3.3.4",
+      "asgiref": "3.13.0",
+      "sqlparse": "0.6.0"
+    },
+    "boundary": "Python 3.13.18",
+    "database": "postgres (PostgreSQL) 16.15",
+    "redis": "Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=6467c31a802b9aff"
+  },
+  "host_mem_total": "MemTotal:        7972028 kB",
+  "containers": [
+    {
+      "service": "app",
+      "image_id": "sha256:4e954f21639caca2cb3c6a20b10a4a2a4703b97a374eef5d514b6d576f9468b9",
+      "memory": 1275068416,
+      "memory_swap": 1275068416,
+      "nano_cpus": 1250000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [
+        {
+          "name": "lhie-p01-candidate_storage",
+          "destination": "/disposable"
+        }
+      ],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:1b67b794f26e890dfbe6d69c788fee0d2e7731a53e53483ffbddc69e669fa1e6"
+    },
+    {
+      "service": "boundary",
+      "image_id": "sha256:ae4696b5fc1a10345d9dd7844e34ad24f6c3bfd712578aae7276827d4b676f5e",
+      "memory": 67108864,
+      "memory_swap": 67108864,
+      "nano_cpus": 100000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [],
+      "published_ports": {
+        "8080/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "18802"
+          }
+        ]
+      },
+      "networks": [
+        "lhie-p01-candidate_isolated"
+      ],
+      "network_mode": "lhie-p01-candidate_isolated"
+    },
+    {
+      "service": "database",
+      "image_id": "sha256:deb28ee471183cb0c303113dac9b2433c51eeeeb678def7af9a9ec5820367815",
+      "memory": 671088640,
+      "memory_swap": 671088640,
+      "nano_cpus": 500000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [
+        {
+          "name": "lhie-p01-candidate_database",
+          "destination": "/var/lib/postgresql/data"
+        }
+      ],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:1b67b794f26e890dfbe6d69c788fee0d2e7731a53e53483ffbddc69e669fa1e6"
+    },
+    {
+      "service": "redis",
+      "image_id": "sha256:892022f9f18c26c92c30e15194d132f90044af87b94a491a75429bbc3982eab1",
+      "memory": 134217728,
+      "memory_swap": 134217728,
+      "nano_cpus": 150000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:1b67b794f26e890dfbe6d69c788fee0d2e7731a53e53483ffbddc69e669fa1e6"
+    }
+  ],
+  "scheduler": "disabled",
+  "workers": 0,
+  "limit": "2 CPU / 2048 MiB, no swap; host OS/daemon headroom required",
+  "application_parity": "unproven; candidate P05 bootstrap only"
+}

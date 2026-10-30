@@ -60,11 +60,12 @@ raw file, snapshot, host data directory, Docker socket or host network is mounte
 Laravel uses a separately tagged build of the repository Dockerfile, overrides the
 production entrypoint, removes cached config/ENV in its disposable writable layer,
 and runs only the HTTP development server as UID 1000. It neither migrates nor
-boots Supervisor, workers, scheduler or webhook setup. PostgreSQL is fresh and
-unmigrated; application DB routes can fail until P02/P05 provide schema/data.
-Candidate is an explicit HTTP readiness slot, **not a Django application**; P05
-#683 owns supported Django selection/bootstrap. Neither server is a throughput
-baseline; P04 must record representative workers and comparator profiles.
+boots Supervisor, workers, scheduler or webhook setup. Laravel PostgreSQL is fresh
+and unmigrated; application DB routes can fail until schema/data are supplied.
+[P05 #683](../p05/README.md) replaces the candidate HTTP slot with an isolated
+Django bootstrap and additive metadata schema, not migrated business tables.
+Neither server is a throughput baseline; P04 must record representative workers
+and comparator profiles.
 
 Laravel HTTP: `127.0.0.1:18801`; candidate HTTP: `127.0.0.1:18802`.
 Both retain separate networks, PostgreSQL volumes and storage volumes.

@@ -138,11 +138,20 @@ def compose(config, directory):
                  "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"],
         healthcheck={"test": ["CMD", "redis-cli", "ping"], "interval": "2s", "timeout": "3s", "retries": 15})
     app = service(1.25, 1216, image=IMAGE, **dependent, user="1000:1000", read_only=True,
-        tmpfs=["/tmp:size=64m"], volumes=["storage:/disposable"],
-        entrypoint=["python", "/opt/harness/candidate.py"])
+        tmpfs=["/tmp:size=64m"], volumes=["storage:/disposable"])
     app["depends_on"].update({"database": {"condition": "service_healthy"}, "redis": {"condition": "service_healthy"}})
     if stack == "candidate":
-        app["volumes"].append(f"{TOOLS / 'candidate.py'}:/opt/harness/candidate.py:ro")
+        db["volumes"].append(
+            f"{ROOT / 'candidate/postgres-init.sql'}:/docker-entrypoint-initdb.d/05-candidate.sql:ro")
+        app.update(image="lhie-p05-candidate:1", working_dir="/opt/candidate",
+                   entrypoint=["python", "serve.py"],
+                   volumes=["storage:/disposable",
+                            f"{directory / 'candidate.json'}:/run/harness/candidate.json:ro",
+                            f"{directory / 'django-key'}:/run/harness/django-key:ro"])
+        app["healthcheck"] = {
+            "test": ["CMD", "python", "-c",
+                     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=4).close()"],
+            "interval": "3s", "timeout": "5s", "retries": 15}
     else:
         app.update(image="lhie-p01-laravel:1", working_dir="/var/www/html",
                    entrypoint=["/bin/sh", "/run/harness/comparator.sh"], read_only=False,
@@ -252,6 +261,12 @@ def manifest(config, directory, command):
                         "network_mode": host["NetworkMode"]})
     sources = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                for path in TOOLS.iterdir() if path.is_file()}
+    if config["stack"] == "candidate":
+        for path in (ROOT / "candidate").rglob("*"):
+            relative = path.relative_to(ROOT / "candidate")
+            if (path.is_file() and not path.is_symlink()
+                    and not any(part.startswith(".") or part == "__pycache__" for part in relative.parts)):
+                sources[str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
     versions = {}
     for item in records:
         service = item["service"]
@@ -262,6 +277,11 @@ def manifest(config, directory, command):
                "redis": ["redis-server", "--version"], "app": ["php", "--version"]
                if config["stack"] == "laravel" else ["python", "--version"]}[service]
         versions[service] = run(["docker", "exec", cid, *cmd], True).splitlines()[0]
+        if service == "app" and config["stack"] == "candidate":
+            versions["candidate_dependencies"] = json.loads(run(
+                ["docker", "exec", cid, "python", "-c",
+                 "import importlib.metadata as m,json; print(json.dumps({n:m.version(n) for n in "
+                 "('Django','psycopg','psycopg-binary','asgiref','sqlparse')}))"], True))
     record = {"time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "command": command,
               "revision": run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], True).strip(),
               "stack": config["stack"], "mode": config["mode"], "dataset": config["dataset"],
@@ -272,10 +292,28 @@ def manifest(config, directory, command):
               "host_mem_total": next(line for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemTotal:")),
               "containers": records, "scheduler": "disabled", "workers": 0,
               "limit": "2 CPU / 2048 MiB, no swap; host OS/daemon headroom required",
-              "application_parity": "unproven; candidate is a P05 slot"}
+              "application_parity": "unproven; candidate P05 bootstrap only"}
     path = directory / (str(time.time_ns()) + "-manifest.json")
     path.write_text(json.dumps(record, indent=2) + "\n")
     return path
+
+
+def candidate_admission(config, directory):
+    """Project only non-secret P01 facts into the application's smaller contract."""
+    runtime = {
+        "version": 1, "identity": "candidate", "dataset": config["dataset"],
+        "quarantine": False,
+        "database": {"host": "127.0.0.1", "port": 5432, "name": "disposable", "user": "candidate_runtime"},
+        "redis": {"host": "127.0.0.1", "port": 6379, "db": 0},
+        "limits": {"processes": 1, "threads": 1, "db_connections": 1},
+    }
+    (directory / "candidate.json").write_text(json.dumps(runtime, sort_keys=True) + "\n")
+    (directory / "candidate.json").chmod(0o600)
+    key = directory / "django-key"
+    if not key.exists():
+        with key.open("x") as handle:
+            handle.write(secrets.token_hex(32))
+    key.chmod(0o600)
 
 
 def main():
@@ -310,6 +348,8 @@ def main():
         (directory / "compose.json").write_text(json.dumps(spec, indent=2))
         if args.command == "build":
             run(["docker", "build", "-t", IMAGE, str(TOOLS)])
+            if args.stack == "candidate":
+                run(["docker", "build", "-t", "lhie-p05-candidate:1", str(ROOT / "candidate")])
             if args.stack == "laravel":
                 if args.local_dependencies:
                     local_comparator_build()
@@ -326,6 +366,8 @@ def main():
             owned_volumes(args.stack)
             if args.quarantine:
                 (directory / "quarantine").touch()
+            if args.stack == "candidate" and not args.quarantine:
+                candidate_admission(config, directory)
             run(compose_cmd(directory, "up", "-d", "--wait", "--wait-timeout", "90",
                             *( ["boundary", "database", "redis"] if args.quarantine else [])))
             print(manifest(config, directory, "start-quarantine" if args.quarantine else "start"))

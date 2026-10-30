@@ -1,0 +1,118 @@
+{
+  "time_utc": "2026-10-30T14:17:52Z",
+  "command": "start",
+  "revision": "339539bb141f66fa439e570e34581f96895f6e7b",
+  "stack": "laravel",
+  "mode": "fake",
+  "dataset": "synthetic-empty",
+  "config_sha256": "b0981599f43bbea05599c090debe7d0becf95179b4a9bdbd18f61818788db95a",
+  "docker_version": "29.7.2",
+  "compose_version": "5.5.0",
+  "harness_source_sha256": {
+    "tools/migration_harness/Dockerfile": "0b29e3b02f426b4a223527494cfa34cba8dfa3626a57af365cec6c77027b11a5",
+    "tools/migration_harness/comparator.sh": "87eb0a947b8d28c28b598fa9345e98ae511788448c5722ca307f67e8d51fa67a",
+    "tools/migration_harness/boundary.py": "afe9b40b2207c8e5640efd096520095fe063353034d5f3c0bcb4e495dc6a29dd",
+    "tools/migration_harness/harness.py": "3c11cf4da9f357cbb180a400186f930a073c3eab2aca811388e72637d46832b7",
+    "tools/migration_harness/.dockerignore": "9d719ec6e60e5b92f4c8fea934ed673ac3904545630a56948cc8f008ea42c365",
+    "tools/migration_harness/smoke.py": "b299687626086b789728019bfbe23810b4db066851f3a260c5390f323862af81",
+    "tools/migration_harness/smoke_candidate.py": "ab26ba7b20e2fffa25177d86e76b293150c8147fdef70b1476e088f8c17fdfbd"
+  },
+  "runtime_versions": {
+    "app": "PHP 8.4.27 (cli) (built: Oct 21 2026 15:53:31) (NTS)",
+    "boundary": "Python 3.13.18",
+    "database": "postgres (PostgreSQL) 16.15",
+    "redis": "Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=6467c31a802b9aff"
+  },
+  "host_mem_total": "MemTotal:        7972028 kB",
+  "containers": [
+    {
+      "service": "app",
+      "image_id": "sha256:396dc771d74e48d015634742f6e3dfec0889d0d0a62d013a335dba14ac91fb87",
+      "memory": 1275068416,
+      "memory_swap": 1275068416,
+      "nano_cpus": 1250000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {
+        "lhie.p01.build-profile": "local-verified-dependencies",
+        "lhie.p01.composer-lock-sha256": "55c3490b964f10f631720f979f13b933bbc0b4f5189fd58cb9843085a551940a",
+        "lhie.p01.php-base-id": "sha256:dd317783b9d9a16690f805aa75e326aec9f1719f1a2dffa41e3db3f3324f4de5",
+        "lhie.p01.source-tree-sha256": "78b920a5f129c5364fb455a0e0010b5202c5ee7a767b4cba3ca2f3d3c21da277",
+        "lhie.p01.vendor-tree-sha256": "c952c3776cb2cbccac6f44dfc1a45257031a2cad74696c504f9997b87ad8992e"
+      },
+      "volumes": [
+        {
+          "name": "lhie-p01-laravel_storage",
+          "destination": "/var/www/html/storage"
+        }
+      ],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:4c8368285e45a363ff5f09183ce8e40afc34d18e430221444610f4fffd219359"
+    },
+    {
+      "service": "boundary",
+      "image_id": "sha256:ae4696b5fc1a10345d9dd7844e34ad24f6c3bfd712578aae7276827d4b676f5e",
+      "memory": 67108864,
+      "memory_swap": 67108864,
+      "nano_cpus": 100000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [],
+      "published_ports": {
+        "8080/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "18801"
+          }
+        ]
+      },
+      "networks": [
+        "lhie-p01-laravel_isolated"
+      ],
+      "network_mode": "lhie-p01-laravel_isolated"
+    },
+    {
+      "service": "database",
+      "image_id": "sha256:deb28ee471183cb0c303113dac9b2433c51eeeeb678def7af9a9ec5820367815",
+      "memory": 671088640,
+      "memory_swap": 671088640,
+      "nano_cpus": 500000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [
+        {
+          "name": "lhie-p01-laravel_database",
+          "destination": "/var/lib/postgresql/data"
+        }
+      ],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:4c8368285e45a363ff5f09183ce8e40afc34d18e430221444610f4fffd219359"
+    },
+    {
+      "service": "redis",
+      "image_id": "sha256:892022f9f18c26c92c30e15194d132f90044af87b94a491a75429bbc3982eab1",
+      "memory": 134217728,
+      "memory_swap": 134217728,
+      "nano_cpus": 150000000,
+      "state": "running",
+      "oom_killed": false,
+      "restarts": 0,
+      "build_identity": {},
+      "volumes": [],
+      "published_ports": {},
+      "networks": [],
+      "network_mode": "container:4c8368285e45a363ff5f09183ce8e40afc34d18e430221444610f4fffd219359"
+    }
+  ],
+  "scheduler": "disabled",
+  "workers": 0,
+  "limit": "2 CPU / 2048 MiB, no swap; host OS/daemon headroom required",
+  "application_parity": "unproven; candidate P05 bootstrap only"
+}
