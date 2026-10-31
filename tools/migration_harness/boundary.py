@@ -22,7 +22,7 @@ def public_https(url):
     return parsed
 
 
-def upstream(url, payload=None, token=None):
+def upstream(url, payload=None, token=None, *, telegram_errors=False):
     """Pin the validated public address; preserve TLS hostname, refuse redirects."""
     parsed = public_https(url)
     addresses = socket.getaddrinfo(parsed.hostname, 443, family=socket.AF_INET,
@@ -41,7 +41,8 @@ def upstream(url, payload=None, token=None):
                      json.dumps(payload) if payload is not None else None, headers)
         response = conn.getresponse()
         data = response.read(65537)
-        if response.status != 200 or len(data) > 65536:
+        if ((response.status != 200 and not (telegram_errors and response.status in (400, 403, 429)))
+                or len(data) > 65536):
             raise ValueError("upstream refused")
         return json.loads(data)
     finally:
@@ -97,8 +98,87 @@ def telegram_request(config, body):
     return {"ok": result.get("ok") is True}  # Never echo upstream customer/secret content.
 
 
+NAVIGATION_METHODS = {
+    "sendMessage", "sendPhoto", "sendAnimation", "editMessageText",
+    "editMessageCaption", "editMessageMedia", "editMessageReplyMarkup",
+    "deleteMessage", "answerCallbackQuery",
+}
+
+
+def navigation_request(config, body, next_message_id):
+    """Only admitted private test chats; never accepts tokens, endpoints or uploads."""
+    if (config["mode"] == "testing-bot"
+            and (config.get("approval") or {}).get("gate") != "P06-approved-navigation-targets-only"):
+        raise ValueError("explicit navigation target approval required")
+    if (not isinstance(body, dict) or set(body) != {"method", "payload"}
+            or body["method"] not in NAVIGATION_METHODS
+            or not isinstance(body["payload"], dict)):
+        raise ValueError("unsupported navigation request")
+    method, payload = body["method"], body["payload"]
+    allowed = {"chat_id", "message_id", "text", "caption", "parse_mode", "entities",
+               "caption_entities", "reply_markup", "photo", "animation", "media",
+               "disable_web_page_preview", "link_preview_options",
+               "show_caption_above_media", "callback_query_id", "show_alert"}
+    if not set(payload) <= allowed:
+        raise ValueError("unsupported navigation options")
+    chat_id = payload.get("chat_id")
+    if isinstance(chat_id, str) and chat_id.isdecimal():
+        chat_id = int(chat_id)
+    if type(chat_id) is not int or chat_id not in config["safe_chat_ids"]:
+        raise ValueError("chat not admitted")
+    payload = {**payload, "chat_id": chat_id}
+    if method == "answerCallbackQuery":
+        if (not isinstance(payload.get("callback_query_id"), str)
+                or not 1 <= len(payload["callback_query_id"]) <= 256
+                or len(payload.get("text", "")) > 200):
+            raise ValueError("invalid callback feedback")
+        payload.pop("chat_id")
+    if method.startswith("edit") or method == "deleteMessage":
+        if type(payload.get("message_id")) is not int or payload["message_id"] < 1:
+            raise ValueError("invalid message identity")
+    for field in ("photo", "animation"):
+        if field in payload:
+            value = payload[field]
+            if not isinstance(value, str) or not value or not all(c.isalnum() or c in "_-" for c in value):
+                raise ValueError("only test-bot file references are supported")
+    if "media" in payload:
+        media = payload["media"]
+        if (not isinstance(media, dict) or media.get("type") not in ("photo", "animation")
+                or not isinstance(media.get("media"), str)
+                or not all(c.isalnum() or c in "_-" for c in media["media"])):
+            raise ValueError("only test-bot media references are supported")
+    markup = payload.get("reply_markup", {})
+    if not isinstance(markup, dict) or set(markup) - {"inline_keyboard", "remove_keyboard"}:
+        raise ValueError("unsupported reply markup")
+    for row in markup.get("inline_keyboard", []):
+        if not isinstance(row, list):
+            raise ValueError("invalid keyboard")
+        for button in row:
+            if (not isinstance(button, dict)
+                    or set(button) - {"text", "callback_data", "url", "style", "icon_custom_emoji_id", "disabled"}
+                    or not isinstance(button.get("text"), str)):
+                raise ValueError("unsupported button")
+            if sum(key in button for key in ("callback_data", "url", "disabled")) != 1:
+                raise ValueError("invalid button action")
+            if "disabled" in button and button["disabled"] != {}:
+                raise ValueError("invalid disabled button")
+            if "callback_data" in button and not 1 <= len(button["callback_data"].encode()) <= 64:
+                raise ValueError("invalid callback")
+            if "url" in button and not button["url"].startswith("https://"):
+                raise ValueError("unsupported button URL")
+    if config["mode"] == "sandbox":
+        raise ValueError("sandbox mode cannot send Telegram navigation")
+    if config["mode"] == "testing-bot":
+        return upstream("https://api.telegram.org/bot" + config["bot_token"] + "/" + method,
+                        payload, telegram_errors=True)
+    if method in ("deleteMessage", "answerCallbackQuery"):
+        return {"ok": True, "result": True}
+    return {"ok": True, "result": {"message_id": payload.get("message_id") or next_message_id}}
+
+
 def handler(config):
     class Handler(BaseHTTPRequestHandler):
+        next_message_id = 1000
         def setup(self):
             super().setup()
             self.connection.settimeout(5)
@@ -118,6 +198,9 @@ def handler(config):
                 body = json.loads(self.rfile.read(length))
                 if self.path == "/telegram" and isinstance(body, dict):
                     result = telegram_request(config, body)
+                elif self.path == "/telegram/navigation":
+                    type(self).next_message_id += 1
+                    result = navigation_request(config, body, type(self).next_message_id)
                 elif self.path == "/sandbox/status" and body == {} and config["mode"] == "sandbox":
                     # Only a pre-approved, exact GET endpoint. No create/payment/purchase API.
                     upstream(config["sandbox_status_url"], token=config["sandbox_token"])

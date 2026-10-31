@@ -97,12 +97,18 @@ log channel. HTTP body size, SMTP message size/line count and I/O time are bound
   is explicitly listed in `safe_chat_ids`; it returns a fake ACK. All provider,
   supplier, purchase and arbitrary routes are denied.
 - `testing-bot` is an **operator-attested P01/P08** option. It requires a separate token,
-  numeric bot identity, exact `LhiestoreTestingBot` username, and positive private
+  numeric bot identity, exact `LhieStoreTestBot` username, and positive private
   test/admin chat IDs. Before admitting dependent services, `getMe` must prove
   that token belongs to that exact testing identity. A production/other bot token
-  fails startup without being printed. The relay only permits `sendMessage` to
-  listed private chats with plain bounded text; no webhook changes, arbitrary
-  Telegram method, group/channel, inline routing, media URLs or keyboards.
+  fails startup without being printed. The original `H0-approved-test-targets-only`
+  attestation permits only plain bounded `sendMessage` calls to listed private
+  chats through `/telegram`.
+  [P06 navigation](../p06/README.md) adds `/telegram/navigation` for bounded
+  sends/edits, inline keyboards and separately mapped test-bot photo/animation
+  references. That route requires the distinct operator gate
+  `P06-approved-navigation-targets-only`; an old text-only approval cannot enable it.
+  Webhook mutation, arbitrary methods, groups/channels, media URLs/uploads,
+  production credentials and non-allowlisted recipients remain forbidden.
 - `sandbox` is another **operator-attested P01/P08** option. It permits only an exact,
   attested HTTPS GET status endpoint, on `klikqris.com/api/sandbox/…/status` or
   `sakurupiah.id/api-sanbox/…/status`. Production paths, alternate ports, credentials
@@ -114,8 +120,10 @@ log channel. HTTP body size, SMTP message size/line count and I/O time are bound
   **not proof that a provider offers that status endpoint**; P01/P08 must qualify
   the actual sandbox API before adapting the relay for checkout.
 
-Live modes require `approval` with exactly `gate: H0-approved-test-targets-only`
-and `scope_sha256`: SHA256 of Python `json.dumps(scope, sort_keys=True).encode()`,
+Live modes require `approval` with exactly `gate` and `scope_sha256`.
+Use `H0-approved-test-targets-only` for the original text-only or sandbox scope,
+or `P06-approved-navigation-targets-only` for explicitly approved navigation in
+Testing Bot mode. `scope_sha256` is SHA256 of Python `json.dumps(scope, sort_keys=True).encode()`,
 where scope is all configuration fields except `approval`. This binds the operator's
 attestation to the exact dataset, credentials, bot, recipients and destination;
 changing any field invalidates admission. It is a recorded human attestation,

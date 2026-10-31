@@ -16,7 +16,9 @@ class PayloadSafeMiddleware(MiddlewareMixin):
             request.get_host()
         except Exception:
             return response(400, "bad_request")
-        if request.method not in ("GET", "HEAD"):
+        if request.method not in ("GET", "HEAD") and not (
+            request.method == "POST" and request.path == "/webhook/telegram"
+        ):
             result = response(405, "method_not_allowed")
             result["Allow"] = "GET, HEAD"
             return result
