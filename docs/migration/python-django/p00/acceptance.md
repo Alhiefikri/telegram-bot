@@ -6,34 +6,52 @@ handoffs, not blockers to publishing the P00 source inventory, and never waive f
 
 ## Evidence record required per scenario
 
-Record scenario ID/matrix row, PHP and Python revisions, dependency/OS/image versions and
-lock hashes, commands/driver revision, schema and sanitized dataset manifest hash/provenance,
-file manifest, settings and resource/worker budgets, expected invariant, observed outcome,
-all errors/skips/unknowns/retries, timestamps/timezone and sanitized artifact paths. Record
-operator/QA decisions separately from measured results. Never store credentials, original
-customer identifiers, raw production dumps/ENV, Telegram payloads with secrets or decrypted files.
-A prior test path is not a passing result. Runtime versions are unknown until P01/P04;
-source requirements/lockfiles are frozen in the inventory, not claimed as installed versions.
+Record the scenario/matrix row, revision, command, expected and observed behavior,
+dataset/config identity, failures/skips/unknowns and evidence limits. Keep shared
+versions, manifests and resource settings in one run record and link it from
+consumer issues; do not repeat the entire manifest for every scenario.
+Reuse evidence only while the relevant code, schema, dependencies/config and
+dataset remain applicable. Never store credentials, customer identifiers, raw
+production dumps/ENV, secret Telegram payloads or decrypted files.
 
-## Mandatory benchmark contract (P01/P04/P11; refresh at P28)
+## Comparison contract (P11; refresh at P28)
+
+P04 supplies a reusable isolated comparator, initial smoke and honest partial
+baseline evidence. The owner approved stopping its long standalone benchmark:
+the complete 24-case comparison belongs to P11 after Django is runnable, not a
+prerequisite for port implementation. Reuse compatible PHP evidence and collect
+missing/changed cases there. No 30% claim is allowed from P04 smoke or partial data.
 
 - Transitions separately: Home→catalog, catalog→Family/Plan, Plan→detail, Back, Home,
   quantity changes, Orders read and Balance read. A transition outside the first slice remains
   pending for full parity; it is not deleted from the contract.
-- Cross each transition with 1/5/10 concurrent users, small/large datasets, cold/warm,
-  idle/representative background load. Report same-chat bursts separately. Pin the exact
-  dataset cardinalities and seed in P04 before measurement; they are currently unknown.
-- At least 200 measured successful observations per mandatory scenario/load/implementation,
-  at least three independent batches, excluded warmup documented, cold measurements separate.
-  Preserve all attempts/failures/outliers and sanitized raw samples. Report p50/p95/max,
-  errors/timeouts/unknown/retries, queue/DB times, cgroup memory/peak/CPU, swap, OOM/restarts,
-  connections and recovery backlog. More samples required for unstable results.
-- Alternate stacks under equal **whole-stack** limits <=2 CPU/2 GiB; document OS headroom
-  against the actual ~1.9 GiB host. Include representative worker/background work. Keep current
-  PHP and resource-normalized PHP profiles separate; disclose every comparator optimization.
-- Per transition/load p50_python <=0.70×p50_php **and** p95_python <=0.70×p95_php;
-  no averaging away failures. Freeze timing floor/resolution before running; near-zero baseline,
-  unstable/conflicting batches or threshold uncertainty are inconclusive, not pass.
+- The owner's 2026-10-31 implementation-first revision supersedes the former
+  960-cell and staged 140-case requirements. Use one current-PHP baseline:
+  eight transitions × users 1/5/10 = 24 cases per implementation, with a matching
+  representative dataset, warm distinct-chat traffic and representative background.
+- Each case uses two independent batches of 25 measured attempts, after five
+  excluded warmups per batch. Keep failures/unknowns, not a quota of successes.
+  No minimum-200 qualification, three-batch minimum or automatic extension.
+  These exploratory samples do not establish production p95 confidence.
+- Normalized PHP, small/cold/same-chat/idle conditions and other diagnostics are
+  optional investigations of a named failure/risk, not mandatory matrices.
+  Same-chat correctness remains covered by focused functional regressions.
+- Preserve attempts/failures/outliers and report per-case p50/p95/max, errors,
+  unknowns and existing CPU/memory/OOM/restart/backlog observations. Reuse tooling;
+  no new sensor/dashboard/resume framework is needed for acceptance.
+- Alternate stacks under equal **whole-stack** limits <=2 CPU/2 GiB, including
+  representative workers. Disclose OS headroom and comparator differences.
+  Normalized PHP never silently replaces the current-PHP baseline.
+- Per transition/load p50_python <=0.70×p50_php **and** p95_python <=0.70×p95_php
+  remains the target. Near-floor, threshold-adjacent, unstable or failure-heavy
+  results are inconclusive. At most one targeted two-batch rerun after diagnosis
+  or a fix; remaining uncertainty goes to H1 for revise/stop, not endless sampling.
+- Checkout/paid-delivery timing comes from transaction-flow smoke, without a
+  separate load matrix or invented numerical target. Old run artifacts retain
+  their original identities and qualification; never pool incompatible protocols.
+- Schema-4 runner defaults to diagnostic smoke; `--benchmark` explicitly opts
+  into the P11 comparison workload. Sampling completion does not imply stable
+  p95 or a comparison pass. Never resume incompatible protocol/source identities.
 - Measure webhook ACK and screen edit/send ACK separately. Backend ACK is not device-visible
   latency. Record fake transport, provider sandbox and live Testing Bot in separate reports;
   do not flood Telegram. Human visible checks/video on Testing Bot remain H1 evidence.
@@ -45,6 +63,11 @@ source requirements/lockfiles are frozen in the inventory, not claimed as instal
 ## Correctness, security and presentation acceptance
 
 P03/P07/P09/P12–P26 reuse relevant prior assertion semantics, not framework internals.
+Implement the changed flow, run its actual E2E/smoke, then focused regressions for
+consumer-visible risks. No test-count/coverage quotas or full-suite-per-issue rule.
+The following races/faults are a risk inventory, not a matrix for every ticket.
+Prove shared protocols once at their owner; consumers link still-applicable proof.
+P11/P28 exercise integrated gaps and changed boundaries, not another complete suite.
 Use disposable real PostgreSQL and synchronized multiprocess barriers for last-stock,
 same-wallet spending, duplicate update/checkout/API claims, paid-vs-cancel/expire/refund,
 callback replay/order, two effect claimants, supplier uncertain purchase and challenge/link races.
@@ -62,10 +85,13 @@ CSRF, HTML/entity/XSS handling, callback authenticity/replay, shared fail-closed
 SSRF/media allowlists, key/digest/crypto integrity, secret-free errors and least-privilege DB writes.
 P28/H2 need no unresolved critical/high issues; lower findings require explicit disposition.
 
-P27 preserves copy/id/en/ms, emoji fallback, primary/danger buttons/footer icons, menu order,
-images/media and animation. Exercise both themes, 320/390/768/1023/1024/1280+ widths,
-zoom/reflow, keyboard/focus/modal/scroll, no-JS fallback, reduced motion and old URLs/API schemas.
-HTML snapshots alone cannot prove behavior. Real Android/iOS/Telegram QA remains human.
+P27 preserves copy/id/en/ms, emoji fallback, primary/danger buttons/footer icons,
+menu order, media and animation. Reuse P21–P25 proof; inspect remaining gaps at
+390px mobile and 1280px desktop, adding widths at changed breakpoints or observed
+overflow. Check alternate themes/locales and keyboard/focus/zoom/no-JS/reduced
+motion where the changed behavior needs them, not a Cartesian presentation matrix.
+All features still need evidence. HTML snapshots alone do not prove interaction;
+real Android/iOS/Telegram QA remains human.
 
 ## Explicit unknown/gap register and owner
 

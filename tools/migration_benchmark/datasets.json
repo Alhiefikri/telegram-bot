@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "seed": 686,
+  "identity": "p04-repository-synthetic-v1",
+  "provenance": "Generated from repository schema and canonical Laravel domain owners; no production snapshot or statistics",
+  "profiles": {
+    "small": {"categories": 4, "families": 12, "products": 36, "customers": 20, "historical_orders": 60},
+    "large": {"categories": 20, "families": 120, "products": 360, "customers": 200, "historical_orders": 600}
+  },
+  "plans_per_family": 3,
+  "historical_status_cycle": ["pending", "paid", "expired", "cancelled", "late_paid", "delivery_unknown"],
+  "money": "exact integer IDR; ledger and inventory mutations only through existing owners",
+  "chronology": "Protocol v2: migrate fresh and seed disposable once per dataset, attest the manifest, then create an owned PostgreSQL seed template. Before every independent cell/batch, disable disposable connections, terminate its sessions from postgres, drop only disposable and clone the matching hardcoded seed template. Local Redis is flushed, exact seed facts are verified, and its dataset marker is restored without DB mutations. Warmup and measurement share the same clone; all post-cell growth and backlog remain in accounting",
+  "seed_templates": {"small": "p04_seed_small", "large": "p04_seed_large"},
+  "template_scope": "Only the admitted P01-owned disposable volume; templates are created on a fresh namespace and never dropped individually. No production database or durability setting is modified",
+  "protocol_version": 2,
+  "logical_checksum": "seed manifest canonical JSON over synthetic source facts; excludes randomized encryption, runtime timestamps and generated UUIDs; not a physical pg_dump checksum",
+  "replay_requirement": "Candidate must import the same logical dataset and replay the exact same workload schedule; verify manifest and financial/history invariants before comparison",
+  "scale_limit": "small/large are test profiles, not verified production scale or traffic distributions"
+}

@@ -1,0 +1,12 @@
+{
+  "snapshots": 150,
+  "sensor_unknowns": 0,
+  "oom_kill_events_max": 0,
+  "restart_count_max": 0,
+  "container_swap_max_bytes": 0,
+  "postgres_connections_max": 20,
+  "redis_ready_jobs_max": 1661,
+  "redis_reserved_jobs_max": 3,
+  "redis_delayed_jobs_max": 0,
+  "redis_wakeup_tokens_max": 1661
+}
