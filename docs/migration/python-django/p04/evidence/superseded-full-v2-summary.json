@@ -1,0 +1,17 @@
+{
+  "status": "failed",
+  "stop_reason": "owner-approved replacement of full Cartesian protocol with staged primary/selected-diagnostic acceptance",
+  "disposable_cleanup": "reset",
+  "raw_attempt_slots": 1940,
+  "warmup_slots": 190,
+  "measured_slots": 1750,
+  "outcomes": {
+    "success": 1882,
+    "error": 0,
+    "timeout": 0,
+    "unknown": 58
+  },
+  "completed_measured_batches": 24,
+  "old_full_acceptance_met": false,
+  "reuse_in_staged_qualification": false
+}

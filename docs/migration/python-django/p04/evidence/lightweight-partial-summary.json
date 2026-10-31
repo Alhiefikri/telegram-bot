@@ -1,0 +1,23 @@
+{
+  "status": "failed",
+  "reason": "owner_requested_stop; initial setup failure retained",
+  "cleanup": "reset",
+  "observed_cases": 8,
+  "planned_cases_before_stop": 24,
+  "completed_cases": 7,
+  "exploratory_cases": 3,
+  "inconclusive_cases": 5,
+  "measured_outcomes": {
+    "success": 375,
+    "error": 0,
+    "timeout": 0,
+    "unknown": 0
+  },
+  "warmup_attempts": 80,
+  "comparison": {
+    "status": "not_evaluated",
+    "reason": "candidate_absent"
+  },
+  "qualification": "partial_only; no complete benchmark or 30% claim",
+  "large_dataset_sha256": "68c6c859de3e25ecadaedd28a04bc4455fdb7177f5c8a33bda28e47d4cb2c08e"
+}

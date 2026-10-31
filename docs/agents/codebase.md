@@ -42,6 +42,29 @@ precision, sequence/timezone mappings and the Eloquent rollback reader.
 startup/public-schema grants remain unchanged; these helpers are not auth or
 money write authority. Actual catalog/key/hash coverage remains HD #684.
 
+P04 [Laravel comparator](../migration/python-django/p04/README.md) owns
+`tools/migration_benchmark/`: frozen synthetic dataset/protocol, concurrent
+HTTP-kernel/Redis fixture probe, dimension-isolated report and cgroup/connection/
+backlog observations. `tests/migration_harness/test_benchmark_*.py` covers
+failure inclusion, missing boundaries, percentile/outlier preservation, resume
+checkpoints and deterministic gates. `smoke.py` and `resume_smoke.py` exercise
+actual disposable services. The owner's current implementation-first revision
+supersedes both the 960-cell run and the staged 140-case requirement: one current
+PHP profile, eight transitions × 1/5/10 users = 24 cases per implementation,
+two batches of 25 attempts after five warmups, with representative background.
+No minimum-200 qualification or automatic extension; uncertain results go to H1
+after at most one targeted rerun. Diagnostics and normalized PHP are optional.
+P04 acceptance is reusable comparator + initial smoke + honest partial evidence,
+not completion of 24 standalone cases. P11 owns paired measurement after Django
+is runnable, reusing applicable PHP samples and filling missing cases.
+The schema-4 runner defaults to ten-flow/two-attempt smoke; `--benchmark` opts
+into comparison. Never pool incompatible identities or claim partial coverage complete.
+Historical artifacts remain retained, not retroactively qualified. Per-case 30%
+navigation targets and H1 authority remain; synthetic backend ACKs are not device
+latency or live Testing Bot/provider qualification. Module owners prove shared
+invariants once; later issues reuse applicable evidence and check changed E2E
+boundaries rather than repeating broad race/fault/browser suites.
+
 HD [operator readiness](../migration/python-django/h0/README.md) records #684's
 deferred production-data checks in the historical `h0/` directory. It grants no
 acquisition or runtime authority. HD follows an explicit H1 continue decision and
