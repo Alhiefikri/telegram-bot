@@ -21,6 +21,19 @@ failure/recovery, template/static setup, privilege denial and the synchronized
 real-PostgreSQL `candidate/smoke_postgres.py`. No business parity is implied.
 Actual test-bot/sandbox target verification belongs to P01/P08, independent of HD.
 
+P06 [initial navigation](../migration/python-django/p06/README.md) owns
+`candidate/lhie_candidate/navigation/`: minimized authenticated ingress, durable
+update dedupe, private-chat sequencing, ACK-backed canonical generation/leases,
+and DB-backed Home/catalog/Family/Plan/detail/quantity presentation. Its SQL and
+column-limited grants require explicit disposable provisioning; startup never
+installs legacy or navigation tables. `navigate.py --once` is a bounded manual
+consumer, not an automatic worker. `tools/migration_harness/smoke_navigation.py`
+reuses P01 plus the repository migration oracle, compares actual PHP captions/
+keyboards and exercises HTTP-to-screen plus multiprocess PostgreSQL fencing.
+Approved allowlisted `@LhieStoreTestBot` runs and operator visual confirmation cover
+premium icons and separate test media; [P06 evidence](../migration/python-django/p06/README.md)
+records the bounded scope. Performance qualification remains P11-owned.
+
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
 adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.
 `tools/migration_data/rehearse.py` exercises authenticated encrypted synthetic backup,

@@ -39,7 +39,7 @@ class AdmissionTests(unittest.TestCase):
     def test_bot_token_requires_exact_testing_identity_and_scope(self):
         config = harness.default("candidate")
         config.update(mode="testing-bot", bot_token="123:" + "a" * 35,
-                      bot_id=123, bot_username="LhiestoreTestingBot")
+                      bot_id=123, bot_username="LhieStoreTestBot")
         def attest():
             scope = {key: config[key] for key in sorted(harness.FIELDS - {"approval"})}
             config["approval"] = {"gate": "H0-approved-test-targets-only", "scope_sha256":
@@ -84,7 +84,7 @@ class AdmissionTests(unittest.TestCase):
     def test_wrong_bot_stops_boundary_before_transports_become_ready(self):
         config = harness.default("candidate")
         config.update(mode="testing-bot", bot_token="synthetic-marker", bot_id=123,
-                      bot_username="LhiestoreTestingBot")
+                      bot_username="LhieStoreTestBot")
         with (patch("builtins.open", return_value=io.StringIO(json.dumps(config))),
               patch.object(boundary, "firewall"), patch.object(boundary.os, "setgroups"),
               patch.object(boundary.os, "setgid"), patch.object(boundary.os, "setuid"),

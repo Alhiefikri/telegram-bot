@@ -1,4 +1,4 @@
-"""P05 owns no tables; future metadata requires an explicit schema cutover."""
+"""Framework migrations stay disabled; P06 navigation metadata is provisioned explicitly."""
 
 
 METADATA_SCHEMA = "django_candidate"

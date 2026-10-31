@@ -9,6 +9,13 @@ All rows: implementation exists in source; production activation **unknown**; Py
 Successor numbers refer to GitHub issues in this repository. Every evidence cell also requires
 the common acceptance record and negative/security tests in [acceptance](acceptance.md).
 
+P06 [initial private navigation evidence](../p06/README.md) now covers the
+Home/catalog/Family/detail comparison, quantity/Back E2E, PostgreSQL root fencing
+and approved Testing Bot premium/media QA subset of F02-F05. The operator confirmed
+the corrected icons and final photo/animation/Home appearance. This does not qualify
+each whole feature family: remaining commands/transactional flows retain their
+successor owners; performance remains P11-owned.
+
 
 | ID / feature | Input/entry point | Canonical transaction/data owner | Schema/model search anchors | Observable output | Prior tests (basename anchors) | Successor issues | Required parity evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |

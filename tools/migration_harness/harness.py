@@ -53,18 +53,21 @@ def validate(config):
             raise Refused("fake mode rejects real credentials or destinations")
     else:
         approval = config["approval"]
-        # H0 operator attestation, not a gate an agent can supply on the operator's behalf.
+        # Target/capability attestation must come from the operator, never the agent.
         if not isinstance(approval, dict) or set(approval) != {"gate", "scope_sha256"}:
-            raise Refused("explicit H0 transport attestation required")
+            raise Refused("explicit transport attestation required")
         scope = {key: config[key] for key in sorted(FIELDS - {"approval"})}
         digest = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
-        if approval != {"gate": "H0-approved-test-targets-only", "scope_sha256": digest}:
-            raise Refused("H0 attestation does not match transport scope")
+        gates = {"H0-approved-test-targets-only"}
+        if config["mode"] == "testing-bot":
+            gates.add("P06-approved-navigation-targets-only")
+        if type(approval["gate"]) is not str or approval["gate"] not in gates or approval["scope_sha256"] != digest:
+            raise Refused("attestation does not match transport scope")
         if config["mode"] == "testing-bot":
             if (not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]{30,100}", config["bot_token"])
                     or type(config["bot_id"]) is not int
                     or str(config["bot_id"]) != config["bot_token"].split(":")[0]
-                    or config["bot_username"] != "LhiestoreTestingBot"
+                    or config["bot_username"] != "LhieStoreTestBot"
                     or config["sandbox_status_url"] or config["sandbox_token"]):
                 raise Refused("only the attested Lhiestore Testing Bot is admitted")
         else:
