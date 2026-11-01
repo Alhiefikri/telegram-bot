@@ -1,0 +1,120 @@
+{
+  "schema_version": 5,
+  "issue": 692,
+  "supersedes": "P04 protocol schema 4 for the paired PHP<->Django comparison only; retained P04 runs keep their own identity",
+  "seed": 686,
+  "dataset_provenance": "repository-schema synthetic; no verified production cardinalities",
+  "implementations": [
+    "laravel",
+    "django"
+  ],
+  "profiles": [
+    "current"
+  ],
+  "transport": "synthetic",
+  "navigation": [
+    "home_catalog",
+    "catalog_plans",
+    "plan_detail",
+    "back",
+    "home",
+    "quantity",
+    "orders",
+    "balance"
+  ],
+  "other_scenarios": [
+    "checkout",
+    "paid_delivery"
+  ],
+  "candidate_unimplemented_scenarios": [
+    "orders",
+    "balance"
+  ],
+  "candidate_unimplemented_other_scenarios": [
+    "checkout",
+    "paid_delivery"
+  ],
+  "candidate_unimplemented_reason": "P06 leaves Orders and Balance callbacks with their existing identities, and P07/P08/P09 have no candidate navigation-to-checkout/payment/delivery surface. Missing cells stay missing; nothing is fabricated or substituted.",
+  "datasets": [
+    "small",
+    "large"
+  ],
+  "seed_templates": {
+    "small": "p11_seed_small",
+    "large": "p11_seed_large"
+  },
+  "users": [
+    1,
+    5,
+    10
+  ],
+  "traffic": [
+    "distinct"
+  ],
+  "temperature": [
+    "warm"
+  ],
+  "background": [
+    "idle"
+  ],
+  "primary_conditions": {
+    "dataset": "large",
+    "temperature": "warm",
+    "traffic": "distinct",
+    "background": "idle"
+  },
+  "measured_batches": 2,
+  "primary_samples_per_batch": 25,
+  "warmup_samples_per_batch": 5,
+  "diagnostic_batches": 0,
+  "diagnostic_samples_per_batch": 0,
+  "planned_cases": {
+    "per_implemented_navigation_scope": 24,
+    "candidate_implementable": 18,
+    "candidate_unimplementable": 6,
+    "total_planned_cells": 42
+  },
+  "comparison": {
+    "scope": "navigation_only",
+    "statistic": "per-case successful screen_ack p50 and p95",
+    "aggregation": "no average or sum across scenarios, user counts or batches",
+    "target": "django p50 <= 0.70 * current-PHP p50 and django p95 <= 0.70 * current-PHP p95 for every measured case",
+    "verdicts": [
+      "pass",
+      "fail",
+      "inconclusive",
+      "not_implemented"
+    ],
+    "payment_stages": "no candidate counterpart exists in this slice; PHP retains its own diagnostic evidence and no post-hoc candidate money target is created"
+  },
+  "arrival_policy": "No pre-ingress pacing is applied. Candidate clients are synchronized per wave and the admitted single-threaded local WSGI server serializes ingress; this is recorded, never smoothed away.",
+  "quantile": "nearest rank ceil(p*n); no trimming/winsorization",
+  "timer": "CLOCK_MONOTONIC nanoseconds within one Linux host across parent, worker and client processes; missing boundaries remain null",
+  "floor_ms": 0.1,
+  "unstable_batch_p95_relative_spread": 0.2,
+  "instability_denominator": "minimum batch p95; insufficient/near-floor/unstable results are inconclusive",
+  "background_policy": "Idle for both implementations. PHP provider-verification, notification and outbound families have no candidate counterpart in the P06-P10 navigation slice, so representative per-wave jobs would make the conditions non-comparable. The PHP comparator keeps its nine queue workers and the candidate keeps its interaction/payment/receipt workers running with their real sweeps; no synthetic background job is injected on either side.",
+  "limit": "Both implementations run inside the same P01 2 CPU / 2048 MiB disposable namespace and the same 1.25 CPU / 1216 MiB application allocation. PHP ingress is an in-process HTTP kernel in concurrent CLI client processes; Django ingress is the admitted single-threaded WSGI server reached over loopback by synchronized client processes. Backend ACKs are not device-visible latency.",
+  "state_model": "Seed once per dataset through the existing PHP domain owners, attest the logical manifest, provision the explicit candidate navigation schema, then clone the pristine PostgreSQL template before each independent batch. Warmup and measurement share one clone; local Redis is flushed per batch.",
+  "authority_model": "Candidate cells may write only django_candidate navigation state plus the already-admitted narrow Customer profile columns. Orders, payments, stock, balances, outbound effects and supplier/receipt history are audited unchanged after every batch; any delta fails the run.",
+  "excluded_claims": [
+    "production scale",
+    "device-visible latency",
+    "live Testing Bot",
+    "provider sandbox qualification",
+    "money or stock race acceptance",
+    "payment-stage improvement",
+    "H1 approval"
+  ],
+  "unavailable_evidence": {
+    "candidate_payment_stages": "not implemented in the P06-P10 slice; PHP-only retained diagnostics",
+    "live_testing_bot": "no new live QA; P06 operator-confirmed navigation/media evidence is reused",
+    "visible_device": "unknown; human H1 observation"
+  },
+  "context7": {
+    "django_execute_wrapper": "https://docs.djangoproject.com/en/5.2/topics/db/instrumentation/",
+    "django_test_client_environ": "https://docs.djangoproject.com/en/5.2/topics/testing/tools/",
+    "postgres_row_locking": "https://www.postgresql.org/docs/16/explicit-locking.html"
+  },
+  "resource_sample_interval_seconds": 5
+}

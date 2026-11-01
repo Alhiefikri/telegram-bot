@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "targeted_reproduction",
+  "issue": 692,
+  "target": "home_catalog, users=10, small synthetic dataset, warmup then measured batch on one clone",
+  "warmup_worker_outcomes": {
+    "applied": 5
+  },
+  "measured_worker_outcomes": {
+    "applied": 21,
+    "duplicate": 4
+  },
+  "handler_errors": {},
+  "interpretation": "No candidate handler exception. Duplicate entries are no-op wakeups after the sweep already processed the row; screen ACKs exist for all attempts. This is a probe bookkeeping artifact, not a candidate failure.",
+  "probe_revision": "corrected to preserve the first terminal outcome and to record handler error types"
+}
