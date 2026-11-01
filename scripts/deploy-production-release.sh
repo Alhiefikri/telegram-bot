@@ -901,7 +901,13 @@ write_release_state "migration-succeeded"
 echo "Migration succeeded. Cutting over application services."
 write_release_state "candidate-cutover-started"
 cutover_started_at="$(date +%s)"
-if ! APP_IMAGE="$APP_IMAGE" compose up -d --no-build --remove-orphans \
+producers="scheduler app"
+if compose config --services | grep -qx outbound-recovery; then
+  producers="$producers outbound-recovery"
+fi
+if ! compose stop --timeout 150 $producers \
+  || ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app artisan ops:check-failed-jobs --snapshot </dev/null > "$FAILED_JOBS_BASELINE_FILE" \
+  || ! APP_IMAGE="$APP_IMAGE" compose up -d --no-build --remove-orphans \
   || ! verify_service_images "$APP_IMAGE" \
   || ! verify_release_gates "$cutover_started_at" \
   || ! verify_app_url \

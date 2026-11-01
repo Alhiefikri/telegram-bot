@@ -328,6 +328,8 @@ repository root
 - service scheduler yang menjalankan Laravel scheduler tiap menit;
 - Telegram Bot API, KlikQRIS, Binance, and (until the retirement gate passes) Pakasir legacy settlement as external dependencies.
 
+Production release cutover stops the previous `app`, `scheduler` and optional `outbound-recovery` services before taking the final failed-job ID watermark. The candidate starts only after that snapshot succeeds; failures during producer shutdown or snapshot trigger normal rollback. This excludes failures from draining legacy workers without ignoring any failures produced by candidate workers. Expand migrations and credential backfill still run before stopping services. The release smoke harness covers legacy failures during drain, candidate failed-job rollback and producer-stop failure.
+
 Queue Redis bersifat volatile: restart Redis dapat menghilangkan queued jobs dan session/cache/lock state. Queue operasional dipisah per beban kerja: `default` untuk update/interaksi bot, `payments` untuk verifikasi pembayaran, `telegram-receipts` khusus unit receipt kredensial beserta successor/fallback-nya, `notifications` untuk email/admin notice/proof/cleanup, serta `telegram-outbound`, `telegram-broadcast`, `telegram-stock`, `binance-verification`, dan `suppliers`. `QueueTopology` adalah satu-satunya daftar nama queue yang dipakai health summary, readiness, cutover, dan test consumer. Jangan menggabungkan `payments` dengan `default`, atau receipt dengan `notifications`, karena worker priority tidak mem-preempt job yang sedang berjalan. Detail batas worker, timeout, dan cutover ada di [topologi queue Telegram](../telegram-queue-topology.md).
 
 ### Isolasi receipt dan verifikasi pembayaran (#651)

@@ -185,6 +185,13 @@ case "$command" in
     if [ "${1:-}" = "-q" ]; then printf '%s-container\n' "${2:-app}"; fi
     ;;
   run)
+    if [ "$scenario" = "legacy-failures-during-drain" ] && [[ "$*" == *'ops:check-failed-jobs --snapshot'* ]]; then
+      if [ -f "$MOCK_WORKSPACE/producers-stopped" ]; then
+        printf '{"max_id":5}\n'
+      else
+        printf '{"max_id":0}\n'
+      fi
+    fi
     if [ "$scenario" = "redis-dependency-migration" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then
       if [ ! -f "$MOCK_WORKSPACE/redis-dependency-ready" ]; then
         printf 'php_network_getaddresses: getaddrinfo for redis failed\n' >&2
@@ -209,7 +216,13 @@ case "$command" in
     fi
     if [ "$scenario" = "contract-failure" ] && printf '%s' "$*" | grep -q 'artisan migrate --force'; then exit 1; fi
     ;;
-  stop) ;;
+  stop)
+    if [ "$scenario" = "producer-stop-failure" ] && [ ! -f "$MOCK_WORKSPACE/stop-failed-once" ]; then
+      touch "$MOCK_WORKSPACE/stop-failed-once"
+      exit 1
+    fi
+    touch "$MOCK_WORKSPACE/producers-stopped"
+    ;;
   up)
     if [ "$*" = "-d --wait redis" ]; then
       if [ "$scenario" = "redis-dependency-migration" ]; then
@@ -226,6 +239,13 @@ case "$command" in
     ;;
   exec)
     current_image=$(cat "$MOCK_WORKSPACE/current-image")
+    if [[ "$*" == *'ops:check-failed-jobs --max=0 --baseline-stdin'* ]]; then
+      baseline=$(cat)
+      if [[ "$current_image" == *bbbbbbbb* ]]; then
+        if [ "$scenario" = "legacy-failures-during-drain" ] && [ "$baseline" != '{"max_id":5}' ]; then exit 1; fi
+        if [ "$scenario" = "candidate-job-failure" ]; then exit 1; fi
+      fi
+    fi
     if printf '%s' "$*" | grep -q 'release-sha.txt'; then
       if printf '%s' "$*" | grep -q 'cat /var/www/html/public/release-sha.txt'; then
         cat "$MOCK_WORKSPACE/release-marker"
@@ -406,6 +426,9 @@ run_scenario compose-validation-failure 1 unused "$PREVIOUS_IMAGE"
 
 run_scenario redis-dependency-migration 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
+run_scenario legacy-failures-during-drain 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
+run_scenario candidate-job-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
+run_scenario producer-stop-failure 20 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario reconcile-success 0 deploy-succeeded-compatible-contract-pending "$CANDIDATE_IMAGE"
 run_scenario reconcile-failure 1 remote-state-reconcile-rollback-succeeded "$PREVIOUS_IMAGE"
 run_scenario reconcile-rollback-succeeded 0 deploy-failed-rollback-succeeded "$PREVIOUS_IMAGE"
