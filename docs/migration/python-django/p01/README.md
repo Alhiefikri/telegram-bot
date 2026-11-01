@@ -115,15 +115,19 @@ log channel. HTTP body size, SMTP message size/line count and I/O time are bound
   in URLs, query strings, redirects, path traversal and non-public DNS resolutions
   are refused. The resolved public IP is pinned while TLS verifies the original
   hostname. A bearer sandbox credential stays in the boundary config. Only
-  `POST /sandbox/status` with `{}` invokes this GET; payment create and supplier
-  purchase have no route. These path restrictions are an admission contract,
-  **not proof that a provider offers that status endpoint**; P01/P08 must qualify
-  the actual sandbox API before adapting the relay for checkout.
+  `POST /sandbox/status` with `{}` invokes this GET in the original status-only
+  mode; supplier purchase is always denied. These path restrictions are an
+  admission contract, not proof that a provider offers that status endpoint.
+  The separately scoped [P08 Sakurupiah contract](../p05/README.md#p08-sakurupiah-sandbox-payment-slice-689)
+  adds only the documented sandbox POST operations and authenticated callback;
+  it does not activate production or authorize an external smoke.
 
 Live modes require `approval` with exactly `gate` and `scope_sha256`.
 Use `H0-approved-test-targets-only` for the original text-only or sandbox scope,
 or `P06-approved-navigation-targets-only` for explicitly approved navigation in
-Testing Bot mode. `scope_sha256` is SHA256 of Python `json.dumps(scope, sort_keys=True).encode()`,
+Testing Bot mode. P08's combined mode uses the distinct
+`P08-approved-dual-targets-only` gate and additionally binds all sandbox and
+callback targets. `scope_sha256` is SHA256 of Python `json.dumps(scope, sort_keys=True).encode()`,
 where scope is all configuration fields except `approval`. This binds the operator's
 attestation to the exact dataset, credentials, bot, recipients and destination;
 changing any field invalidates admission. It is a recorded human attestation,

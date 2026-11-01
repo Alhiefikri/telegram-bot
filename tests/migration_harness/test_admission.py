@@ -1,14 +1,17 @@
 """Risk tests for admission, transport routing, redaction and quarantine boundaries."""
 import hashlib
+import hmac
 import io
 from http.client import HTTPConnection
 from http.server import HTTPServer
 import json
 from pathlib import Path
+import os
 import smtplib
 import socketserver
 import sys
 import threading
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +21,52 @@ import harness
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_p08_draft_is_private_unapproved_and_never_overwrites(self):
+        env = {"SAKURUPIAH_SANDBOX_API_ID": "synthetic-id",
+               "SAKURUPIAH_SANDBOX_API_KEY": "synthetic-key",
+               "SAKURUPIAH_PRODUCTION_API_KEY": "must-not-copy"}
+        targets = {"phone": "628000000000",
+                   "callback_url": "https://synthetic.ngrok-free.app/callback/sakurupiah",
+                   "return_url": "https://synthetic.ngrok-free.app/return"}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            active = directory / "config.json"
+            active.write_text("unchanged")
+            harness.p08_draft(directory, env, targets)
+            draft = directory / "p08-draft.json"
+            self.assertEqual(draft.stat().st_mode & 0o777, 0o600)
+            content = draft.read_text()
+            self.assertNotIn("must-not-copy", content)
+            config = json.loads(content)
+            self.assertIsNone(config["approval"])
+            self.assertIsNone(config["p08_callback"])
+            with self.assertRaises(harness.Refused):
+                harness.validate(config)
+            with self.assertRaises(FileExistsError):
+                harness.p08_draft(directory, env, targets)
+            self.assertEqual(active.read_text(), "unchanged")
+
+    def test_p08_draft_rejects_missing_inputs_and_nonprivate_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            targets = {"phone": "628000000000",
+                       "callback_url": "https://synthetic.ngrok-free.app/callback/sakurupiah",
+                       "return_url": "https://synthetic.ngrok-free.app/return"}
+            with self.assertRaises(harness.Refused):
+                harness.p08_draft(directory, {}, targets)
+            env = dict.fromkeys(("SAKURUPIAH_SANDBOX_API_ID", "SAKURUPIAH_SANDBOX_API_KEY"), "x")
+            for invalid in ({**targets, "callback_url": "https://sakurupiah.id/api/production"},
+                            {**targets, "callback_url": "http://synthetic.ngrok-free.app/callback/sakurupiah"},
+                            {**targets, "return_url": "https://production.example/return"},
+                            {**targets, "callback_url": "https://synthetic.ngrok-free.app/callback/sakurupiah?x=1"},
+                            {**targets, "phone": "invalid"}):
+                with self.subTest(targets=invalid), self.assertRaises(harness.Refused):
+                    harness.p08_draft(directory, env, invalid)
+            os.chmod(directory, 0o755)
+            with self.assertRaises(harness.Refused):
+                harness.p08_draft(directory, env, targets)
+            self.assertFalse((directory / "p08-draft.json").exists())
+
     def test_production_ambiguous_and_credential_configs_rejected(self):
         cases = [("db_url", "postgresql://prod/production"), ("db_url", "postgresql://localhost/test"),
                  ("redis_url", "redis://host.docker.internal/0"), ("redis_url", "redis://[::1]/0"),
@@ -80,6 +129,84 @@ class AdmissionTests(unittest.TestCase):
                                   hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()}
             with self.assertRaises(harness.Refused):
                 harness.validate(config)
+    def test_p08_requires_explicit_sandbox_scope_and_loopback_publication(self):
+        config = harness.default("candidate")
+        config.update(mode="sandbox", sandbox_token="test-key", sandbox_status_url="https://sakurupiah.id/api-sanbox/",
+                      p08_callback={"gate": "P08-approved-sandbox-callback-only"}, p08_api_id="test-id",
+                      p08_phone="628000000000", p08_callback_url="https://callback.example/callback/sakurupiah",
+                      p08_return_url="https://callback.example/return")
+        scope = {key: config[key] for key in sorted(set(config) - {"approval"})}
+        config["approval"] = {"gate": "H0-approved-test-targets-only", "scope_sha256":
+                              hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()}
+        harness.validate(config)
+        spec = harness.compose(config, Path("/tmp/test-p08"))
+        self.assertIn("127.0.0.1:18803:8026", spec["services"]["boundary"]["ports"])
+        self.assertNotIn("sandbox_token", spec["services"]["app"].get("environment", {}))
+        config["p08_phone"] = "628000000001"
+        with self.assertRaises(harness.Refused):
+            harness.validate(config)
+        config.update(mode="p08-sandbox-testing-bot", bot_id=123, bot_token="123:" + "a" * 35,
+                      bot_username="LhieStoreTestBot")
+        scope = {key: config[key] for key in sorted(set(config) - {"approval"})}
+        config["approval"] = {"gate": "P08-approved-dual-targets-only", "scope_sha256":
+                              hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()}
+        harness.validate(config)
+        config["approval"]["gate"] = "H0-approved-test-targets-only"
+        with self.assertRaises(harness.Refused):
+            harness.validate(config)
+
+    def test_callback_relay_authenticates_raw_body_before_forwarding(self):
+        server = HTTPServer(("127.0.0.1", 0), boundary.callback_handler("sandbox-key", "internal-key"))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        body = b'{"status":"pending"}'
+        signature = hmac.new(b"sandbox-key", body, hashlib.sha256).hexdigest()
+        try:
+            with patch.object(boundary.http.client, "HTTPConnection") as upstream:
+                upstream.return_value.getresponse.return_value.status = 200
+                for supplied, expected in (("bad", 403), (signature, 200)):
+                    conn = HTTPConnection(*server.server_address, timeout=2)
+                    conn.request("POST", "/callback/sakurupiah", body, {
+                        "Content-Type": "application/json", "X-Callback-Event": "payment_status",
+                        "X-Callback-Signature": supplied})
+                    reply = conn.getresponse()
+                    self.assertEqual(reply.status, expected)
+                    reply.read()
+                    conn.close()
+                self.assertEqual(upstream.call_count, 1)
+                headers = upstream.return_value.request.call_args.args[3]
+                self.assertEqual(headers["X-P08-Internal-Secret"], "internal-key")
+                self.assertNotIn("sandbox-key", str(headers))
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_callback_relay_denies_other_routes_methods_and_oversize(self):
+        server = HTTPServer(("127.0.0.1", 0), boundary.callback_handler("sandbox-key", "internal-key"))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        body = b'{}'
+        headers = {"Content-Type": "application/json", "X-Callback-Event": "payment_status",
+                   "X-Callback-Signature": hmac.new(b"sandbox-key", body, hashlib.sha256).hexdigest()}
+        cases = [("POST", "/callback/sakurupiah?x=1", body, headers),
+                 ("POST", "/callback/other", body, headers),
+                 ("GET", "/callback/sakurupiah", None, {}),
+                 ("POST", "/callback/sakurupiah", b"x" * 16385, headers),
+                 ("POST", "/callback/sakurupiah", body, {**headers, "Transfer-Encoding": "chunked"})]
+        try:
+            with patch.object(boundary.http.client, "HTTPConnection") as upstream:
+                for method, path, payload, request_headers in cases:
+                    conn = HTTPConnection(*server.server_address, timeout=2)
+                    conn.request(method, path, payload, request_headers)
+                    reply = conn.getresponse()
+                    self.assertNotEqual(reply.status, 200)
+                    reply.read()
+                    conn.close()
+                upstream.assert_not_called()
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
     def test_wrong_bot_stops_boundary_before_transports_become_ready(self):
         config = harness.default("candidate")
