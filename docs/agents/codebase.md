@@ -8,7 +8,7 @@ P01 [local comparison harness](../migration/python-django/p01/README.md) owns
 configuration admission, separate disposable namespaces/storage, the default-deny
 transport boundary, mail sink, sticky restore quarantine and guarded reset.
 `tools/migration_harness/harness.py` generates local-only Compose; it never uses
-production Compose or starts workers/schedulers. Each alternating stack is capped
+production Compose and installs no scheduler process. Each alternating stack is capped
 at a total 2 CPU/2 GiB. `tests/migration_harness/test_admission.py` and the real
 Docker/PostgreSQL/Redis `tools/migration_harness/smoke.py` are its verification
 entry points. [P05 Django bootstrap](../migration/python-django/p05/README.md)
@@ -26,8 +26,8 @@ P06 [initial navigation](../migration/python-django/p06/README.md) owns
 update dedupe, private-chat sequencing, ACK-backed canonical generation/leases,
 and DB-backed Home/catalog/Family/Plan/detail/quantity presentation. Its SQL and
 column-limited grants require explicit disposable provisioning; startup never
-installs legacy or navigation tables. `navigate.py --once` is a bounded manual
-consumer, not an automatic worker. `tools/migration_harness/smoke_navigation.py`
+installs legacy or navigation tables. `navigate.py --once` remains a bounded manual
+consumer; the P10 isolated supervisor owns the automatic interaction process. `tools/migration_harness/smoke_navigation.py`
 reuses P01 plus the repository migration oracle, compares actual PHP captions/
 keyboards and exercises HTTP-to-screen plus multiprocess PostgreSQL fencing.
 Approved allowlisted `@LhieStoreTestBot` runs and operator visual confirmation cover
@@ -52,7 +52,7 @@ hints in existing Payment Events, immutable same-Payment create/recovery and
 authoritative status/history settlement using canonical receipt and inventory
 owners. `tools/migration_harness/smoke_qris.py` exercises the local synthetic
 path. It does not qualify the real sandbox or Testing Bot: P06's payment button
-is not yet connected, P10 owns automatic consumption, and real target/credential
+is not yet connected, P10 owns the bounded automatic consumer, and real target/credential
 verification plus external smoke remain open P08/H1 requirements.
 
 P09 [receipt delivery](../migration/python-django/p05/README.md#p09-credential-receipts-and-outbound-effects-690)
@@ -62,6 +62,23 @@ wakeups and no-resend recovery. `candidate/receipt.py` runs bounded batches;
 `tools/migration_harness/smoke_checkout.py --receipt` exercises the synthetic
 PostgreSQL/fake-relay path. Live Testing Bot receipt delivery and old
 short-lived TXT confirmation-cache migration are not qualified by this slice.
+
+P10 [isolated workers](../migration/python-django/p10/README.md) owns
+`candidate/lhie_candidate/workers/`, `candidate/stack.py` and
+`candidate/workers.py` under [ADR-0032](../../adr/0032-python-bounded-worker-supervision.md).
+It adds a standard-library bounded supervisor with one process each for
+interaction, payment and receipt, one `candidate_runtime` connection per worker,
+ID-only shared wakeups, bounded PostgreSQL sweeps and bounded restart/drain.
+`interaction` preserves P06 per-chat serialization and marks abandoned claims
+unknown instead of replaying; `payment` consumes P08 hints and ambiguous-create
+recovery without a second invoice; `receipt` delivers P09 ordered effects
+directly from PostgreSQL when Redis is absent and never resends an unknown.
+`tools/migration_harness/smoke_workers.py` runs the mixed-load and
+Redis-stopped recovery drills inside P01 isolation and writes
+`.local/migration-p10/verification.json`. It reuses P07/P08/P09 fixtures and
+evidence; a fake slow sandbox is harness-only. No notification/broadcast/
+supplier family is ported or allowed onto these workers; full scheduler,
+retention, metrics and Python-only operations remain P26.
 
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
 adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.

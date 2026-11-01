@@ -3,7 +3,7 @@ GRANT SELECT (id,expires_at,total_amount,currency,order_status,payment_status)
     ON public.orders TO candidate_runtime;
 GRANT SELECT (id,order_id,provider,method,currency,amount,merchant_ref,sakurupiah_channel,
     expired_at,status,provider_reference,provider_total_payment,provider_fee,provider_expires_at,
-    provider_presentation,provider_create_state,provider_payment_method)
+    provider_presentation,provider_create_state,provider_create_attempted_at,provider_payment_method)
     ON public.payments TO candidate_runtime;
 GRANT SELECT (id,provider,event_type,merchant_ref,provider_reference,provider_status,
     idempotency_key,received_count,processed_at) ON public.payment_events TO candidate_runtime;

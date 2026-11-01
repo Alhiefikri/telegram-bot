@@ -18,7 +18,7 @@ DOCUMENT = {
     "quarantine": False,
     "database": {"host": "127.0.0.1", "port": 5432, "name": "disposable", "user": "candidate_runtime"},
     "redis": {"host": "127.0.0.1", "port": 6379, "db": 0},
-    "limits": {"processes": 1, "threads": 1, "db_connections": 1},
+    "limits": {"processes": 5, "threads": 5, "db_connections": 4},
 }
 
 
@@ -50,6 +50,21 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(runtime.AdmissionError):
             runtime.validate_document({key: value for key, value in DOCUMENT.items() if key != "limits"})
 
+    def test_workers_are_explicit_and_exact(self):
+        with_workers = {**DOCUMENT, "workers": True}
+        self.assertEqual(runtime.validate_document(with_workers), "synthetic-empty")
+        for value in (False, 1, "true", None):
+            with self.subTest(value=value), self.assertRaises(runtime.AdmissionError):
+                runtime.validate_document({**DOCUMENT, "workers": value})
+        for limits in (
+            {**DOCUMENT["limits"], "processes": 4},
+            {**DOCUMENT["limits"], "threads": 4},
+            {**DOCUMENT["limits"], "db_connections": 5},
+            {"processes": 5, "threads": 5},
+        ):
+            with self.subTest(limits=limits), self.assertRaises(runtime.AdmissionError):
+                runtime.validate_document({**DOCUMENT, "limits": limits})
+
     def test_fixed_files_private_key_and_duplicate_json_rejection(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "candidate.json"
@@ -60,7 +75,10 @@ class AdmissionTests(unittest.TestCase):
             with patch.object(runtime, "RUNTIME_PATH", config), patch.object(runtime, "KEY_PATH", key):
                 admitted = runtime.load_runtime()
                 self.assertEqual(admitted.dataset, "synthetic-empty")
+                self.assertFalse(admitted.workers)
                 self.assertNotIn("a" * 64, repr(admitted))
+                config.write_text(json.dumps({**DOCUMENT, "workers": True}))
+                self.assertTrue(runtime.load_runtime().workers)
                 key.chmod(0o644)
                 with self.assertRaisesRegex(runtime.AdmissionError, "^candidate runtime admission refused$"):
                     runtime.load_runtime()
@@ -124,7 +142,7 @@ class ReadinessTests(unittest.TestCase):
         from lhie_candidate import readiness
         admitted = (
             "disposable", "candidate_runtime", "127.0.0.1", 5432, False,
-            False, False, False, False, 4, "django_candidate", "candidate_runtime",
+            False, False, False, False, 6, "django_candidate", "candidate_runtime",
             False, False,
         )
         denied = []

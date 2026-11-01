@@ -142,9 +142,11 @@ not a reason to expose arbitrary files with DEBUG or a production dev server.
 
 The local HTTP server is deliberately one process and one thread with no reload
 or worker children. `CONN_MAX_AGE=0`; no pool is added. Each request can hold at
-most one runtime connection; readiness closes its connection. The role ceiling
-of four leaves bounded room for manual diagnostics, not permission to spawn
-four background workers. PostgreSQL's existing `max_connections=30` retains
+at most one runtime connection; readiness closes its connection. The role
+ceiling of six reserves four connections for the P10 HTTP/worker runtime (one
+HTTP and one per queue) and leaves two bounded diagnostic/test slots; it is not
+permission to spawn six workers. The runtime's own admitted ceiling remains
+four. PostgreSQL's existing `max_connections=30` retains
 three reserved slots: budget one HTTP + four synchronized test processes + one
 coordinator + at most two operator connections = eight normal connections,
 leaving nineteen normal slots unused. Concurrency smoke is a diagnostic alongside

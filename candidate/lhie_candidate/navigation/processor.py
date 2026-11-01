@@ -161,3 +161,23 @@ class NavigationProcessor:
                            "ORDER BY update_id LIMIT %s", [limit])
             identities = [row[0] for row in cursor.fetchall()]
         return [self.process(identity) for identity in identities]
+
+    def recover(self, limit=25, *, stale_seconds=60):
+        """Resolve an abandoned claim without replaying an unknown Telegram ACK."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("invalid work limit")
+        if type(stale_seconds) is not int or not 1 <= stale_seconds <= 600:
+            raise ValueError("invalid stale interval")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "WITH stale AS ("
+                "SELECT update_id FROM django_candidate.navigation_updates "
+                "WHERE state='processing' AND claimed_at < clock_timestamp() - make_interval(secs => %s) "
+                "ORDER BY update_id LIMIT %s FOR UPDATE SKIP LOCKED"
+                ") UPDATE django_candidate.navigation_updates AS updates "
+                "SET state='unknown',outcome='worker_lost',completed_at=clock_timestamp() "
+                "FROM stale WHERE updates.update_id=stale.update_id AND updates.state='processing' "
+                "RETURNING updates.update_id",
+                [stale_seconds, limit],
+            )
+            return len(cursor.fetchall())

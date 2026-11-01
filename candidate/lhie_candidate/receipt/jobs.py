@@ -1,86 +1,31 @@
-"""Disposable Redis wakeups carry identities only; PostgreSQL owns recovery."""
-import json
-import socket
-from uuid import UUID
+"""Receipt-family wakeups over the shared ID-only transport.
 
-from django.db import transaction
+PostgreSQL owns receipt/effect recovery; these calls only shorten the wait.
+"""
+
+from ..workers import wakeup
+from ..workers.contract import TOPOLOGY
 
 
-QUEUE = 'candidate:telegram-receipts'
-MAX_JOB_BYTES = 160
+QUEUE = TOPOLOGY["receipt"].wakeup_queue
+MAX_JOB_BYTES = wakeup.MAX_JOB_BYTES
 
 
 def encode_job(kind, identity):
-    if kind not in ('order', 'effect'):
-        raise ValueError('Invalid receipt job')
-    try:
-        identity = str(UUID(str(identity)))
-    except (ValueError, TypeError, AttributeError):
-        raise ValueError('Invalid receipt job') from None
-    return json.dumps({'version': 1, 'kind': kind, 'id': identity}, separators=(',', ':'))
+    return wakeup.encode(kind, identity)
 
 
 def decode_job(raw):
-    try:
-        if not isinstance(raw, (bytes, str)) or not 0 < len(raw) <= MAX_JOB_BYTES:
-            raise ValueError()
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError()
-                result[key] = value
-            return result
-        obj = json.loads(raw, object_pairs_hook=unique)
-        if type(obj) is not dict or obj.keys() != {'version', 'kind', 'id'} or type(obj['version']) is not int or obj['version'] != 1:
-            raise ValueError()
-        normalized = encode_job(obj['kind'], obj['id'])
-        if json.loads(normalized)['id'] != obj['id']:
-            raise ValueError()
-        return obj['kind'], obj['id']
-    except (ValueError, TypeError, UnicodeError, KeyError):
-        raise ValueError('Invalid receipt job') from None
+    return wakeup.decode(QUEUE, raw)
 
 
 def enqueue(kind, identity):
-    payload = encode_job(kind, identity).encode('ascii')
-    parts = (b'LPUSH', QUEUE.encode('ascii'), payload)
-    command = b'*3\r\n' + b''.join(b'$%d\r\n' % len(part) + part + b'\r\n' for part in parts)
-    try:
-        with socket.create_connection(('127.0.0.1', 6379), timeout=1) as connection:
-            connection.settimeout(1)
-            connection.sendall(command)
-            response = connection.recv(128)
-            if not response.startswith(b':') or not response.endswith(b'\r\n'):
-                return False
-            return int(response[1:-2]) > 0
-    except (OSError, ValueError):
-        return False
+    return wakeup.enqueue(kind, identity)
 
 
 def take():
-    parts = (b'RPOP', QUEUE.encode('ascii'))
-    command = b'*2\r\n' + b''.join(b'$%d\r\n' % len(part) + part + b'\r\n' for part in parts)
-    with socket.create_connection(('127.0.0.1', 6379), timeout=1) as connection:
-        connection.settimeout(1)
-        connection.sendall(command)
-        with connection.makefile('rb') as response:
-            length = response.readline(32)
-            if length == b'$-1\r\n':
-                return None
-            if not length.startswith(b'$') or not length.endswith(b'\r\n'):
-                raise ValueError('Invalid Redis response')
-            size = int(length[1:-2])
-            if not 0 < size <= MAX_JOB_BYTES:
-                raise ValueError('Invalid Redis response')
-            body = response.read(size)
-            if len(body) != size or response.read(2) != b'\r\n':
-                raise ValueError('Invalid Redis response')
-            decode_job(body)
-            return body
+    return wakeup.take(QUEUE)
 
 
 def wake_after_commit(kind, identity, *, using='default'):
-    # Validate before commit; failure to wake is repaired from the durable source.
-    encode_job(kind, identity)
-    transaction.on_commit(lambda: enqueue(kind, identity), using=using)
+    wakeup.wake_after_commit(kind, identity, using=using)

@@ -54,12 +54,12 @@ def _image_snapshot(source):
 
 
 class ReceiptService:
-    def __init__(self, source, transport, invoice_renderer, *, using='default'):
+    def __init__(self, source, transport, invoice_renderer, *, using='default', lease_seconds=600):
         self.source = source
         self.transport = transport
         self.invoice_renderer = invoice_renderer
         self.using = using
-        self.protocol = ReceiptProtocol(using)
+        self.protocol = ReceiptProtocol(using, lease_seconds=lease_seconds)
         self.db = self.protocol.db
 
     def _outside(self):

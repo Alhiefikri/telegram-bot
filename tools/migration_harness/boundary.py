@@ -15,6 +15,7 @@ import re
 import ssl
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlencode, urlsplit
 
@@ -354,6 +355,66 @@ _P08_ENDPOINTS = {
     "history": ("transaction.php", {"method", "mechant", "merchant_ref"}),
 }
 
+_FAKE_PAYMENTS = {}
+_FAKE_LOCK = threading.Lock()
+_FAKE_SLOW_SECONDS = 4.0
+
+
+def fake_p08_request(body):
+    """Synthetic fake-mode sandbox only; no credential, network or real identity."""
+    if not isinstance(body, dict) or set(body) != {"operation", "fields"}:
+        raise ValueError("sandbox operation denied")
+    operation, fields = body["operation"], body["fields"]
+    if operation not in _P08_ENDPOINTS or not isinstance(fields, dict):
+        raise ValueError("sandbox operation denied")
+    _, expected = _P08_ENDPOINTS[operation]
+    if set(fields) != expected or any(type(value) is not str or not value or len(value.encode()) > 2048
+                                      for value in fields.values()):
+        raise ValueError("sandbox fields denied")
+    if operation == "list":
+        if fields["method"] != "list":
+            raise ValueError("sandbox method denied")
+        return {"status": "200", "data": [{"kode": "QRIS", "status": "Aktif",
+                                           "minimal": "1", "maksimal": "100000000"}]}
+    with _FAKE_LOCK:
+        if operation == "create":
+            if fields["method"] not in ("QRIS", "QRISC", "QRISMU", "QRIS2"):
+                raise ValueError("sandbox method denied")
+            if re.fullmatch(r"[1-9][0-9]{0,18}", fields["amount"]) is None:
+                raise ValueError("sandbox amount denied")
+            reference = fields["merchant_ref"]
+            row = _FAKE_PAYMENTS.setdefault(reference, {
+                "trx_id": "synthetic-" + reference, "merchant_ref": reference,
+                "payment_kode": fields["method"], "amount": fields["amount"],
+                "total": fields["amount"], "fee": "0", "expired": "2099-01-01 00:00:00",
+                "qr": "https://sakurupiah.id/synthetic-qr",
+                "checkout_url": "https://sakurupiah.id/synthetic-checkout",
+                "status": "pending",
+            })
+            return {"status": "200", "data": [dict(row)]}
+        if operation == "status":
+            if fields["method"] != "status":
+                raise ValueError("sandbox method denied")
+            matches = [row for row in _FAKE_PAYMENTS.values() if row["trx_id"] == fields["trx_id"]]
+            if len(matches) != 1:
+                raise ValueError("sandbox reference denied")
+            row = matches[0]
+            if row["merchant_ref"].startswith("p10-"):
+                time.sleep(_FAKE_SLOW_SECONDS)
+                state = "berhasil"
+            else:
+                state = "pending"
+            return {"status": "200", "data": [{"trx_id": row["trx_id"], "payment_status": state}]}
+        if operation == "history":
+            if fields["method"] != "transaction" or fields["mechant"] != "1":
+                raise ValueError("sandbox method denied")
+            row = _FAKE_PAYMENTS.get(fields["merchant_ref"])
+            if row is None:
+                raise ValueError("sandbox reference denied")
+            state = "berhasil" if row["merchant_ref"].startswith("p10-") else "pending"
+            return {"status": "200", "data": [{**row, "status": state, "payment_status": state}]}
+    raise ValueError("sandbox operation denied")
+
 
 def p08_request(config, body):
     if (config.get("mode") not in ("sandbox", "p08-sandbox-testing-bot")
@@ -451,7 +512,12 @@ def handler(config):
                     type(self).next_message_id += 1
                     result = navigation_request(config, body, type(self).next_message_id)
                 elif self.path == "/sandbox/sakurupiah":
-                    result = p08_request(config, body)
+                    if config["mode"] == "fake":
+                        synthetic = fake_p08_request(body)
+                        result = {"status": 200,
+                                  "body": base64.b64encode(json.dumps(synthetic).encode()).decode("ascii")}
+                    else:
+                        result = p08_request(config, body)
                 elif (self.path == "/sandbox/status" and body == {} and config["mode"] == "sandbox"
                       and config.get("p08_callback") is None):
                     # Only a pre-approved, exact GET endpoint. No create/payment/purchase API.
@@ -466,6 +532,34 @@ def handler(config):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
     return Handler
+
+
+class BoundedThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    """Allow one slow synthetic provider call without starving other relays."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+    maximum_requests = 8
+
+    def __init__(self, *args, **kwargs):
+        self._slots = threading.BoundedSemaphore(self.maximum_requests)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 class SMTP(socketserver.StreamRequestHandler):
@@ -524,7 +618,7 @@ def main():
     if callback:
         callbacks = HTTPServer(("0.0.0.0", 8026), callback_handler(config["sandbox_token"], internal_key))
         threading.Thread(target=callbacks.serve_forever, daemon=True).start()
-    server = HTTPServer(("127.0.0.1", 8025), handler(config))
+    server = BoundedThreadingHTTPServer(("127.0.0.1", 8025), handler(config))
     server.timeout = 5
     with open("/tmp/harness-ready", "w") as ready:
         ready.write("firewall and transports ready\n")

@@ -27,7 +27,7 @@ def verify_database():
             observed = cursor.fetchone()
             expected = (
                 "disposable", "candidate_runtime", "127.0.0.1", 5432, False,
-                False, False, False, False, 4, "django_candidate", "candidate_runtime",
+                False, False, False, False, 6, "django_candidate", "candidate_runtime",
                 False, False,
             )
             if observed is not None and observed[-2] is True:
