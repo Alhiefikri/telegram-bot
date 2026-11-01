@@ -48,6 +48,12 @@ private testing chats. Other commands and Home's financial/API/support/language
 callbacks keep their existing identities for their owning migration tickets;
 this slice does not substitute fake implementations for those handlers.
 
+The P11-fix #717 follow-up adds the read-only successful Orders screen to this
+navigation owner. It uses one bounded, customer-scoped keyset read over paid
+Processing/Completed Orders, keeps PHP invoice/status buttons and cursor
+identities, and adds only the SELECT columns those reads need. Order detail and
+payment actions remain outside this slice.
+
 ## Explicit schema and runtime admission
 
 Startup runs no DDL or legacy migrations. The disposable smoke explicitly applies
@@ -99,9 +105,10 @@ docker run --rm --network none --read-only --tmpfs /tmp:size=64m \
 
 Observed locally: Python 3.13.18 / Django 5.2.18; 54 focused candidate tests,
 5 relay-admission, 9 existing harness-admission and 2 interactive-target tests passed. The real
-PostgreSQL smoke compared actual PHP Home/catalog/Family/detail captions and
-keyboards, then exercised actual HTTP ingress through canonical screen ACK,
-quantity and Back. The actual `navigate.py --once` command consumed a new
+PostgreSQL smoke compared actual PHP Home/catalog/Family/detail and the #717
+Orders captions/keyboards (first and older keyset pages), then exercised actual
+HTTP ingress through canonical screen ACK, quantity, Orders, stale rejection and
+Back. The actual `navigate.py --once` command consumed a new
 HTTP-accepted update and established Home. The smoke also exercised
 duplicate/stale/foreign/late updates, same-chat ordering, column privilege denial,
 exact-identity registration replay, expired/competing roots and a synchronized

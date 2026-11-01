@@ -4,7 +4,7 @@ import unittest
 from zoneinfo import ZoneInfo
 
 from lhie_candidate.navigation.presentation import CatalogPresenter
-from lhie_candidate.navigation.repository import CatalogRepository
+from lhie_candidate.navigation.repository import CatalogRepository, ORDER_HISTORY_PAGE_SIZE
 
 
 CUSTOMER = {'id': 1, 'telegram_id': 41001, 'first_name': 'Ayu', 'username': 'ayu', 'locale': 'id'}
@@ -16,6 +16,13 @@ def product(identity, name, *, family=None, stock=3, price=25000, **values):
                 price_amount=price, usdt_price_amount=None, sold_quantity=0, icon=None,
                 custom_emoji_id=None, description='Details <plain>', warranty_policy='',
                 telegram_content={}, telegram_image_path=None, **values)
+
+
+def order(identity, invoice, *, created_token, order_status='completed',
+          payment_status='paid', receipt_sent=True, customer_id=1):
+    return dict(id=f'00000000-0000-4000-8000-{identity:012d}', customer_id=customer_id,
+                invoice_number=invoice, order_status=order_status, payment_status=payment_status,
+                created_token=created_token, receipt_sent=receipt_sent)
 
 
 class MemoryCatalog(CatalogRepository):
@@ -30,8 +37,20 @@ class MemoryCatalog(CatalogRepository):
                           dict(key='menu.back',source_emoji='⬅️',fallback_emoji='🔙',custom_emoji_id=None)]
         self.tier_rows = {}
         self.assets = {}
+        self.order_rows = []
         self.paused = False
         self.spending = True
+
+    def order_history(self, customer_id, *, direction=None, created_token=None, order_id=None):
+        rows = [copy.deepcopy(row) for row in self.order_rows
+                if row['customer_id'] == customer_id and row['payment_status'] == 'paid'
+                and row['order_status'] in ('processing','completed')]
+        if direction is not None:
+            compare = (lambda row: (row['created_token'],row['id']) < (created_token,order_id)) if direction == 'older' else (
+                lambda row: (row['created_token'],row['id']) > (created_token,order_id))
+            rows = [row for row in rows if compare(row)]
+        rows.sort(key=lambda row: (row['created_token'],row['id']),reverse=direction != 'newer')
+        return rows[:ORDER_HISTORY_PAGE_SIZE + 1]
 
     def products(self):
         rows = copy.deepcopy(self.product_rows)
@@ -321,6 +340,86 @@ class CatalogPresentationTests(unittest.TestCase):
         self.assertEqual(self.state['catalog']['type'],'catalog')
         self.assertEqual(self.state['catalog']['page'],1)
         self.assertEqual(refreshed.caption,first.caption)
+
+    def _order_rows(self):
+        rows = [order(index,f'INV-{index:03d}',created_token=f'2026110112{23-index:02d}00',
+                      order_status='processing' if index in (3,4) else 'completed',
+                      receipt_sent=index not in (2,4)) for index in range(1,13)]
+        rows += [order(101,'INV-PENDING',created_token='20261101130000',payment_status='pending'),
+                 order(102,'INV-CANCELLED',created_token='20261101130100',order_status='cancelled')]
+        return rows
+
+    def test_orders_matches_php_status_labels_and_keyset_pagination(self):
+        self.repository.order_rows = self._order_rows()
+        self.state['selection'] = {'product_id': 3}
+        first = self.presenter.route(self.customer,'menu:orders',self.state)
+        self.assertEqual(self.state,{})
+        self.assertEqual((first.screen,first.locale,first.caption),('orders','id','📦 Pesanan Berhasil'))
+        order_buttons = [button for button in buttons(first) if button.get('callback_data','').startswith('order:')]
+        self.assertEqual([button['callback_data'] for button in order_buttons],
+                         [f'order:INV-{index:03d}' for index in range(1,11)])
+        self.assertEqual([button['text'] for button in order_buttons],
+                         ['📦 INV-001 · Terkirim','📦 INV-002 · Terkirim','📦 INV-003 · Terkirim',
+                          '📦 INV-004 · Diproses','📦 INV-005 · Terkirim','📦 INV-006 · Terkirim',
+                          '📦 INV-007 · Terkirim','📦 INV-008 · Terkirim','📦 INV-009 · Terkirim',
+                          '📦 INV-010 · Terkirim'])
+        next_button = next(button for button in buttons(first) if button.get('text','').startswith('Berikutnya'))
+        self.assertTrue(next_button['callback_data'].startswith('orders:older:20261101121300:'))
+        self.assertEqual([button['callback_data'] for button in first.keyboard['inline_keyboard'][-1]],
+                         ['menu:back','menu:home'])
+        second = self.presenter.route(self.customer,next_button['callback_data'],self.state)
+        self.assertEqual([button['callback_data'] for button in buttons(second)
+                          if button.get('callback_data','').startswith('order:')],
+                         ['order:INV-011','order:INV-012'])
+        previous = next(button for button in buttons(second)
+                        if button.get('callback_data','').startswith('orders:newer:'))
+        restored = self.presenter.route(self.customer,previous['callback_data'],self.state)
+        self.assertEqual(restored.caption,first.caption)
+        self.assertEqual(restored.keyboard,first.keyboard)
+
+    def test_orders_empty_localized_and_unimplemented_callbacks_do_not_fake_a_screen(self):
+        self.customer['locale'] = 'en'
+        empty = self.presenter.route(self.customer,'menu:orders',self.state)
+        self.assertEqual(empty.caption,'📦 No successful orders yet.')
+        self.assertEqual([button['callback_data'] for button in buttons(empty)],
+                         ['katalog','menu:back','menu:home'])
+        self.customer['locale'] = 'ms'
+        self.assertEqual(self.presenter.route(self.customer,'menu:orders',self.state).caption,
+                         '📦 Tiada pesanan berjaya lagi.')
+        self.customer['locale'] = 'id'
+        for data in ('orders:older:not-a-cursor','orders:newer:20261101120000:bad','order:INV-001'):
+            with self.subTest(data=data):
+                self.assertIsNone(self.presenter.route(self.customer,data,self.state))
+        self.repository.order_rows = self._order_rows()
+        self.state['selection'] = {'product_id': 3}
+        self.presenter.route(self.customer,'menu:orders',self.state)
+        self.assertEqual(self.presenter.route(
+            self.customer,'orders:older:20261301120000:'
+            '00000000-0000-4000-8000-000000000010',self.state).caption,
+            '📦 Pesanan Berhasil')
+        self.repository.order_rows = []
+        page = self.presenter.route(self.customer,'orders:older:20261101121300:'
+                                    '00000000-0000-4000-8000-000000000010',self.state)
+        self.assertEqual(page.caption,'📦 Belum ada pesanan berhasil.')
+        self.assertEqual([button['callback_data'] for button in buttons(page)],
+                         ['katalog','orders:open','menu:back','menu:home'])
+        self.assertEqual(self.presenter.route(self.customer,'orders:open',self.state).caption,
+                         '📦 Belum ada pesanan berhasil.')
+
+    def test_orders_uses_db_icon_for_copy_and_leading_button_icon(self):
+        self.presenter.custom_emoji = True
+        self.repository.order_rows = self._order_rows()[:1]
+        self.repository.icon_rows.append(dict(key='message.orders',source_emoji='📦',
+                                              fallback_emoji='📦',custom_emoji_id='400'))
+        screen = self.presenter.route(self.customer,'menu:orders',self.state)
+        self.assertIn('<tg-emoji emoji-id="400">📦</tg-emoji> Pesanan Berhasil',screen.caption)
+        order_button = next(button for button in buttons(screen)
+                            if button.get('callback_data','').startswith('order:'))
+        self.assertEqual(order_button['text'],'INV-001 · Terkirim')
+        self.assertEqual(order_button['icon_custom_emoji_id'],'400')
+        self.assertEqual(order_button['_unicode_fallback'],'📦 INV-001 · Terkirim')
+        back,home = screen.keyboard['inline_keyboard'][-1]
+        self.assertEqual((back['text'],home['text']),('🔙 Kembali','🏠 Beranda'))
 
 
 if __name__ == '__main__':

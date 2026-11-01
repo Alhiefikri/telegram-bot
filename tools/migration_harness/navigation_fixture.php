@@ -43,6 +43,25 @@ $bot = new class extends App\Services\Telegram\TelegramBotClient {
     public function deleteMessage(int|string $chatId, int|string $messageId): void {}
 };
 $app->instance(App\Services\Telegram\TelegramBotClient::class, $bot);
+foreach (range(1, 12) as $index) {
+    App\Models\Order::factory()->for($customer)->create([
+        'invoice_number' => 'INV-P06-'.str_pad((string) $index, 3, '0', STR_PAD_LEFT),
+        'order_status' => in_array($index, [3, 4], true)
+            ? App\Enums\OrderStatus::Processing : App\Enums\OrderStatus::Completed,
+        'payment_status' => App\Enums\PaymentStatus::Paid,
+        'created_at' => now()->subMinutes($index),
+        'updated_at' => now()->subMinutes($index),
+        'telegram_receipt_sent_at' => $index === 4 ? null : now(),
+    ]);
+}
+App\Models\Order::factory()->for($customer)->create([
+    'invoice_number' => 'INV-P06-UNPAID', 'order_status' => App\Enums\OrderStatus::PendingPayment,
+    'payment_status' => App\Enums\PaymentStatus::Pending, 'created_at' => now(),
+]);
+App\Models\Order::factory()->for($customer)->create([
+    'invoice_number' => 'INV-P06-CANCELLED', 'order_status' => App\Enums\OrderStatus::Cancelled,
+    'payment_status' => App\Enums\PaymentStatus::Paid, 'created_at' => now()->addMinute(),
+]);
 $catalog = $app->make(App\Services\Telegram\TelegramCatalogIntents::class);
 $home = $app->make(App\Services\Telegram\TelegramMenuIntents::class)->homeSurface($customer, '1');
 $expected = ['home' => ['caption' => $home->caption, 'keyboard' => $home->keyboard, 'options' => $home->options]];
@@ -52,6 +71,18 @@ $catalog->sendFamilyOptions($customer, '1', $family->id);
 $expected['family'] = end($bot->surfaces);
 $catalog->sendProductDetail($customer, '1', $products[1]);
 $expected['detail'] = end($bot->surfaces);
+$orders = $app->make(App\Services\Telegram\TelegramOrderIntents::class);
+$ordersSurface = $orders->orderHistorySurface($customer);
+$expected['orders'] = ['caption' => $ordersSurface->caption, 'keyboard' => $ordersSurface->keyboard,
+    'options' => $ordersSurface->options];
+$next = collect($ordersSurface->keyboard['inline_keyboard'])->flatten(1)
+    ->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'orders:older:'));
+if ($next === null) {
+    throw new RuntimeException('Synthetic Orders fixture did not produce a next page');
+}
+$ordersNext = $orders->orderHistorySurface($customer, $next['callback_data']);
+$expected['orders_next'] = ['caption' => $ordersNext->caption, 'keyboard' => $ordersNext->keyboard,
+    'options' => $ordersNext->options];
 echo json_encode(['customer_id' => $customer->id, 'family_id' => $family->id,
     'product_id' => $products[1]->id, 'standalone_id' => $standalone->id,
     'expected' => $expected], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);

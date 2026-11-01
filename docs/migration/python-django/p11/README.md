@@ -24,12 +24,18 @@ candidate counterpart in the P06–P10 slice, so injecting them on one side only
 would make the pair incomparable. Both sides still run their own real worker
 processes and sweeps.
 
-Candidate scope is navigation only. `orders` and `balance` callbacks keep their
-existing identities outside the P06 port, and there is no candidate
-navigation-to-checkout, paid detection or credential delivery surface. Those
-six navigation cells and both payment stages are reported as
-`not_implemented` with that declared reason; they are never substituted with
-synthetic PHP samples or claimed as candidate coverage.
+Candidate scope is navigation only. The measured #692 revision left `orders` and
+`balance` callbacks with their existing identities outside the P06 port, and
+there is no candidate navigation-to-checkout, paid detection or credential
+delivery surface. Those six navigation cells and both payment stages are
+reported as `not_implemented` with that declared reason; they are never
+substituted with synthetic PHP samples or claimed as candidate coverage.
+
+The separate P11-fix follow-up #717 ports the read-only successful Orders screen
+and removes `orders` from the declared gap list. That work is outside the
+measured #692 identity: its results are not pooled with the published samples,
+and the paired-gate rerun belongs to #722. Balance and both payment stages remain
+declared gaps until their own issues close.
 
 ## How both sides produce comparable evidence
 
@@ -157,3 +163,9 @@ remain owned by their existing P04/P06/P07/P08/P09/P10 modules and ADRs.
 - [PostgreSQL explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html):
   reused candidate session/advisory-lock patterns are unchanged; the benchmark
   adds no new locking or money path.
+- [Django raw SQL cursors](https://docs.djangoproject.com/en/5.2/topics/db/sql/):
+  the #717 Orders read uses `connection.cursor()` with `%s` parameters and a
+  bounded `LIMIT`, never string-interpolated customer values.
+- [PostgreSQL row comparison](https://www.postgresql.org/docs/16/functions-comparisons.html#ROW-WISE-COMPARISON):
+  the Orders keyset compares `(created_at, id)` in the requested direction so
+  equal-second Orders stay reachable without an offset scan.

@@ -7,9 +7,10 @@ whose protocol, dataset contract, dataset logical checksums or limits differ.
 
 Each navigation case is judged independently from successful ``screen_ack``
 p50/p95; scenario or user counts are never averaged. Declared candidate gaps
-(Orders, Balance, checkout and paid delivery) stay ``not_implemented``; missing
-or non-exploratory evidence is ``inconclusive``; a case fails only when a
-quality-qualified Django distribution is slower than 70% of its PHP pair.
+(Balance, checkout and paid delivery in the P11-fix revision) stay
+``not_implemented``; missing or non-exploratory evidence is ``inconclusive``; a
+case fails only when a quality-qualified Django distribution is slower than 70%
+of its PHP pair.
 
 Payment-stage numbers come from retained PHP-only diagnostic smoke evidence.
 The budget proposal is marked unratified and is never derived from Django

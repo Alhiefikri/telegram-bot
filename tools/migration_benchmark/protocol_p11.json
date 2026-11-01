@@ -27,14 +27,13 @@
     "paid_delivery"
   ],
   "candidate_unimplemented_scenarios": [
-    "orders",
     "balance"
   ],
   "candidate_unimplemented_other_scenarios": [
     "checkout",
     "paid_delivery"
   ],
-  "candidate_unimplemented_reason": "P06 leaves Orders and Balance callbacks with their existing identities, and P07/P08/P09 have no candidate navigation-to-checkout/payment/delivery surface. Missing cells stay missing; nothing is fabricated or substituted.",
+  "candidate_unimplemented_reason": "The P11-fix Orders port implements the successful-orders read screen; Balance, and P07/P08/P09 navigation-to-checkout/payment/delivery surfaces remain absent. Missing cells stay missing; nothing is fabricated or substituted.",
   "datasets": [
     "small",
     "large"
@@ -70,9 +69,9 @@
   "diagnostic_samples_per_batch": 0,
   "planned_cases": {
     "per_implemented_navigation_scope": 24,
-    "candidate_implementable": 18,
-    "candidate_unimplementable": 6,
-    "total_planned_cells": 42
+    "candidate_implementable": 21,
+    "candidate_unimplementable": 3,
+    "total_planned_cells": 45
   },
   "comparison": {
     "scope": "navigation_only",

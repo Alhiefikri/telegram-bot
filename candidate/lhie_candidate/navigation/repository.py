@@ -13,6 +13,8 @@ PRODUCT_COLUMNS = (
     "region account_type device_limit included_items limitations fulfillment_expectation support_policy"
 ).split()
 
+ORDER_HISTORY_PAGE_SIZE = 10
+
 # One projection shared by the catalog scan and targeted detail lookups. Detail,
 # quantity and Back renders must not re-scan every Product with its correlated
 # stock/order subqueries; P11 measured that full scan as the dominant cost.
@@ -58,6 +60,41 @@ class CatalogRepository:
         return self._one(
             "SELECT id,telegram_id,first_name,username,locale FROM public.customers WHERE telegram_id=%s",
             (telegram_id,),
+        )
+
+    def order_history(self, customer_id, *, direction=None, created_token=None, order_id=None):
+        """PHP-equivalent successful Orders page using one bounded keyset read.
+
+        ``created_token`` is the stored wall-clock timestamp (YYYYMMDDHHMMSS),
+        never a timezone-converted value: legacy Orders are timestamp without
+        time zone written in the application timezone. The composite keyset
+        keeps equal-second Orders reachable in both directions.
+        """
+        if direction not in (None, 'older', 'newer'):
+            raise ValueError('invalid order history direction')
+        if (direction is None) != (created_token is None and order_id is None):
+            raise ValueError('invalid order history cursor')
+        if direction is not None and (
+                not created_token or len(created_token) != 14 or not created_token.isdigit()
+                or not order_id):
+            raise ValueError('invalid order history cursor')
+        where = ("customer_id=%s AND payment_status='paid' "
+                 "AND order_status IN ('processing','completed')")
+        params = [customer_id]
+        if direction is not None:
+            operator = '<' if direction == 'older' else '>'
+            timestamp = (f'{created_token[0:4]}-{created_token[4:6]}-{created_token[6:8]} '
+                         f'{created_token[8:10]}:{created_token[10:12]}:{created_token[12:14]}')
+            where += f' AND (created_at, id) {operator} (%s::timestamp, %s::uuid)'
+            params += [timestamp, order_id]
+        order = 'DESC' if direction != 'newer' else 'ASC'
+        return self._rows(
+            "SELECT id,invoice_number,order_status,payment_status,"
+            "to_char(created_at,'YYYYMMDDHH24MISS') AS created_token,"
+            "telegram_receipt_sent_at IS NOT NULL AS receipt_sent "
+            "FROM public.orders WHERE " + where +
+            f" ORDER BY created_at {order},id {order} LIMIT {ORDER_HISTORY_PAGE_SIZE + 1}",
+            params,
         )
 
     def _product_rows(self, suffix="", params=()):

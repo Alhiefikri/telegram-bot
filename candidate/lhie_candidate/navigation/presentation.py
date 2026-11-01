@@ -19,6 +19,13 @@ from .types import Surface
 _LOCALES = {code: json.loads(Path(__file__).with_name(code + '.json').read_text()) for code in ('id','en','ms')}
 _ICON = re.compile(r'<tg-emoji\b[^>]*>(.*?)</tg-emoji>', re.S)
 _TOKEN = r'[a-f0-9]{16}'
+_ORDER_HISTORY = re.compile(
+    r'orders:(older|newer):([0-9]{14}):'
+    r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})')
+_ORDER_STATUS_KEYS = {'draft': 'status.order.draft', 'pending_payment': 'status.order.pending_payment',
+                      'processing': 'status.order.processing', 'completed': 'status.order.completed',
+                      'cancelled': 'status.order.cancelled', 'expired': 'status.order.expired'}
+_ORDER_HISTORY_PAGE_SIZE = 10
 _DEFAULT_ICONS = {'message.search': '🔎', 'message.refresh': '🔄', 'menu.back': '⬅️',
                   'menu.products': '🛍️', 'menu.balance': '💰', 'menu.orders': '📦',
                   'menu.language': '🌐', 'menu.support': '💬', 'menu.channel': '📢', 'menu.api': '🔌'}
@@ -114,6 +121,81 @@ class CatalogPresenter:
             else:
                 result['text'] = (glyph + ' ' + text).strip()
         return result
+
+    def _legacy_button(self, customer, key, callback, **replacements):
+        """Translate a non-slot button and move a leading catalog icon to Telegram's icon field."""
+        label = self.t(customer, key, **replacements)
+        match = re.match(r'<tg-emoji\b[^>]*\bemoji-id="([^"]+)"[^>]*>(.*?)</tg-emoji>\s*',
+                         label, re.S)
+        if self.custom_emoji and match:
+            text = plain(label[match.end():])
+            glyph = unescape(match.group(2))
+            return {'text': text, 'callback_data': callback, 'style': 'primary',
+                    'icon_custom_emoji_id': unescape(match.group(1)),
+                    '_unicode_fallback': (glyph + ' ' + text).strip()}
+        return {'text': plain(label), 'callback_data': callback, 'style': 'primary'}
+
+    def _navigation_row(self, customer):
+        return [self._button(customer,'menu.back','menu:back',slot='menu.back'),
+                self._button(customer,'menu.home','menu:home',slot='menu.home')]
+
+    def _order_status(self, customer, order):
+        if order['payment_status'] == 'paid' and (
+                order['order_status'] == 'completed' or order.get('receipt_sent')):
+            return self.t(customer,'order.history.delivered')
+        key = _ORDER_STATUS_KEYS.get(order['order_status'])
+        return self.t(customer,key) if key else order['order_status']
+
+    @staticmethod
+    def _order_cursor(direction, order):
+        return f"orders:{direction}:{order['created_token']}:{order['id']}"
+
+    def orders(self, customer, cursor=None):
+        """PHP-equivalent successful Orders history with bounded keyset pagination."""
+        direction = created_token = order_id = None
+        if cursor not in (None,'orders:open'):
+            match = _ORDER_HISTORY.fullmatch(cursor)
+            if match is None:
+                return None
+            direction, created_token, order_id = match.groups()
+            try:
+                datetime.strptime(created_token,'%Y%m%d%H%M%S')
+            except ValueError:
+                # PHP treats an unparsable cursor as the first page.
+                direction = created_token = order_id = None
+                cursor = None
+        orders = self.repository.order_history(
+            value(customer,'id'), direction=direction,
+            created_token=created_token, order_id=order_id)
+        has_more = len(orders) > _ORDER_HISTORY_PAGE_SIZE
+        if has_more:
+            orders = orders[:_ORDER_HISTORY_PAGE_SIZE]
+        if direction == 'newer':
+            orders = list(reversed(orders))
+        has_newer = cursor is not None and (direction == 'older' or has_more)
+        has_older = (has_more and (cursor is None or direction == 'older')) or (
+            cursor is not None and direction == 'newer')
+        if not orders:
+            rows = [[self._legacy_button(customer,'order.history.browse_button','katalog')]]
+            if cursor is not None:
+                rows.append([self._legacy_button(customer,'order.history.previous','orders:open')])
+            rows.append(self._navigation_row(customer))
+            return self._surface(customer,self.t(customer,'order.history.empty'),rows,screen='orders')
+        rows = [[self._legacy_button(
+                    customer,'order.history.item_button',f"order:{order['invoice_number']}",
+                    invoice=order['invoice_number'],status=self._order_status(customer,order))]
+                for order in orders]
+        pagination = []
+        if has_newer:
+            pagination.append(self._legacy_button(
+                customer,'order.history.previous',self._order_cursor('newer',orders[0])))
+        if has_older:
+            pagination.append(self._legacy_button(
+                customer,'order.history.next',self._order_cursor('older',orders[-1])))
+        if pagination:
+            rows.append(pagination)
+        rows.append(self._navigation_row(customer))
+        return self._surface(customer,self.t(customer,'order.history.title'),rows,screen='orders')
 
     def _product_icon(self, product):
         glyph, identifier = product.get('icon'), product.get('custom_emoji_id')
@@ -591,9 +673,12 @@ class CatalogPresenter:
         self._icon_rows = None
         self.callback_handled = False
         self.callback_notice = None
-        if data in ('menu','home','start','/start','/menu','menu:home','family:back:menu'):
+        if data in ('menu','home','start','/start','/menu','menu:home','menu:back','family:back:menu'):
             state.clear()
             return self.home(customer)
+        if data in ('menu:orders','orders:open') or _ORDER_HISTORY.fullmatch(data):
+            state.clear()
+            return self.orders(customer,None if data in ('menu:orders','orders:open') else data)
         if data in ('katalog','catalog','catalog:refresh'):
             state.clear()
             return self.catalog(customer,state=state)

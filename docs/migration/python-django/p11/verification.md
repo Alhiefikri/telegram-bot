@@ -134,8 +134,40 @@ smoke is two attempts per cell: p50 moved −32% to +99% across scenarios
 A future paired gate must use a new run identity; no result here is pooled with
 the measured run.
 
-Still not fixed because they are product features, not P11 defects: Orders and
-Balance navigation (Balance includes funding/money flows) and the candidate
+### Read-only Orders port (#717)
+
+`navigation/repository.py` now exposes one customer-scoped successful-Orders
+keyset read: paid `processing`/`completed` Orders, newest first by
+`(created_at, id)`, at most ten rows plus one lookahead. It selects only the
+columns the screen renders and never loads order history into memory.
+`navigation/presentation.py` routes `menu:orders`, `orders:open` and the PHP
+`orders:older`/`orders:newer` cursors, reuses the PHP invoice/status labels and
+Back/Home chrome, and leaves order detail/payment actions unhandled rather than
+fabricating a screen. Grants add only the missing SELECT columns on `public.orders`.
+
+Verification of this follow-up (not a gate rerun):
+
+| Check | Observed |
+| --- | --- |
+| Focused candidate unit lane | 47 tests passed (`test_catalog_presentation`, `test_navigation_ingress`, `test_http`, `test_runtime`) |
+| P11 contract/regression lane | 13 tests passed (`test_p11_probe`, `test_p11_compare`) |
+| Harness regression lane | 87 tests passed |
+| PHP↔candidate Orders fixture and PostgreSQL smoke | `python3 tools/migration_harness/smoke_navigation.py` — `passed`; PHP parity for Home/catalog/Family/detail/Orders, first + older Orders pages, stale callback, Back/Home, grant denial and real PostgreSQL keyset order |
+| P11 structural smoke | `.local/migration-p11/django-smoke-orders` — `complete`, 7/7 cells, 14/14 successful attempts, 7 authority audits with 0 changed tables/violations; the `orders` cell was 2/2 success |
+
+The Orders unit lane covers first/second page keyset round-trip, equal-status
+label selection, id/en/ms empty copy, malformed/foreign/invalid cursors, DB icon
+fallback, and the explicit refusal to render an order-detail callback. The P11
+contract plans `orders` at users 1/5/10; the short structural smoke exercises its
+single-user protocol cell, and #722 owns the measured 1/5/10 rerun. No
+performance claim follows, and no sample is pooled with the measured #692 run.
+The local candidate image for this follow-up was assembled from the existing
+pinned P05 candidate base plus the current working tree because the canonical
+dependency rebuild could not finish against the slow package network; the smoke
+result records the current source hashes and image identity.
+
+Still not fixed because they are product features, not P11 defects: Balance
+navigation (Balance includes funding/money flows) and the candidate
 checkout→paid→receipt surface. Those need separate issues, grant/authority
 review and H1 authorization before another gate.
 

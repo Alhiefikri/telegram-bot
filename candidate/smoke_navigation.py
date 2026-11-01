@@ -49,8 +49,15 @@ def run():
     for denied in (
         'SELECT password FROM public.customers',
         'SELECT * FROM public.product_stock_items',
+        'SELECT total_amount FROM public.orders',
         'UPDATE public.customer_balance_accounts SET balance=balance',
         'UPDATE public.customers SET auth_version=auth_version',
+        'UPDATE public.orders SET order_status=order_status',
+        "INSERT INTO public.orders (id,customer_id,invoice_number,order_status,payment_status,total_amount,currency,created_at,updated_at) VALUES (gen_random_uuid(),1,'DENIED','processing','paid',0,'IDR',now(),now())",
+        'DELETE FROM public.orders WHERE FALSE',
+        'UPDATE public.payments SET status=status',
+        'DELETE FROM public.telegram_outbound_effects WHERE FALSE',
+        'UPDATE public.store_balance_entries SET balance_after=balance_after',
         'CREATE TABLE public.p06_forbidden (id integer)',
     ):
         try:
@@ -69,7 +76,8 @@ def run():
     state = {}
     surfaces = {'home': presenter.home(customer), 'catalog': presenter.catalog(customer,state=state),
         'family': presenter.family(customer,reference['family_id'],state=state),
-        'detail': presenter.detail(customer,reference['product_id'],state=state)}
+        'detail': presenter.detail(customer,reference['product_id'],state=state),
+        'orders': presenter.orders(customer)}
     for name,surface in surfaces.items():
         actual = canonical({'caption':surface.caption,'keyboard':surface.keyboard,'options':surface.options})
         expected = canonical(reference['expected'][name])
@@ -77,6 +85,23 @@ def run():
             with open('/tmp/p06-parity-diff.json','w') as output:
                 json.dump({'surface':name,'actual':actual,'expected':expected},output,ensure_ascii=False,indent=2)
             raise AssertionError('PHP presentation mismatch: ' + name)
+    next_orders = next(button['callback_data']
+        for row in reference['expected']['orders']['keyboard']['inline_keyboard'] for button in row
+        if button.get('callback_data','').startswith('orders:older:'))
+    orders_next = presenter.route(customer,next_orders,{})
+    actual = canonical({'caption':orders_next.caption,'keyboard':orders_next.keyboard,'options':orders_next.options})
+    expected = canonical(reference['expected']['orders_next'])
+    if actual != expected:
+        with open('/tmp/p06-parity-diff.json','w') as output:
+            json.dump({'surface':'orders_next','actual':actual,'expected':expected},output,ensure_ascii=False,indent=2)
+        raise AssertionError('PHP presentation mismatch: orders_next')
+    history = repository.order_history(customer['id'])
+    if [row['invoice_number'] for row in history[:10]] != [f'INV-P06-{index:03d}' for index in range(1,11)]:
+        raise AssertionError('Orders keyset order is not newest-first')
+    older = repository.order_history(customer['id'],direction='older',
+        created_token=history[9]['created_token'],order_id=history[9]['id'])
+    if [row['invoice_number'] for row in older] != ['INV-P06-011','INV-P06-012']:
+        raise AssertionError('Orders keyset older page is incorrect')
     transport = RelayTransport()
     roots = NavigationRoots(transport,bot_asset_scope='synthetic')
     processor = NavigationProcessor(repository,presenter,roots,transport)
@@ -148,6 +173,12 @@ def run():
     assert roots.current_for_chat(customer,'1').message_id != previous_home.message_id
     receive(callback(113,'katalog',message_id=previous_home.message_id))
     assert processor.process(113) == 'stale'
+    click(114,'menu:orders')
+    assert roots.current_for_chat(customer,'1').screen == 'orders'
+    receive(callback(115,'menu:orders',message_id=999999))
+    assert processor.process(115) == 'stale'
+    click(116,'menu:back')
+    assert roots.current_for_chat(customer,'1').screen == 'home'
     protocol = exercise_root_protocol(customer)
     from lhie_candidate.navigation.customers import resolve_customer
     second = resolve_customer(repository,{'id':2,'first_name':'Synthetic Second'})
@@ -163,7 +194,8 @@ def run():
     assert json.loads(command.stdout) == {'status':'processed','outcomes':['established']}
     assert NavigationRoots(transport,bot_asset_scope='LhieStoreTestBot').current_for_chat(customer,'1').screen == 'home'
     return {'status':'passed','dataset':'p06-synthetic-repository-schema-v1',
-        'php_surface_parity':list(surfaces),'webhook_to_screen':['home','catalog','family','detail','quantity','back','home'],
+        'php_surface_parity':list(surfaces),'orders_parity':['first_page','older_page','stale','back'],
+        'webhook_to_screen':['home','catalog','family','detail','quantity','back','home','orders','back'],
         'duplicate_stale_foreign_burst':'passed','webhook_authentication':'passed',
         'registration':'exact_telegram_identity_replay_passed',
         'bounded_consumer_command':'navigate.py --once rendered accepted Home',

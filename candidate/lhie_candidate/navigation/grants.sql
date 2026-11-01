@@ -16,7 +16,8 @@ GRANT SELECT (id,name,slug,description,icon,custom_emoji_id,telegram_image_path,
     ON public.product_families TO candidate_runtime;
 GRANT SELECT (product_id,supplier_purchase_id,order_item_id,retired_at) ON public.product_stock_items TO candidate_runtime;
 GRANT SELECT (product_id,order_id,quantity) ON public.order_items TO candidate_runtime;
-GRANT SELECT (id,customer_id,payment_status,order_status) ON public.orders TO candidate_runtime;
+GRANT SELECT (id,customer_id,invoice_number,payment_status,order_status,created_at,telegram_receipt_sent_at)
+    ON public.orders TO candidate_runtime;
 GRANT SELECT (id,order_id,amount,currency,status,paid_at) ON public.payments TO candidate_runtime;
 GRANT SELECT (id,product_id,minimum_quantity,price_amount,usdt_price_amount)
     ON public.product_quantity_price_tiers TO candidate_runtime;

@@ -24,8 +24,12 @@ Actual test-bot/sandbox target verification belongs to P01/P08, independent of H
 P06 [initial navigation](../migration/python-django/p06/README.md) owns
 `candidate/lhie_candidate/navigation/`: minimized authenticated ingress, durable
 update dedupe, private-chat sequencing, ACK-backed canonical generation/leases,
-and DB-backed Home/catalog/Family/Plan/detail/quantity presentation. Its SQL and
-column-limited grants require explicit disposable provisioning; startup never
+and DB-backed Home/catalog/Family/Plan/detail/quantity presentation. The P11-fix
+#717 follow-up adds the read-only successful Orders history: one bounded
+customer-scoped keyset read over paid processing/completed Orders, PHP-equivalent
+invoice/status buttons and cursors, and Back/Home chrome. Orders column grants
+remain SELECT-only. The navigation SQL and column-limited grants require explicit
+disposable provisioning; startup never
 installs legacy or navigation tables. `navigate.py --once` remains a bounded manual
 consumer; the P10 isolated supervisor owns the automatic interaction process. `tools/migration_harness/smoke_navigation.py`
 reuses P01 plus the repository migration oracle, compares actual PHP captions/
@@ -95,9 +99,10 @@ real bounded interaction worker, instrumented only inside the probe process
 tree. Candidate cells may change only `django_candidate` state and admitted
 Customer profile columns; the runner hashes every other public table after each
 batch and stops on any change. The paired report judges each navigation
-scenario/user case independently against 70% of current-PHP p50/p95. Declared
-candidate gaps (Orders, Balance, checkout, paid delivery) stay
-`not_implemented`. `tests/migration_harness/test_p11_probe.py` and
+scenario/user case independently against 70% of current-PHP p50/p95. After the
+#717 follow-up, declared candidate gaps are Balance, checkout and paid delivery;
+the measured #692 evidence still records Orders as absent and is never relabelled.
+`tests/migration_harness/test_p11_probe.py` and
 `test_p11_compare.py` are its regressions. It adds no production activation or
 payment-stage target; H1 owns the continue/fix/stop decision.
 

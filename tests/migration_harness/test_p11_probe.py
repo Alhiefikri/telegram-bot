@@ -29,8 +29,11 @@ def payload(**changes):
 class CandidateProbeContractTest(unittest.TestCase):
     def test_paired_cell_identity_is_accepted_and_other_conditions_refused(self):
         self.assertEqual(probe.validate_batch(payload())['scenario'], 'home_catalog')
+        for users in (1, 5, 10):
+            self.assertEqual(probe.validate_batch(payload(scenario='orders', users=users))['users'],
+                             users)
         for changes in ({'background': 'representative'}, {'traffic': 'same_chat'},
-                        {'temperature': 'cold'}, {'scenario': 'orders'},
+                        {'temperature': 'cold'}, {'scenario': 'balance'},
                         {'implementation': 'laravel'}, {'profile': 'normalized'},
                         {'transport': 'sandbox'}, {'dataset': 'production'}):
             with self.subTest(changes=changes):
