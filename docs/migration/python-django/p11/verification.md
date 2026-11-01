@@ -241,16 +241,68 @@ stage was measured or added to the protocol. ADR-0019 remains Proposed; H1 and
 the Owner must record activation approval (and P15 must qualify the provider/
 credentials) before this slice can be activated or measured.
 
-Still not fixed because they are product features, not P11 defects: the candidate
-checkout→paid→receipt surface. It needs a separate issue, grant/authority review
-and H1 authorization before another gate.
+The #720 follow-up below closes the candidate checkout→paid→receipt surface
+behind the navigation detail pay callbacks. It does not retroactively change the
+#719 approval statement or the measured #692 identity.
+
+### Navigation checkout, payment and receipt (#720)
+
+`candidate/lhie_candidate/checkout/navigation.py` is a bridge above the existing
+owners, not a new payment writer. A `detail:pay:qris` or `detail:pay:balance`
+selection locks the Customer, revalidates the admitted navigation root, reuses
+or creates exactly one canonical Cart item for the selected Product/quantity,
+then delegates to P07 `CheckoutService` with its existing preflight/locks/pricing/
+inventory rules. The QRIS rail uses the P08 `SakurupiahLifecycle` for one sandbox
+invoice and authoritative `refresh`/`recover`; the Balance rail uses
+`StoreBalanceLedger` and the existing spending/restore gates. `checkout:check:
+<payment-id>` observes the same Payment, never creates a second invoice, and
+settlement wakes the existing P09 receipt materializer. The presenter keeps the
+PHP `detail:pay:qris|balance` identities and renders `id`/`en`/`ms` copy through
+the existing catalog keys, the primary button convention and DB icon slots. The
+only new write authority is Cart/CartItem insert plus the already-reviewed
+P07/P08/P09 columns; provider references/totals/status still have one owner.
+
+Verification of this follow-up (not a gate rerun):
+
+| Check | Observed |
+| --- | --- |
+| Focused candidate unit lane | 70 tests passed (`test_navigation_checkout`, `test_catalog_presentation`, `test_navigation_ingress`, `test_http`, `test_runtime`, `test_funding`) |
+| P11 contract/regression lane | 14 tests passed (`test_p11_probe`, `test_p11_compare`) |
+| PHP↔candidate navigation/checkout smoke | `python3 tools/migration_harness/smoke_navigation.py` — `passed`; the PHP parity, read-only navigation and #719 funding stages passed first, then the #720 probe completed |
+| QRIS fake-sandbox flow | one Order/Payment, `provider_creates = 1` after replay, `paid_observed` settled once, one external receipt claim, one receipt effect, `credential_ack = sent`, `group_complete = true`, second delivery `not_ready` |
+| Store Balance flow | one completed/paid Order, balance debited exactly once, one receipt effect, duplicate delivery `not_ready` |
+| Same-key race | two concurrent threads, one Order, one Payment, same Order identity, zero errors |
+| Authority denials | six runtime statements rejected with SQLSTATE `42501`: order total, payment amount, product price, receipt status, ledger delete and CartItem quantity |
+| Runtime source hashes | 63 files recorded in `.local/migration-p06/verification.json`; no production/CI/provider operation |
+
+The one-sample local boundary observations for QRIS were `checkout_ready`
+71.06 ms, `paid_observed` 20.57 ms, `paid_committed` 0.99 ms, `receipt_queued`
+323.45 ms, `receipt_pickup`/`credential_ack` 190.01 ms and `group_complete`
+190.02 ms. The same run's Balance sample recorded `checkout_ready` 64.80 ms,
+`receipt_queued` 197.45 ms, `receipt_pickup`/`credential_ack` 217.81 ms and
+`group_complete` 217.81 ms. They carry
+`target_status = proposed_unratified`: the sample is synthetic, single-attempt,
+in-process fake provider, and not a paired PHP/Django comparison. The probe emits
+no device-visible latency and no performance claim. #722 must run the new paired
+identity; H1 must ratify or replace any budget.
+
+The local checkout probe ran with `lhie-p09-candidate:local` while mounting the
+current working tree at `/opt/candidate`, because the older
+`lhie-p05-candidate:1` image does not contain Pillow and therefore cannot import
+the receipt invoice renderer. The dependency image identity is recorded here as
+a limitation, not as a production artifact. The fake provider returns only
+synthetic `https://sakurupiah.id` presentation URLs; there is no network,
+real money, live Testing Bot send or provider credential. `checkout_fixture.php`
+adds three isolated Customer/Product pairs (`navigation_qris`,
+`navigation_balance`, `navigation_race`) after the existing P07 fixtures so no
+prior economic fixture identity changes.
 
 ## Focused regressions
 
 | Check | Observed |
 | --- | --- |
-| `python3 -m unittest discover -s tests/migration_harness` | 87 tests passed |
-| P11-specific (`test_p11_probe`, `test_p11_compare`) | 13 tests passed |
+| `python3 -m unittest discover -s tests/migration_harness` | 88 tests passed |
+| P11-specific (`test_p11_probe`, `test_p11_compare`) | 14 tests passed |
 | `python3 -m py_compile tools/migration_benchmark/*.py` | passed |
 | Paired-report mismatch refusals | dataset SHA, protocol, smoke, implementation, PHP measurement-path delta, missing authority audit, critical finding → all covered |
 

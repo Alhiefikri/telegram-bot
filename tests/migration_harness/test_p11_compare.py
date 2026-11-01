@@ -237,6 +237,15 @@ class ProtocolP11ContractTest(unittest.TestCase):
         self.assertIn('representative', PROTOCOL['background_policy'])
         self.assertIn('resource_sample_interval_seconds', PROTOCOL)
 
+    def test_candidate_payment_stage_probe_stays_local_and_unratified(self):
+        probe = PROTOCOL['candidate_payment_stage_probe']
+        self.assertEqual(probe['status'], 'local_single_sample_not_paired')
+        self.assertEqual(probe['target_status'], 'proposed_unratified')
+        self.assertEqual(probe['probe'], 'candidate/smoke_checkout_navigation.py')
+        self.assertIn('checkout_ready', probe['boundaries'])
+        self.assertIn('group_complete', probe['boundaries'])
+        self.assertIn('H1', probe['authority'])
+
     def test_runner_plans_only_the_declared_candidate_scope(self):
         spec = importlib.util.spec_from_file_location(
             'benchmark_runner_p11', TOOLS / 'runner.py')

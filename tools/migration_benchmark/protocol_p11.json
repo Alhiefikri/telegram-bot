@@ -31,7 +31,7 @@
     "checkout",
     "paid_delivery"
   ],
-  "candidate_unimplemented_reason": "The P11-fix Balance port implements the read-only Saldo screen and IDR ledger history; P07/P08/P09 navigation-to-checkout/payment/delivery surfaces remain absent. Missing cells stay missing; nothing is fabricated or substituted.",
+  "candidate_unimplemented_reason": "The measured #692 identity predates the #717 Orders, #718 Balance, #719 funding and #720 navigation-checkout/payment/receipt follow-ups. #720 now provides a local candidate checkout/paid/receipt surface and single-sample stage probe, but the paired runner does not yet plan payment cells; #722 owns the new paired run and H1 owns any budget. Missing historical cells stay missing; nothing is fabricated or substituted.",
   "datasets": [
     "small",
     "large"
@@ -104,7 +104,7 @@
     "H1 approval"
   ],
   "unavailable_evidence": {
-    "candidate_payment_stages": "not implemented in the P06-P10 slice; PHP-only retained diagnostics",
+    "candidate_payment_stages": "The #720 navigation checkout/payment/receipt surface exists locally, but no paired candidate payment samples have been collected; #722 owns the rerun.",
     "live_testing_bot": "no new live QA; P06 operator-confirmed navigation/media evidence is reused",
     "visible_device": "unknown; human H1 observation"
   },
@@ -113,5 +113,22 @@
     "django_test_client_environ": "https://docs.djangoproject.com/en/5.2/topics/testing/tools/",
     "postgres_row_locking": "https://www.postgresql.org/docs/16/explicit-locking.html"
   },
-  "resource_sample_interval_seconds": 5
+  "resource_sample_interval_seconds": 5,
+  "candidate_payment_stage_probe": {
+    "status": "local_single_sample_not_paired",
+    "command": "python3 tools/migration_harness/smoke_navigation.py",
+    "probe": "candidate/smoke_checkout_navigation.py",
+    "boundaries": [
+      "checkout_ready",
+      "paid_observed",
+      "paid_committed",
+      "receipt_queued",
+      "receipt_pickup",
+      "credential_ack",
+      "group_complete"
+    ],
+    "target_status": "proposed_unratified",
+    "reason": "The #720 probe records one fake-sandbox QRIS/Balance sample and a same-key race; it is integration evidence, not a paired distribution. #722 must collect the new paired identity before H1 can ratify any target.",
+    "authority": "H1/Owner; no post-hoc target is set by this change"
+  }
 }

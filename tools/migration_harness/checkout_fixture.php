@@ -84,5 +84,17 @@ $fixtures['receipt_partial'] = row($customer, $first, $partialCart);
 $customer = buyer(50000);
 $product = product('receipt-historical');
 $fixtures['receipt_historical'] = row($customer, $product, cart($customer, $product));
+foreach (['navigation_qris', 'navigation_balance', 'navigation_race'] as $name) {
+    $customer = buyer(50000);
+    $customer->update(['locale' => 'id']);
+    $product = product(str_replace('_', '-', $name));
+    $fixtures[$name] = [
+        'customer_id' => $customer->id,
+        'telegram_id' => $customer->telegram_id,
+        'product_id' => $product->id,
+        'product_name' => $product->name,
+        'stock' => $product->fresh()->stock,
+    ];
+}
 $fixtures['key'] = hash_hmac('sha256', 'telegram-direct-checkout|42|700042|700042|99|checkout:choice', str_repeat('a', 64));
 echo json_encode($fixtures, JSON_THROW_ON_ERROR);

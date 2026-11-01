@@ -40,10 +40,21 @@ fake-only sandbox provider seam and settlement through the existing Store
 Balance ledger plus global external-receipt claim. That work is outside the
 measured #692 identity: its results are not pooled with the published samples,
 and the paired-gate rerun belongs to #722. The funding rail is inactive by
-default, and full provider/credential activation remains P15/P17. Checkout and
-paid delivery remain declared gaps until their own issues close. No Owner/H1/ADR
-approval is recorded by this change; H1/Owner authorization remains a blocker
-for activating or measuring the funding rail.
+default, and full provider/credential activation remains P15/P17. No
+Owner/H1/ADR approval is recorded by this change; H1/Owner authorization remains
+a blocker for activating or measuring the funding rail.
+
+The #720 follow-up adds the candidate navigation-to-checkout/payment/receipt
+surface behind `detail:pay:qris`, `detail:pay:balance` and
+`checkout:check:<payment-id>`. It reuses the P07 checkout/inventory owner, the
+P08 sandbox lifecycle (one Payment, no provider retarget and no second invoice)
+and the P09 ordered receipt ledger. A local fake-sandbox probe measures the
+candidate boundaries and proves one Order/Payment per selection, replay and
+same-key race, receipt completion and duplicate-delivery refusal. That probe is
+single-sample local integration evidence, not a paired measurement. The measured
+#692 identity still has no candidate checkout cell, so the protocol continues to
+declare both payment scenarios `not_implemented` for that run and no sample is
+pooled. #722 owns a new paired run; H1 still owns any payment-stage budget.
 
 ## How both sides produce comparable evidence
 
@@ -146,12 +157,19 @@ H1 owns continue/fix/stop.
 
 ## Payment stages and budgets
 
-No paired payment-stage timing exists. Retained PHP checkout/credential
-diagnostics from P04 are reported separately with their actual (weak)
-conditions, and `compare.py` emits a `proposed_unratified` budget anchor set at
-0.70 × current-PHP diagnostic p95 per boundary. Those anchors are a starting
-proposal for H1, not a candidate target, because the candidate has no payment
-surface and no Django payment result was observed or used.
+No paired payment-stage timing exists for the measured #692 identity, and
+`compare.py` intentionally continues to report the retained PHP-only diagnostic
+set. The #720 surface can now observe candidate `checkout_ready`,
+`paid_observed`, `paid_committed`, `receipt_queued`, `receipt_pickup`,
+`credential_ack` and `group_complete` locally through
+`candidate/smoke_checkout_navigation.py`, but it produces one synthetic sample
+per boundary, not a distribution. `compare.py` still emits the
+`proposed_unratified` 0.70 × current-PHP diagnostic p95 anchors as a starting
+proposal for H1. They are not a candidate target: no paired Django payment
+sample has been collected, and #722/H1 must ratify or replace the numbers.
+`protocol_p11.json` records the #720 local probe as
+`local_single_sample_not_paired` with `target_status = proposed_unratified`; it
+does not add payment cells to the measured paired runner.
 
 ## Relevant owners
 
@@ -188,3 +206,10 @@ remain owned by their existing P04/P06/P07/P08/P09/P10 modules and ADRs.
 - [PostgreSQL row comparison](https://www.postgresql.org/docs/16/functions-comparisons.html#ROW-WISE-COMPARISON):
   the Orders and Balance keysets compare `(created_at, id)` in the requested
   direction so equal-second rows stay reachable without an offset scan.
+- [Django transactions](https://docs.djangoproject.com/en/5.2/topics/db/transactions/):
+  the #720 Cart materialization locks the Customer and revalidates the admitted
+  root inside one short transaction; provider I/O and checkout retries stay
+  outside it.
+- [Django `select_for_update`](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update):
+  the same-key replay/race path uses real PostgreSQL Customer and Cart row locks;
+  SQLite/TestCase cannot prove that boundary.

@@ -2,6 +2,8 @@
 NAVIGATION_INSERT = {'customers': {'telegram_id', 'first_name', 'username', 'locale', 'created_at', 'updated_at'}}
 NAVIGATION_UPDATE = {'customers': {'first_name', 'username', 'locale', 'updated_at'}}
 CHECKOUT_INSERT = {
+    'carts': set('customer_id origin status expires_at created_at updated_at'.split()),
+    'cart_items': set('cart_id product_id quantity created_at updated_at'.split()),
     'orders': set('id customer_id cart_id checkout_key invoice_number order_status payment_status total_amount currency expires_at terms_version terms_accepted_at balance_checkout_snapshot created_at updated_at'.split()),
     'payments': set('id order_id provider merchant_ref method amount currency status expired_at sakurupiah_channel binance_verification_status created_at updated_at'.split()),
     'order_items': set('order_id product_id product_name product_icon product_custom_emoji_id family_id family_name delivery_note delivery_note_snapshotted usage_guide_title usage_guide_url usage_guide_snapshotted quantity local_quantity supplier_quantity quantity_price_tier_minimum unit_price subtotal created_at updated_at'.split()),

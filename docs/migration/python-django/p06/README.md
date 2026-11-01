@@ -51,8 +51,8 @@ this slice does not substitute fake implementations for those handlers.
 The P11-fix #717 follow-up adds the read-only successful Orders screen to this
 navigation owner. It uses one bounded, customer-scoped keyset read over paid
 Processing/Completed Orders, keeps PHP invoice/status buttons and cursor
-identities, and adds only the SELECT columns those reads need. Order detail and
-payment actions remain outside this slice.
+identities, and adds only the SELECT columns those reads need. Order detail
+remains outside this slice; the #720 follow-up owns navigation payment actions.
 
 The #718 follow-up adds the read-only Saldo screen and IDR ledger history. It
 reads the IDR projection and newest ledger entry in one statement, renders the
@@ -72,6 +72,22 @@ and every confirmation fails closed without a balance write. A separate
 installs nothing. `balance:p:*`, `balance:confirm|cancel|back:*`,
 `balance:topup:*:check|retry` and `/deposit` are wired. Full top-up recovery,
 manual proof review, KlikQRIS/Binance and USDT funding remain P15/P17.
+
+The #720 follow-up wires `detail:pay:qris` and `detail:pay:balance` into
+`candidate/lhie_candidate/checkout/navigation.py`. It materializes the exact
+detail selection as one canonical Cart item, derives the PHP-compatible
+detail-checkout HMAC, and delegates to the existing P07 `CheckoutService`
+(preflight before locks, local preparation after locks, Cart/Product/StockItem
+locks and inventory allocation unchanged). QRIS invoice creation and
+authoritative observation reuse the P08 `SakurupiahLifecycle`; no second invoice
+or provider retarget exists. `checkout:check:<payment-id>` reuses the same
+Payment, settles once and wakes the existing P09 receipt owner. Store Balance
+stays on `StoreBalanceLedger` and the existing spending/restore gates. The new
+authority is limited to Cart/CartItem inserts plus the already-reviewed P07/P08/
+P09 columns; `smoke_checkout_navigation.py` proves the fake-sandbox QRIS and
+Balance paths, replay, a two-thread same-key race, receipt delivery and runtime
+column denials. Production provider, real money, H1 budget ratification and the
+paired payment-stage measurement remain outside this slice and belong to #722/H1.
 
 ## Explicit schema and runtime admission
 

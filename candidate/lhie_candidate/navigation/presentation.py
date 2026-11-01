@@ -32,6 +32,8 @@ _BALANCE_ACTIVITY = re.compile(r'balance:a:(o|n):([A-Za-z0-9_-]{25,})')
 _BALANCE_DETAIL = re.compile(r'balance:a:d:([A-Za-z0-9_-]{25,})')
 _FUNDING_INTENT = re.compile(r'balance:(confirm|cancel|back):([a-f0-9]{32})\Z')
 _FUNDING_TOPUP = re.compile(r'balance:topup:([1-9][0-9]{0,18}):(check|retry)\Z')
+_CHECKOUT_PAY = re.compile(r'detail:pay:(qris|balance):([1-9][0-9]*):([A-Za-z0-9_-]+)\Z')
+_CHECKOUT_CHECK = re.compile(r'checkout:check:([0-9a-fA-F-]{36})\Z')
 _BALANCE_KINDS = {
     'admin_adjustment_credit': ('balance.activity.kind.adjustment', 1),
     'admin_adjustment_reversal': ('balance.activity.kind.adjustment_reversal', -1),
@@ -96,7 +98,8 @@ def plain(text):
 
 class CatalogPresenter:
     def __init__(self, repository, *, signing_key=None, custom_emoji=False, media_mapping=None,
-                 bot_scope='synthetic', dollar_rail_selectable=False, clock=None, funding=None):
+                 bot_scope='synthetic', dollar_rail_selectable=False, clock=None, funding=None,
+                 checkout=None):
         self.repository = repository
         self.signing_key = signing_key
         self.custom_emoji = custom_emoji
@@ -109,6 +112,9 @@ class CatalogPresenter:
         # The minimum P11 funding owner is injected explicitly. Without it the
         # read-only Saldo screen keeps the #718 explicit-refusal behavior.
         self.funding = funding
+        # The navigation checkout owner is injected explicitly. Without it the
+        # existing detail pay callbacks stay an explicit stale acknowledgement.
+        self.checkout = checkout
         self._icon_rows = None
         self.callback_handled = False
         self.callback_notice = None
@@ -592,6 +598,164 @@ class CatalogPresenter:
             self.callback_notice = plain(self.t(customer, 'balance.add.preset_stale'))
             return self.add_balance(customer, 'balance.add.preset_stale')
         return None
+
+    # -- navigation checkout / payment ---------------------------------
+
+    def _checkout_ready(self):
+        return (self.checkout is not None
+                and callable(getattr(self.checkout, 'checkout', None))
+                and callable(getattr(self.checkout, 'check', None)))
+
+    def _checkout_unavailable(self, customer):
+        from types import SimpleNamespace
+        return self._checkout_surface(customer, SimpleNamespace(
+            state='provider_unavailable', payment_id=None, invoice_number=None,
+            amount=None, total=None, fee=None, expires_at=None, qris_url=None,
+            checkout_url=None, rail=None))
+
+    def _checkout_surface(self, customer, view, *, product=None, quantity=None):
+        lines = []
+        rows = []
+        if view.state == 'pending':
+            lines = [self.t_html(customer, 'payment.sakurupiah.checkout_created'),
+                     '━━━━━━━━━━━━━━',
+                     self.t_html(customer, 'payment.invoice', invoice=view.invoice_number or '')]
+            if product is not None and quantity is not None:
+                lines.append(self.t_html(customer, 'payment.products',
+                                         items=f'{product["name"]} × {quantity}'))
+            lines.append(self.t_html(customer, 'payment.product_total',
+                                     amount='Rp ' + number(int(view.amount or 0))))
+            if view.fee is not None:
+                lines.append(self.t_html(customer, 'payment.qris_fee',
+                                         fee='Rp ' + number(int(view.fee))))
+            lines.append(self.t_html(customer, 'payment.qris_total',
+                                     amount='Rp ' + number(int(view.total or view.amount or 0))))
+            if view.expires_at is not None:
+                lines.append(self.t_html(customer, 'payment.qris_deadline',
+                                         date=self._funding_date(customer, view.expires_at)))
+            if view.qris_url or view.checkout_url:
+                lines += ['', self.t_html(customer, 'payment.sakurupiah.scan'),
+                          self.t_html(customer, 'payment.sakurupiah.exact_amount')]
+            else:
+                lines += ['', self.t_html(customer, 'payment.sakurupiah.retry.creating_body')]
+            if view.qris_url:
+                rows.append([self._url_button(customer, 'payment.action.website', view.qris_url)])
+            if view.checkout_url:
+                rows.append([self._url_button(customer, 'payment.action.website', view.checkout_url)])
+            if view.payment_id:
+                rows.append([self._legacy_button(
+                    customer, 'payment.action.check', f'checkout:check:{view.payment_id}')])
+            rows.append([self._button(customer, 'checkout.orders_button', 'menu:orders',
+                                      slot='menu.orders')])
+            rows.append(self._navigation_row(customer))
+        elif view.state == 'paid':
+            title = ('checkout.balance.success' if view.rail == 'balance'
+                     else 'order.guidance.processing')
+            lines = [self.t_html(customer, title),
+                     self.t_html(customer, 'payment.invoice', invoice=view.invoice_number or ''),
+                     self.t_html(customer, 'payment.total',
+                                 amount='Rp ' + number(int(view.total or view.amount or 0)))]
+            rows = [[self._button(customer, 'checkout.orders_button', 'menu:orders',
+                                  slot='menu.orders')], self._navigation_row(customer)]
+        elif view.state == 'expired':
+            lines = [self.t_html(customer, 'payment.sakurupiah.retry.expired_title'),
+                     self.t_html(customer, 'payment.sakurupiah.retry.expired_body')]
+            rows = [[self._button(customer, 'checkout.browse_button', 'katalog',
+                                  slot='menu.products')],
+                    [self._button(customer, 'checkout.orders_button', 'menu:orders',
+                                  slot='menu.orders')],
+                    self._navigation_row(customer)]
+        elif view.state == 'review':
+            lines = [self.t_html(customer, 'order.guidance.manual_review')]
+            if view.invoice_number:
+                lines.append(self.t_html(customer, 'payment.invoice',
+                                         invoice=view.invoice_number))
+            rows = [[self._button(customer, 'checkout.orders_button', 'menu:orders',
+                                  slot='menu.orders')], self._navigation_row(customer)]
+        elif view.state == 'provider_unavailable':
+            lines = [self.t_html(customer, 'checkout.recovery.configuration_invalid')]
+            if view.payment_id:
+                rows.append([self._legacy_button(
+                    customer, 'payment.action.check', f'checkout:check:{view.payment_id}')])
+            rows.append([self._button(customer, 'checkout.orders_button', 'menu:orders',
+                                      slot='menu.orders')])
+            rows.append(self._navigation_row(customer))
+        elif view.state == 'balance_insufficient':
+            lines = [self.t_html(customer, 'checkout.balance.insufficient')]
+            if self._funding_ready():
+                rows.append([self._button(customer, 'balance.add', 'balance:add',
+                                          slot='menu.balance')])
+            rows.append([self._button(customer, 'checkout.browse_button', 'katalog',
+                                      slot='menu.products')])
+            rows.append(self._navigation_row(customer))
+        elif view.state == 'balance_unavailable':
+            lines = [self.t_html(customer, 'checkout.balance.unavailable')]
+            rows = [[self._button(customer, 'checkout.browse_button', 'katalog',
+                                  slot='menu.products')], self._navigation_row(customer)]
+        elif view.state == 'maintenance':
+            lines = [self.t_html(customer, 'checkout.maintenance')]
+            rows = [[self._button(customer, 'checkout.browse_button', 'katalog',
+                                  slot='menu.products')], self._navigation_row(customer)]
+        elif view.state == 'stock_conflict':
+            lines = [self.t_html(customer, 'checkout.stock_conflict')]
+            rows = [[self._button(customer, 'checkout.browse_button', 'katalog',
+                                  slot='menu.products')], self._navigation_row(customer)]
+        else:
+            lines = [self.t_html(customer, 'checkout.invalid_cart')]
+            rows = [[self._button(customer, 'checkout.browse_button', 'katalog',
+                                  slot='menu.products')], self._navigation_row(customer)]
+        return self._surface(customer, '\n'.join(lines), rows, screen='checkout')
+
+    def _pay_detail(self, customer, rail, product_id, token, state, root, chat_id):
+        self.callback_handled = True
+        selection = state.get('selection') or {}
+        if (selection.get('mode') != 'browsing'
+                or selection.get('product_id') != product_id
+                or selection.get('interaction_token') != token
+                or selection.get('locale') != locale(customer)):
+            self.callback_notice = plain(self.t(customer, 'catalog.selection.stale'))
+            return None
+        if not self._checkout_ready():
+            state.pop('selection', None)
+            self.callback_notice = plain(
+                self.t(customer, 'checkout.recovery.configuration_invalid'))
+            return self._checkout_unavailable(customer)
+        product = self.repository.product(product_id)
+        quantity = int(selection['quantity'])
+        view = self.checkout.checkout(
+            customer, root, product_id=product_id, quantity=quantity,
+            token=token, rail=rail)
+        if (view.payment_id is None
+                or view.state in ('paid', 'pending', 'expired', 'review', 'stock_conflict',
+                                  'balance_insufficient', 'balance_unavailable', 'maintenance',
+                                  'invalid', 'stale')):
+            state.pop('selection', None)
+        if view.state == 'stale':
+            self.callback_notice = plain(self.t(customer, 'catalog.selection.stale'))
+            return None
+        return self._checkout_surface(customer, view, product=product, quantity=quantity)
+
+    def _check_payment(self, customer, payment_id, root):
+        self.callback_handled = True
+        if not self._checkout_ready():
+            self.callback_notice = plain(
+                self.t(customer, 'checkout.recovery.configuration_invalid'))
+            return None
+        view = self.checkout.check(customer, root, payment_id=payment_id)
+        if view.state == 'stale':
+            self.callback_notice = plain(self.t(customer, 'checkout.payment.selector_stale'))
+            return None
+        notices = {
+            'paid': 'order.refresh.verified',
+            'pending': 'order.refresh.pending',
+            'expired': 'payment.sakurupiah.retry.expired_title',
+            'review': 'order.guidance.manual_review',
+            'provider_unavailable': 'checkout.recovery.configuration_invalid',
+        }
+        key = notices.get(view.state)
+        if key:
+            self.callback_notice = plain(self.t(customer, key))
+        return self._checkout_surface(customer, view)
 
     def _token_key(self):
         key = self.signing_key if self.signing_key is not None else settings.SECRET_KEY
@@ -1239,6 +1403,13 @@ class CatalogPresenter:
             self.callback_handled = True
             self.callback_notice = plain(self.t(customer,'balance.action.unavailable'))
             return None
+        match = _CHECKOUT_PAY.fullmatch(data)
+        if match:
+            return self._pay_detail(customer, match[1], int(match[2]), match[3],
+                                    state, root, chat_id)
+        match = _CHECKOUT_CHECK.fullmatch(data)
+        if match:
+            return self._check_payment(customer, match[1], root)
         if data in ('katalog','catalog','catalog:refresh'):
             state.clear()
             return self.catalog(customer,state=state)

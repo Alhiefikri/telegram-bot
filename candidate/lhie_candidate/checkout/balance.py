@@ -17,7 +17,7 @@ class StoreBalanceLedger:
         self.db.require_transaction()
         customer_id = require_integer(customer_id, minimum=1)
         account = self.db.one(
-            "SELECT * FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
+            "SELECT id,balance FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
             (customer_id,),
         )
         if account is None:
@@ -29,7 +29,7 @@ class StoreBalanceLedger:
                 (customer_id,),
             )
             account = self.db.one(
-                "SELECT * FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
+                "SELECT id,balance FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
                 (customer_id,),
             )
         if account is None:
@@ -104,7 +104,7 @@ class StoreBalanceLedger:
         self.db.require_transaction()
         customer_id = require_integer(customer_id, minimum=1)
         account = self.db.one(
-            "SELECT * FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
+            "SELECT id,balance FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
             (customer_id,))
         if account is None:
             self.db.execute(
@@ -115,7 +115,7 @@ class StoreBalanceLedger:
                    ON CONFLICT (customer_id) DO NOTHING""",
                 (customer_id,))
             account = self.db.one(
-                "SELECT * FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
+                "SELECT id,balance FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
                 (customer_id,))
         if account is None:
             raise CheckoutError("balance_account_unavailable")

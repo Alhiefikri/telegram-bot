@@ -107,9 +107,9 @@ tree. Candidate cells may change only `django_candidate` state and admitted
 Customer profile columns; the runner hashes every other public table after each
 batch and stops on any change. The paired report judges each navigation
 scenario/user case independently against 70% of current-PHP p50/p95. After the
-#717 and #718 follow-ups, declared candidate navigation gaps are closed; checkout
-and paid delivery remain declared gaps. The measured #692 evidence still records
-Orders and Balance as absent and is never relabelled.
+#717, #718 and #720 follow-ups, candidate navigation and navigation-payment
+surfaces exist; the measured #692 identity still records Orders, Balance and
+payment stages as absent and is never relabelled. #722 owns the new paired run.
 The #719 follow-up adds the minimum IDR funding path outside the measured gate:
 `funding/` owns DB-backed policy/preset identities, one sandbox-shaped top-up
 owner over `store_balance_top_up*`, an explicit provider/request injection point
@@ -121,6 +121,19 @@ Full IDR top-up/reconciliation remains P15 and USDT funding remains P17.
 `tests/migration_harness/test_p11_probe.py` and
 `test_p11_compare.py` are its regressions. It adds no production activation or
 payment-stage target; H1 owns the continue/fix/stop decision.
+The #720 follow-up owns the navigation-to-checkout bridge in
+`candidate/lhie_candidate/checkout/navigation.py`. It maps one admitted detail
+selection to one canonical Cart item under a Customer lock, derives the
+PHP-compatible detail checkout HMAC, and delegates price/stock/money to the
+existing P07 `CheckoutService`. The QRIS rail creates/observes one P08 sandbox
+Payment through `SakurupiahLifecycle` (no second invoice or provider retarget);
+the Balance rail stays on `StoreBalanceLedger` and the spending/restore gates.
+`checkout:check:<payment-id>` observes the same Payment and settlement wakes the
+P09 receipt ledger. New grants are Cart/CartItem inserts only; provider columns
+keep their P08 writer. `smoke_checkout_navigation.py` proves the fake-sandbox
+QRIS/Balance paths, replay, a two-thread same-key race, one receipt delivery and
+runtime column denial. Payment-stage samples remain local single attempts with
+`proposed_unratified` status; #722/H1 own the paired run and budget.
 
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
 adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.

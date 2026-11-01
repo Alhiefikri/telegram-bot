@@ -150,6 +150,7 @@ def run():
             raise AssertionError('non-disposable funding identity')
     if counts()[:1] != (0,):
         raise AssertionError('funding smoke requires a fresh synthetic customer')
+    opening_balance = counts()[2]
     customer_row, root_row = customer(), root()
     provider = FakeProvider()
     svc = service(provider)
@@ -169,19 +170,19 @@ def run():
     provider.state = OutcomeState.PENDING
     pending = svc.check(created.topup)
     assert pending['status'] == 'payable', pending['status']
-    assert counts() == (0, 0, 0, 0), counts()
+    assert counts() == (0, 0, opening_balance, 0), counts()
     provider.state = OutcomeState.SUCCESS
     paid = svc.check(created.topup)
     assert paid['status'] == 'paid', paid['status']
-    assert counts() == (1, AMOUNT, AMOUNT, 1), counts()
+    assert counts() == (1, AMOUNT, opening_balance + AMOUNT, 1), counts()
     assert svc.check(paid)['status'] == 'paid'
-    assert counts() == (1, AMOUNT, AMOUNT, 1), counts()
+    assert counts() == (1, AMOUNT, opening_balance + AMOUNT, 1), counts()
     assert svc.presentation(paid)['paid']
 
     # Two independent workers observing the same paid target can never credit
     # twice; the account lock, receipt claim and ledger source claim all agree.
     race(paid['id'])
-    assert counts() == (1, AMOUNT, AMOUNT, 1), counts()
+    assert counts() == (1, AMOUNT, opening_balance + AMOUNT, 1), counts()
 
     # A second target reusing the first provider reference is held without a
     # second credit because receipt ownership is global.
@@ -192,7 +193,7 @@ def run():
     created2 = svc2.create_top_up(customer_row, root_row, claim2.intent['id'])
     held = svc2.check(created2.topup)
     assert held['status'] == 'invalid_provider_result', held['status']
-    assert counts() == (1, AMOUNT, AMOUNT, 1), counts()
+    assert counts() == (1, AMOUNT, opening_balance + AMOUNT, 1), counts()
 
     # The active runtime role cannot read provider payloads / QR ciphertext,
     # alter a top-up identity/amount, or write the ledger outside the owner.
@@ -216,7 +217,7 @@ def run():
     return {
         'status': 'passed', 'topup_id': str(paid['id']),
         'provider_reference': paid['provider_reference'],
-        'credited': AMOUNT, 'balance_after': AMOUNT,
+        'credited': AMOUNT, 'balance_after': opening_balance + AMOUNT,
         'ledger_entries': 1, 'receipt_claims': 1,
         'race_processes': 2, 'replay_duplicate_credit': 0,
         'global_receipt_conflict': 'invalid_provider_result',
