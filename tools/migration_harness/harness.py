@@ -22,6 +22,7 @@ STATE = ROOT / ".local/migration-p01"
 TOOLS = Path(__file__).resolve().parent
 PREFIX = "lhie-p01-"
 IMAGE = "lhie-p01-boundary:1"
+BOUNDARY_SOURCE = None
 FIELDS = {"version", "stack", "mode", "dataset", "db_url", "redis_url", "bot_token",
           "bot_id", "bot_username", "safe_chat_ids", "sandbox_status_url", "sandbox_token",
           "approval"}
@@ -198,6 +199,8 @@ def compose(config, directory):
         ports=[f"127.0.0.1:{18801 if stack == 'laravel' else 18802}:8080"],
         healthcheck={"test": ["CMD", "test", "-f", "/tmp/harness-ready"],
                      "interval": "2s", "timeout": "3s", "retries": 30, "start_period": "10s"})
+    if BOUNDARY_SOURCE is not None:
+        boundary["volumes"].append(f"{BOUNDARY_SOURCE}:/opt/harness/boundary.py:ro")
     if config.get("p08_callback") is not None:
         boundary["ports"].append("127.0.0.1:18803:8026")
         boundary["volumes"].append(f"{directory / 'p08-internal-key'}:/run/harness/p08-internal-key:ro")
@@ -375,15 +378,19 @@ def manifest(config, directory, command):
     return path
 
 
-def candidate_admission(config, directory):
+def candidate_admission(config, directory, *, workers=False):
     """Project only non-secret P01 facts into the application's smaller contract."""
     runtime = {
         "version": 1, "identity": "candidate", "dataset": config["dataset"],
         "quarantine": False,
         "database": {"host": "127.0.0.1", "port": 5432, "name": "disposable", "user": "candidate_runtime"},
         "redis": {"host": "127.0.0.1", "port": 6379, "db": 0},
-        "limits": {"processes": 1, "threads": 1, "db_connections": 1},
+        # Whole-runtime ceilings: supervisor + HTTP + one process per queue,
+        # one thread each, and at most four candidate_runtime connections.
+        "limits": {"processes": 5, "threads": 5, "db_connections": 4},
     }
+    if workers:
+        runtime["workers"] = True
     if config.get("p08_callback") is not None:
         internal_key = directory / "p08-internal-key"
         try:

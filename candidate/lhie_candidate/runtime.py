@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import stat
 
+from .workers.contract import worker_connection_budget
+
 
 RUNTIME_PATH = Path("/run/harness/candidate.json")
 KEY_PATH = Path("/run/harness/django-key")
@@ -24,6 +26,7 @@ class Runtime:
     dataset: str
     secret_key: str
     p08_internal_key: str = ""
+    workers: bool = False
 
 
 def _read_file(path, maximum, *, private=False):
@@ -66,10 +69,14 @@ def validate_document(document):
         "quarantine": False,
         "database": {"host": "127.0.0.1", "port": 5432, "name": "disposable", "user": "candidate_runtime"},
         "redis": {"host": "127.0.0.1", "port": 6379, "db": 0},
-        "limits": {"processes": 1, "threads": 1, "db_connections": 1},
+        "limits": worker_connection_budget(),
     }
     if type(document) is dict and document.get("p08_callback") is True:
         expected["p08_callback"] = True
+    if type(document) is dict and document.get("workers") is not None:
+        if type(document["workers"]) is not bool or document["workers"] is not True:
+            raise AdmissionError()
+        expected["workers"] = True
     if (type(document) is not dict or document.keys() != expected.keys()
             or type(document.get("dataset")) is not str
             or DATASET_PATTERN.fullmatch(document["dataset"]) is None):
@@ -78,6 +85,14 @@ def validate_document(document):
     if not _exact(document, expected):
         raise AdmissionError()
     return document["dataset"]
+
+
+def application_key():
+    """Read the private synthetic Laravel-compatible key without echoing it."""
+    encoded = _read_file(Path('/run/harness/app-key'), 64, private=True).decode('ascii').strip()
+    if re.fullmatch(r'[A-Za-z0-9+/]{43}=', encoded) is None:
+        raise AdmissionError()
+    return 'base64:' + encoded
 
 
 def load_runtime():
@@ -92,6 +107,7 @@ def load_runtime():
             p08_key = _read_file(P08_KEY_PATH, 64, private=True).decode("ascii")
             if re.fullmatch(r"[a-f0-9]{64}", p08_key) is None:
                 raise AdmissionError()
-        return Runtime(dataset=dataset, secret_key=key, p08_internal_key=p08_key)
+        return Runtime(dataset=dataset, secret_key=key, p08_internal_key=p08_key,
+                       workers=document.get("workers") is True)
     except Exception:
         raise AdmissionError() from None

@@ -68,9 +68,14 @@ def receive(request):
                 "idempotency_key,received_at,last_received_at,received_count) "
                 "VALUES ('sakurupiah','callback',%s,%s,%s,%s::jsonb,%s,now(),now(),1) "
                 "ON CONFLICT (provider,event_type,idempotency_key) DO UPDATE SET "
-                "last_received_at=now(),received_count=public.payment_events.received_count+1",
+                "last_received_at=now(),received_count=public.payment_events.received_count+1 "
+                "RETURNING id",
                 [merchant_ref, trx_id, status, json.dumps(sanitized, ensure_ascii=False), digest],
             )
+            event_id = cursor.fetchone()[0]
     except Exception:
         return response(503, "unavailable")
+    from ..workers import wakeup
+    # Hints remain durable in payment_events; a lost wakeup is swept later.
+    wakeup.enqueue("payment.event", event_id)
     return response(200, "accepted")

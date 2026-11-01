@@ -235,9 +235,14 @@ class ReceiptProtocol:
                 return None
             return self.db.one('''UPDATE public.telegram_outbound_effects SET state = 'sending',
                 attempts = attempts + 1, next_attempt_at = NULL, lease_until = %s,
-                claim_token = %s, last_error_code = NULL, last_error = NULL, updated_at = %s
+                claim_token = %s, last_error_code = NULL, last_error = NULL,
+                outcome_metadata = CASE WHEN outcome_metadata::jsonb ? 'first_pickup_at'
+                    THEN outcome_metadata
+                    ELSE (COALESCE(outcome_metadata::jsonb, '{}'::jsonb)
+                          || jsonb_build_object('first_pickup_at', %s::text))::json END,
+                updated_at = %s
                 WHERE id = %s RETURNING *''',
-                (now + timedelta(seconds=self.lease_seconds), secrets.token_hex(32), now, effect_id))
+                (now + timedelta(seconds=self.lease_seconds), secrets.token_hex(32), now.isoformat(), now, effect_id))
 
     def _locked_claim(self, effect_id, token):
         if not isinstance(token, str) or not token:
