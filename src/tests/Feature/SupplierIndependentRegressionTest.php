@@ -497,8 +497,7 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
             'Asia/Jakarta',
         );
         Http::assertSent(fn ($request): bool => $request->method() === 'GET'
-            && str_starts_with($request->url(), 'https://shopbot.00969600.xyz/shop-api/v1/orders?limit=100'),
-            json_encode(Http::recorded()->map(fn ($recorded) => [$recorded[0]->method(), $recorded[0]->url()])));
+            && $request->url() === 'https://toolorax.shop/shop-api/v1/orders?limit=100');
 
         $this->assertSame(SupplierOrderHistoryReconciliation::OUTCOME_NO_ORDER, $reconciliation->outcome, (string) $reconciliation->error_code);
         $this->assertSame(1, $reconciliation->row_count);
