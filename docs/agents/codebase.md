@@ -55,6 +55,14 @@ path. It does not qualify the real sandbox or Testing Bot: P06's payment button
 is not yet connected, P10 owns automatic consumption, and real target/credential
 verification plus external smoke remain open P08/H1 requirements.
 
+P09 [receipt delivery](../migration/python-django/p05/README.md#p09-credential-receipts-and-outbound-effects-690)
+owns `candidate/lhie_candidate/receipt/`: authorized transient rendering,
+ordered existing-ledger effects, token-fenced claims, ID-only after-commit
+wakeups and no-resend recovery. `candidate/receipt.py` runs bounded batches;
+`tools/migration_harness/smoke_checkout.py --receipt` exercises the synthetic
+PostgreSQL/fake-relay path. Live Testing Bot receipt delivery and old
+short-lived TXT confirmation-cache migration are not qualified by this slice.
+
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
 adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.
 `tools/migration_data/rehearse.py` exercises authenticated encrypted synthetic backup,

@@ -37,6 +37,14 @@ P08_UPDATE = {
     'payments': set('provider_reference provider_total_payment provider_fee provider_expires_at provider_payment_method provider_presentation provider_create_state provider_create_attempted_at provider_create_last_error updated_at'.split()),
 }
 
+P09_INSERT = {
+    'telegram_outbound_effects': set('id effect_key effect_group_key supersedes_effect_id sequence effect_type source_type source_id target_type telegram_chat_id queue telegram_method locale template_version state attempts next_attempt_at failed_at last_error_code last_error outcome_metadata created_at updated_at'.split()),
+}
+P09_UPDATE = {
+    'telegram_outbound_effects': set('state attempts next_attempt_at lease_until claim_token telegram_message_id sent_at unknown_at failed_at manual_review_at last_error_code last_error outcome_metadata updated_at'.split()),
+    'orders': {'telegram_receipt_sent_at'},
+}
+
 
 def verify_public_writes(cursor):
     cursor.execute("SELECT has_column_privilege(current_user,'public.orders','checkout_key','INSERT')")
@@ -48,6 +56,12 @@ def verify_public_writes(cursor):
         allowed_insert = {**allowed_insert, **P08_INSERT}
         allowed_update = {**allowed_update, **{
             table: allowed_update.get(table, set()) | columns for table, columns in P08_UPDATE.items()
+        }}
+    cursor.execute("SELECT has_column_privilege(current_user,'public.telegram_outbound_effects','effect_key','INSERT')")
+    if cursor.fetchone()[0]:
+        allowed_insert = {**allowed_insert, **P09_INSERT}
+        allowed_update = {**allowed_update, **{
+            table: allowed_update.get(table, set()) | columns for table, columns in P09_UPDATE.items()
         }}
     cursor.execute('''SELECT c.relname FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace

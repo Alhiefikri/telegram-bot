@@ -14,6 +14,7 @@ from .db import Database
 from .errors import CheckoutError
 from .intents import PaymentSetting, StoreBalancePreparation
 from .inventory import InventoryLedger
+from lhie_candidate.receipt.jobs import wake_after_commit
 from .pricing import PricingSnapshot
 
 
@@ -196,6 +197,7 @@ class CheckoutService:
             self.inventory.record_sales(order_id)
             self.db.execute("UPDATE public.payments SET status='paid',paid_at=%s,updated_at=%s WHERE id=%s", (now, now, payment_id))
             self.db.execute("UPDATE public.orders SET payment_status='paid',order_status='completed',updated_at=%s WHERE id=%s", (now, order_id))
+            wake_after_commit('order', order_id, using=self.using)
         self.db.execute("UPDATE public.carts SET status='checked_out',updated_at=%s WHERE id=%s", (now, request.cart_id))
         return CheckoutResult(order_id, payment_id, invoice, 'completed' if is_balance else 'pending_payment',
                               'paid' if is_balance else 'pending', plan.amount, False)

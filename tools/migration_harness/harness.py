@@ -73,6 +73,7 @@ def validate(config):
         gates = {"H0-approved-test-targets-only"}
         if config["mode"] == "testing-bot":
             gates.add("P06-approved-navigation-targets-only")
+            gates.add("P09-approved-receipt-targets-only")
         if config["mode"] == "p08-sandbox-testing-bot":
             gates = {"P08-approved-dual-targets-only"}
         if type(approval["gate"]) is not str or approval["gate"] not in gates or approval["scope_sha256"] != digest:
@@ -220,7 +221,8 @@ def compose(config, directory):
                    entrypoint=["python", "serve.py"],
                    volumes=["storage:/disposable",
                             f"{directory / 'candidate.json'}:/run/harness/candidate.json:ro",
-                            f"{directory / 'django-key'}:/run/harness/django-key:ro"])
+                            f"{directory / 'django-key'}:/run/harness/django-key:ro",
+                            f"{directory / 'app-key'}:/run/harness/app-key:ro"])
         if config.get("p08_callback") is not None:
             app["volumes"].append(f"{directory / 'p08-internal-key'}:/run/harness/p08-internal-key:ro")
         app["healthcheck"] = {
