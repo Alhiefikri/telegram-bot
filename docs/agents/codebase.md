@@ -33,6 +33,12 @@ keyboards and exercises HTTP-to-screen plus multiprocess PostgreSQL fencing.
 Approved allowlisted `@LhieStoreTestBot` runs and operator visual confirmation cover
 premium icons and separate test media; [P06 evidence](../migration/python-django/p06/README.md)
 records the bounded scope. Performance qualification remains P11-owned.
+`navigation/repository.py` keeps one product projection shared by catalog
+browsing and targeted Product/Family lookups; detail, quantity and Back renders
+must not re-scan the whole catalog with its stock/order subqueries (P11 measured
+that scan as the dominant detail-render cost). Catalog browsing itself still
+loads the active catalog for filtering and pagination.
+
 
 P07 [checkout contract](../migration/python-django/p05/README.md#p07-atomic-checkout-inventory-and-idr-688)
 owns `candidate/lhie_candidate/checkout/`: immutable tier pricing/intent snapshots,
@@ -79,6 +85,21 @@ Redis-stopped recovery drills inside P01 isolation and writes
 evidence; a fake slow sandbox is harness-only. No notification/broadcast/
 supplier family is ported or allowed onto these workers; full scheduler,
 retention, metrics and Python-only operations remain P26.
+
+P11 [experiment gate](../migration/python-django/p11/README.md) owns
+`tools/migration_benchmark/protocol_p11.json`, `candidate_probe.py` and
+`compare.py`. `runner.py --protocol p11 --implementation django` runs the
+candidate in the P01 namespace with the same dataset logical checksum and
+resource envelope: real loopback WSGI ingress, synchronized warm clients and the
+real bounded interaction worker, instrumented only inside the probe process
+tree. Candidate cells may change only `django_candidate` state and admitted
+Customer profile columns; the runner hashes every other public table after each
+batch and stops on any change. The paired report judges each navigation
+scenario/user case independently against 70% of current-PHP p50/p95. Declared
+candidate gaps (Orders, Balance, checkout, paid delivery) stay
+`not_implemented`. `tests/migration_harness/test_p11_probe.py` and
+`test_p11_compare.py` are its regressions. It adds no production activation or
+payment-stage target; H1 owns the continue/fix/stop decision.
 
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
 adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.

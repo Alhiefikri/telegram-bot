@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "issue": 692,
+  "reviewed": [
+    "tools/migration_benchmark/candidate_probe.py",
+    "tools/migration_benchmark/compare.py",
+    "tools/migration_benchmark/runner.py",
+    "tools/migration_benchmark/protocol_p11.json",
+    "tests/migration_harness/test_p11_probe.py",
+    "tests/migration_harness/test_p11_compare.py"
+  ],
+  "review": [
+    "The probe runs only under P11_BENCHMARK=disposable-local-only inside the P01 disposable namespace as UID 1000, read-only root, no added capabilities, no published port and the P01 default-deny transport rules.",
+    "It reuses the admitted runtime file, the candidate database role candidate_runtime with navigation/checkout/P08/P09 grant checks, and refuses any database other than disposable or dataset cardinalities other than the seeded synthetic contract.",
+    "Evidence files contain only protocol dimensions, monotonic timestamps, outcome, retry count, database duration and stable error codes. Payloads, callback data, customer identities, row values and row hashes stay in private /tmp state and are never printed or retained.",
+    "Ingress payloads, control tokens and the webhook secret are held in memory only; the secret is derived from the admitted candidate settings and is never written to evidence.",
+    "No shell interpolation is used for Docker or probe subprocesses; arguments are lists, child stderr is discarded and unexpected exceptions emit only a stable error code.",
+    "Candidate cells cannot reach money, stock, order, payment, credential, outbound-effect or supplier writers: the navigation grant envelope is applied, the payment/receipt workers are not started, and every batch is followed by a full public-table row hash comparison that fails the run on any change.",
+    "The benchmark adds no production route, webhook change, scheduler, credential, provider call, customer message or CI workflow.",
+    "The paired report refuses mismatched protocol, dataset checksums, PostgreSQL settings or limits, and a missing authority audit can never produce a continue recommendation."
+  ],
+  "findings": [],
+  "residual_risks": [
+    {
+      "severity": "low",
+      "status": "documented",
+      "text": "The probe-sized WSGI accept backlog is 64 instead of serve.py's 8 so synchronized client waves measure the request path rather than a harness socket limit. This is a probe configuration, not a candidate capacity claim."
+    },
+    {
+      "severity": "low",
+      "status": "documented",
+      "text": "Instrumentation wraps candidate classes inside the probe process tree (execute_wrapper plus processor/transport wrappers). A future rename fails the probe loudly with a stable error code; it cannot silently alter product behaviour."
+    },
+    {
+      "severity": "low",
+      "status": "documented",
+      "text": "Candidate evidence covers navigation only. Orders, Balance and all payment stages remain unmeasured because the candidate surface does not exist."
+    },
+    {
+      "severity": "low",
+      "status": "documented",
+      "text": "A stale wakeup can re-enter the processor after the sweep already rendered the row; the terminal outcome was briefly recorded as duplicate. Reproduction showed applied/duplicate only and no handler exception. The probe now keeps the first terminal outcome; the completed run retains the 15 recorded errors and their cells stay inconclusive."
+    }
+  ]
+}

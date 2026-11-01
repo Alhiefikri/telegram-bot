@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "issue": 692,
+  "status": "complete",
+  "engine_recommendation": "fix",
+  "owner_decision": false,
+  "php_baseline": {
+    "cells": 24,
+    "attempts": 1440,
+    "measured_successes": 1200,
+    "measured_errors": 0,
+    "exploratory_cells": 9,
+    "inconclusive_cells": 15,
+    "dataset_logical_sha256_large": "68c6c859de3e25ecadaedd28a04bc4455fdb7177f5c8a33bda28e47d4cb2c08e"
+  },
+  "django_candidate": {
+    "cells": 18,
+    "attempts": 1080,
+    "measured_successes": 885,
+    "measured_errors": 15,
+    "exploratory_cells": 4,
+    "inconclusive_cells": 14,
+    "authority_audits": 72,
+    "authority_violations": 0,
+    "dataset_logical_sha256_large": "68c6c859de3e25ecadaedd28a04bc4455fdb7177f5c8a33bda28e47d4cb2c08e"
+  },
+  "paired": {
+    "pass": 0,
+    "fail": 3,
+    "inconclusive": 15,
+    "not_implemented": 6,
+    "candidate_coverage_fraction": 1.0,
+    "fails": [
+      {
+        "scenario": "catalog_plans",
+        "users": 10,
+        "p50_ratio": 1.3856,
+        "p95_ratio": 1.4381
+      },
+      {
+        "scenario": "plan_detail",
+        "users": 1,
+        "p50_ratio": 1.4631,
+        "p95_ratio": 0.5621
+      },
+      {
+        "scenario": "quantity",
+        "users": 1,
+        "p50_ratio": 3.392,
+        "p95_ratio": 1.5369
+      }
+    ]
+  },
+  "source_reuse": {
+    "files": 2482,
+    "differing": [
+      "tools/migration_benchmark/candidate_probe.py",
+      "tools/migration_benchmark/runner.py"
+    ],
+    "php_measurement_path_delta": []
+  },
+  "unresolved_findings": [
+    {
+      "code": "candidate_orders_balance_absent",
+      "severity": "medium",
+      "detail": "Orders and Balance handlers are not ported; 6 of 24 navigation cases are not_implemented."
+    },
+    {
+      "code": "candidate_payment_stages_absent",
+      "severity": "medium",
+      "detail": "No candidate navigation-to-checkout, paid detection or credential delivery surface; no paired payment timing and no ratified budget."
+    },
+    {
+      "code": "probe_duplicate_outcome_artifact",
+      "severity": "low",
+      "detail": "15 measured attempts were recorded as error because a duplicate no-op wakeup overwrote the terminal outcome after the screen ACK. Reproduction found no handler exception; the probe is corrected, attempts are retained and affected cells stay inconclusive."
+    },
+    {
+      "code": "django_navigation_performance_target_not_met",
+      "severity": "high",
+      "detail": "All three quality-qualified paired cases fail the 70% p50/p95 target; no paired case passes."
+    }
+  ]
+}

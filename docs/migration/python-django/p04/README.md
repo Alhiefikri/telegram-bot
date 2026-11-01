@@ -127,6 +127,11 @@ Checkout and paid-delivery timings use transaction-flow smoke rather than anothe
 load matrix. Reuse existing manifests, parser tests and resource observations;
 do not add sensor, dashboard, resume or benchmark infrastructure for acceptance.
 
+P11 adds the paired protocol as schema 5 in a separate
+[`protocol_p11.json`](../../../../tools/migration_benchmark/protocol_p11.json) and
+a candidate probe, without changing this schema-4 identity. The paired
+navigation gate, candidate coverage gaps and verdict rules live in
+[the P11 report](../p11/README.md).
 The target remains separate p50 and p95 Django <=70% current PHP per case.
 Threshold-adjacent, near-floor, unstable or failure-heavy results are inconclusive.
 After diagnosis/fix, at most one targeted two-batch rerun; unresolved uncertainty

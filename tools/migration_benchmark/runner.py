@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import resource
 import subprocess
 import sys
@@ -24,7 +25,12 @@ from smoke import cli, container
 from report import summarize
 
 TOOLS = Path(__file__).resolve().parent
-PROTOCOL = json.loads((TOOLS / 'protocol.json').read_text())
+PROTOCOLS = {'p04': TOOLS / 'protocol.json', 'p11': TOOLS / 'protocol_p11.json'}
+PROTOCOL = json.loads(PROTOCOLS['p04'].read_text())
+IMPLEMENTATIONS = ('laravel', 'django')
+CANDIDATE_IMAGE = 'lhie-p05-candidate:1'
+CANDIDATE_DATASET = 'synthetic-p11-paired'
+P11_STATE = ROOT / '.local/migration-p11/lifecycle'
 
 
 def command(args, *, payload=None, timeout=600):
@@ -105,9 +111,10 @@ class Sensors:
             raise RuntimeError('resource_sensor_did_not_stop')
 
 
-def verify_limits(observed):
+def verify_limits(observed, services=('boundary', 'database', 'redis', 'app')):
     expected = {'boundary': (64, .1), 'database': (640, .5), 'redis': (128, .15), 'app': (1216, 1.25)}
-    for service, (mib, cpus) in expected.items():
+    for service in services:
+        mib, cpus = expected[service]
         record = observed['services'].get(service)
         if record is None:
             raise RuntimeError('missing_cgroup_sensor')
@@ -136,6 +143,256 @@ def install_tools(app):
         raise RuntimeError('probe_installation_failed')
 
 
+# --- P11 paired comparison (candidate lifecycle, PHP seed oracle, Django probe) ---
+
+
+def django_lifecycle(*args, timeout=240):
+    """P01 lifecycle in a separate P11 namespace; never the operator's P01 state."""
+    entry = ("import sys; from pathlib import Path; import harness; "
+             "harness.STATE=Path(sys.argv[1]); harness.PREFIX='lhie-p11-'; "
+             "harness.IMAGE='lhie-p01-boundary:1'; "
+             "sys.argv=[harness.__file__,*sys.argv[2:]]; harness.main()")
+    result = subprocess.run([sys.executable, '-c', entry, str(P11_STATE), *args],
+                            cwd=ROOT / 'tools/migration_harness', capture_output=True,
+                            text=True, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError('p11_lifecycle_failed')
+    return result.stdout.strip()
+
+
+def candidate_directory():
+    return P11_STATE / 'candidate'
+
+
+def prepare_candidate_admission():
+    config_path = candidate_directory() / 'config.json'
+    if not config_path.exists():
+        django_lifecycle('init', 'candidate')
+    config = harness.validate(json.loads(config_path.read_text()))
+    expected = {**harness.default('candidate'), 'dataset': CANDIDATE_DATASET,
+                'safe_chat_ids': list(range(8800000, 8800010))}
+    if config != expected:
+        # Only a pristine synthetic default in the dedicated P11 namespace may
+        # be extended; an operator-attested Testing Bot config is never rewritten.
+        if config != harness.default('candidate'):
+            raise RuntimeError('p11_candidate_configuration_not_pristine')
+        atomic_json(config_path, expected)
+        config = expected
+    harness.candidate_admission(config, candidate_directory(), workers=True)
+
+
+def php_storage(output):
+    storage = output / 'php-storage'
+    for name in ('app/private', 'app/public', 'framework/cache', 'framework/sessions',
+                 'framework/views', 'logs'):
+        (storage / name).mkdir(parents=True, exist_ok=True)
+    os.chmod(storage, 0o700)
+    return storage
+
+
+def php_container(ids, storage, argv, payload=None, timeout=1800):
+    """One temporary Laravel container bound to the disposable stack network."""
+    directory = candidate_directory()
+    command_args = [
+        'docker', 'run', '--rm', '-i', '--network', 'container:' + ids['boundary'],
+        '--cpus', '1.25', '--memory', '1216m', '--memory-swap', '1216m',
+        '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+        '--user', '1000:1000', '--tmpfs', '/tmp:size=64m',
+        '--mount', f'type=bind,src={TOOLS},dst=/tmp/p04,readonly',
+        '--mount', f'type=bind,src={storage},dst=/var/www/html/storage',
+        '--env', 'APP_ENV=testing', '--env', 'APP_DEBUG=false',
+        '--env', 'APP_KEY=base64:' + (directory / 'app-key').read_text().strip(),
+        '--env', 'APP_URL=http://127.0.0.1',
+        '--env', 'DB_CONNECTION=pgsql', '--env', 'DB_HOST=127.0.0.1',
+        '--env', 'DB_PORT=5432', '--env', 'DB_DATABASE=disposable',
+        '--env', 'DB_USERNAME=harness', '--env', 'DB_PASSWORD=harness',
+        '--env', 'REDIS_HOST=127.0.0.1', '--env', 'REDIS_PORT=6379',
+        '--env', 'QUEUE_CONNECTION=redis', '--env', 'CACHE_STORE=redis',
+        '--env', 'SESSION_DRIVER=redis', '--env', 'LOG_CHANNEL=null',
+        '--env', 'MAIL_MAILER=array', '--env', 'TELEGRAM_BOT_TOKEN=',
+        '--env', 'TELEGRAM_ADMIN_CHAT_ID=8999999',
+        '--env', 'APP_AUTO_MIGRATE=false', '--env', 'APP_AUTO_SET_TELEGRAM_WEBHOOK=false',
+        '--entrypoint', argv[0], 'lhie-p01-laravel:1', *argv[1:],
+    ]
+    return command(command_args, payload=payload, timeout=timeout)
+
+
+def php_probe(ids, storage, payload, timeout=1800):
+    return json.loads(php_container(ids, storage, ['php', '/tmp/p04/probe.php'],
+                                    payload=payload, timeout=timeout))
+
+
+def disposable_sql(ids, sql):
+    return command(['docker', 'exec', ids['database'], 'psql', '-U', 'harness',
+                    '-d', 'disposable', '-v', 'ON_ERROR_STOP=1', '-Atc', sql])
+
+
+def provision_candidate_schema(ids):
+    parts = []
+    for name in ('schema.sql', 'ingress_schema.sql', 'assets_schema.sql', 'grants.sql'):
+        parts.append((ROOT / 'candidate/lhie_candidate/navigation' / name).read_text())
+    disposable_sql(ids, '\n'.join(parts))
+
+
+AUTHORITY_EXCLUDED = {'customers'}
+
+
+def authority_snapshot(ids):
+    """Hash every public row except the admitted narrow Customer profile writes."""
+    tables = [row for row in disposable_sql(
+        ids, "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname='public' ORDER BY tablename"
+    ).splitlines() if row and row not in AUTHORITY_EXCLUDED]
+    result = {}
+    for table in tables:
+        identifier = '"' + table.replace('"', '""') + '"'
+        result[table] = disposable_sql(
+            ids, "SELECT count(*), coalesce(md5(string_agg(t::text, '|' ORDER BY t::text)), '') "
+                 f"FROM public.{identifier} AS t")
+    return result
+
+
+def authority_delta(before, after):
+    changed = sorted(name for name in set(before) | set(after) if before.get(name) != after.get(name))
+    return changed
+
+
+def evidence_name(run_id, payload):
+    return run_id + '-' + point_name(payload).removesuffix('.json') + '.jsonl'
+
+
+def probe_name(run_id, payload):
+    label = re.sub(r'[^a-z0-9]', '', point_name(payload).lower())[:48]
+    return 'lhie-p11-probe-' + run_id[:12] + '-' + label
+
+
+def candidate_probe(ids, payload, output, run_id, session):
+    name = probe_name(run_id, payload)
+    evidence = output / 'spools' / evidence_name(run_id, payload)
+    evidence.parent.mkdir(exist_ok=True)
+    os.chmod(evidence.parent, 0o700)
+    # An empty host spool is still durable evidence that the cohort wrote
+    # nothing before refusing; it keeps cleanup safe without inventing samples.
+    evidence.touch(mode=0o600, exist_ok=True)
+    payload = {**payload, 'evidence_path': '/evidence/' + evidence.name}
+    directory = candidate_directory()
+    arguments = [
+        'docker', 'run', '--name', name, '-i', '--network', 'container:' + ids['boundary'],
+        '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+        '--user', '1000:1000', '--cpus', '1.25', '--memory', '1216m', '--memory-swap', '1216m',
+        '--pids-limit', '128', '--tmpfs', '/tmp:size=256m',
+        '--mount', f'type=bind,src={ROOT / "candidate"},dst=/opt/candidate,readonly',
+        '--mount', f'type=bind,src={TOOLS},dst=/opt/harness,readonly',
+        '--mount', f'type=bind,src={directory / "candidate.json"},dst=/run/harness/candidate.json,readonly',
+        '--mount', f'type=bind,src={directory / "django-key"},dst=/run/harness/django-key,readonly',
+        '--mount', f'type=bind,src={directory / "app-key"},dst=/run/harness/app-key,readonly',
+        '--mount', f'type=bind,src={evidence.parent},dst=/evidence',
+        '--env', 'P11_BENCHMARK=disposable-local-only',
+        '--env', 'PYTHONDONTWRITEBYTECODE=1', '--env', 'PYTHONPATH=/opt/candidate',
+        '--entrypoint', 'python', CANDIDATE_IMAGE, '/opt/harness/candidate_probe.py',
+    ]
+    try:
+        command(['docker', 'rm', '-f', name], timeout=30)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        pass
+    state = {'samples': [], 'resources': []}
+    process = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    try:
+        stop = threading.Event()
+        thread = threading.Thread(target=sample_probe, args=(name, state['resources'], stop), daemon=True)
+        thread.start()
+        try:
+            stdout, stderr = process.communicate(json.dumps(payload), timeout=1800)
+        except subprocess.TimeoutExpired:
+            command(['docker', 'rm', '-f', name], timeout=30)
+            process.kill()
+            process.communicate()
+            raise RuntimeError('timeout') from None
+        finally:
+            stop.set()
+            thread.join(timeout=20)
+        try:
+            state['state'] = json.loads(command([
+                'docker', 'inspect', '--format',
+                '{"oom_killed":{{.State.OOMKilled}},"restarts":{{.RestartCount}},"exit":{{.State.ExitCode}}}',
+                name], timeout=30))
+        except (RuntimeError, OSError, subprocess.TimeoutExpired, ValueError):
+            state['state'] = None
+        if process.returncode:
+            diagnostics = output / 'probe-diagnostics'
+            diagnostics.mkdir(exist_ok=True)
+            os.chmod(diagnostics, 0o700)
+            try:
+                atomic_text(diagnostics / (name + '.stderr'), (stderr or '')[-65536:])
+            except OSError:
+                pass
+            # The probe prints only a stable error code; never relay child text.
+            codes = {'probe_error', 'timeout', 'scenario_error', 'unexpected_response',
+                     'boundary_unknown'}
+            diagnostic = None
+            for line in (stdout or '').splitlines():
+                try:
+                    value = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(value, dict) and value.get('error_code') in codes:
+                    diagnostic = value['error_code']
+            raise RuntimeError('probe_error:' + (diagnostic or 'unknown'))
+        result = json.loads(stdout)
+        if not isinstance(result.get('samples'), list):
+            raise RuntimeError('probe_failed')
+        return result, payload, evidence, state
+    finally:
+        try:
+            command(['docker', 'rm', '-f', name], timeout=30)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def sample_probe(name, records, stop):
+    files = ('memory.current', 'memory.peak', 'memory.max', 'memory.swap.current',
+             'memory.swap.max', 'pids.current')
+    while not stop.wait(3):
+        try:
+            script = '; '.join(f'echo {value}; cat /sys/fs/cgroup/{value}' for value in files)
+            lines = command(['docker', 'exec', name, 'sh', '-c', script], timeout=10).splitlines()
+            values, current = {}, None
+            for line in lines:
+                if line in files:
+                    current = line
+                    values[current] = []
+                elif current is not None:
+                    values[current].append(line)
+            records.append({'time_ns': time.monotonic_ns(), 'cgroup': values})
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            records.append({'time_ns': time.monotonic_ns(), 'unknown': 'probe_sensor_failed'})
+
+
+def recover_candidate_batch(payload, result, code, output, evidence, stopped):
+    retained = {}
+    rejected = 0
+    try:
+        for line in evidence.read_text().splitlines():
+            try:
+                candidate = json.loads(line)
+            except (ValueError, TypeError):
+                rejected += 1
+                continue
+            rejected += retain_samples(payload, [candidate], retained)
+        evidence_copied = True
+    except (OSError, ValueError):
+        evidence_copied = False
+    if isinstance(result, dict) and isinstance(result.get('samples'), list):
+        rejected += retain_samples(payload, result['samples'], retained)
+    completed = [retained[key] for key in sorted(retained)]
+    records = completed + failure_samples(payload, code, completed)
+    records.sort(key=lambda record: record['attempt'])
+    return records, {'outcome': 'unknown', 'error_code': code,
+                     'completed_attempts_retained': len(completed),
+                     'rejected_evidence_records': rejected, 'evidence_copied': evidence_copied,
+                     'probe_cohort_stopped': stopped, 'disposable_reset_required': True}
+
+
 def sources():
     paths = [*TOOLS.glob('*.py'), *TOOLS.glob('*.php'), *TOOLS.glob('*.json'),
              *(ROOT / 'tools/migration_harness').glob('*.py'),
@@ -143,13 +400,27 @@ def sources():
     tracked = command(['git', '-C', str(ROOT), 'ls-files', '-z', 'src']).split('\0')
     paths.extend(ROOT / name for name in tracked if name and not Path(name).name.startswith('.env'))
     paths.extend((ROOT / 'src/public/build').rglob('*'))
+    if PROTOCOL.get('implementations') and 'django' in PROTOCOL['implementations']:
+        # The candidate slice is the code under test for that implementation.
+        tracked = command(['git', '-C', str(ROOT), 'ls-files', '-z', 'candidate']).split('\0')
+        paths.extend(ROOT / name for name in tracked
+                     if name and '/.venv/' not in name and not Path(name).name.startswith('.env'))
     return {str(path.relative_to(ROOT)): digest(path) for path in sorted(set(paths))
             if path.is_file() and not path.is_symlink()}
 
 
+def implementation_scenarios(implementation):
+    scenarios = PROTOCOL['navigation'] + PROTOCOL['other_scenarios']
+    if implementation != 'django':
+        return scenarios
+    unavailable = set(PROTOCOL.get('candidate_unimplemented_scenarios', []))
+    unavailable |= set(PROTOCOL.get('candidate_unimplemented_other_scenarios', []))
+    return [scenario for scenario in scenarios if scenario not in unavailable]
+
+
 def measurement_role(dimensions, smoke=False):
     primary = (not smoke
-               and dimensions.get('implementation', 'laravel') == 'laravel'
+               and dimensions.get('implementation', 'laravel') in PROTOCOL['implementations']
                and dimensions.get('transport', 'synthetic') == 'synthetic'
                and dimensions['profile'] in PROTOCOL['profiles']
                and dimensions['scenario'] in PROTOCOL['navigation']
@@ -158,16 +429,20 @@ def measurement_role(dimensions, smoke=False):
     return 'primary' if primary else 'diagnostic'
 
 
-def planned_cells(smoke=False):
-    scenarios = PROTOCOL['navigation'] + PROTOCOL['other_scenarios']
+def planned_cells(smoke=False, implementation='laravel'):
+    scenarios = implementation_scenarios(implementation)
     if smoke:
         for profile, scenario in itertools.product(PROTOCOL['profiles'], scenarios):
             yield dict(dataset='small', profile=profile, scenario=scenario, users=1,
-                       traffic='distinct', temperature='warm', background='idle')
+                       traffic='distinct', temperature='warm', background='idle',
+                       implementation=implementation)
         return
     for profile, scenario, users in itertools.product(
             PROTOCOL['profiles'], PROTOCOL['navigation'], PROTOCOL['users']):
-        yield dict(profile=profile, scenario=scenario, users=users, **PROTOCOL['primary_conditions'])
+        if scenario not in scenarios:
+            continue
+        yield dict(profile=profile, scenario=scenario, users=users,
+                   implementation=implementation, **PROTOCOL['primary_conditions'])
 
 
 CELL_FIELDS = ('dataset', 'profile', 'scenario', 'users', 'traffic', 'temperature',
@@ -176,22 +451,29 @@ SAMPLE_FIELDS = ('schema_version', 'implementation', 'transport', *CELL_FIELDS,
                  'attempt', 'outcome', 'retries', 'timestamps', 'db_ms', 'error_code')
 
 
+def implementation_of(payload):
+    return payload.get('implementation', 'laravel')
+
+
 def failure_samples(payload, code, completed=()):
     dimensions = {k: payload[k] for k in CELL_FIELDS}
     seen = {record['attempt'] for record in completed}
-    return [dict(schema_version=1, implementation='laravel', transport='synthetic', **dimensions,
-                 attempt=i + 1, outcome='unknown', retries=0, timestamps={}, db_ms=None, error_code=code)
+    return [dict(schema_version=1, implementation=implementation_of(payload), transport='synthetic',
+                 **dimensions, attempt=i + 1, outcome='unknown', retries=0, timestamps={},
+                 db_ms=None, error_code=code)
             for i in range(payload['samples']) if i + 1 not in seen]
 
 
 def retain_samples(payload, candidates, retained):
     """Accept each completed identity independently; never copy arbitrary probe fields."""
     rejected = 0
+    expected = implementation_of(payload)
     for candidate in candidates:
         try:
             record = {key: candidate[key] for key in SAMPLE_FIELDS}
             summarize([record])
-            if (record['implementation'] != 'laravel' or record['transport'] != 'synthetic'
+            if (record['implementation'] != expected or record['transport'] != 'synthetic'
+                    or expected not in PROTOCOL['implementations']
                     or any(record[key] != payload[key] for key in CELL_FIELDS)
                     or not 1 <= record['attempt'] <= payload['samples']):
                 raise ValueError('probe_cell_identity_mismatch')
@@ -271,9 +553,12 @@ def recover_batch(app, payload, result, code, output=None):
 
 def write_report(output, raw_path, meta, smoke):
     records = [json.loads(line) for line in raw_path.read_text().splitlines()]
+    implementation = meta.get('implementation', 'laravel')
     report = summarize(records)
     report['run_status'] = meta['status']
     report['smoke'] = smoke
+    report['implementation'] = implementation
+    report['protocol_file'] = meta.get('protocol_file', 'p04')
     report['protocol_schema_version'] = PROTOCOL['schema_version']
     report['old_full_matrix_acceptance'] = 'not_claimed'
     for cell in report['cells']:
@@ -282,7 +567,7 @@ def write_report(output, raw_path, meta, smoke):
         completed = {batch['cell']['batch'] for batch in meta.get('batches', [])
                      if batch.get('completed') and not batch['cell']['warmup']
                      and cell_key(batch['cell']) == cell_key(cell['dimensions'])
-                     and cell['dimensions']['implementation'] == 'laravel'
+                     and cell['dimensions']['implementation'] == implementation
                      and cell['dimensions']['transport'] == 'synthetic'}
         cell['completed_batch_count'] = len(completed)
         cell['sampling'] = {
@@ -299,12 +584,12 @@ def write_report(output, raw_path, meta, smoke):
         elif not cell['sampling']['completed']:
             cell['gate']['status'] = 'inconclusive'
             cell['gate']['reasons'].append('incomplete_independent_batches')
-    expected = {role: {cell_key(cell) for cell in planned_cells(smoke)
+    expected = {role: {cell_key(cell) for cell in planned_cells(smoke, implementation)
                        if measurement_role(cell, smoke) == role}
                 for role in ('primary', 'diagnostic')}
     observed = {role: {cell_key(cell['dimensions']) for cell in report['cells']
                        if cell['measurement_role'] == role
-                       and cell['dimensions']['implementation'] == 'laravel'
+                       and cell['dimensions']['implementation'] == implementation
                        and cell['dimensions']['transport'] == 'synthetic'}
                 for role in expected}
     report['coverage'] = {'expected_cells': sum(map(len, expected.values())),
@@ -315,6 +600,18 @@ def write_report(output, raw_path, meta, smoke):
             f'observed_{role}_cells': len(expected[role] & observed[role]),
             f'missing_{role}_cells': [list(key) for key in sorted(expected[role] - observed[role])],
         })
+    if implementation == 'django':
+        unavailable = set(PROTOCOL.get('candidate_unimplemented_scenarios', []))
+        unavailable |= set(PROTOCOL.get('candidate_unimplemented_other_scenarios', []))
+        excluded = [{'scenario': scenario, 'users': users, 'reason': 'candidate_feature_absent'}
+                    for scenario in sorted(unavailable & set(PROTOCOL['navigation']))
+                    for users in PROTOCOL['users']]
+        excluded += [{'scenario': scenario, 'users': None, 'reason': 'candidate_feature_absent'}
+                     for scenario in sorted(unavailable & set(PROTOCOL['other_scenarios']))]
+        report['coverage']['excluded_cells'] = excluded
+        report['coverage']['excluded_reason'] = PROTOCOL.get('candidate_unimplemented_reason')
+        report['comparison'] = {'status': 'paired_comparison_required',
+                                'reason': 'samples_cover_one_implementation'}
     primary = [cell for cell in report['cells'] if cell['measurement_role'] == 'primary']
     report['coverage'].update({
         'completed_primary_cells': sum(cell['sampling']['completed'] for cell in primary),
@@ -394,9 +691,11 @@ def load_checkpoints(output, source_hash):
     return points
 
 
-def validate_resume(meta, smoke, current_sources):
+def validate_resume(meta, smoke, current_sources, implementation='laravel', protocol='p04'):
     if (meta['schema_version'] != 2 or meta['protocol'] != PROTOCOL
-            or meta['smoke'] != smoke or meta['source_sha256'] != current_sources):
+            or meta['smoke'] != smoke or meta['source_sha256'] != current_sources
+            or meta.get('implementation', 'laravel') != implementation
+            or meta.get('protocol_file', 'p04') != protocol):
         raise RuntimeError('resume_source_or_protocol_mismatch')
 
 
@@ -448,9 +747,14 @@ def postgres(ids, sql):
 SEED_DATABASES = {'small': 'p04_seed_small', 'large': 'p04_seed_large'}
 
 
+def seed_template(dataset):
+    templates = PROTOCOL.get('seed_templates', SEED_DATABASES)
+    return templates[dataset]
+
+
 def clone_database(ids, dataset, create_template=False):
     # Neither identifier comes from a CLI value or arbitrary SQL input.
-    template = SEED_DATABASES[dataset]
+    template = seed_template(dataset)
     postgres(ids, "ALTER DATABASE disposable WITH ALLOW_CONNECTIONS false")
     postgres(ids, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='disposable'")
     if create_template:
@@ -461,10 +765,17 @@ def clone_database(ids, dataset, create_template=False):
     postgres(ids, "ALTER DATABASE disposable WITH ALLOW_CONNECTIONS true")
 
 
-def prepare_template(ids, dataset, meta):
-    command(['docker', 'exec', ids['app'], 'php', 'artisan', 'migrate:fresh', '--force', '--no-interaction'])
-    command(['docker', 'exec', ids['redis'], 'redis-cli', 'FLUSHALL'])
-    seeded = probe(ids['app'], {'mode': 'seed', 'dataset': dataset})
+def prepare_template(ids, dataset, meta, output):
+    if meta.get('implementation', 'laravel') == 'django':
+        storage = php_storage(output)
+        php_container(ids, storage, ['php', 'artisan', 'migrate:fresh', '--force', '--no-interaction'])
+        command(['docker', 'exec', ids['redis'], 'redis-cli', 'FLUSHALL'])
+        seeded = php_probe(ids, storage, {'mode': 'seed', 'dataset': dataset})
+        provision_candidate_schema(ids)
+    else:
+        command(['docker', 'exec', ids['app'], 'php', 'artisan', 'migrate:fresh', '--force', '--no-interaction'])
+        command(['docker', 'exec', ids['redis'], 'redis-cli', 'FLUSHALL'])
+        seeded = probe(ids['app'], {'mode': 'seed', 'dataset': dataset})
     manifest = seeded['manifest']
     for key, expected in meta['dataset_contract']['profiles'][dataset].items():
         if manifest['cardinalities']['orders' if key == 'historical_orders' else key] != expected:
@@ -504,6 +815,14 @@ class Progress:
         self.thread.join(timeout=30)
 
 
+def candidate_stop(name):
+    try:
+        command(['docker', 'rm', '-f', name], timeout=30)
+        return True
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def recover_pending(output, meta, points, source_hash):
     active = meta.get('active')
     if active is None:
@@ -515,31 +834,39 @@ def recover_pending(output, meta, points, source_hash):
                                  and existing['accounting'].get('probe_cohort_stopped'))):
         meta['active'] = None
         return
-    # docker cp reads stopped containers as well. Never reset their volume
-    # before copying the durable per-attempt spool to a host checkpoint.
-    app = active['app']
-    running = command(['docker', 'inspect', '--format', '{{.State.Running}}', app]) == 'true'
-    if running:
-        records, detail = recover_batch(app, payload, None, 'interrupted', output)
+    if meta.get('implementation', 'laravel') == 'django':
+        stopped = candidate_stop(active.get('probe_name') or probe_name(meta['run_id'], payload))
+        host_evidence = output / 'spools' / evidence_name(meta['run_id'], payload)
+        records, detail = recover_candidate_batch(payload, None, 'interrupted', output,
+                                                  host_evidence, stopped)
     else:
-        retained = {}
-        rejected = 0
-        with tempfile.TemporaryDirectory(prefix='p04-recovery-') as temporary:
-            target = Path(temporary) / 'spool.jsonl'
-            command(['docker', 'cp', app + ':' + payload['evidence_path'], str(target)], timeout=30)
-            # Preserve all bytes, including a torn last record, on the host.
-            recovered = output / 'recovered-spools'
-            recovered.mkdir(exist_ok=True)
-            atomic_text(recovered / (point_name(payload) + '.jsonl'), target.read_text())
-            for line in target.read_text().splitlines():
-                try:
-                    rejected += retain_samples(payload, [json.loads(line)], retained)
-                except (ValueError, TypeError):
-                    rejected += 1
-        completed = list(retained.values())
-        records = sorted(completed + failure_samples(payload, 'interrupted', completed), key=lambda row: row['attempt'])
-        detail = {'evidence_copied': True, 'probe_cohort_stopped': True,
-                  'completed_attempts_retained': len(completed), 'rejected_evidence_records': rejected}
+        # docker cp reads stopped containers as well. Never reset their volume
+        # before copying the durable per-attempt spool to a host checkpoint.
+        app = active['app']
+        running = command(['docker', 'inspect', '--format', '{{.State.Running}}', app]) == 'true'
+        if running:
+            records, detail = recover_batch(app, payload, None, 'interrupted', output)
+        else:
+            retained = {}
+            rejected = 0
+            with tempfile.TemporaryDirectory(prefix='p04-recovery-') as temporary:
+                target = Path(temporary) / 'spool.jsonl'
+                command(['docker', 'cp', app + ':' + payload['evidence_path'], str(target)], timeout=30)
+                # Preserve all bytes, including a torn last record, on the host.
+                recovered = output / 'recovered-spools'
+                recovered.mkdir(exist_ok=True)
+                atomic_text(recovered / (point_name(payload) + '.jsonl'), target.read_text())
+                for line in target.read_text().splitlines():
+                    try:
+                        rejected += retain_samples(payload, [json.loads(line)], retained)
+                    except (ValueError, TypeError):
+                        rejected += 1
+            completed = list(retained.values())
+            records = sorted(completed + failure_samples(payload, 'interrupted', completed),
+                             key=lambda row: row['attempt'])
+            detail = {'evidence_copied': True, 'probe_cohort_stopped': True,
+                      'completed_attempts_retained': len(completed),
+                      'rejected_evidence_records': rejected}
     point = {'cell': payload, 'session': active.get('session'), 'started_ns': active['started_ns'],
              'finished_ns': None, 'recovered_at': {'session': meta.get('sessions', [None])[-1],
                                                  'time_ns': time.monotonic_ns()},
@@ -560,8 +887,19 @@ def main():
     mode.add_argument('--benchmark', action='store_true', help='explicit comparison workload for P11')
     parser.add_argument('--output', type=Path, required=True, help='artifact directory below repository .local')
     parser.add_argument('--resume', action='store_true', help='resume this exact version/source output')
+    parser.add_argument('--protocol', choices=sorted(PROTOCOLS), default='p04',
+                        help='p04 baseline identity (default) or p11 paired comparison')
+    parser.add_argument('--implementation', choices=IMPLEMENTATIONS, default='laravel',
+                        help='implementation under measurement; django requires --protocol p11')
     args = parser.parse_args()
     args.smoke = not args.benchmark
+    global PROTOCOL
+    process_protocol = json.loads(PROTOCOLS[args.protocol].read_text())
+    if args.implementation not in process_protocol['implementations']:
+        raise RuntimeError('implementation_not_in_protocol')
+    if args.implementation == 'django' and args.protocol != 'p11':
+        raise RuntimeError('django_requires_p11_protocol')
+    PROTOCOL = process_protocol
     os.umask(0o077)
     output = args.output.resolve()
     if not output.is_relative_to(ROOT / '.local') or (output.exists() != args.resume):
@@ -570,7 +908,7 @@ def main():
     source_hash = fingerprint(current_sources)
     if args.resume:
         meta = json.loads((output / 'run.json').read_text())
-        validate_resume(meta, args.smoke, current_sources)
+        validate_resume(meta, args.smoke, current_sources, args.implementation, args.protocol)
         points = load_checkpoints(output, source_hash)
         for point in points:
             if not point['completed'] and not any(
@@ -583,6 +921,8 @@ def main():
         (output / 'checkpoints').mkdir()
         points = []
         meta = {'schema_version': 2, 'run_id': uuid.uuid4().hex, 'status': 'running', 'smoke': args.smoke,
+                'implementation': args.implementation, 'protocol_file': args.protocol,
+                'protocol_sha256': digest(PROTOCOLS[args.protocol]),
                 'protocol': PROTOCOL, 'source_sha256': current_sources,
                 'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                 'revision': command(['git', '-C', str(ROOT), 'rev-parse', 'HEAD']),
@@ -599,9 +939,17 @@ def main():
                'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
     meta.setdefault('sessions', []).append(session)
     harness.docker_admission()
-    config = harness.validate(json.loads((harness.STATE / 'laravel/config.json').read_text()))
-    if config != harness.default('laravel'):
-        raise RuntimeError('only_default_synthetic_configuration_admitted')
+    if args.implementation == 'django':
+        # smoke.container()/harness helpers resolve the P11 namespace in-process.
+        harness.STATE = P11_STATE
+        harness.PREFIX = 'lhie-p11-'
+        harness.IMAGE = 'lhie-p01-boundary:1'
+    if args.implementation == 'laravel':
+        config = harness.validate(json.loads((harness.STATE / 'laravel/config.json').read_text()))
+        if config != harness.default('laravel'):
+            raise RuntimeError('only_default_synthetic_configuration_admitted')
+    else:
+        prepare_candidate_admission()
     if args.resume:
         recover_pending(output, meta, points, source_hash)
         meta['run_history'].append({'status': 'interrupted' if meta['status'] == 'running' else meta['status'],
@@ -612,69 +960,118 @@ def main():
     rebuild_journals(output, points)
     meta['batches'] = [batch_summary(point) for point in points]
     meta['status'] = 'running'
-    meta['commands'].append('python3 tools/migration_benchmark/runner.py '
-                            + ('--smoke ' if args.smoke else '--benchmark ') + ('--resume ' if args.resume else '')
+    meta['commands'].append('python3 tools/migration_benchmark/runner.py --protocol ' + args.protocol
+                            + (' --smoke ' if args.smoke else ' --benchmark ')
+                            + '--implementation ' + args.implementation + ' '
+                            + ('--resume ' if args.resume else '')
                             + '--output ' + str(output.relative_to(ROOT)))
     save()
     print(json.dumps({'event': 'baseline_started', 'output': str(output.relative_to(ROOT)),
+                      'implementation': args.implementation,
                       'status': meta['status'], 'protocol_version': PROTOCOL['schema_version']}), flush=True)
     safe_to_reset = True
+    django = args.implementation == 'django'
+    meta['stage'] = 'start_stack'
     try:
-        cli('reset', 'laravel')
-        manifest_path = Path(cli('start', 'laravel'))
+        if django:
+            django_lifecycle('reset', 'candidate')
+            manifest_path = Path(django_lifecycle('start', 'candidate', '--quarantine'))
+            ids = {service: container('candidate', service) for service in ('boundary', 'database', 'redis')}
+            app = None
+            services = ('boundary', 'database', 'redis')
+        else:
+            cli('reset', 'laravel')
+            manifest_path = Path(cli('start', 'laravel'))
+            ids = {service: container('laravel', service) for service in ('boundary', 'database', 'redis', 'app')}
+            app = ids['app']
+            services = ('boundary', 'database', 'redis', 'app')
         meta['harness'] = json.loads(manifest_path.read_text())
-        meta['assets_sha256'] = {str(p.relative_to(ROOT / 'src/public')): digest(p)
-                                for p in sorted((ROOT / 'src/public/build').rglob('*')) if p.is_file()}
-        ids = {service: container('laravel', service) for service in ('boundary', 'database', 'redis', 'app')}
-        app = ids['app']
-        image_id = command(['docker', 'inspect', '--format', '{{.Image}}', app])
-        labels = json.loads(command(['docker', 'image', 'inspect', '--format', '{{json .Config.Labels}}', image_id])) or {}
-        meta['asset_build_identity'] = {key: value for key, value in labels.items() if key.startswith('lhie.p04.')}
-        if labels.get('lhie.p04.assets-tree-sha256') != harness.tree_digest(ROOT / 'src/public/build'):
-            raise RuntimeError('comparator_assets_do_not_match_frozen_inputs')
+        if django:
+            meta['candidate_admission'] = json.loads((candidate_directory() / 'candidate.json').read_text())
+            meta['candidate_image'] = command(['docker', 'image', 'inspect', CANDIDATE_IMAGE, '--format', '{{.Id}}'])
+            meta['comparator_image'] = command(['docker', 'image', 'inspect', 'lhie-p01-laravel:1', '--format', '{{.Id}}'])
+        else:
+            meta['assets_sha256'] = {str(p.relative_to(ROOT / 'src/public')): digest(p)
+                                     for p in sorted((ROOT / 'src/public/build').rglob('*')) if p.is_file()}
+            image_id = command(['docker', 'inspect', '--format', '{{.Image}}', app])
+            labels = json.loads(command(['docker', 'image', 'inspect', '--format', '{{json .Config.Labels}}', image_id])) or {}
+            meta['asset_build_identity'] = {key: value for key, value in labels.items() if key.startswith('lhie.p04.')}
+            if labels.get('lhie.p04.assets-tree-sha256') != harness.tree_digest(ROOT / 'src/public/build'):
+                raise RuntimeError('comparator_assets_do_not_match_frozen_inputs')
         observed = snapshot(ids, session)
-        verify_limits(observed)
+        verify_limits(observed, services)
         atomic_json(output / 'admission-resources.json', observed)
-        install_tools(app)
+        if not django:
+            install_tools(app)
         settings = "SELECT json_object_agg(name,setting) FROM pg_settings WHERE name IN ('max_connections','shared_buffers','synchronous_commit','fsync','full_page_writes','TimeZone','max_worker_processes','checkpoint_timeout')"
         meta.setdefault('postgres_settings', []).append(json.loads(postgres(ids, settings)))
         with Progress(output), Sensors(ids, output / 'resources.jsonl', session):
-            cells = list(planned_cells(args.smoke))
+            cells = list(planned_cells(args.smoke, args.implementation))
             manifests = {}
             for role in ('primary', 'diagnostic'):
                 for dimensions in (cell for cell in cells if measurement_role(cell, args.smoke) == role):
                     dataset = dimensions['dataset']
                     while (batch := next_batch(points, dimensions, args.smoke)) is not None:
                         if dataset not in manifests:
-                            manifest = prepare_template(ids, dataset, meta)
+                            meta['stage'] = 'seed'
+                            save()
+                            manifest = prepare_template(ids, dataset, meta, output)
                             meta.setdefault('schema_sha256', []).append(hashlib.sha256(command([
                                 'docker', 'exec', ids['database'], 'pg_dump', '-U', 'harness', '-d',
                                 'disposable', '--schema-only', '--no-comments']).encode()).hexdigest())
                             manifests[dataset] = manifest
                             save()
+                        meta['stage'] = 'clone'
+                        save()
                         manifest = manifests[dataset]
                         clone_database(ids, dataset)
                         command(['docker', 'exec', ids['redis'], 'redis-cli', 'FLUSHALL'])
-                        admitted = probe(app, {'mode': 'admit_seed', 'dataset': dataset,
-                                               'logical_sha256': manifest['logical_sha256']})
+                        if django:
+                            admitted = php_probe(ids, php_storage(output), {
+                                'mode': 'admit_seed', 'dataset': dataset,
+                                'logical_sha256': manifest['logical_sha256']})
+                        else:
+                            admitted = probe(app, {'mode': 'admit_seed', 'dataset': dataset,
+                                                   'logical_sha256': manifest['logical_sha256']})
                         if not admitted.get('admitted') or admitted['manifest'] != manifest:
                             raise RuntimeError('cloned_dataset_admission_failed')
+                        meta['stage'] = 'probe'
+                        save()
                         count = samples_per_batch(points, dimensions, args.smoke)
                         phases = [(False, count)]
                         if measurement_role(dimensions, args.smoke) == 'primary':
                             phases.insert(0, (True, PROTOCOL['warmup_samples_per_batch']))
-                        for warmup, samples in phases:
+                        for index, (warmup, samples) in enumerate(phases):
                             payload = dict(mode='batch', batch=batch, samples=samples, warmup=warmup, **dimensions)
-                            payload['evidence_path'] = ('/var/www/html/storage/app/private/p04-evidence/'
-                                                        + meta['run_id'] + '-' + point_name(payload) + '.jsonl')
+                            # Derived identity fields stay explicit; proposals never
+                            # infer an implementation or transport from context.
+                            payload['implementation'] = implementation_of(payload)
+                            payload['transport'] = 'synthetic'
+                            # Warmup and measurement share one pristine clone; only
+                            # the first phase may require empty candidate state.
+                            payload['fresh_clone'] = index == 0
+                            payload['evidence_path'] = (
+                                '/evidence/' + evidence_name(meta['run_id'], payload)
+                                if django else '/var/www/html/storage/app/private/p04-evidence/'
+                                + meta['run_id'] + '-' + point_name(payload) + '.jsonl')
                             before = time.monotonic_ns()
-                            meta['active'] = {'cell': payload, 'app': app, 'started_ns': before, 'session': session}
+                            probe_id = probe_name(meta['run_id'], payload)
+                            authority_before = authority_snapshot(ids) if django else None
+                            meta['active'] = {'cell': payload, 'app': app,
+                                              'probe_name': probe_id if django else None,
+                                              'started_ns': before, 'session': session}
                             save()
                             safe_to_reset = False
                             result = None
                             completed = True
+                            probe_state = None
+                            host_evidence = output / 'spools' / evidence_name(meta['run_id'], payload)
                             try:
-                                result = probe(app, payload)
+                                if django:
+                                    result, payload, host_evidence, probe_state = candidate_probe(
+                                        ids, payload, output, meta['run_id'], session)
+                                else:
+                                    result = probe(app, payload)
                                 retained = {}
                                 if (not isinstance(result['samples'], list) or len(result['samples']) != samples
                                         or retain_samples(payload, result['samples'], retained)
@@ -685,9 +1082,27 @@ def main():
                             except (RuntimeError, OSError, subprocess.TimeoutExpired, ValueError,
                                     KeyError, TypeError, KeyboardInterrupt) as error:
                                 completed = False
-                                code = 'timeout' if isinstance(error, subprocess.TimeoutExpired) else 'probe_error'
-                                records, detail = recover_batch(app, payload, result, code, output)
+                                code = ('timeout'
+                                        if isinstance(error, subprocess.TimeoutExpired) or str(error) == 'timeout'
+                                        else 'probe_error')
+                                if django:
+                                    stopped = candidate_stop(probe_id)
+                                    records, detail = recover_candidate_batch(
+                                        payload, result, code, output, host_evidence, stopped)
+                                    if isinstance(error, RuntimeError) and str(error).startswith('probe_error:'):
+                                        detail['probe_error_code'] = str(error).split(':', 1)[1]
+                                else:
+                                    records, detail = recover_batch(app, payload, result, code, output)
                                 meta['runner_failures'].append({'cell': payload, 'code': code, 'recovery': detail})
+                            changed = []
+                            if django:
+                                changed = authority_delta(authority_before, authority_snapshot(ids))
+                                detail['authority_audit'] = {
+                                    'changed_tables': changed, 'violations': len(changed),
+                                    'excluded_tables': sorted(AUTHORITY_EXCLUDED)}
+                                detail['probe_resources'] = {
+                                    'state': (probe_state or {}).get('state'),
+                                    'samples': (probe_state or {}).get('resources', [])}
                             point = {'cell': payload, 'session': session, 'started_ns': before,
                                      'finished_ns': time.monotonic_ns(), 'completed': completed,
                                      'samples': records, 'accounting': detail}
@@ -700,16 +1115,22 @@ def main():
                             meta['batches'].append(batch_summary(point))
                             save()
                             print(json.dumps(meta['batches'][-1]), flush=True)
+                            if changed:
+                                raise RuntimeError('authority_violation')
                             if not completed:
                                 raise RuntimeError('probe_failed_run_stopped')
             meta['status'] = 'complete_with_unknowns' if meta['runner_failures'] else 'complete'
-    except (Exception, KeyboardInterrupt):
+    except (Exception, KeyboardInterrupt) as error:
         meta['status'] = 'failed'
+        meta['error_type'] = type(error).__name__
         meta['runner_failures'].append({'code': 'runner_error'})
     finally:
         if safe_to_reset:
             try:
-                cli('reset', 'laravel')
+                if django:
+                    django_lifecycle('reset', 'candidate')
+                else:
+                    cli('reset', 'laravel')
                 meta['disposable_cleanup'] = 'reset'
             except (Exception, KeyboardInterrupt):
                 meta['status'] = 'failed'
@@ -720,8 +1141,10 @@ def main():
         meta['finished_utc'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         meta['driver_max_rss_kib'] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         save()
+        meta['stage'] = 'report'
         attempts = write_report(output, output / 'samples.jsonl', meta, args.smoke)
-    print(json.dumps({'output': str(output.relative_to(ROOT)), 'status': meta['status'], 'attempts': attempts}))
+    print(json.dumps({'output': str(output.relative_to(ROOT)), 'implementation': args.implementation,
+                      'status': meta['status'], 'attempts': attempts}))
     return 1 if meta['status'] == 'failed' else 0
 
 
@@ -729,5 +1152,5 @@ if __name__ == '__main__':
     try:
         raise SystemExit(main())
     except (RuntimeError, ValueError, KeyError, OSError, subprocess.TimeoutExpired):
-        print('P04 failed safely; inspect sanitized run status; no child payload is printed.', file=sys.stderr)
+        print('benchmark failed safely; inspect sanitized run status; no child payload is printed.', file=sys.stderr)
         raise SystemExit(1)
