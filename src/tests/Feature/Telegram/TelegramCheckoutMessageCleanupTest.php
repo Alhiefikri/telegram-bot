@@ -15,6 +15,7 @@ use App\Services\Telegram\TelegramBuyerCheckoutInstructionCleaner;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -159,6 +160,75 @@ final class TelegramCheckoutMessageCleanupTest extends NonTransactionalDatabaseT
         $this->artisan('telegram:recover-outbound', ['--chunk' => 1])->assertSuccessful();
 
         $this->assertDeletedMessages([703]);
+    }
+
+    public function test_deactivated_recipient_ends_cleanup_for_all_tracked_targets(): void
+    {
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Cancelled,
+            'manual_checkout_customer_notification_chat_id' => '777',
+            'manual_checkout_customer_notification_message_id' => 701,
+            'buyer_order_detail_message_chat_id' => '777',
+            'buyer_order_detail_message_id' => 702,
+        ]);
+        $effect = TelegramOutboundEffect::factory()->create([
+            'source_type' => Order::class,
+            'source_id' => $order->id,
+            'effect_type' => TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,
+            'state' => TelegramOutboundEffectState::Sent,
+            'telegram_chat_id' => '777',
+            'telegram_message_id' => '703',
+            'sent_at' => now(),
+        ]);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => Http::response([
+            'ok' => false, 'error_code' => 403, 'description' => 'Forbidden: user is deactivated',
+        ], 403)]);
+
+        app()->call([new DeleteBuyerCheckoutMessages($order->id), 'handle']);
+        app()->call([new DeleteBuyerCheckoutMessages($order->id), 'handle']);
+
+        $this->assertDeletedMessages([701, 702, 703]);
+        $this->assertNotNull($order->refresh()->manual_checkout_customer_notification_deleted_at);
+        $this->assertNotNull($order->buyer_order_detail_message_deleted_at);
+        $this->assertNotNull($effect->refresh()->telegram_message_deleted_at);
+        $this->assertNull($effect->telegram_message_deletion_token);
+    }
+
+    #[DataProvider('retryableDeletionFailures')]
+    public function test_other_rejections_leave_cleanup_retryable(int $status, string $description): void
+    {
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Cancelled,
+            'manual_checkout_customer_notification_chat_id' => '777',
+            'manual_checkout_customer_notification_message_id' => 701,
+        ]);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(['https://api.telegram.org/*' => Http::response([
+            'ok' => false, 'error_code' => $status, 'description' => $description,
+        ], $status)]);
+
+        try {
+            app()->call([new DeleteBuyerCheckoutMessages($order->id), 'handle']);
+            $this->fail('Non-terminal deletion failure must propagate.');
+        } catch (RequestException $exception) {
+            $this->assertSame($status, $exception->response->status());
+        }
+
+        $this->assertNull($order->fresh()->manual_checkout_customer_notification_deleted_at);
+        $this->assertNull($order->manual_checkout_customer_notification_deletion_token);
+    }
+
+    public static function retryableDeletionFailures(): array
+    {
+        return [
+            'unknown forbidden' => [403, 'Forbidden: unexpected bot permission failure'],
+            'blocked recipient' => [403, 'Forbidden: bot was blocked by the user'],
+            'rate limit' => [429, 'Too Many Requests'],
+            'provider outage' => [500, 'Internal Server Error'],
+        ];
     }
 
     public static function qrisProviders(): array

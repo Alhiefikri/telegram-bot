@@ -80,7 +80,7 @@ class TelegramBuyerCheckoutInstructionCleaner
             try {
                 $this->bot->deleteMessage($target->telegram_chat_id, $target->telegram_message_id);
             } catch (Throwable $exception) {
-                if (! ($exception instanceof RequestException && $this->isAlreadyDeletedTelegramMessage($exception))) {
+                if (! ($exception instanceof RequestException && $this->isTerminalDeletionResponse($exception))) {
                     TelegramOutboundEffect::query()
                         ->whereKey($target->id)
                         ->where('telegram_message_deletion_token', $token)
@@ -132,7 +132,7 @@ class TelegramBuyerCheckoutInstructionCleaner
         try {
             $this->bot->deleteMessage($target->buyer_order_detail_message_chat_id, $target->buyer_order_detail_message_id);
         } catch (RequestException $e) {
-            if (! $this->isAlreadyDeletedTelegramMessage($e)) {
+            if (! $this->isTerminalDeletionResponse($e)) {
                 Order::query()
                     ->whereKey($target->id)
                     ->where('buyer_order_detail_message_id', $target->buyer_order_detail_message_id)
@@ -171,7 +171,7 @@ class TelegramBuyerCheckoutInstructionCleaner
                 $target->{$prefix.'_message_id'},
             );
         } catch (RequestException $e) {
-            if (! $this->isAlreadyDeletedTelegramMessage($e)) {
+            if (! $this->isTerminalDeletionResponse($e)) {
                 $this->releaseDeletionClaim($target, $prefix, $token);
 
                 throw $e;
@@ -262,8 +262,12 @@ class TelegramBuyerCheckoutInstructionCleaner
             && $startedAt->gt(now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600))));
     }
 
-    private function isAlreadyDeletedTelegramMessage(RequestException $e): bool
+    private function isTerminalDeletionResponse(RequestException $e): bool
     {
+        if ($e->response?->status() === 403) {
+            return data_get($e->response->json(), 'description') === 'Forbidden: user is deactivated';
+        }
+
         if ($e->response?->status() !== 400) {
             return false;
         }
