@@ -68,3 +68,7 @@ tools/migration_data/__pycache__/
 candidate/.venv/
 candidate/**/__pycache__/
 candidate/__pycache__/
+# P11 and later local evidence/spools never enter git.
+.local/
+tools/migration_benchmark/__pycache__/
+tools/migration_compat/__pycache__/
