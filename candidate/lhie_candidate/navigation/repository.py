@@ -13,6 +13,28 @@ PRODUCT_COLUMNS = (
     "region account_type device_limit included_items limitations fulfillment_expectation support_policy"
 ).split()
 
+# One projection shared by the catalog scan and targeted detail lookups. Detail,
+# quantity and Back renders must not re-scan every Product with its correlated
+# stock/order subqueries; P11 measured that full scan as the dominant cost.
+_PRODUCT_SELECT = f"""
+    SELECT {", ".join("p." + name for name in PRODUCT_COLUMNS)},
+      c.name AS category_name,c.slug AS category_slug,
+      CASE WHEN EXISTS (SELECT 1 FROM public.product_stock_items s
+             WHERE s.product_id=p.id AND s.supplier_purchase_id IS NULL)
+        THEN LEAST(GREATEST(0,p.stock-p.reserved_stock),
+             (SELECT COUNT(*) FROM public.product_stock_items s WHERE s.product_id=p.id
+              AND s.supplier_purchase_id IS NULL AND s.order_item_id IS NULL AND s.retired_at IS NULL))
+        ELSE GREATEST(0,p.stock-p.reserved_stock) END
+      + CASE WHEN p.supplier_available_until > CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta'
+             THEN GREATEST(0,p.supplier_available_stock) ELSE 0 END AS available_stock,
+      COALESCE((SELECT SUM(i.quantity) FROM public.order_items i JOIN public.orders o ON o.id=i.order_id
+                WHERE i.product_id=p.id AND o.payment_status='paid'
+                  AND o.order_status IN ('processing','completed')),0) AS sold_quantity
+    FROM public.products p LEFT JOIN public.categories c ON c.id=p.category_id AND c.deleted_at IS NULL
+    WHERE p.deleted_at IS NULL AND p.is_active=TRUE
+      AND (p.category_id IS NULL OR c.is_active=TRUE)
+"""
+
 
 def _json(value):
     return json.loads(value) if isinstance(value, str) else (value or {})
@@ -38,26 +60,10 @@ class CatalogRepository:
             (telegram_id,),
         )
 
-    def products(self):
-        columns = ",".join("p." + name for name in PRODUCT_COLUMNS)
-        rows = self._rows(f"""
-            SELECT {columns},c.name AS category_name,c.slug AS category_slug,
-              CASE WHEN EXISTS (SELECT 1 FROM public.product_stock_items s
-                     WHERE s.product_id=p.id AND s.supplier_purchase_id IS NULL)
-                THEN LEAST(GREATEST(0,p.stock-p.reserved_stock),
-                     (SELECT COUNT(*) FROM public.product_stock_items s WHERE s.product_id=p.id
-                      AND s.supplier_purchase_id IS NULL AND s.order_item_id IS NULL AND s.retired_at IS NULL))
-                ELSE GREATEST(0,p.stock-p.reserved_stock) END
-              + CASE WHEN p.supplier_available_until > CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta'
-                     THEN GREATEST(0,p.supplier_available_stock) ELSE 0 END AS available_stock,
-              COALESCE((SELECT SUM(i.quantity) FROM public.order_items i JOIN public.orders o ON o.id=i.order_id
-                        WHERE i.product_id=p.id AND o.payment_status='paid'
-                          AND o.order_status IN ('processing','completed')),0) AS sold_quantity
-            FROM public.products p LEFT JOIN public.categories c ON c.id=p.category_id AND c.deleted_at IS NULL
-            WHERE p.deleted_at IS NULL AND p.is_active=TRUE
-              AND (p.category_id IS NULL OR c.is_active=TRUE)
-        """)
-        families = {family['id']: family for family in self.families()}
+    def _product_rows(self, suffix="", params=()):
+        return self._rows(_PRODUCT_SELECT + suffix, params)
+
+    def _enrich_products(self, rows, families):
         for product in rows:
             family = families.get(product['product_family_id'])
             product['family'] = family
@@ -71,18 +77,37 @@ class CatalogRepository:
             product['sold_quantity'] = int(product['sold_quantity'])
         return rows
 
+    def products(self):
+        return self._enrich_products(
+            self._product_rows(),
+            {family['id']: family for family in self.families()},
+        )
+
     def product(self, product_id):
-        return next((product for product in self.products() if product['id'] == product_id), None)
+        rows = self._product_rows(" AND p.id=%s", (product_id,))
+        if not rows:
+            return None
+        family = self._family(rows[0]['product_family_id'])
+        return self._enrich_products(rows, {family['id']: family} if family else {})[0]
 
     def families(self):
         return self._rows("""SELECT id,name,slug,description,icon,custom_emoji_id,telegram_image_path,sort_order
                              FROM public.product_families WHERE deleted_at IS NULL ORDER BY sort_order,name,id""")
 
+    def _family(self, family_id):
+        if family_id is None:
+            return None
+        return self._one("""SELECT id,name,slug,description,icon,custom_emoji_id,telegram_image_path,sort_order
+                            FROM public.product_families WHERE id=%s AND deleted_at IS NULL""", (family_id,))
+
     def family(self, family_id):
-        family = next((family for family in self.families() if family['id'] == family_id), None)
+        family = self._family(family_id)
         if family is None:
             return None
-        members = [product for product in self.products() if product['product_family_id'] == family_id]
+        members = self._enrich_products(
+            self._product_rows(" AND p.product_family_id=%s", (family_id,)),
+            {family['id']: family},
+        )
         if not members:
             return None
         return dict(family, members=sorted(members, key=self.member_key))

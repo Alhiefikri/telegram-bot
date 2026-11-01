@@ -42,6 +42,16 @@ class MemoryCatalog(CatalogRepository):
     def families(self):
         return copy.deepcopy(self.family_rows)
 
+    def product(self, product_id):
+        return next((row for row in self.products() if row['id'] == product_id), None)
+
+    def family(self, family_id):
+        family = next((row for row in self.families() if row['id'] == family_id), None)
+        if family is None:
+            return None
+        members = [row for row in self.products() if row['product_family_id'] == family_id]
+        return dict(family, members=sorted(members, key=self.member_key)) if members else None
+
     def categories(self):
         return copy.deepcopy(self.category_rows)
 
