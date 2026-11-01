@@ -12,6 +12,7 @@ from django.db import connections, transaction
 from ..checkout.db import Database
 from ..checkout.errors import CheckoutError
 from ..checkout.inventory import InventoryLedger
+from ..receipt.jobs import wake_after_commit
 from .sakurupiah import CreateRequest, InvoiceIdentity, OutcomeState
 
 
@@ -354,4 +355,5 @@ class SakurupiahLifecycle:
         transaction.savepoint_commit(savepoint, using=self.using)
         self.db.execute("UPDATE public.payments SET status='paid',paid_at=%s,updated_at=%s WHERE id=%s", (now, now, payment['id']))
         self.db.execute("UPDATE public.orders SET payment_status='paid',order_status='completed',updated_at=%s WHERE id=%s", (now, order['id']))
+        wake_after_commit('order', str(order['id']), using=self.using)
         return LifecycleResult('paid')

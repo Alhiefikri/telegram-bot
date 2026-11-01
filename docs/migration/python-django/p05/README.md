@@ -469,3 +469,69 @@ Context7 documentation consulted: Django 5.2
 [atomic transactions](https://docs.djangoproject.com/en/5.2/topics/db/transactions/)
 and [row locks](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update),
 and PostgreSQL 16 [explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html).
+
+## P09: credential receipts and outbound effects (#690)
+
+`candidate/lhie_candidate/receipt/` uses the existing
+`telegram_outbound_effects` table as the delivery authority. Paid checkout and
+payment settlement register ID-only Redis wakeups after commit. The bounded
+`candidate/receipt.py --once` consumer materializes receipt groups and claims
+ordered units with token-fenced PostgreSQL leases. `--recover` discovers
+missing groups and due units and repairs completed receipt projections without
+sending again. Expired leases and lost acknowledgements remain `unknown`;
+only definite initial photo failures may create the text fallback. A definite
+custom-emoji rejection permits one Unicode retry; ambiguous results never do.
+Historical invoice-photo groups retain their separate legacy successor rule.
+
+The source checks Customer ownership, the latest paid Payment, late-payment
+review, supplier state and externally handed-off fulfillment before a receipt
+is created or sent. Retired allocations are not rendered. The authorized
+allocation is decrypted only in process to render the invoice PNG, localized
+text, TXT and action panel; jobs and effect metadata contain no credential
+payload. The receipt queue is separate from admin/email work, and this path
+does not pin messages. `receipt/grants.sql` is explicitly provisioned for the
+disposable runtime; startup never grants privileges.
+
+Local verification uses `python3 tools/migration_harness/smoke_checkout.py
+--receipt` and `tests.test_receipt_render`, `tests.test_receipt_transport`,
+`tests.test_navigation_ingress`, `tests.test_navigation_roots` and
+`tests.migration_harness.test_p09_relay`. The smoke
+uses synthetic checkout data, the repository PostgreSQL schema, Redis and a
+fake-only Telegram relay. It checks one allocation/debit on replay, foreign
+ownership, retired and partially retired allocations, manual review,
+materialization rollback, concurrent claim fencing, lost ACK, definite photo
+fallback, legacy invoice successors, action-panel and owner-bound TXT delivery,
+rate limiting and sent-projection repair without a second send. Sanitized
+evidence and source/image identities are in `.local/migration-p09/verification.json`.
+
+For a fresh local run, build the required tags first:
+
+```sh
+docker build -t lhie-p09-candidate:local candidate
+docker build -t lhie-p09-boundary:local tools/migration_harness
+```
+
+The verification image mounted the current source read-only over the existing
+P05 image with Pillow 12.1.0 and DejaVu fonts added locally. A fresh candidate
+build timed out while downloading Debian package indexes; it did not complete.
+This is not evidence of a fresh production image, actual Telegram delivery,
+provider qualification, production data/key coverage or visual parity.
+Non-fake receipt uploads require
+the `testing-bot` mode and a separately attested
+`P09-approved-receipt-targets-only` scope; P06/P08 approvals do not authorize
+credential sends. The relay verifies the configured safe chat, transmits uploads
+in memory and treats uncertain upstream outcomes as ambiguous. No such send was
+performed in this verification. Signed invoice links currently target the local
+fixture; the real invoice surface belongs to P21. Previously issued
+`txt:send`/`txt:cancel` confirmation nonces are not migrated from Laravel's
+short-lived cache. The current PHP request handler no longer starts these
+sessions; any pre-existing confirmation can still live for ten minutes. The
+cutover must account for that TTL. Current `txt:request` actions remain
+supported. Generic worker supervision and recovery scheduling belong to P10.
+
+Context7 was consulted for Django 5.2
+[transaction callbacks](https://docs.djangoproject.com/en/5.2/topics/db/transactions/#performing-actions-after-commit)
+and [row locks](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update),
+and PostgreSQL 16 [explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html).
+The [Telegram Bot API](https://core.telegram.org/bots/api#sending-files)
+specifies multipart uploads and response semantics.

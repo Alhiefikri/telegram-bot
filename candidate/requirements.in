@@ -3,3 +3,4 @@ psycopg[binary]==3.3.4
 cryptography==46.0.7
 bcrypt==5.0.0
 argon2-cffi==25.1.0
+Pillow==12.1.0

@@ -1,5 +1,6 @@
 """ID-only processing; session advisory locks serialize chats without DB transactions over I/O."""
 import json
+import re
 
 from django.db import connection
 from .customers import resolve_customer
@@ -76,8 +77,25 @@ class NavigationProcessor:
                     else resolve_customer(self.repository, source["from"]))
         if customer is None:
             return "unknown_customer"
+        receipt_action = None
+        if callback:
+            match = re.fullmatch(r'(txt:request|receipt:buy_again|receipt:main_menu):([0-9a-fA-F-]{36})', callback["data"])
+            if match:
+                action, order_id = match.groups()
+                from lhie_candidate.receipt.runtime import receipt_service
+                receipt = receipt_service()
+                try:
+                    allocation, _ = receipt.source.authorize(order_id, chat['id'])
+                except ValueError:
+                    return self._feedback(customer, callback, "stale")
+                if allocation['customer_id'] != customer['id']:
+                    return self._feedback(customer, callback, "stale")
+                if action == 'txt:request':
+                    result = receipt.request_download(order_id, customer['id'], chat['id'], payload['update_id'])
+                    return self._feedback(customer, callback, "acknowledged" if result else "stale")
+                receipt_action = 'menu' if action == 'receipt:main_menu' else 'katalog'
         root = self.roots.current_for_chat(customer, str(chat["id"]))
-        if callback and (root is None or self.roots.match(customer, str(chat["id"]), message["message_id"]) is None):
+        if callback and receipt_action is None and (root is None or self.roots.match(customer, str(chat["id"]), message["message_id"]) is None):
             return self._feedback(customer, callback, "stale")
         with connection.cursor() as cursor:
             cursor.execute("SELECT state FROM django_candidate.navigation_sessions WHERE customer_id=%s", [customer["id"]])
@@ -87,7 +105,7 @@ class NavigationProcessor:
             state = json.loads(state)
         surface = None
         if callback:
-            data = callback["data"]
+            data = receipt_action or callback["data"]
         else:
             command = source.get("text", "").strip().split("@", 1)[0].lower()
             if command in ("/start", "/menu", "☰ menu", "menu"):

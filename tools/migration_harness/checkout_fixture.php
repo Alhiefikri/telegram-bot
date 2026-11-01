@@ -72,5 +72,17 @@ foreach (['duplicate', 'stale', 'maintenance', 'rollback', 'release', 'pause', '
     $product = product($name);
     $fixtures[$name] = row($customer, $product, cart($customer, $product));
 }
+$customer = buyer(50000);
+$product = product('receipt-lost-ack');
+$fixtures['receipt_lost'] = row($customer, $product, cart($customer, $product, 2));
+$customer = buyer(50000);
+$first = product('receipt-partial-a');
+$second = product('receipt-partial-b');
+$partialCart = cart($customer, $first);
+app(App\Services\CartService::class)->addItem($partialCart, $second, 1);
+$fixtures['receipt_partial'] = row($customer, $first, $partialCart);
+$customer = buyer(50000);
+$product = product('receipt-historical');
+$fixtures['receipt_historical'] = row($customer, $product, cart($customer, $product));
 $fixtures['key'] = hash_hmac('sha256', 'telegram-direct-checkout|42|700042|700042|99|checkout:choice', str_repeat('a', 64));
 echo json_encode($fixtures, JSON_THROW_ON_ERROR);

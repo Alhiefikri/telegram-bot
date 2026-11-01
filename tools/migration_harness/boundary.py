@@ -10,6 +10,7 @@ import pwd
 import socket
 import socketserver
 import stat
+import secrets
 import re
 import ssl
 import subprocess
@@ -27,7 +28,7 @@ def public_https(url):
     return parsed
 
 
-def upstream(url, payload=None, token=None, *, telegram_errors=False):
+def upstream(url, payload=None, token=None, *, telegram_errors=False, raw_body=None, content_type=None):
     """Pin the validated public address; preserve TLS hostname, refuse redirects."""
     parsed = public_https(url)
     addresses = socket.getaddrinfo(parsed.hostname, 443, family=socket.AF_INET,
@@ -38,12 +39,14 @@ def upstream(url, payload=None, token=None, *, telegram_errors=False):
     address = addresses[0][4]
     conn.connect = lambda: setattr(conn, "sock", ssl.create_default_context().wrap_socket(
         socket.create_connection(address, timeout=8), server_hostname=parsed.hostname))
-    headers = {"Content-Type": "application/json"}
+    if raw_body is not None and payload is not None:
+        raise ValueError("conflicting upstream bodies")
+    headers = {"Content-Type": content_type or "application/json"}
     if token:
         headers["Authorization"] = "Bearer " + token
     try:
-        conn.request("POST" if payload is not None else "GET", parsed.path or "/",
-                     json.dumps(payload) if payload is not None else None, headers)
+        body = raw_body if raw_body is not None else json.dumps(payload) if payload is not None else None
+        conn.request("POST" if body is not None else "GET", parsed.path or "/", body, headers)
         response = conn.getresponse()
         data = response.read(65537)
         if ((response.status != 200 and not (telegram_errors and response.status in (400, 403, 429)))
@@ -186,6 +189,116 @@ def navigation_request(config, body, next_message_id):
     return {"ok": True, "result": {"message_id": payload.get("message_id") or next_message_id}}
 
 
+def receipt_multipart(payload, field, data):
+    boundary = "receipt-" + secrets.token_hex(16)
+    parts = []
+    for key, value in payload.items():
+        if key == "filename":
+            continue
+        if isinstance(value, (dict, list, bool)):
+            value = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+        else:
+            value = str(value)
+        parts.append(("--" + boundary + '\r\nContent-Disposition: form-data; name="' + key
+                      + '"\r\n\r\n').encode() + value.encode("utf-8") + b"\r\n")
+    filename = "invoice.png" if field == "photo" else payload["filename"]
+    content_type = "image/png" if field == "photo" else "text/plain; charset=utf-8"
+    parts.append(("--" + boundary + '\r\nContent-Disposition: form-data; name="' + field
+                  + '"; filename="' + filename + '"\r\nContent-Type: ' + content_type
+                  + "\r\n\r\n").encode() + data + b"\r\n")
+    parts.append(("--" + boundary + "--\r\n").encode())
+    return b"".join(parts), "multipart/form-data; boundary=" + boundary
+
+
+def receipt_response(response):
+    if not isinstance(response, dict):
+        return {"ok": False, "error_code": 502}
+    result = response.get("result")
+    if response.get("ok") is True and isinstance(result, dict) and type(result.get("message_id")) is int and result["message_id"] > 0:
+        return {"ok": True, "result": {"message_id": result["message_id"]}}
+    code = response.get("error_code")
+    if response.get("ok") is False and type(code) is int and code in (400, 403, 429):
+        safe = {"ok": False, "error_code": code}
+        description = response.get("description")
+        if (code == 400 and isinstance(description, str)
+                and any(term in description.lower() for term in ("custom emoji", "icon_custom_emoji_id", "tg-emoji"))):
+            safe["emoji_rejected"] = True
+        parameters = response.get("parameters")
+        if isinstance(parameters, dict) and type(parameters.get("retry_after")) is int:
+            safe["parameters"] = {"retry_after": min(300, max(1, parameters["retry_after"]))}
+        return safe
+    return {"ok": False, "error_code": 502}
+
+
+def receipt_request(config, body, next_message_id):
+    """Receipt uploads are ephemeral and restricted to explicitly admitted targets."""
+    approved = (config.get("mode") == "testing-bot"
+                and (config.get("approval") or {}).get("gate") == "P09-approved-receipt-targets-only")
+    if config.get("mode") != "fake" and not approved:
+        return {"ok": False, "error_code": 403}
+    if (not isinstance(body, dict) or set(body) != {"method", "payload"}
+            or body["method"] not in ("sendMessage", "sendPhoto", "sendDocument")
+            or not isinstance(body["payload"], dict)):
+        raise ValueError("invalid receipt request")
+    method, payload = body["method"], body["payload"]
+    common = {"chat_id", "reply_markup", "protect_content"}
+    allowed = {
+        "sendMessage": common | {"text", "entities"},
+        "sendPhoto": common | {"photo", "caption", "caption_entities"},
+        "sendDocument": common | {"document", "filename", "caption", "caption_entities"},
+    }[method]
+    if not set(payload) <= allowed:
+        raise ValueError("invalid receipt options")
+    if "protect_content" in payload and type(payload["protect_content"]) is not bool:
+        raise ValueError("invalid receipt protection")
+    chat_id = payload.get("chat_id")
+    if isinstance(chat_id, str) and chat_id.isascii() and chat_id.isdecimal() and len(chat_id) <= 20:
+        chat_id = int(chat_id)
+    if type(chat_id) is not int or chat_id not in config["safe_chat_ids"]:
+        raise ValueError("chat not admitted")
+    text = payload.get("text" if method == "sendMessage" else "caption", "")
+    if (not isinstance(text, str) or (method == "sendMessage" and not text)
+            or len(text.encode("utf-16-le")) // 2 > (4096 if method == "sendMessage" else 1024)):
+        raise ValueError("invalid receipt text")
+    for key in ("entities", "caption_entities"):
+        if key in payload and not isinstance(payload[key], list):
+            raise ValueError("invalid receipt entities")
+    if "reply_markup" in payload and not isinstance(payload["reply_markup"], dict):
+        raise ValueError("invalid receipt markup")
+    field = {"sendPhoto": "photo", "sendDocument": "document"}.get(method)
+    metadata = {key: value for key, value in payload.items() if key != field}
+    if len(json.dumps(metadata, ensure_ascii=True)) > 65536:
+        raise ValueError("receipt metadata too large")
+    if field:
+        value = payload.get(field)
+        limit = 5 * 1024 * 1024 if field == "photo" else 1024 * 1024
+        if not isinstance(value, str) or len(value) > 4 * ((limit + 2) // 3):
+            raise ValueError("invalid receipt attachment")
+        data = base64.b64decode(value, validate=True)
+        if not 0 < len(data) <= limit:
+            raise ValueError("invalid receipt attachment")
+        if field == "photo" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("invalid receipt image")
+        if field == "document":
+            if (not isinstance(payload.get("filename"), str)
+                    or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,123}\.txt", payload["filename"]) is None):
+                raise ValueError("invalid receipt filename")
+            data.decode("utf-8")
+    if approved:
+        url = "https://api.telegram.org/bot" + config["bot_token"] + "/" + method
+        try:
+            if field:
+                raw_body, content_type = receipt_multipart(metadata, field, data)
+                response = upstream(url, telegram_errors=True, raw_body=raw_body, content_type=content_type)
+            else:
+                response = upstream(url, metadata, telegram_errors=True)
+            return receipt_response(response)
+        except Exception:
+            # The upstream may have accepted the request before the connection failed.
+            return {"ok": False, "error_code": 502}
+    return {"ok": True, "result": {"message_id": next_message_id}}
+
+
 def callback_handler(api_key, internal_key):
     class CallbackHandler(BaseHTTPRequestHandler):
         def setup(self):
@@ -310,6 +423,23 @@ def handler(config):
             self.end_headers()
 
         def do_POST(self):
+            if self.path == "/telegram/receipt":
+                try:
+                    lengths = self.headers.get_all("Content-Length", [])
+                    if (len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit()
+                            or not 0 < int(lengths[0]) <= 7 * 1024 * 1024 + 65536
+                            or self.headers.get("Transfer-Encoding")
+                            or self.headers.get_content_type() != "application/json"):
+                        raise ValueError("invalid receipt request")
+                    body = json.loads(self.rfile.read(int(lengths[0])))
+                    type(self).next_message_id += 1
+                    result = receipt_request(config, body, type(self).next_message_id)
+                except Exception:
+                    result = {"ok": False, "error_code": 400}
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+                return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 16384 or self.headers.get("Transfer-Encoding"):
