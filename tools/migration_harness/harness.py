@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import stat
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ IMAGE = "lhie-p01-boundary:1"
 FIELDS = {"version", "stack", "mode", "dataset", "db_url", "redis_url", "bot_token",
           "bot_id", "bot_username", "safe_chat_ids", "sandbox_status_url", "sandbox_token",
           "approval"}
+P08_FIELDS = {"p08_callback", "p08_api_id", "p08_callback_url", "p08_return_url", "p08_phone"}
 
 
 class Refused(Exception):
@@ -31,11 +33,11 @@ class Refused(Exception):
 
 
 def validate(config):
-    if not isinstance(config, dict) or set(config) != FIELDS:
+    if not isinstance(config, dict) or set(config) not in (FIELDS, FIELDS | P08_FIELDS):
         raise Refused("configuration fields do not match the P01 contract")
     if config["version"] != 1 or config["stack"] not in ("laravel", "candidate"):
         raise Refused("unsupported stack or contract")
-    if config["mode"] not in ("fake", "sandbox", "testing-bot"):
+    if config["mode"] not in ("fake", "sandbox", "testing-bot", "p08-sandbox-testing-bot"):
         raise Refused("unsupported transport mode")
     if not re.fullmatch(r"synthetic-[a-z0-9-]{1,60}|sanitized-[a-f0-9]{64}", config["dataset"]):
         raise Refused("dataset must be synthetic or carry a sanitized manifest digest")
@@ -47,6 +49,16 @@ def validate(config):
     if (not isinstance(chats, list) or not 1 <= len(chats) <= 10
             or any(type(chat) is not int or chat <= 0 for chat in chats)):
         raise Refused("only explicitly listed private testing/admin chats are admitted")
+    callback = config.get("p08_callback")
+    if callback is not None and (callback != {"gate": "P08-approved-sandbox-callback-only"}
+                                 or config["stack"] != "candidate"
+                                 or config["mode"] not in ("sandbox", "p08-sandbox-testing-bot")):
+        raise Refused("P08 callback requires explicit candidate sandbox approval")
+    if callback is None and any(config.get(key) for key in
+                                ("p08_api_id", "p08_callback_url", "p08_return_url", "p08_phone")):
+        raise Refused("P08 targets require callback approval")
+    if config["mode"] == "p08-sandbox-testing-bot" and callback is None:
+        raise Refused("dual-target mode requires P08 callback approval")
     if config["mode"] == "fake":
         if any(config[key] for key in ("bot_token", "bot_id", "bot_username", "sandbox_status_url",
                                        "sandbox_token", "approval")):
@@ -56,33 +68,50 @@ def validate(config):
         # Target/capability attestation must come from the operator, never the agent.
         if not isinstance(approval, dict) or set(approval) != {"gate", "scope_sha256"}:
             raise Refused("explicit transport attestation required")
-        scope = {key: config[key] for key in sorted(FIELDS - {"approval"})}
+        scope = {key: config[key] for key in sorted(set(config) - {"approval"})}
         digest = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
         gates = {"H0-approved-test-targets-only"}
         if config["mode"] == "testing-bot":
             gates.add("P06-approved-navigation-targets-only")
+        if config["mode"] == "p08-sandbox-testing-bot":
+            gates = {"P08-approved-dual-targets-only"}
         if type(approval["gate"]) is not str or approval["gate"] not in gates or approval["scope_sha256"] != digest:
             raise Refused("attestation does not match transport scope")
-        if config["mode"] == "testing-bot":
+        if config["mode"] in ("testing-bot", "p08-sandbox-testing-bot"):
             if (not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]{30,100}", config["bot_token"])
                     or type(config["bot_id"]) is not int
                     or str(config["bot_id"]) != config["bot_token"].split(":")[0]
                     or config["bot_username"] != "LhieStoreTestBot"
-                    or config["sandbox_status_url"] or config["sandbox_token"]):
+                    or (config["mode"] == "testing-bot"
+                        and (config["sandbox_status_url"] or config["sandbox_token"]))):
                 raise Refused("only the attested Lhiestore Testing Bot is admitted")
-        else:
+        if config["mode"] in ("sandbox", "p08-sandbox-testing-bot"):
             from boundary import public_https
             try:
                 parsed = public_https(config["sandbox_status_url"])
                 prefixes = {"klikqris.com": "/api/sandbox/", "sakurupiah.id": "/api-sanbox/"}
-                if (parsed.hostname not in prefixes or not parsed.path.startswith(prefixes[parsed.hostname])
+                if callback is not None:
+                    if config["sandbox_status_url"] != "https://sakurupiah.id/api-sanbox/":
+                        raise ValueError()
+                    token = config["sandbox_token"]
+                    if (not isinstance(token, str) or not token or token.strip() != token or len(token) > 512
+                            or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", config["p08_api_id"])
+                            or not re.fullmatch(r"[0-9]{8,16}", config["p08_phone"])):
+                        raise ValueError()
+                    for key in ("p08_callback_url", "p08_return_url"):
+                        target = public_https(config[key])
+                        if "%" in target.path or any(part in (".", "..") for part in target.path.split("/")):
+                            raise ValueError()
+                    if public_https(config["p08_callback_url"]).path != "/callback/sakurupiah":
+                        raise ValueError()
+                elif (parsed.hostname not in prefixes or not parsed.path.startswith(prefixes[parsed.hostname])
                         or not parsed.path.endswith("/status") or not config["sandbox_token"]
                         or any(part in (".", "..") for part in parsed.path.split("/"))
                         or "%" in parsed.path):
                     raise ValueError()
             except Exception:
                 raise Refused("exact attested sandbox status endpoint required") from None
-            if any(config[key] for key in ("bot_token", "bot_id", "bot_username")):
+            if config["mode"] == "sandbox" and any(config[key] for key in ("bot_token", "bot_id", "bot_username")):
                 raise Refused("sandbox mode rejects Telegram credentials")
     return config
 
@@ -93,6 +122,44 @@ def default(stack):
                 redis_url="redis://127.0.0.1:6379/0", bot_token="", bot_id=0,
                 bot_username="", safe_chat_ids=[1], sandbox_status_url="",
                 sandbox_token="", approval=None)
+
+def p08_draft(directory, environ, targets):
+    """Write an unapproved sandbox-only draft; never replace active configuration."""
+    names = ("SAKURUPIAH_SANDBOX_API_ID", "SAKURUPIAH_SANDBOX_API_KEY")
+    if any(not isinstance(environ.get(name), str) or not environ[name] for name in names):
+        raise Refused("P08 draft requires sandbox credentials")
+    if (not isinstance(targets, dict) or set(targets) != {"phone", "callback_url", "return_url"}
+            or any(not isinstance(value, str) for value in targets.values())
+            or re.fullmatch(r"[0-9]{8,16}", targets["phone"]) is None):
+        raise Refused("P08 draft requires valid sandbox targets")
+    from boundary import public_https
+    try:
+        callback = public_https(targets["callback_url"])
+        returned = public_https(targets["return_url"])
+        if (re.fullmatch(r"[a-z0-9-]+\.(?:ngrok-free\.(?:app|dev)|trycloudflare\.com)",
+                         callback.hostname or "") is None
+                or returned.hostname != callback.hostname
+                or callback.path != "/callback/sakurupiah"
+                or any("%" in url.path or any(part in (".", "..") for part in url.path.split("/"))
+                       for url in (callback, returned))):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise Refused("P08 draft requires one temporary HTTPS tunnel host") from None
+    info = directory.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) & 0o077):
+        raise Refused("candidate directory must be private and owned by the operator")
+    config = default("candidate")
+    config.update(mode="sandbox", sandbox_status_url="https://sakurupiah.id/api-sanbox/",
+                  sandbox_token=environ[names[1]], p08_callback=None,
+                  p08_api_id=environ[names[0]], p08_phone=targets["phone"],
+                  p08_callback_url=targets["callback_url"], p08_return_url=targets["return_url"])
+    descriptor = os.open(directory / "p08-draft.json",
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        json.dump(config, stream, indent=2)
+        stream.write("\n")
+
 
 
 def run(args, capture=False):
@@ -130,6 +197,9 @@ def compose(config, directory):
         ports=[f"127.0.0.1:{18801 if stack == 'laravel' else 18802}:8080"],
         healthcheck={"test": ["CMD", "test", "-f", "/tmp/harness-ready"],
                      "interval": "2s", "timeout": "3s", "retries": 30, "start_period": "10s"})
+    if config.get("p08_callback") is not None:
+        boundary["ports"].append("127.0.0.1:18803:8026")
+        boundary["volumes"].append(f"{directory / 'p08-internal-key'}:/run/harness/p08-internal-key:ro")
     db = service(.5, 640, image="postgres:16-alpine", user="70:70", **dependent,
         environment={"POSTGRES_USER": "harness", "POSTGRES_PASSWORD": "harness", "POSTGRES_DB": "disposable"},
         volumes=["database:/var/lib/postgresql/data"], tmpfs=["/var/run/postgresql:uid=70,gid=70,size=8m", "/tmp:size=8m"],
@@ -151,6 +221,8 @@ def compose(config, directory):
                    volumes=["storage:/disposable",
                             f"{directory / 'candidate.json'}:/run/harness/candidate.json:ro",
                             f"{directory / 'django-key'}:/run/harness/django-key:ro"])
+        if config.get("p08_callback") is not None:
+            app["volumes"].append(f"{directory / 'p08-internal-key'}:/run/harness/p08-internal-key:ro")
         app["healthcheck"] = {
             "test": ["CMD", "python", "-c",
                      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=4).close()"],
@@ -310,6 +382,22 @@ def candidate_admission(config, directory):
         "redis": {"host": "127.0.0.1", "port": 6379, "db": 0},
         "limits": {"processes": 1, "threads": 1, "db_connections": 1},
     }
+    if config.get("p08_callback") is not None:
+        internal_key = directory / "p08-internal-key"
+        try:
+            descriptor = os.open(internal_key, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        except FileExistsError:
+            descriptor = os.open(internal_key, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                value = stream.read(65)
+                if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) not in (0o400, 0o600)
+                        or re.fullmatch(rb"[a-f0-9]{64}", value) is None):
+                    raise Refused("P08 internal key is invalid")
+        else:
+            with os.fdopen(descriptor, "w") as stream:
+                stream.write(secrets.token_hex(32))
+        runtime["p08_callback"] = True
     (directory / "candidate.json").write_text(json.dumps(runtime, sort_keys=True) + "\n")
     (directory / "candidate.json").chmod(0o600)
     key = directory / "django-key"
@@ -321,7 +409,7 @@ def candidate_admission(config, directory):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "validate", "build", "start", "stop", "reset", "manifest"])
+    parser.add_argument("command", choices=["init", "validate", "build", "start", "stop", "reset", "manifest", "p08-draft"])
     parser.add_argument("stack", choices=["laravel", "candidate"])
     parser.add_argument("--quarantine", action="store_true", help="start DB/Redis only; no application/producers")
     parser.add_argument("--local-dependencies", action="store_true", help="build Laravel with verified local vendor and installed PHP base, without downloads")
@@ -339,6 +427,15 @@ def main():
             path.write_text(json.dumps(default(args.stack), indent=2) + "\n")
             (directory / "app-key").write_text(base64.b64encode(secrets.token_bytes(32)).decode())
             print("Created synthetic fake-mode configuration")
+            return
+        if args.command == "p08-draft":
+            if args.stack != "candidate":
+                raise Refused("P08 draft is candidate-only")
+            raw_targets = sys.stdin.read(8193)
+            if len(raw_targets) > 8192:
+                raise Refused("P08 draft input too large")
+            p08_draft(directory, os.environ, json.loads(raw_targets))
+            print("Created unapproved P08 draft; active configuration unchanged")
             return
         config = validate(json.loads((directory / "config.json").read_text()))
         if config["stack"] != args.stack:

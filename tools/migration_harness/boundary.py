@@ -1,16 +1,21 @@
 """Namespace firewall, bounded HTTP relay and discard-only SMTP sink. No payload logs."""
 import http.client
+import base64
+import hashlib
+import hmac
 import ipaddress
 import json
 import os
 import pwd
 import socket
 import socketserver
+import stat
+import re
 import ssl
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 
 def public_https(url):
@@ -58,7 +63,7 @@ def verify_bot(config):
         raise ValueError("testing bot identity mismatch")
 
 
-def firewall(mode):
+def firewall(mode, callback=False):
     # Rules are installed before any dependent container is admitted. IPv6 also denied.
     for binary in ("iptables", "ip6tables"):
         def rule(*args):
@@ -71,6 +76,8 @@ def firewall(mode):
         rule("-A", "OUTPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT")
         rule("-A", "INPUT", "-i", "lo", "-j", "ACCEPT")
         rule("-A", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT")
+        if callback and binary == "iptables":
+            rule("-A", "INPUT", "-p", "tcp", "--dport", "8026", "-j", "ACCEPT")
         rule("-A", "OUTPUT", "-o", "lo", "-p", "tcp", "-m", "multiport",
              "--dports", "5432,6379,1025,8025,8080", "-j", "ACCEPT")
         if mode != "fake":
@@ -92,7 +99,7 @@ def telegram_request(config, body):
         raise ValueError("chat not admitted")
     if not isinstance(body["text"], str) or len(body["text"]) > 4096:
         raise ValueError("invalid text")
-    if config["mode"] != "testing-bot":
+    if config["mode"] not in ("testing-bot", "p08-sandbox-testing-bot"):
         return {"ok": True, "fake": True}
     result = upstream("https://api.telegram.org/bot" + config["bot_token"] + "/sendMessage", body)
     return {"ok": result.get("ok") is True}  # Never echo upstream customer/secret content.
@@ -110,6 +117,9 @@ def navigation_request(config, body, next_message_id):
     if (config["mode"] == "testing-bot"
             and (config.get("approval") or {}).get("gate") != "P06-approved-navigation-targets-only"):
         raise ValueError("explicit navigation target approval required")
+    if (config["mode"] == "p08-sandbox-testing-bot"
+            and (config.get("approval") or {}).get("gate") != "P08-approved-dual-targets-only"):
+        raise ValueError("explicit dual target approval required")
     if (not isinstance(body, dict) or set(body) != {"method", "payload"}
             or body["method"] not in NAVIGATION_METHODS
             or not isinstance(body["payload"], dict)):
@@ -168,12 +178,121 @@ def navigation_request(config, body, next_message_id):
                 raise ValueError("unsupported button URL")
     if config["mode"] == "sandbox":
         raise ValueError("sandbox mode cannot send Telegram navigation")
-    if config["mode"] == "testing-bot":
+    if config["mode"] in ("testing-bot", "p08-sandbox-testing-bot"):
         return upstream("https://api.telegram.org/bot" + config["bot_token"] + "/" + method,
                         payload, telegram_errors=True)
     if method in ("deleteMessage", "answerCallbackQuery"):
         return {"ok": True, "result": True}
     return {"ok": True, "result": {"message_id": payload.get("message_id") or next_message_id}}
+
+
+def callback_handler(api_key, internal_key):
+    class CallbackHandler(BaseHTTPRequestHandler):
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(5)
+
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            status = 403
+            try:
+                lengths = self.headers.get_all("Content-Length", [])
+                signatures = self.headers.get_all("X-Callback-Signature", [])
+                events = self.headers.get_all("X-Callback-Event", [])
+                if (self.path != "/callback/sakurupiah" or len(lengths) != 1
+                        or not lengths[0].isascii() or not lengths[0].isdigit()
+                        or not 0 < int(lengths[0]) <= 16384
+                        or self.headers.get("Transfer-Encoding")
+                        or self.headers.get_content_type() != "application/json"
+                        or len(signatures) != 1 or re.fullmatch(r"[a-f0-9]{64}", signatures[0]) is None
+                        or events != ["payment_status"]):
+                    raise ValueError("callback denied")
+                body = self.rfile.read(int(lengths[0]))
+                expected = hmac.new(api_key.encode(), body, hashlib.sha256).hexdigest()
+                if len(body) != int(lengths[0]) or not hmac.compare_digest(signatures[0], expected):
+                    raise ValueError("callback denied")
+                connection = http.client.HTTPConnection("127.0.0.1", 8080, timeout=5)
+                try:
+                    connection.request("POST", "/callback/sakurupiah", body, {
+                        "Content-Type": "application/json",
+                        "X-P08-Internal-Secret": internal_key,
+                        "X-Callback-Event": "payment_status",
+                    })
+                    response = connection.getresponse()
+                    response.read(1024)
+                    status = 200 if response.status == 200 else 503
+                finally:
+                    connection.close()
+            except Exception:
+                pass
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}' if status == 200 else b'{"ok":false}')
+    return CallbackHandler
+
+_P08_ENDPOINTS = {
+    "list": ("list-payment.php", {"method"}),
+    "create": ("create.php", {"method", "phone", "amount", "merchant_fee", "merchant_ref", "callback_url", "return_url"}),
+    "status": ("status-transaction.php", {"method", "trx_id"}),
+    "history": ("transaction.php", {"method", "mechant", "merchant_ref"}),
+}
+
+
+def p08_request(config, body):
+    if (config.get("mode") not in ("sandbox", "p08-sandbox-testing-bot")
+            or config.get("p08_callback") != {"gate": "P08-approved-sandbox-callback-only"}
+            or not isinstance(body, dict) or set(body) != {"operation", "fields"}):
+        raise ValueError("sandbox operation denied")
+    operation = body["operation"]
+    if operation not in _P08_ENDPOINTS or not isinstance(body["fields"], dict):
+        raise ValueError("sandbox operation denied")
+    path, expected = _P08_ENDPOINTS[operation]
+    fields = body["fields"]
+    if (set(fields) != expected or any(type(v) is not str or not v or len(v.encode()) > 2048
+                                       for v in fields.values())):
+        raise ValueError("sandbox fields denied")
+    if operation == "list" and fields["method"] != "list":
+        raise ValueError("sandbox method denied")
+    if operation == "status" and fields["method"] != "status":
+        raise ValueError("sandbox method denied")
+    if operation == "history" and (fields["method"] != "transaction" or fields["mechant"] != "1"):
+        raise ValueError("sandbox method denied")
+    if operation == "create":
+        if (fields["method"] not in ("QRIS", "QRISC", "QRISMU", "QRIS2")
+                or fields["merchant_fee"] != "2"
+                or re.fullmatch(r"[1-9][0-9]{0,18}", fields["amount"]) is None
+                or int(fields["amount"]) > 9223372036854775807
+                or fields["phone"] != config["p08_phone"]
+                or fields["callback_url"] != config["p08_callback_url"]
+                or fields["return_url"] != config["p08_return_url"]):
+            raise ValueError("sandbox create denied")
+    api_id, api_key = config["p08_api_id"], config["sandbox_token"]
+    form = {"api_id": api_id, **fields}
+    if operation == "create":
+        message = api_id + fields["method"] + fields["merchant_ref"] + fields["amount"]
+        form["signature"] = hmac.new(api_key.encode(), message.encode(), hashlib.sha256).hexdigest()
+    addresses = socket.getaddrinfo("sakurupiah.id", 443, family=socket.AF_INET, type=socket.SOCK_STREAM)
+    if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
+        raise ValueError("sandbox destination denied")
+    conn = http.client.HTTPSConnection("sakurupiah.id", timeout=5)
+    address = addresses[0][4]
+    conn.connect = lambda: setattr(conn, "sock", ssl.create_default_context().wrap_socket(
+        socket.create_connection(address, timeout=5), server_hostname="sakurupiah.id"))
+    try:
+        conn.request("POST", "/api-sanbox/" + path, urlencode(form), {
+            "Content-Type": "application/x-www-form-urlencoded", "Authorization": "Bearer " + api_key,
+        })
+        response = conn.getresponse()
+        data = response.read(1048577)
+        if len(data) > 1048576 or 300 <= response.status < 400:
+            raise ValueError("sandbox response denied")
+        return {"status": response.status, "body": base64.b64encode(data).decode("ascii")}
+    finally:
+        conn.close()
 
 
 def handler(config):
@@ -201,7 +320,10 @@ def handler(config):
                 elif self.path == "/telegram/navigation":
                     type(self).next_message_id += 1
                     result = navigation_request(config, body, type(self).next_message_id)
-                elif self.path == "/sandbox/status" and body == {} and config["mode"] == "sandbox":
+                elif self.path == "/sandbox/sakurupiah":
+                    result = p08_request(config, body)
+                elif (self.path == "/sandbox/status" and body == {} and config["mode"] == "sandbox"
+                      and config.get("p08_callback") is None):
                     # Only a pre-approved, exact GET endpoint. No create/payment/purchase API.
                     upstream(config["sandbox_status_url"], token=config["sandbox_token"])
                     result = {"ok": True}
@@ -247,15 +369,31 @@ class SMTP(socketserver.StreamRequestHandler):
 
 def main():
     config = json.load(open("/run/harness/config.json"))
-    firewall(config["mode"])
+    callback = config.get("p08_callback") == {"gate": "P08-approved-sandbox-callback-only"}
+    internal_key = ""
+    if callback:
+        if config.get("mode") not in ("sandbox", "p08-sandbox-testing-bot") or not config.get("sandbox_token"):
+            raise ValueError("callback configuration denied")
+        descriptor = os.open("/run/harness/p08-internal-key", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) not in (0o400, 0o600):
+                raise ValueError("callback key denied")
+            internal_key = stream.read(65).decode("ascii")
+        if re.fullmatch(r"[a-f0-9]{64}", internal_key) is None:
+            raise ValueError("callback key denied")
+    firewall(config["mode"], callback)
     user = pwd.getpwnam("relay")
     os.setgroups([])
     os.setgid(user.pw_gid)
     os.setuid(user.pw_uid)
-    if config["mode"] == "testing-bot":
+    if config["mode"] in ("testing-bot", "p08-sandbox-testing-bot"):
         verify_bot(config)  # Must succeed before health admits DB/application startup.
     smtp = socketserver.TCPServer(("127.0.0.1", 1025), SMTP)
     threading.Thread(target=smtp.serve_forever, daemon=True).start()
+    if callback:
+        callbacks = HTTPServer(("0.0.0.0", 8026), callback_handler(config["sandbox_token"], internal_key))
+        threading.Thread(target=callbacks.serve_forever, daemon=True).start()
     server = HTTPServer(("127.0.0.1", 8025), handler(config))
     server.timeout = 5
     with open("/tmp/harness-ready", "w") as ready:

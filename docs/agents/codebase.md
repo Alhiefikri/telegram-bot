@@ -46,6 +46,15 @@ and exercises real multiprocess PostgreSQL wallet/last-stock/replay and rollback
 boundaries. Later consumers reuse this shared proof; payment sandbox, delivery and
 full refund/supplier/warranty lifecycle remain P08/P09/P12/P18.
 
+P08 [sandbox payment slice](../migration/python-django/p05/README.md#p08-sakurupiah-sandbox-payment-slice-689)
+adds an explicitly attested Sakurupiah-only relay, provider-authenticated callback
+hints in existing Payment Events, immutable same-Payment create/recovery and
+authoritative status/history settlement using canonical receipt and inventory
+owners. `tools/migration_harness/smoke_qris.py` exercises the local synthetic
+path. It does not qualify the real sandbox or Testing Bot: P06's payment button
+is not yet connected, P10 owns automatic consumption, and real target/credential
+verification plus external smoke remain open P08/H1 requirements.
+
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
 adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.
 `tools/migration_data/rehearse.py` exercises authenticated encrypted synthetic backup,

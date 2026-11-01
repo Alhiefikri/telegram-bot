@@ -10,6 +10,7 @@ import stat
 
 RUNTIME_PATH = Path("/run/harness/candidate.json")
 KEY_PATH = Path("/run/harness/django-key")
+P08_KEY_PATH = Path("/run/harness/p08-internal-key")
 DATASET_PATTERN = re.compile(r"(?:synthetic-[a-z0-9-]{1,60}|sanitized-[a-f0-9]{64})")
 
 
@@ -22,6 +23,7 @@ class AdmissionError(Exception):
 class Runtime:
     dataset: str
     secret_key: str
+    p08_internal_key: str = ""
 
 
 def _read_file(path, maximum, *, private=False):
@@ -66,6 +68,8 @@ def validate_document(document):
         "redis": {"host": "127.0.0.1", "port": 6379, "db": 0},
         "limits": {"processes": 1, "threads": 1, "db_connections": 1},
     }
+    if type(document) is dict and document.get("p08_callback") is True:
+        expected["p08_callback"] = True
     if (type(document) is not dict or document.keys() != expected.keys()
             or type(document.get("dataset")) is not str
             or DATASET_PATTERN.fullmatch(document["dataset"]) is None):
@@ -83,6 +87,11 @@ def load_runtime():
         key = _read_file(KEY_PATH, 65, private=True).decode("ascii").removesuffix("\n")
         if re.fullmatch(r"[a-f0-9]{64}", key) is None:
             raise AdmissionError()
-        return Runtime(dataset=dataset, secret_key=key)
+        p08_key = ""
+        if document.get("p08_callback") is True:
+            p08_key = _read_file(P08_KEY_PATH, 64, private=True).decode("ascii")
+            if re.fullmatch(r"[a-f0-9]{64}", p08_key) is None:
+                raise AdmissionError()
+        return Runtime(dataset=dataset, secret_key=key, p08_internal_key=p08_key)
     except Exception:
         raise AdmissionError() from None

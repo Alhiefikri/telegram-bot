@@ -14,6 +14,8 @@ class PaymentSetting:
     id: int
     version: int
     active: bool
+    provider: str | None = None
+    sakurupiah_channel: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +23,7 @@ class PaymentPreflight:
     provider: str
     method: str
     setting: PaymentSetting | None
-    observation: str | None = None
+    observation: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +33,7 @@ class PaymentPlan:
     amount: int
     expires_at: datetime
     balance_paid: bool = False
+    sakurupiah_channel: str | None = None
 
 
 class PaymentPreparation(Protocol):

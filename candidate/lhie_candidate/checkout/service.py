@@ -168,9 +168,10 @@ class CheckoutService:
              snapshot, now, now))
         self.db.execute('''INSERT INTO public.payments
             (id,order_id,provider,merchant_ref,method,amount,currency,status,expired_at,
-             binance_verification_status,created_at,updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,'IDR','pending',%s,'checking',%s,%s)''',
-            (payment_id, order_id, plan.provider, _reference('PAY', now), plan.method, plan.amount, plan.expires_at, now, now))
+             sakurupiah_channel,binance_verification_status,created_at,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,'IDR','pending',%s,%s,'checking',%s,%s)''',
+            (payment_id, order_id, plan.provider, _reference('PAY', now), plan.method, plan.amount, plan.expires_at,
+             plan.sakurupiah_channel, now, now))
         for quote in pricing.quotes:
             product = products[quote.product_id]
             family = None
@@ -226,9 +227,10 @@ class CheckoutService:
 
     def _setting(self, *, lock):
         suffix = ' FOR UPDATE' if lock else ''
-        setting = self.db.one('''SELECT id,is_active,payment_provider_version FROM public.manual_payment_settings
-            ORDER BY is_active DESC,id LIMIT 1''' + suffix)
-        return None if setting is None else PaymentSetting(setting['id'], setting['payment_provider_version'], setting['is_active'])
+        setting = self.db.one('''SELECT id,is_active,payment_provider_version,payment_mode,sakurupiah_channel
+            FROM public.manual_payment_settings ORDER BY is_active DESC,id LIMIT 1''' + suffix)
+        return None if setting is None else PaymentSetting(setting['id'], setting['payment_provider_version'],
+            setting['is_active'], setting['payment_mode'], setting['sakurupiah_channel'])
 
 
 def _reference(prefix, now):
