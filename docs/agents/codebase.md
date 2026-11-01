@@ -27,9 +27,12 @@ update dedupe, private-chat sequencing, ACK-backed canonical generation/leases,
 and DB-backed Home/catalog/Family/Plan/detail/quantity presentation. The P11-fix
 #717 follow-up adds the read-only successful Orders history: one bounded
 customer-scoped keyset read over paid processing/completed Orders, PHP-equivalent
-invoice/status buttons and cursors, and Back/Home chrome. Orders column grants
-remain SELECT-only. The navigation SQL and column-limited grants require explicit
-disposable provisioning; startup never
+invoice/status buttons and cursors, and Back/Home chrome. The #718 follow-up adds
+the read-only Saldo screen and IDR ledger history: projection-health snapshots,
+the USDT balance line, merged recent ledger rows, signed customer-scoped history
+cursors, and the PHP funding button identity rendered without executing it.
+Orders and balance column grants remain SELECT-only. The navigation SQL and
+column-limited grants require explicit disposable provisioning; startup never
 installs legacy or navigation tables. `navigate.py --once` remains a bounded manual
 consumer; the P10 isolated supervisor owns the automatic interaction process. `tools/migration_harness/smoke_navigation.py`
 reuses P01 plus the repository migration oracle, compares actual PHP captions/
@@ -100,8 +103,9 @@ tree. Candidate cells may change only `django_candidate` state and admitted
 Customer profile columns; the runner hashes every other public table after each
 batch and stops on any change. The paired report judges each navigation
 scenario/user case independently against 70% of current-PHP p50/p95. After the
-#717 follow-up, declared candidate gaps are Balance, checkout and paid delivery;
-the measured #692 evidence still records Orders as absent and is never relabelled.
+#717 and #718 follow-ups, declared candidate navigation gaps are closed; checkout
+and paid delivery remain declared gaps. The measured #692 evidence still records
+Orders and Balance as absent and is never relabelled.
 `tests/migration_harness/test_p11_probe.py` and
 `test_p11_compare.py` are its regressions. It adds no production activation or
 payment-stage target; H1 owns the continue/fix/stop decision.

@@ -59,6 +59,7 @@
   "balance.title": "💰 Baki Saya",
   "balance.available": "🇮🇩 Baki Rupiah: :balance",
   "balance.add": "➕ Tambah Baki",
+  "balance.action.unavailable": "Tindakan baki ini belum tersedia dalam build ini. Baki tidak berubah.",
   "balance.recent.title": ":count aktiviti terakhir",
   "balance.activity.button": "📜 Sejarah Transaksi",
   "balance.activity.back": "⬅️ Kembali ke Baki",

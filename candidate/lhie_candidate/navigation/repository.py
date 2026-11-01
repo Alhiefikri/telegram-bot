@@ -1,4 +1,5 @@
 """Credential-free, read-only projections of the PHP catalog's public tables."""
+from datetime import datetime, timezone
 from functools import cmp_to_key
 import json
 
@@ -14,6 +15,8 @@ PRODUCT_COLUMNS = (
 ).split()
 
 ORDER_HISTORY_PAGE_SIZE = 10
+BALANCE_ACTIVITY_PAGE_SIZE = 10
+USDT_ACTIVITY_ROWS = 25
 
 # One projection shared by the catalog scan and targeted detail lookups. Detail,
 # quantity and Back renders must not re-scan every Product with its correlated
@@ -96,6 +99,133 @@ class CatalogRepository:
             f" ORDER BY created_at {order},id {order} LIMIT {ORDER_HISTORY_PAGE_SIZE + 1}",
             params,
         )
+
+    def balance_snapshot(self, customer_id):
+        """PHP `StoreBalanceLedger::snapshot()` without any write authority.
+
+        The projection and its newest entry are read in one statement so a
+        concurrent credit cannot look like a real ledger/projection drift.
+        """
+        row = self._one(
+            "SELECT a.balance,(SELECT e.balance_after FROM public.store_balance_entries e "
+            "WHERE e.customer_balance_account_id=a.id ORDER BY e.id DESC LIMIT 1) "
+            "AS latest_balance_after FROM public.customer_balance_accounts a "
+            "WHERE a.customer_id=%s",
+            (customer_id,),
+        )
+        if row is None:
+            return {'available': True, 'balance': 0}
+        amount = int(row['balance'])
+        if row['latest_balance_after'] is None:
+            return {'available': amount == 0, 'balance': amount if amount == 0 else 0}
+        available = int(row['latest_balance_after']) == amount
+        return {'available': available, 'balance': amount if available else 0}
+
+    def usdt_balance_snapshot(self, customer_id):
+        """PHP `CustomerUsdtBalanceLedger::snapshot()` cursor-aware health check."""
+        row = self._one(
+            "SELECT a.balance_micro,a.version,a.frozen_reason,"
+            "(SELECT e.balance_after_micro FROM public.customer_usdt_balance_entries e "
+            "WHERE e.customer_usdt_balance_account_id=a.id ORDER BY e.id DESC LIMIT 1) "
+            "AS latest_balance_after,"
+            "(SELECT e.account_sequence FROM public.customer_usdt_balance_entries e "
+            "WHERE e.customer_usdt_balance_account_id=a.id ORDER BY e.id DESC LIMIT 1) "
+            "AS latest_account_sequence FROM public.customer_usdt_balance_accounts a "
+            "WHERE a.customer_id=%s",
+            (customer_id,),
+        )
+        if row is None:
+            return {'available': True, 'balance_micro': 0, 'frozen': False}
+        amount, version = int(row['balance_micro']), int(row['version'])
+        if row['latest_balance_after'] is None:
+            available = version == 0 and amount == 0
+        else:
+            available = (int(row['latest_balance_after']) == amount
+                         and int(row['latest_account_sequence']) == version)
+        return {'available': available,
+                'balance_micro': amount if available else 0,
+                'frozen': row['frozen_reason'] is not None}
+
+    def balance_account_id(self, customer_id):
+        row = self._one("""SELECT id FROM public.customer_balance_accounts
+                            WHERE customer_id=%s""", (customer_id,))
+        return None if row is None else int(row['id'])
+
+    @staticmethod
+    def _activity_timestamp(occurred_micros):
+        if type(occurred_micros) is not int or occurred_micros < 1:
+            raise ValueError('invalid balance activity cursor')
+        seconds, micros = divmod(occurred_micros, 1_000_000)
+        return (datetime.fromtimestamp(seconds, tz=timezone.utc)
+                .strftime('%Y-%m-%d %H:%M:%S') + f'.{micros:06d}')
+
+    @staticmethod
+    def _occurred_micros(occurred_at):
+        """Wall-clock ordering key; the column has no time zone."""
+        occurred = datetime.fromisoformat(occurred_at).replace(tzinfo=timezone.utc)
+        delta = occurred - datetime(1970, 1, 1, tzinfo=timezone.utc)
+        return (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+
+    def balance_activity(self, account_id, *, direction=None, occurred_micros=None,
+                         entry_id=None):
+        """One bounded PHP-equivalent IDR ledger page.
+
+        ``(created_at, id)`` keeps same-second rows reachable in both
+        directions. The page reads at most ten rows plus one lookahead and
+        never scans another Customer's account.
+        """
+        if direction not in (None, 'older', 'newer'):
+            raise ValueError('invalid balance activity direction')
+        if (direction is None) != (occurred_micros is None and entry_id is None):
+            raise ValueError('invalid balance activity cursor')
+        if direction is not None and (occurred_micros is None or not entry_id):
+            raise ValueError('invalid balance activity cursor')
+        where, params = 'customer_balance_account_id=%s', [account_id]
+        if direction is not None:
+            operator = '<' if direction == 'older' else '>'
+            where += f' AND (created_at,id) {operator} (%s::timestamp,%s)'
+            params += [self._activity_timestamp(occurred_micros), entry_id]
+        order = 'ASC' if direction == 'newer' else 'DESC'
+        rows = self._rows(
+            "SELECT id,kind,amount,source_type,source_id,refund_order_id,"
+            "to_char(created_at,'YYYY-MM-DD\"T\"HH24:MI:SS.US') AS occurred_at "
+            "FROM public.store_balance_entries WHERE " + where +
+            f" ORDER BY created_at {order},id {order} LIMIT {BALANCE_ACTIVITY_PAGE_SIZE + 1}",
+            params,
+        )
+        for row in rows:
+            row['occurred_micros'] = self._occurred_micros(row['occurred_at'])
+        return rows
+
+    def balance_entry_exists(self, account_id, entry_id):
+        return self._one("""SELECT 1 AS present FROM public.store_balance_entries
+                            WHERE customer_balance_account_id=%s AND id=%s""",
+                         (account_id, entry_id)) is not None
+
+    def usdt_activity(self, customer_id, limit=USDT_ACTIVITY_ROWS):
+        """Newest USDT ledger rows for the wallet overview; never funding targets."""
+        if type(limit) is not int or not 1 <= limit <= USDT_ACTIVITY_ROWS:
+            raise ValueError('invalid USDT activity limit')
+        rows = self._rows(
+            "SELECT e.id,e.kind,e.amount_micro,e.source_type,e.source_id,e.refund_order_id,"
+            "to_char(e.created_at,'YYYY-MM-DD\"T\"HH24:MI:SS.US') AS occurred_at "
+            "FROM public.customer_usdt_balance_entries e "
+            "JOIN public.customer_usdt_balance_accounts a "
+            "ON a.id=e.customer_usdt_balance_account_id "
+            "WHERE a.customer_id=%s ORDER BY e.created_at DESC,e.id DESC LIMIT %s",
+            (customer_id, limit),
+        )
+        for row in rows:
+            row['occurred_micros'] = self._occurred_micros(row['occurred_at'])
+        return rows
+
+    def orders_for_balance_entries(self, customer_id, order_ids):
+        if not order_ids:
+            return {}
+        rows = self._rows("""SELECT id,invoice_number FROM public.orders
+                             WHERE customer_id=%s AND id = ANY(%s::uuid[])""",
+                          (customer_id, [str(value) for value in order_ids]))
+        return {str(row['id']): row['invoice_number'] for row in rows}
 
     def _product_rows(self, suffix="", params=()):
         return self._rows(_PRODUCT_SELECT + suffix, params)

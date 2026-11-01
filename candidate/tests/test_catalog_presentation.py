@@ -1,10 +1,12 @@
 import copy
-from datetime import datetime
+from datetime import datetime, timedelta
 import unittest
 from zoneinfo import ZoneInfo
 
 from lhie_candidate.navigation.presentation import CatalogPresenter
-from lhie_candidate.navigation.repository import CatalogRepository, ORDER_HISTORY_PAGE_SIZE
+from lhie_candidate.navigation.repository import (
+    BALANCE_ACTIVITY_PAGE_SIZE, CatalogRepository, ORDER_HISTORY_PAGE_SIZE,
+    USDT_ACTIVITY_ROWS)
 
 
 CUSTOMER = {'id': 1, 'telegram_id': 41001, 'first_name': 'Ayu', 'username': 'ayu', 'locale': 'id'}
@@ -25,6 +27,24 @@ def order(identity, invoice, *, created_token, order_status='completed',
                 created_token=created_token, receipt_sent=receipt_sent)
 
 
+def balance_entry(identity, kind, amount, when, *, source_type='fixture', source_id=None,
+                  refund_order_id=None):
+    return dict(id=identity, kind=kind, amount=amount,
+                occurred_at=when.strftime('%Y-%m-%dT%H:%M:%S.%f'),
+                occurred_micros=int(when.replace(tzinfo=ZoneInfo('Asia/Jakarta')).timestamp() * 1_000_000),
+                source_type=source_type, source_id=source_id or str(identity),
+                refund_order_id=refund_order_id)
+
+
+def usdt_entry(identity, kind, amount, when, *, source_type='fixture', source_id=None,
+               refund_order_id=None):
+    return dict(id=identity, kind=kind, amount_micro=amount,
+                occurred_at=when.strftime('%Y-%m-%dT%H:%M:%S.%f'),
+                occurred_micros=int(when.replace(tzinfo=ZoneInfo('Asia/Jakarta')).timestamp() * 1_000_000),
+                source_type=source_type, source_id=source_id or str(identity),
+                refund_order_id=refund_order_id)
+
+
 class MemoryCatalog(CatalogRepository):
     def __init__(self):
         self.product_rows = [product(1,'Basic',family=10,stock=0), product(2,'Premium',family=10),
@@ -38,8 +58,47 @@ class MemoryCatalog(CatalogRepository):
         self.tier_rows = {}
         self.assets = {}
         self.order_rows = []
+        self.balance_rows = []
+        self.usdt_rows = []
+        self.idr_snapshot = {'available': True, 'balance': 50000}
+        self.usd_snapshot = {'available': True, 'balance_micro': 0, 'frozen': False}
+        self.account_id = 1
         self.paused = False
         self.spending = True
+
+    def balance_snapshot(self, customer_id):
+        return copy.deepcopy(self.idr_snapshot)
+
+    def usdt_balance_snapshot(self, customer_id):
+        return copy.deepcopy(self.usd_snapshot)
+
+    def balance_account_id(self, customer_id):
+        return self.account_id if self.balance_rows else None
+
+    def balance_activity(self, account_id, *, direction=None, occurred_micros=None,
+                         entry_id=None):
+        rows = copy.deepcopy(self.balance_rows)
+        if direction is not None:
+            compare = (lambda row: (row['occurred_micros'], row['id'])
+                       < (occurred_micros, entry_id)) if direction == 'older' else (
+                lambda row: (row['occurred_micros'], row['id']) > (occurred_micros, entry_id))
+            rows = [row for row in rows if compare(row)]
+        rows.sort(key=lambda row: (row['occurred_micros'], row['id']),
+                  reverse=direction != 'newer')
+        return rows[:BALANCE_ACTIVITY_PAGE_SIZE + 1]
+
+    def balance_entry_exists(self, account_id, entry_id):
+        return account_id is not None and any(row['id'] == entry_id for row in self.balance_rows)
+
+    def usdt_activity(self, customer_id, limit=USDT_ACTIVITY_ROWS):
+        rows = copy.deepcopy(self.usdt_rows)
+        rows.sort(key=lambda row: (row['occurred_micros'], row['id']), reverse=True)
+        return rows[:limit]
+
+    def orders_for_balance_entries(self, customer_id, order_ids):
+        wanted = {str(order_id) for order_id in order_ids}
+        return {row['id']: row['invoice_number'] for row in self.order_rows
+                if row['customer_id'] == customer_id and row['id'] in wanted}
 
     def order_history(self, customer_id, *, direction=None, created_token=None, order_id=None):
         rows = [copy.deepcopy(row) for row in self.order_rows
@@ -420,6 +479,155 @@ class CatalogPresentationTests(unittest.TestCase):
         self.assertEqual(order_button['_unicode_fallback'],'📦 INV-001 · Terkirim')
         back,home = screen.keyboard['inline_keyboard'][-1]
         self.assertEqual((back['text'],home['text']),('🔙 Kembali','🏠 Beranda'))
+
+
+    def _balance_rows(self):
+        orders = self._order_rows()
+        self.repository.order_rows = orders
+        rows = [balance_entry(identity,
+                              'purchase_debit' if identity % 2 == 0 else 'admin_adjustment_credit',
+                              1000 + identity,
+                              datetime(2026,11,1,8,0) + timedelta(minutes=identity))
+                for identity in range(1,12)]
+        rows.append(balance_entry(12,'refund_credit',1500,datetime(2026,11,1,8,12),
+                                  source_type='order_refund',source_id=orders[1]['id'],
+                                  refund_order_id=orders[1]['id']))
+        rows.append(balance_entry(13,'purchase_debit',2000,datetime(2026,11,1,8,13),
+                                  source_type='order',source_id=orders[0]['id']))
+        self.repository.balance_rows = rows
+        self.repository.usdt_rows = [
+            usdt_entry(1,'funding_credit',3_500_000,datetime(2026,11,1,8,20)),
+            usdt_entry(2,'purchase_debit',1_250_000,datetime(2026,11,1,8,11,30)),
+        ]
+
+    def test_balance_matches_php_header_recent_activity_and_funding_identity(self):
+        self._balance_rows()
+        self.state['selection'] = {'product_id': 3}
+        screen = self.presenter.route(self.customer,'balance',self.state)
+        self.assertEqual(self.state,{})
+        self.assertEqual((screen.screen,screen.locale),('balance','id'))
+        self.assertEqual(screen.caption,
+            '💰 Saldo Saya\n━━━━━━━━━━━━━━\n🇮🇩 Saldo Rupiah: Rp 50.000\n\n'
+            '💎 Saldo USDT: 0 USDT\n\n4 aktivitas terakhir\n'
+            '1. Kredit top-up · +3.5 USDT · Dikreditkan · 01 Nov 2026\n'
+            '2. Pembelian · -Rp 2.000 · Didebit · 01 Nov 2026\n'
+            '3. Pengembalian dana · +Rp 1.500 · Dikembalikan · 01 Nov 2026\n'
+            '4. Pembelian · -1.25 USDT · Didebit · 01 Nov 2026')
+        self.assertEqual([button['callback_data'] for button in screen.keyboard['inline_keyboard'][0]],
+                         ['balance:add'])
+        self.assertEqual([button['callback_data'] for button in screen.keyboard['inline_keyboard'][1]],
+                         ['balance:activity'])
+        self.assertEqual([button['callback_data'] for button in screen.keyboard['inline_keyboard'][-1]],
+                         ['menu:back','menu:home'])
+        self.assertEqual((screen.keyboard['inline_keyboard'][0][0]['text'],
+                          screen.keyboard['inline_keyboard'][1][0]['text']),
+                         ('➕ Tambah Saldo','📜 Riwayat Transaksi'))
+
+    def test_balance_unavailable_and_frozen_states_never_fabricate_a_zero(self):
+        self.repository.idr_snapshot = {'available': False, 'balance': 0}
+        self.repository.usd_snapshot = {'available': False, 'balance_micro': 0, 'frozen': False}
+        screen = self.presenter.route(self.customer,'balance',self.state)
+        self.assertEqual(screen.caption,
+            '💰 Saldo Saya\n━━━━━━━━━━━━━━\n🇮🇩 Saldo Rupiah: Saldo sementara tidak tersedia\n\n'
+            'Aktivitas disembunyikan sementara saat saldo sedang diverifikasi.\n'
+            'Kalau terus begini, buka Support. Dana tidak ditambahkan selama verifikasi belum selesai.\n\n'
+            '💎 Saldo USDT belum bisa diverifikasi. Hubungi Support; nominal tidak ditampilkan sampai cocok dengan ledger.')
+        self.assertEqual([button['callback_data'] for button in buttons(screen)],
+                         ['menu:back','menu:home'])
+        self.assertEqual(self.presenter.route(self.customer,'balance:activity',self.state).caption,
+                         screen.caption)
+        self.repository.idr_snapshot = {'available': True, 'balance': 50000}
+        self.repository.usd_snapshot = {'available': True, 'balance_micro': 0, 'frozen': True}
+        frozen = self.presenter.route(self.customer,'balance',self.state)
+        self.assertIn('💎 Saldo USDT dibekukan sementara selama pemeriksaan insiden.',frozen.caption)
+        self.assertNotIn('💎 Saldo USDT: 0 USDT',frozen.caption)
+        self.assertEqual([button['callback_data'] for button in buttons(frozen)],
+                         ['balance:add','balance:activity','menu:back','menu:home'])
+
+    def test_balance_history_paginates_ledger_and_rejects_money_actions(self):
+        self._balance_rows()
+        first = self.presenter.route(self.customer,'balance:activity',self.state)
+        self.assertIn('Riwayat Transaksi Rupiah',first.caption)
+        self.assertNotIn('Saldo USDT',first.caption)
+        self.assertIn('1. Pembelian — -Rp 2.000 — Didebit',first.caption)
+        self.assertIn('Referensi: #INV-001',first.caption)
+        details = [button for button in buttons(first)
+                   if button.get('callback_data','').startswith('balance:a:d:')]
+        self.assertEqual(len(details),10)
+        self.assertTrue(all(len(button['callback_data'].encode()) <= 64 for button in buttons(first)
+                            if button.get('callback_data')))
+        self.assertIn('Referensi: #INV-002',first.caption)
+        older = next(button for button in buttons(first)
+                     if button.get('callback_data','').startswith('balance:a:o:'))
+        self.assertEqual(older['text'],'Berikutnya ➡️')
+        second = self.presenter.route(self.customer,older['callback_data'],self.state)
+        self.assertEqual(len([button for button in buttons(second)
+                              if button.get('callback_data','').startswith('balance:a:d:')]),3)
+        self.assertIn('3. Penyesuaian saldo — +Rp 1.001 — Dikreditkan',second.caption)
+        newer = next(button for button in buttons(second)
+                     if button.get('callback_data','').startswith('balance:a:n:'))
+        restored = self.presenter.route(self.customer,newer['callback_data'],self.state)
+        self.assertEqual(restored.caption,first.caption)
+        self.assertEqual(restored.keyboard,first.keyboard)
+        self.assertIsNone(self.presenter.route(self.customer,details[0]['callback_data'],self.state))
+        self.assertTrue(self.presenter.callback_handled)
+        self.assertEqual(self.presenter.callback_notice,
+                         'Aksi Saldo ini belum tersedia di build ini. Saldo tidak berubah.')
+        for data in ('balance:add','balance:currency:idr','balance:topup:7','balance:usd:bsc'):
+            with self.subTest(data=data):
+                self.assertIsNone(self.presenter.route(self.customer,data,self.state))
+                self.assertTrue(self.presenter.callback_handled)
+                self.assertIn('Saldo tidak berubah',self.presenter.callback_notice)
+
+    def test_balance_history_rejects_foreign_tampered_and_malformed_cursors(self):
+        self._balance_rows()
+        entry = self.repository.balance_rows[-2]
+        foreign = self.presenter._activity_callback('older',2,entry['occurred_micros'],entry['id'])
+        self.assertIsNone(self.presenter.route(self.customer,foreign,self.state))
+        self.assertFalse(self.presenter.callback_handled)
+        for data in ('balance:a:o:' + 'A' * 51,'balance:a:o:short','balance:a:d:' + 'A' * 40):
+            with self.subTest(data=data):
+                self.assertIsNone(self.presenter.route(self.customer,data,self.state))
+                self.assertFalse(self.presenter.callback_handled)
+
+    def test_balance_history_keeps_same_second_rows_reachable(self):
+        when = datetime(2026,11,1,8,0)
+        self.repository.balance_rows = [
+            balance_entry(identity,'admin_adjustment_credit',1000 + identity,when)
+            for identity in range(1,12)]
+        first = self.presenter.route(self.customer,'balance:activity',self.state)
+        def detail_ids(surface):
+            details = [button for button in buttons(surface)
+                       if button.get('callback_data','').startswith('balance:a:d:')]
+            return [self.presenter._decode_detail_token(
+                button['callback_data'][len('balance:a:d:'):])['entry_id'] for button in details]
+        self.assertEqual(detail_ids(first),list(range(11,1,-1)))
+        older = next(button for button in buttons(first)
+                     if button.get('callback_data','').startswith('balance:a:o:'))
+        second = self.presenter.route(self.customer,older['callback_data'],self.state)
+        self.assertEqual(detail_ids(second),[1])
+        newer = next(button for button in buttons(second)
+                     if button.get('callback_data','').startswith('balance:a:n:'))
+        self.assertEqual(detail_ids(self.presenter.route(
+            self.customer,newer['callback_data'],self.state)),list(range(11,1,-1)))
+
+    def test_balance_localized_copy_and_db_icons(self):
+        self.presenter.custom_emoji = True
+        self.repository.icon_rows += [
+            dict(key='message.balance',source_emoji='💰',fallback_emoji='💰',custom_emoji_id='600'),
+            dict(key='message.add',source_emoji='➕',fallback_emoji='➕',custom_emoji_id='601')]
+        screen = self.presenter.route(self.customer,'balance',self.state)
+        self.assertIn('<tg-emoji emoji-id="600">💰</tg-emoji> Saldo Saya',screen.caption)
+        add = next(button for button in buttons(screen) if button['callback_data'] == 'balance:add')
+        self.assertEqual(add['text'],'Tambah Saldo')
+        self.assertEqual(add['icon_custom_emoji_id'],'601')
+        self.assertEqual(add['_unicode_fallback'],'➕ Tambah Saldo')
+        self.customer['locale'] = 'en'
+        self.assertEqual(self.presenter.route(self.customer,'balance',self.state).caption.splitlines()[0],
+                         '<tg-emoji emoji-id="600">💰</tg-emoji> My Balance')
+        self.customer['locale'] = 'ms'
+        self.assertIn('💎 Baki USDT: 0 USDT',
+                      self.presenter.route(self.customer,'balance',self.state).caption)
 
 
 if __name__ == '__main__':

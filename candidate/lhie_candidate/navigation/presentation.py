@@ -1,5 +1,6 @@
 """PHP-compatible initial catalog surfaces; no Telegram or provider calls."""
 import base64
+import binascii
 from datetime import datetime
 import hmac
 from html import escape, unescape
@@ -26,6 +27,38 @@ _ORDER_STATUS_KEYS = {'draft': 'status.order.draft', 'pending_payment': 'status.
                       'processing': 'status.order.processing', 'completed': 'status.order.completed',
                       'cancelled': 'status.order.cancelled', 'expired': 'status.order.expired'}
 _ORDER_HISTORY_PAGE_SIZE = 10
+_BALANCE_ACTIVITY = re.compile(r'balance:a:(o|n):([A-Za-z0-9_-]{25,})')
+_BALANCE_DETAIL = re.compile(r'balance:a:d:([A-Za-z0-9_-]{25,})')
+_BALANCE_KINDS = {
+    'admin_adjustment_credit': ('balance.activity.kind.adjustment', 1),
+    'admin_adjustment_reversal': ('balance.activity.kind.adjustment_reversal', -1),
+    'top_up_credit': ('balance.activity.kind.top_up', 1),
+    'owner_compensation_credit': ('balance.activity.kind.compensation', 1),
+    'purchase_debit': ('balance.activity.kind.purchase', -1),
+    'refund_credit': ('balance.activity.kind.refund', 1),
+}
+_BALANCE_STATES = {
+    'admin_adjustment_credit': 'balance.activity.state.credited',
+    'admin_adjustment_reversal': 'balance.activity.state.debited',
+    'top_up_credit': 'balance.activity.state.credited',
+    'owner_compensation_credit': 'balance.activity.state.compensated',
+    'purchase_debit': 'balance.activity.state.debited',
+    'refund_credit': 'balance.activity.state.refunded',
+}
+_USDT_KINDS = {
+    'funding_credit': ('balance.usdt.history.kind.funding_credit', 1),
+    'purchase_debit': ('balance.usdt.history.kind.purchase_debit', -1),
+    'refund_credit': ('balance.usdt.history.kind.refund_credit', 1),
+    'reversal_debit': ('balance.usdt.history.kind.reversal_debit', -1),
+}
+_USDT_STATES = {
+    'funding_credit': 'balance.usdt.history.state.credited',
+    'purchase_debit': 'balance.usdt.history.state.debited',
+    'refund_credit': 'balance.usdt.history.state.refunded',
+    'reversal_debit': 'balance.usdt.history.state.reversed',
+}
+_BALANCE_ACTIVITY_PAGE_SIZE = 10
+_WALLET_ACTIVITY_ROWS = 4
 _DEFAULT_ICONS = {'message.search': '🔎', 'message.refresh': '🔄', 'menu.back': '⬅️',
                   'menu.products': '🛍️', 'menu.balance': '💰', 'menu.orders': '📦',
                   'menu.language': '🌐', 'menu.support': '💬', 'menu.channel': '📢', 'menu.api': '🔌'}
@@ -196,6 +229,220 @@ class CatalogPresenter:
             rows.append(pagination)
         rows.append(self._navigation_row(customer))
         return self._surface(customer,self.t(customer,'order.history.title'),rows,screen='orders')
+
+    def _balance_header(self, customer, idr, usd, *, include_usd=True):
+        balance = ('Rp ' + number(idr['balance'])) if idr['available'] else self.t(
+            customer, 'welcome.balance_unavailable')
+        lines = [self.t(customer, 'balance.title'), '━━━━━━━━━━━━━━',
+                 self.t(customer, 'balance.available', balance=balance)]
+        if not idr['available']:
+            lines += ['', self.t(customer, 'balance.activity.unavailable'),
+                      self.t(customer, 'balance.activity.support')]
+        if not include_usd:
+            return lines
+        if not usd['available']:
+            lines += ['', self.t(customer, 'balance.usdt.unavailable')]
+        elif usd['frozen']:
+            lines += ['', self.t(customer, 'balance.usdt.frozen')]
+        else:
+            lines += ['', self.t(customer, 'balance.usdt.available',
+                                 amount=usdt(usd['balance_micro']))]
+        return lines
+
+    @staticmethod
+    def _short_date(occurred_at, translate):
+        occurred = datetime.fromisoformat(occurred_at).replace(tzinfo=ZoneInfo('Asia/Jakarta'))
+        month = translate(f'date.month.{occurred.month}')
+        return f'{occurred.day:02d} {month} {occurred.year}'
+
+    def _balance_row(self, customer, entry):
+        kind_key, direction = _BALANCE_KINDS[entry['kind']]
+        signed = int(entry['amount']) * direction
+        state_key = _BALANCE_STATES[entry['kind']]
+        return {'occurred_micros': int(entry['occurred_micros']),
+                'kind': self.t(customer, kind_key),
+                'amount': ('+' if signed >= 0 else '-') + 'Rp ' + number(abs(signed)),
+                'state': self.t(customer, state_key),
+                'date': self._short_date(entry['occurred_at'],
+                                         lambda key: self.t(customer, key))}
+
+    def _usdt_row(self, customer, entry):
+        kind_key, direction = _USDT_KINDS[entry['kind']]
+        signed = int(entry['amount_micro']) * direction
+        return {'occurred_micros': int(entry['occurred_micros']),
+                'kind': self.t(customer, kind_key),
+                'amount': self.t(customer, 'balance.usdt.history.amount',
+                                 amount=('+' if signed >= 0 else '-') + usdt(abs(signed))),
+                'state': self.t(customer, _USDT_STATES[entry['kind']]),
+                'date': self._short_date(entry['occurred_at'],
+                                         lambda key: self.t(customer, key))}
+
+    def _recent_activity(self, customer, usd):
+        rows = []
+        account_id = self.repository.balance_account_id(value(customer, 'id'))
+        entries = (self.repository.balance_activity(account_id)[:_BALANCE_ACTIVITY_PAGE_SIZE]
+                   if account_id is not None else [])
+        rows += [self._balance_row(customer, entry) for entry in entries]
+        if usd['available']:
+            rows += [self._usdt_row(customer, entry)
+                     for entry in self.repository.usdt_activity(value(customer, 'id'))]
+        rows.sort(key=lambda row: row['occurred_micros'], reverse=True)
+        return rows[:_WALLET_ACTIVITY_ROWS]
+
+    def balance(self, customer):
+        """PHP-equivalent read-only Saldo screen; funding actions stay unimplemented."""
+        idr = self.repository.balance_snapshot(value(customer, 'id'))
+        usd = self.repository.usdt_balance_snapshot(value(customer, 'id'))
+        lines = self._balance_header(customer, idr, usd)
+        rows = []
+        if idr['available']:
+            recent = self._recent_activity(customer, usd)
+            lines += ['', self.t(customer, 'balance.recent.title', count=len(recent))]
+            if not recent:
+                lines.append(self.t(customer, 'balance.activity.empty'))
+            for index, row in enumerate(recent, 1):
+                lines.append(self.t(customer, 'balance.recent.row', number=index,
+                                    kind=row['kind'], amount=row['amount'],
+                                    state=row['state'], date=row['date']))
+            rows.append([self._legacy_button(customer, 'balance.add', 'balance:add')])
+            rows.append([self._legacy_button(customer, 'balance.activity.button', 'balance:activity')])
+        rows.append(self._navigation_row(customer))
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines),
+                             rows, screen='balance')
+
+    def _token_key(self):
+        key = self.signing_key if self.signing_key is not None else settings.SECRET_KEY
+        return key.encode() if isinstance(key, str) else key
+
+    def _encode_token(self, payload):
+        return base64.urlsafe_b64encode(
+            payload + hmac.digest(self._token_key(), payload, 'sha256')[:12]).decode().rstrip('=')
+
+    def _decode_token(self, token, size):
+        try:
+            raw = base64.b64decode(token + '=' * (-len(token) % 4), altchars=b'-_', validate=True)
+        except (ValueError, binascii.Error):
+            return None
+        if len(raw) != size + 12:
+            return None
+        payload, signature = raw[:size], raw[size:]
+        if not hmac.compare_digest(signature, hmac.digest(self._token_key(), payload, 'sha256')[:12]):
+            return None
+        return payload
+
+    def _activity_callback(self, direction, customer_id, occurred_micros, entry_id):
+        return ('balance:a:' + ('o' if direction == 'older' else 'n') + ':'
+                + self._encode_token(struct.pack('>BqqBq', 1, customer_id,
+                                                 occurred_micros, 2, entry_id)))
+
+    def _decode_activity_token(self, token):
+        payload = self._decode_token(token, 26)
+        if payload is None:
+            return None
+        version, customer_id, occurred_micros, rank, entry_id = struct.unpack('>BqqBq', payload)
+        if version != 1 or customer_id < 1 or occurred_micros < 1 or rank != 2 or entry_id < 1:
+            return None
+        return {'customer_id': customer_id, 'occurred_micros': occurred_micros,
+                'entry_id': entry_id}
+
+    def _detail_token(self, customer_id, entry_id):
+        return 'balance:a:d:' + self._encode_token(
+            struct.pack('>BqqB', 1, customer_id, entry_id, 2))
+
+    def _decode_detail_token(self, token):
+        payload = self._decode_token(token, 18)
+        if payload is None:
+            return None
+        version, customer_id, entry_id, rank = struct.unpack('>BqqB', payload)
+        if version != 1 or customer_id < 1 or entry_id < 1 or rank != 2:
+            return None
+        return {'customer_id': customer_id, 'entry_id': entry_id}
+
+    @staticmethod
+    def _entry_order_id(entry):
+        if entry['source_type'] == 'order' and entry['source_id']:
+            return str(entry['source_id'])
+        if (entry['source_type'] == 'order_refund' and entry['kind'] == 'refund_credit'
+                and entry['refund_order_id'] is not None):
+            return str(entry['refund_order_id'])
+        return None
+
+    def balance_activity(self, customer, cursor=None):
+        """PHP-equivalent IDR ledger history with bounded keyset pagination."""
+        customer_id = value(customer, 'id')
+        idr = self.repository.balance_snapshot(customer_id)
+        if not idr['available']:
+            return self.balance(customer)
+        account_id = self.repository.balance_account_id(customer_id)
+        direction = occurred_micros = entry_id = None
+        if cursor is not None:
+            match = _BALANCE_ACTIVITY.fullmatch(cursor)
+            if match is None:
+                return None
+            decoded = self._decode_activity_token(match[2])
+            if decoded is None or decoded['customer_id'] != customer_id:
+                return None
+            direction = 'older' if match[1] == 'o' else 'newer'
+            occurred_micros, entry_id = decoded['occurred_micros'], decoded['entry_id']
+            if account_id is None or not self.repository.balance_entry_exists(account_id, entry_id):
+                return None
+        entries = (self.repository.balance_activity(
+            account_id, direction=direction, occurred_micros=occurred_micros,
+            entry_id=entry_id) if account_id is not None else [])
+        has_more = len(entries) > _BALANCE_ACTIVITY_PAGE_SIZE
+        if direction == 'newer':
+            visible = list(reversed(entries[:_BALANCE_ACTIVITY_PAGE_SIZE]))
+            has_older, has_newer = True, has_more
+            older_cursor = (self._activity_callback('older', customer_id, visible[-1]['occurred_micros'],
+                                                    visible[-1]['id']) if visible else cursor)
+            newer_cursor = (self._activity_callback('newer', customer_id, visible[0]['occurred_micros'],
+                                                    visible[0]['id']) if has_more else None)
+        else:
+            visible = entries[:_BALANCE_ACTIVITY_PAGE_SIZE]
+            has_older = has_more
+            has_newer = direction == 'older'
+            older_cursor = (self._activity_callback('older', customer_id, visible[-1]['occurred_micros'],
+                                                    visible[-1]['id']) if visible and has_more else None)
+            newer_cursor = (self._activity_callback('newer', customer_id, visible[0]['occurred_micros'],
+                                                    visible[0]['id']) if visible and has_newer else (
+                cursor if has_newer else None))
+        order_ids = [order_id for order_id in (self._entry_order_id(entry) for entry in visible)
+                     if order_id is not None]
+        invoices = self.repository.orders_for_balance_entries(customer_id, order_ids)
+        def reference(entry):
+            order_id = self._entry_order_id(entry)
+            return '#' + (invoices.get(order_id) or str(entry['id']))
+        lines = self._balance_header(customer, idr, None, include_usd=False)
+        lines += ['', self.t(customer, 'balance.activity.title')]
+        if not visible:
+            lines.append(self.t(customer, 'balance.activity.empty'))
+        for index, entry in enumerate(visible, 1):
+            kind_key, direction_sign = _BALANCE_KINDS[entry['kind']]
+            signed = int(entry['amount']) * direction_sign
+            lines.append(self.t(customer, 'balance.activity.row', number=index,
+                                kind=self.t(customer, kind_key),
+                                state=self.t(customer, _BALANCE_STATES[entry['kind']]),
+                                amount=('+' if signed >= 0 else '-') + 'Rp ' + number(abs(signed))))
+            lines.append(self.t(customer, 'balance.activity.date',
+                                date=self._short_date(entry['occurred_at'],
+                                                      lambda key: self.t(customer, key))))
+            lines.append(self.t(customer, 'balance.activity.reference', reference=reference(entry)))
+        rows = [[self._legacy_button(customer, 'balance.add', 'balance:add')],
+                [self._legacy_button(customer, 'balance.activity.back', 'balance'),
+                 self._button(customer, 'menu.home', 'menu:home', slot='menu.home')]]
+        for entry in visible:
+            rows.append([self._legacy_button(
+                customer, 'balance.activity.detail_button',
+                self._detail_token(customer_id, entry['id']), reference=reference(entry))])
+        paging = []
+        if has_newer:
+            paging.append(self._legacy_button(customer, 'balance.activity.newer', newer_cursor))
+        if has_older:
+            paging.append(self._legacy_button(customer, 'balance.activity.older', older_cursor))
+        if paging:
+            rows.append(paging)
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines),
+                             rows, screen='balance')
 
     def _product_icon(self, product):
         glyph, identifier = product.get('icon'), product.get('custom_emoji_id')
@@ -679,6 +926,29 @@ class CatalogPresenter:
         if data in ('menu:orders','orders:open') or _ORDER_HISTORY.fullmatch(data):
             state.clear()
             return self.orders(customer,None if data in ('menu:orders','orders:open') else data)
+        if data == 'balance':
+            state.clear()
+            return self.balance(customer)
+        if data == 'balance:activity':
+            state.clear()
+            return self.balance_activity(customer)
+        match = _BALANCE_ACTIVITY.fullmatch(data)
+        if match:
+            state.clear()
+            return self.balance_activity(customer,data)
+        match = _BALANCE_DETAIL.fullmatch(data)
+        if match:
+            decoded = self._decode_detail_token(match[1])
+            if decoded is None or decoded['customer_id'] != value(customer,'id'):
+                return None
+            self.callback_handled = True
+            self.callback_notice = plain(self.t(customer,'balance.action.unavailable'))
+            return None
+        if data == 'balance:add' or data.startswith(
+                ('balance:currency:','balance:p:','balance:topup:','balance:usd:','balance:usdt')):
+            self.callback_handled = True
+            self.callback_notice = plain(self.t(customer,'balance.action.unavailable'))
+            return None
         if data in ('katalog','catalog','catalog:refresh'):
             state.clear()
             return self.catalog(customer,state=state)

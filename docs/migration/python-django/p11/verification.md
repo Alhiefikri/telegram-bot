@@ -166,10 +166,47 @@ pinned P05 candidate base plus the current working tree because the canonical
 dependency rebuild could not finish against the slow package network; the smoke
 result records the current source hashes and image identity.
 
-Still not fixed because they are product features, not P11 defects: Balance
-navigation (Balance includes funding/money flows) and the candidate
-checkout→paid→receipt surface. Those need separate issues, grant/authority
-review and H1 authorization before another gate.
+### Read-only Balance port (#718)
+
+`navigation/repository.py` reads the IDR projection and newest ledger entry in
+one statement, applies the USDT cursor-aware health check, and exposes one
+customer-scoped IDR ledger keyset read over `(created_at, id)` with a ten-row
+page plus one lookahead. `navigation/presentation.py` renders the PHP Saldo
+header, USDT balance/frozen/unavailable line, merged recent ledger rows, the
+read-only IDR history and its signed customer-scoped older/newer cursors. It
+reuses the PHP `balance`, `balance:add`, `balance:activity`, `balance:a:o|n` and
+`balance:a:d` identities; funding and detail actions are rejected with an
+explicit localized notice and never produce a surface or a balance write.
+Grants add only SELECT columns on the two balance/ledger pairs; no INSERT,
+UPDATE or DELETE authority exists on balance, ledger or payment rows.
+
+Verification of this follow-up (not a gate rerun):
+
+| Check | Observed |
+| --- | --- |
+| Focused candidate unit lane | 53 tests passed (`test_catalog_presentation`, `test_navigation_ingress`, `test_http`, `test_runtime`) |
+| P11 contract/regression lane | 13 tests passed (`test_p11_probe`, `test_p11_compare`) |
+| Harness regression lane | 87 tests passed |
+| PHP↔candidate Balance fixture and PostgreSQL smoke | `python3 tools/migration_harness/smoke_navigation.py` — `passed`; PHP parity for Home/catalog/Family/detail/Orders/Saldo and the first + older Saldo history pages, merged recent IDR/USDT ledger rows, stale/foreign callbacks, funding/detail refusal, grant denial and real PostgreSQL keyset order |
+| P11 structural smoke | `.local/migration-p11/django-smoke-balance-final` — `complete`, 8/8 cells, 16/16 successful attempts, 8 authority audits with 0 changed tables/violations; the `balance` cell was 2/2 success |
+
+The Balance unit lane covers projection drift and frozen/unavailable honesty,
+IDR/USDT recent-row merge order, exact IDR/USDT amount and state copy, id/en/ms
+labels, DB icon fallback, first/second page keyset round-trip, foreign/tampered/
+malformed cursor rejection, and the explicit refusal of funding and activity
+detail callbacks. The P11 contract now plans all eight navigation scenarios at
+users 1/5/10 with zero declared navigation gaps; the short structural smoke
+exercises the single-user `balance` cell, and #722 owns the measured 1/5/10
+rerun. Top-up targets, funding actions and activity details remain #719 scope;
+no performance claim follows and no sample is pooled with the measured #692 run.
+The local candidate image for this follow-up was assembled from the pinned P05
+candidate base plus the current working tree because the canonical dependency
+rebuild could not finish against the slow package network; the smoke result
+records the current source hashes and image identity.
+
+Still not fixed because they are product features, not P11 defects: the candidate
+checkout→paid→receipt surface. It needs a separate issue, grant/authority review
+and H1 authorization before another gate.
 
 ## Focused regressions
 

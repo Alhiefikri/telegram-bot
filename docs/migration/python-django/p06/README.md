@@ -54,6 +54,15 @@ Processing/Completed Orders, keeps PHP invoice/status buttons and cursor
 identities, and adds only the SELECT columns those reads need. Order detail and
 payment actions remain outside this slice.
 
+The #718 follow-up adds the read-only Saldo screen and IDR ledger history. It
+reads the IDR projection and newest ledger entry in one statement, renders the
+USDT balance line and merged recent ledger rows, pages at most ten immutable IDR
+entries with signed customer-scoped cursors, and keeps the PHP
+`balance:add`/`balance:activity`/`balance:a:*` callback identities. Funding,
+top-up targets, retry/check actions and activity details are deliberately not
+implemented: `balance:add` and `balance:a:d:*` reject with an explicit localized
+notice and no balance write. Balance/USDT ledger grants remain SELECT-only.
+
 ## Explicit schema and runtime admission
 
 Startup runs no DDL or legacy migrations. The disposable smoke explicitly applies
@@ -103,11 +112,12 @@ docker run --rm --network none --read-only --tmpfs /tmp:size=64m \
   tests.test_jobs tests.test_postgres_smoke_safety -v
 ```
 
-Observed locally: Python 3.13.18 / Django 5.2.18; 54 focused candidate tests,
+Observed locally: Python 3.13.18 / Django 5.2.18; 64 focused candidate tests,
 5 relay-admission, 9 existing harness-admission and 2 interactive-target tests passed. The real
-PostgreSQL smoke compared actual PHP Home/catalog/Family/detail and the #717
-Orders captions/keyboards (first and older keyset pages), then exercised actual
-HTTP ingress through canonical screen ACK, quantity, Orders, stale rejection and
+PostgreSQL smoke compared actual PHP Home/catalog/Family/detail, the #717 Orders
+captions/keyboards and the #718 Saldo screen plus first/older ledger pages,
+then exercised actual
+HTTP ingress through canonical screen ACK, quantity, Orders, Saldo, stale rejection and
 Back. The actual `navigate.py --once` command consumed a new
 HTTP-accepted update and established Home. The smoke also exercised
 duplicate/stale/foreign/late updates, same-chat ordering, column privilege denial,
@@ -272,6 +282,9 @@ collections through its REST resolve-library/context endpoints:
   short explicit transactions; no Telegram I/O inside transaction closures.
 - [Django row locking](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update):
   locking requires real transactional backend verification, not SQLite/TestCase assumptions.
+- [Django raw SQL](https://docs.djangoproject.com/en/5.2/topics/db/sql/): the
+  #718 Balance reads use parameterized `%s` cursors and bounded `LIMIT`s; signed
+  activity cursors remain opaque application data and never become SQL.
 - [Telegram editMessageCaption](https://core.telegram.org/bots/api#editmessagecaption):
   1024 characters after entity parsing.
 - [Telegram InlineKeyboardButton](https://core.telegram.org/bots/api#inlinekeyboardbutton):

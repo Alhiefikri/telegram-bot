@@ -24,7 +24,13 @@ GRANT SELECT (id,product_id,minimum_quantity,price_amount,usdt_price_amount)
 GRANT SELECT (key,fallback_emoji,source_emoji,custom_emoji_id,sort_order,label,id) ON public.telegram_ui_icons TO candidate_runtime;
 GRANT SELECT (singleton_key,is_active,public_note) ON public.checkout_maintenance_settings TO candidate_runtime;
 GRANT SELECT (id,customer_id,balance) ON public.customer_balance_accounts TO candidate_runtime;
-GRANT SELECT (id,customer_balance_account_id,balance_after) ON public.store_balance_entries TO candidate_runtime;
+GRANT SELECT (id,customer_balance_account_id,kind,amount,balance_after,source_type,source_id,
+    refund_order_id,created_at) ON public.store_balance_entries TO candidate_runtime;
+GRANT SELECT (id,customer_id,balance_micro,version,frozen_reason)
+    ON public.customer_usdt_balance_accounts TO candidate_runtime;
+GRANT SELECT (id,customer_usdt_balance_account_id,account_sequence,kind,amount_micro,
+    balance_after_micro,source_type,source_id,refund_order_id,created_at)
+    ON public.customer_usdt_balance_entries TO candidate_runtime;
 GRANT SELECT (singleton_key,channel_link,channel_username) ON public.store_channel_settings TO candidate_runtime;
 GRANT SELECT (singleton_key,enabled) ON public.customer_api_settings TO candidate_runtime;
 GRANT SELECT (singleton_key,telegram_welcome_banner_path) ON public.storefront_settings TO candidate_runtime;

@@ -20,6 +20,7 @@ def canonical(value):
     if isinstance(value, str):
         value = re.sub(r':([os])[a-f0-9]{16}', r':\1TOKEN', value)
         value = re.sub(r':[a-f0-9]{16}(?=:|$)', ':TOKEN', value)
+        value = re.sub(r'(balance:a:[ond]:)[A-Za-z0-9_-]+', r'\1TOKEN', value)
         return value
     return value
 
@@ -50,7 +51,13 @@ def run():
         'SELECT password FROM public.customers',
         'SELECT * FROM public.product_stock_items',
         'SELECT total_amount FROM public.orders',
+        'SELECT idempotency_key FROM public.store_balance_entries',
         'UPDATE public.customer_balance_accounts SET balance=balance',
+        'UPDATE public.customer_usdt_balance_accounts SET balance_micro=balance_micro',
+        'UPDATE public.customer_usdt_balance_entries SET amount_micro=amount_micro',
+        "INSERT INTO public.store_balance_entries (customer_balance_account_id,kind,amount,balance_after,source_type,source_id,idempotency_key,created_at) VALUES (1,'purchase_debit',1,1,'fixture','denied','denied',now())",
+        'DELETE FROM public.customer_usdt_balance_entries WHERE FALSE',
+        'SELECT provider_payload FROM public.store_balance_top_ups',
         'UPDATE public.customers SET auth_version=auth_version',
         'UPDATE public.orders SET order_status=order_status',
         "INSERT INTO public.orders (id,customer_id,invoice_number,order_status,payment_status,total_amount,currency,created_at,updated_at) VALUES (gen_random_uuid(),1,'DENIED','processing','paid',0,'IDR',now(),now())",
@@ -77,7 +84,8 @@ def run():
     surfaces = {'home': presenter.home(customer), 'catalog': presenter.catalog(customer,state=state),
         'family': presenter.family(customer,reference['family_id'],state=state),
         'detail': presenter.detail(customer,reference['product_id'],state=state),
-        'orders': presenter.orders(customer)}
+        'orders': presenter.orders(customer), 'balance': presenter.balance(customer),
+        'balance_activity': presenter.balance_activity(customer)}
     for name,surface in surfaces.items():
         actual = canonical({'caption':surface.caption,'keyboard':surface.keyboard,'options':surface.options})
         expected = canonical(reference['expected'][name])
@@ -102,6 +110,37 @@ def run():
         created_token=history[9]['created_token'],order_id=history[9]['id'])
     if [row['invoice_number'] for row in older] != ['INV-P06-011','INV-P06-012']:
         raise AssertionError('Orders keyset older page is incorrect')
+    next_balance = next(button['callback_data']
+        for row in surfaces['balance_activity'].keyboard['inline_keyboard'] for button in row
+        if button.get('callback_data','').startswith('balance:a:o:'))
+    balance_next = presenter.route(customer,next_balance,{})
+    actual = canonical({'caption':balance_next.caption,'keyboard':balance_next.keyboard,'options':balance_next.options})
+    expected = canonical(reference['expected']['balance_activity_next'])
+    if actual != expected:
+        with open('/tmp/p06-parity-diff.json','w') as output:
+            json.dump({'surface':'balance_activity_next','actual':actual,'expected':expected},output,ensure_ascii=False,indent=2)
+        raise AssertionError('PHP presentation mismatch: balance_activity_next')
+    account_id = repository.balance_account_id(customer['id'])
+    ledger = repository.balance_activity(account_id)
+    if len(ledger) != 11 or [row['occurred_micros'] for row in ledger] != sorted(
+            (row['occurred_micros'] for row in ledger),reverse=True):
+        raise AssertionError('Balance ledger keyset order is not newest-first')
+    ledger_older = repository.balance_activity(account_id,direction='older',
+        occurred_micros=ledger[9]['occurred_micros'],entry_id=ledger[9]['id'])
+    if len(ledger_older) != 4 or {row['id'] for row in ledger_older} & {row['id'] for row in ledger[:10]}:
+        raise AssertionError('Balance ledger older page is incorrect')
+    usdt_ledger = repository.usdt_activity(customer['id'])
+    if [(row['kind'],row['amount_micro']) for row in usdt_ledger] != [
+            ('funding_credit',3750000),('purchase_debit',1250000)]:
+        raise AssertionError('USDT ledger projection is incorrect')
+    funding = presenter.route(customer,'balance:add',{})
+    if funding is not None or not presenter.callback_handled or 'Saldo tidak berubah' not in presenter.callback_notice:
+        raise AssertionError('Unimplemented funding action did not give explicit feedback')
+    detail = next(button['callback_data']
+        for row in surfaces['balance_activity'].keyboard['inline_keyboard'] for button in row
+        if button.get('callback_data','').startswith('balance:a:d:'))
+    if presenter.route(customer,detail,{}) is not None or not presenter.callback_handled:
+        raise AssertionError('Unimplemented Balance detail did not give explicit feedback')
     transport = RelayTransport()
     roots = NavigationRoots(transport,bot_asset_scope='synthetic')
     processor = NavigationProcessor(repository,presenter,roots,transport)
@@ -179,6 +218,17 @@ def run():
     assert processor.process(115) == 'stale'
     click(116,'menu:back')
     assert roots.current_for_chat(customer,'1').screen == 'home'
+    click(117,'balance')
+    assert roots.current_for_chat(customer,'1').screen == 'balance'
+    receive(callback(118,'balance',message_id=999999))
+    assert processor.process(118) == 'stale'
+    receive(callback(119,'balance',actor=2))
+    assert processor.process(119) == 'foreign'
+    receive(callback(120,'balance:add'))
+    assert processor.process(120) == 'acknowledged'
+    assert roots.current_for_chat(customer,'1').screen == 'balance'
+    click(121,'menu:back')
+    assert roots.current_for_chat(customer,'1').screen == 'home'
     protocol = exercise_root_protocol(customer)
     from lhie_candidate.navigation.customers import resolve_customer
     second = resolve_customer(repository,{'id':2,'first_name':'Synthetic Second'})
@@ -195,7 +245,9 @@ def run():
     assert NavigationRoots(transport,bot_asset_scope='LhieStoreTestBot').current_for_chat(customer,'1').screen == 'home'
     return {'status':'passed','dataset':'p06-synthetic-repository-schema-v1',
         'php_surface_parity':list(surfaces),'orders_parity':['first_page','older_page','stale','back'],
-        'webhook_to_screen':['home','catalog','family','detail','quantity','back','home','orders','back'],
+        'balance_parity':['screen','recent_activity','ledger_first_page','ledger_older_page',
+                          'usdt_ledger','funding_rejected','detail_rejected','stale','foreign'],
+        'webhook_to_screen':['home','catalog','family','detail','quantity','back','home','orders','balance','home'],
         'duplicate_stale_foreign_burst':'passed','webhook_authentication':'passed',
         'registration':'exact_telegram_identity_replay_passed',
         'bounded_consumer_command':'navigate.py --once rendered accepted Home',

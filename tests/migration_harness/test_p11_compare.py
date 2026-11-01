@@ -112,12 +112,14 @@ class PairedComparisonTest(unittest.TestCase):
 
     def test_declared_candidate_gaps_are_not_implemented_not_fabricated(self):
         table = {scenario: (10.0, 20.0) for scenario in PROTOCOL['navigation']}
+        protocol = copy.deepcopy(PROTOCOL)
+        protocol['candidate_unimplemented_scenarios'] = ['balance']
         cells = [cell('laravel', scenario, users, *table[scenario])
                  for scenario in PROTOCOL['navigation'] for users in PROTOCOL['users']]
         implemented = [dict(item, dimensions={**item['dimensions'], 'implementation': 'django'})
                        for item in cells if item['dimensions']['scenario']
-                       not in PROTOCOL['candidate_unimplemented_scenarios']]
-        report = self.build(cells, implemented)
+                       not in protocol['candidate_unimplemented_scenarios']]
+        report = self.build(cells, implemented, protocol=protocol)
         self.assertEqual(report['summary']['not_implemented'], 3)
         self.assertEqual(report['summary']['paired_cases'], 21)
         self.assertEqual(report['summary']['candidate_coverage_fraction'], 1.0)
@@ -125,6 +127,7 @@ class PairedComparisonTest(unittest.TestCase):
         self.assertEqual({case['scenario'] for case in gaps}, {'balance'})
         self.assertEqual(report['verdict']['decision'], 'fix')
         self.assertIn('candidate_feature_absent', report['verdict']['reasons'])
+        self.assertEqual(PROTOCOL['candidate_unimplemented_scenarios'], [])
 
     def test_inconclusive_evidence_never_counts_as_a_pass(self):
         table = {scenario: (10.0, 20.0) for scenario in PROTOCOL['navigation']}
@@ -241,11 +244,12 @@ class ProtocolP11ContractTest(unittest.TestCase):
         spec.loader.exec_module(runner)
         runner.PROTOCOL = PROTOCOL
         cells = list(runner.planned_cells(False, 'django'))
-        self.assertEqual(len(cells), 21)
+        self.assertEqual(len(cells), 24)
         self.assertEqual({cell['scenario'] for cell in cells},
                          set(PROTOCOL['navigation']) - set(PROTOCOL['candidate_unimplemented_scenarios']))
-        self.assertEqual({cell['users'] for cell in cells if cell['scenario'] == 'orders'},
-                         {1, 5, 10})
+        for scenario in ('orders', 'balance'):
+            self.assertEqual({cell['users'] for cell in cells if cell['scenario'] == scenario},
+                             {1, 5, 10})
         self.assertTrue(all(cell['background'] == 'idle' for cell in cells))
         self.assertTrue(all(runner.measurement_role(cell) == 'primary' for cell in cells))
         php = list(runner.planned_cells(False, 'laravel'))

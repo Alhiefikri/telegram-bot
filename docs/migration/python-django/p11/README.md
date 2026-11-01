@@ -32,10 +32,11 @@ reported as `not_implemented` with that declared reason; they are never
 substituted with synthetic PHP samples or claimed as candidate coverage.
 
 The separate P11-fix follow-up #717 ports the read-only successful Orders screen
-and removes `orders` from the declared gap list. That work is outside the
-measured #692 identity: its results are not pooled with the published samples,
-and the paired-gate rerun belongs to #722. Balance and both payment stages remain
-declared gaps until their own issues close.
+and removes `orders` from the declared gap list. The #718 follow-up ports the
+read-only Saldo screen and IDR ledger history and removes `balance` from that
+list. That work is outside the measured #692 identity: its results are not pooled
+with the published samples, and the paired-gate rerun belongs to #722. Checkout
+and paid delivery remain declared gaps until their own issues close.
 
 ## How both sides produce comparable evidence
 
@@ -164,8 +165,9 @@ remain owned by their existing P04/P06/P07/P08/P09/P10 modules and ADRs.
   reused candidate session/advisory-lock patterns are unchanged; the benchmark
   adds no new locking or money path.
 - [Django raw SQL cursors](https://docs.djangoproject.com/en/5.2/topics/db/sql/):
-  the #717 Orders read uses `connection.cursor()` with `%s` parameters and a
-  bounded `LIMIT`, never string-interpolated customer values.
+  the #717 Orders and #718 Balance reads use `connection.cursor()` with `%s`
+  parameters and bounded `LIMIT`s, never string-interpolated customer values.
+  Balance activity cursors stay opaque signed application data.
 - [PostgreSQL row comparison](https://www.postgresql.org/docs/16/functions-comparisons.html#ROW-WISE-COMPARISON):
-  the Orders keyset compares `(created_at, id)` in the requested direction so
-  equal-second Orders stay reachable without an offset scan.
+  the Orders and Balance keysets compare `(created_at, id)` in the requested
+  direction so equal-second rows stay reachable without an offset scan.

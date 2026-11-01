@@ -59,6 +59,7 @@
   "balance.title": "💰 Saldo Saya",
   "balance.available": "🇮🇩 Saldo Rupiah: :balance",
   "balance.add": "➕ Tambah Saldo",
+  "balance.action.unavailable": "Aksi Saldo ini belum tersedia di build ini. Saldo tidak berubah.",
   "balance.recent.title": ":count aktivitas terakhir",
   "balance.activity.button": "📜 Riwayat Transaksi",
   "balance.activity.back": "⬅️ Kembali ke Saldo",

@@ -32,8 +32,10 @@ class CandidateProbeContractTest(unittest.TestCase):
         for users in (1, 5, 10):
             self.assertEqual(probe.validate_batch(payload(scenario='orders', users=users))['users'],
                              users)
+            self.assertEqual(probe.validate_batch(payload(scenario='balance', users=users))['users'],
+                             users)
         for changes in ({'background': 'representative'}, {'traffic': 'same_chat'},
-                        {'temperature': 'cold'}, {'scenario': 'balance'},
+                        {'temperature': 'cold'}, {'scenario': 'checkout'},
                         {'implementation': 'laravel'}, {'profile': 'normalized'},
                         {'transport': 'sandbox'}, {'dataset': 'production'}):
             with self.subTest(changes=changes):

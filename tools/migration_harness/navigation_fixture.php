@@ -43,8 +43,9 @@ $bot = new class extends App\Services\Telegram\TelegramBotClient {
     public function deleteMessage(int|string $chatId, int|string $messageId): void {}
 };
 $app->instance(App\Services\Telegram\TelegramBotClient::class, $bot);
+$orders = [];
 foreach (range(1, 12) as $index) {
-    App\Models\Order::factory()->for($customer)->create([
+    $orders[] = App\Models\Order::factory()->for($customer)->create([
         'invoice_number' => 'INV-P06-'.str_pad((string) $index, 3, '0', STR_PAD_LEFT),
         'order_status' => in_array($index, [3, 4], true)
             ? App\Enums\OrderStatus::Processing : App\Enums\OrderStatus::Completed,
@@ -62,6 +63,57 @@ App\Models\Order::factory()->for($customer)->create([
     'invoice_number' => 'INV-P06-CANCELLED', 'order_status' => App\Enums\OrderStatus::Cancelled,
     'payment_status' => App\Enums\PaymentStatus::Paid, 'created_at' => now()->addMinute(),
 ]);
+$accountId = Illuminate\Support\Facades\DB::table('customer_balance_accounts')->insertGetId([
+    'customer_id' => $customer->id, 'balance' => 0,
+    'created_at' => now(), 'updated_at' => now(),
+]);
+$movements = [['admin_adjustment_credit', 49494, 'balance_adjustment', 'fixture-0', null]];
+foreach (range(1, 11) as $index) {
+    $movements[] = $index % 2 === 0
+        ? ['purchase_debit', 1000 + $index, 'order', $orders[$index - 1]->id, null]
+        : ['admin_adjustment_credit', 1000 + $index, 'balance_adjustment', 'fixture-'.$index, null];
+}
+$movements[] = ['refund_credit', 1500, 'order_refund', $orders[1]->id, $orders[1]->id];
+$movements[] = ['purchase_debit', 2000, 'order', $orders[0]->id, null];
+$balanceAfter = 0;
+foreach ($movements as $index => [$kind, $amount, $sourceType, $sourceId, $refundOrderId]) {
+    $balanceAfter += in_array($kind, ['purchase_debit', 'admin_adjustment_reversal'], true)
+        ? -$amount : $amount;
+    Illuminate\Support\Facades\DB::table('store_balance_entries')->insert([
+        'customer_balance_account_id' => $accountId, 'kind' => $kind, 'amount' => $amount,
+        'balance_after' => $balanceAfter, 'source_type' => $sourceType,
+        'source_id' => (string) $sourceId, 'idempotency_key' => 'fixture-entry-'.$index,
+        'refund_order_id' => $refundOrderId,
+        'created_at' => now()->subMinutes(120)->addMinutes($index),
+    ]);
+}
+Illuminate\Support\Facades\DB::table('customer_balance_accounts')
+    ->where('id', $accountId)->update(['balance' => $balanceAfter]);
+$usdtAccountId = Illuminate\Support\Facades\DB::table('customer_usdt_balance_accounts')->insertGetId([
+    'customer_id' => $customer->id, 'currency' => 'USDT', 'balance_micro' => 2500000,
+    'version' => 2, 'last_entry_id' => null, 'frozen_reason' => null,
+    'created_at' => now(), 'updated_at' => now(),
+]);
+$usdtEntries = [
+    [1, 'funding_credit', 3750000, 3750000, 'customer_usdt_top_up', 'fixture-topup-1',
+        null, now()->subMinutes(100)],
+    [2, 'purchase_debit', 1250000, 2500000, 'order', $orders[4]->id, null,
+        now()->subMinutes(108)->subSeconds(30)],
+];
+foreach ($usdtEntries as [$sequence, $kind, $amount, $after, $sourceType, $sourceId, $refundOrderId, $createdAt]) {
+    $usdtEntryId = Illuminate\Support\Facades\DB::table('customer_usdt_balance_entries')->insertGetId([
+        'customer_usdt_balance_account_id' => $usdtAccountId,
+        'account_sequence' => $sequence, 'kind' => $kind, 'amount_micro' => $amount,
+        'balance_after_micro' => $after, 'source_type' => $sourceType,
+        'source_id' => (string) $sourceId,
+        'idempotency_key' => 'fixture-usdt-'.$sequence,
+        'request_fingerprint' => hash('sha256', 'fixture-usdt-'.$sequence),
+        'original_entry_id' => null, 'refund_order_id' => $refundOrderId,
+        'created_at' => $createdAt,
+    ]);
+    Illuminate\Support\Facades\DB::table('customer_usdt_balance_accounts')
+        ->where('id', $usdtAccountId)->update(['last_entry_id' => $usdtEntryId]);
+}
 $catalog = $app->make(App\Services\Telegram\TelegramCatalogIntents::class);
 $home = $app->make(App\Services\Telegram\TelegramMenuIntents::class)->homeSurface($customer, '1');
 $expected = ['home' => ['caption' => $home->caption, 'keyboard' => $home->keyboard, 'options' => $home->options]];
@@ -83,6 +135,27 @@ if ($next === null) {
 $ordersNext = $orders->orderHistorySurface($customer, $next['callback_data']);
 $expected['orders_next'] = ['caption' => $ordersNext->caption, 'keyboard' => $ordersNext->keyboard,
     'options' => $ordersNext->options];
+$menu = $app->make(App\Services\Telegram\TelegramMenuIntents::class);
+$balance = $menu->balanceSurface($customer);
+$expected['balance'] = ['caption' => $balance->caption, 'keyboard' => $balance->keyboard,
+    'options' => $balance->options];
+$activities = $app->make(App\Services\StoreBalance\StoreBalanceActivityService::class);
+$activity = $menu->balanceActivitySurface($customer, $activities->firstPage($customer));
+$expected['balance_activity'] = ['caption' => $activity->caption, 'keyboard' => $activity->keyboard,
+    'options' => $activity->options];
+$nextActivity = collect($activity->keyboard['inline_keyboard'])->flatten(1)
+    ->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'balance:a:o:'));
+if ($nextActivity === null) {
+    throw new RuntimeException('Synthetic Balance fixture did not produce an older page');
+}
+$decoded = $app->make(App\Services\Telegram\TelegramBalanceActivityToken::class)
+    ->decodeCursorToken(substr($nextActivity['callback_data'], strlen('balance:a:o:')));
+if ($decoded === null) {
+    throw new RuntimeException('Synthetic Balance fixture produced an invalid cursor');
+}
+$olderActivity = $menu->balanceActivitySurface($customer, $activities->olderPage($customer, $decoded['cursor']));
+$expected['balance_activity_next'] = ['caption' => $olderActivity->caption,
+    'keyboard' => $olderActivity->keyboard, 'options' => $olderActivity->options];
 echo json_encode(['customer_id' => $customer->id, 'family_id' => $family->id,
     'product_id' => $products[1]->id, 'standalone_id' => $standalone->id,
     'expected' => $expected], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);

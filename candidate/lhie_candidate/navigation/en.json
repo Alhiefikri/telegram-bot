@@ -59,6 +59,7 @@
   "balance.title": "💰 My Balance",
   "balance.available": "🇮🇩 IDR balance: :balance",
   "balance.add": "➕ Add Balance",
+  "balance.action.unavailable": "This balance action is not available in this build. Your balance was not changed.",
   "balance.recent.title": "Last :count activities",
   "balance.activity.button": "📜 Transaction History",
   "balance.activity.back": "⬅️ Back to Balance",

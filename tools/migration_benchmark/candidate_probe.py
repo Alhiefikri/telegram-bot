@@ -34,7 +34,8 @@ DATASETS = {
     "large": {"categories": 20, "families": 120, "products": 360, "customers": 200,
               "orders": 600, "payments": 600, "stock_items": 9616},
 }
-SCENARIOS = ("home_catalog", "catalog_plans", "plan_detail", "back", "home", "quantity", "orders")
+SCENARIOS = ("home_catalog", "catalog_plans", "plan_detail", "back", "home", "quantity", "orders",
+             "balance")
 SCREEN_METHODS = frozenset({
     "sendMessage", "sendPhoto", "sendAnimation", "editMessageText",
     "editMessageCaption", "editMessageMedia", "editMessageReplyMarkup",
@@ -626,6 +627,8 @@ class Driver:
             return self.control(home, "katalog", exact=True)
         if scenario == "orders":
             return self.control(home, "menu:orders", exact=True)
+        if scenario == "balance":
+            return self.control(home, "balance", exact=True)
         catalog = self.callback(chat, "katalog")
         options = self.control(catalog, "family:options:")
         if scenario == "catalog_plans":
