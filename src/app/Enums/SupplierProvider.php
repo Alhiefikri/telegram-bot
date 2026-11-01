@@ -24,7 +24,7 @@ enum SupplierProvider: string
             self::Warzone => 'https://api.warzoneshop.in/api/v1',
             self::AiVault => 'https://reseller.aivaulthub.store/api/v1',
             self::NyStore => 'https://nystoreofficial.shop/api/v1',
-            self::ToolOrax => 'https://shopbot.00969600.xyz/shop-api/v1',
+            self::ToolOrax => 'https://toolorax.shop/shop-api/v1',
             self::Canboso => 'https://canboso.com/api/v2/telegram-buyer',
             self::Nastele => 'https://nastele.online/api/partner',
             self::MiraiApi => 'https://api.miraiapi.com/api/reseller/v1',

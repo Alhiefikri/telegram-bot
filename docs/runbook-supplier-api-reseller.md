@@ -827,7 +827,7 @@ order instead of buying again.
 
 ToolOraX (ShopBot) authenticates with `X-Shop-API-Key` (or Bearer), buys with
 `POST /orders {product_id, quantity}` and reads `GET /orders/{order_code}`.
-The [first-party API documentation](https://shopbot.00969600.xyz/shop-api/docs)
+The [first-party API documentation](https://toolorax.shop/shop-api/docs)
 documents a create success with `ok`, `order_code`, `quantity`, `total`,
 `balance_after`, `channel` and `delivered_keys`, but no status, product identity
 or currency. Canonical GET includes `product_id` and `status: fulfilled`.
@@ -838,6 +838,13 @@ Documented pre-purchase conflicts (`Insufficient balance.`,
 stays ambiguous. ToolOraX **`supportsIdempotency=false`**: no idempotency header
 or automatic POST replay is authorized by the available contract. See the
 qualification record below; documentation examples are not live purchase proof.
+
+The active base URL is `https://toolorax.shop/shop-api/v1`; the public
+health endpoint returned `ok: true`, `status: ok`, `service: shop-api`,
+`version: v1` on 2026-11-01. The interactive API tester is
+`https://toolorax.shop/api-test`. The October qualification record below
+retains its historical origin and does not qualify authenticated access on
+the new domain. The client uses the new origin directly, without redirects.
 
 Both providers' balance and catalog were verified read-only with the operator's
 keys; a funded live purchase still requires the controlled qualification in

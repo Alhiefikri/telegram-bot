@@ -102,7 +102,9 @@ class SupplierClientTest extends TestCase
     {
         $supplier = $this->supplier($provider);
         $fixture = self::fixture($provider);
-        $base = SupplierProvider::from($provider)->baseUrl();
+        $base = $provider === 'toolorax'
+            ? 'https://toolorax.shop/shop-api/v1'
+            : SupplierProvider::from($provider)->baseUrl();
         $purchasePath = in_array($provider, ['prodseller', 'toolorax'], true) ? '/orders' : '/order';
         $externalId = $provider === 'toolorax' ? '4' : 'sku-1';
         $this->fake(function ($request, $options) use ($base, $fixture, $provider, $purchasePath) {
