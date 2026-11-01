@@ -34,9 +34,16 @@ substituted with synthetic PHP samples or claimed as candidate coverage.
 The separate P11-fix follow-up #717 ports the read-only successful Orders screen
 and removes `orders` from the declared gap list. The #718 follow-up ports the
 read-only Saldo screen and IDR ledger history and removes `balance` from that
-list. That work is outside the measured #692 identity: its results are not pooled
-with the published samples, and the paired-gate rerun belongs to #722. Checkout
-and paid delivery remain declared gaps until their own issues close.
+list. The #719 follow-up adds the minimum IDR funding path behind the same Saldo
+entry point: DB policy/preset identities, one intent/confirm/cancel owner, a
+fake-only sandbox provider seam and settlement through the existing Store
+Balance ledger plus global external-receipt claim. That work is outside the
+measured #692 identity: its results are not pooled with the published samples,
+and the paired-gate rerun belongs to #722. The funding rail is inactive by
+default, and full provider/credential activation remains P15/P17. Checkout and
+paid delivery remain declared gaps until their own issues close. No Owner/H1/ADR
+approval is recorded by this change; H1/Owner authorization remains a blocker
+for activating or measuring the funding rail.
 
 ## How both sides produce comparable evidence
 
@@ -155,6 +162,18 @@ remain owned by their existing P04/P06/P07/P08/P09/P10 modules and ADRs.
 
 ## Context7 references
 
+- [Django transactions](https://docs.djangoproject.com/en/5.2/topics/db/transactions/):
+  the #719 funding owner uses `transaction.atomic()` plus `savepoint()` /
+  `savepoint_commit()` / `savepoint_rollback()` around the global receipt claim
+  so a unique conflict never leaves the caller transaction aborted.
+- [Django row locking](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update):
+  Customer/account/top-up locks are real PostgreSQL `SELECT ... FOR UPDATE`
+  statements inside the money transaction; SQLite/TestCase does not prove them.
+- [Django raw SQL cursors](https://docs.djangoproject.com/en/5.2/topics/db/sql/):
+  the #717 Orders, #718 Balance and #719 funding reads/writes use
+  `connection.cursor()` with `%s` parameters and bounded `LIMIT`s, never
+  string-interpolated customer, amount or provider values. Balance activity
+  cursors stay opaque signed application data.
 - [Django database instrumentation](https://docs.djangoproject.com/en/5.2/topics/db/instrumentation/):
   `connection.execute_wrapper()` is a thread-local context manager; the probe
   accumulates query duration only, never SQL or parameters.
@@ -162,12 +181,10 @@ remain owned by their existing P04/P06/P07/P08/P09/P10 modules and ADRs.
   arbitrary keyword arguments set WSGI environ values, which is how the probe
   supplies the admitted `SERVER_NAME`, webhook header and attempt header.
 - [PostgreSQL explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html):
-  reused candidate session/advisory-lock patterns are unchanged; the benchmark
-  adds no new locking or money path.
-- [Django raw SQL cursors](https://docs.djangoproject.com/en/5.2/topics/db/sql/):
-  the #717 Orders and #718 Balance reads use `connection.cursor()` with `%s`
-  parameters and bounded `LIMIT`s, never string-interpolated customer values.
-  Balance activity cursors stay opaque signed application data.
+  reused candidate session/advisory-lock patterns are unchanged; the #719
+  funding settlement locks Customer → balance account → top-up, performs
+  provider I/O outside the transaction and revalidates after re-locking.
+  The benchmark adds no new locking or money path.
 - [PostgreSQL row comparison](https://www.postgresql.org/docs/16/functions-comparisons.html#ROW-WISE-COMPARISON):
   the Orders and Balance keysets compare `(created_at, id)` in the requested
   direction so equal-second rows stay reachable without an offset scan.

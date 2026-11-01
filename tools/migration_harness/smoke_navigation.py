@@ -49,8 +49,37 @@ def main():
             raise RuntimeError('P06 navigation probe failed; see .local/migration-p06/probe-failure.json')
         observed = json.loads(probe.stdout)
         assert observed['status'] == 'passed'
+        # The funding follow-up applies its own write grants only after the
+        # read-only Balance proof, so #718's navigation authority stays intact.
+        funding_grants = (ROOT / 'candidate/lhie_candidate/funding/grants.sql').read_text()
+        docker('exec', database, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'harness', '-d', 'disposable', '-c', funding_grants)
+        docker('exec', database, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'harness', '-d', 'disposable', '-c',
+               "INSERT INTO public.manual_payment_settings "
+               "(is_active,payment_mode,payment_provider_version,sakurupiah_channel,created_at,updated_at) "
+               "VALUES (true,'sakurupiah',1,'QRIS',now(),now())")
+        funding_probe = subprocess.run([
+            'docker', 'run', '--rm', '--network', 'container:' + boundary, '--volumes-from', app,
+            '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+            '--user', '1000:1000', '--cpus', '1.25', '--memory', '1216m', '--memory-swap', '1216m',
+            '--tmpfs', '/tmp:size=64m', '--workdir', '/opt/candidate',
+            '--mount', f'type=bind,src={ROOT / "candidate"},dst=/opt/candidate,readonly',
+            '--env', 'P719_FUNDING_SMOKE=disposable-local-only',
+            '--entrypoint', 'python', 'lhie-p05-candidate:1', 'smoke_funding.py',
+        ], capture_output=True, text=True, timeout=180)
+        if funding_probe.returncode:
+            (output / 'funding-failure.stdout').write_text(funding_probe.stdout)
+            (output / 'funding-failure.stderr').write_text(funding_probe.stderr)
+            raise RuntimeError('P11 funding probe failed; see .local/migration-p06/funding-failure.*')
+        observed['funding'] = json.loads(funding_probe.stdout)
+        assert observed['funding']['status'] == 'passed'
         import hashlib
         sources = [*sorted((ROOT / 'candidate/lhie_candidate/navigation').glob('*')),
+                   *sorted((ROOT / 'candidate/lhie_candidate/funding').glob('*')),
+                   ROOT / 'candidate/lhie_candidate/payments/receipts.py',
+                   ROOT / 'candidate/lhie_candidate/payments/lifecycle.py',
+                   ROOT / 'candidate/lhie_candidate/checkout/balance.py',
+                   ROOT / 'candidate/lhie_candidate/checkout/privileges.py',
+                   ROOT / 'candidate/smoke_funding.py',
                    ROOT / 'candidate/navigate.py', ROOT / 'candidate/smoke_navigation.py',
                    ROOT / 'candidate/lhie_candidate/readiness.py', ROOT / 'candidate/lhie_candidate/http.py',
                    ROOT / 'candidate/lhie_candidate/urls.py', Path(__file__),

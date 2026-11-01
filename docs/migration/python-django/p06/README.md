@@ -58,10 +58,20 @@ The #718 follow-up adds the read-only Saldo screen and IDR ledger history. It
 reads the IDR projection and newest ledger entry in one statement, renders the
 USDT balance line and merged recent ledger rows, pages at most ten immutable IDR
 entries with signed customer-scoped cursors, and keeps the PHP
-`balance:add`/`balance:activity`/`balance:a:*` callback identities. Funding,
-top-up targets, retry/check actions and activity details are deliberately not
-implemented: `balance:add` and `balance:a:d:*` reject with an explicit localized
-notice and no balance write. Balance/USDT ledger grants remain SELECT-only.
+`balance:add`/`balance:activity`/`balance:a:*` callback identities. Balance/USDT
+ledger grants stay SELECT-only in `navigation/grants.sql`.
+
+The #719 follow-up adds the minimum IDR funding/top-up path in
+`candidate/lhie_candidate/funding/`: DB policy and PHP-compatible signed preset
+identities, one `store_balance_funding_intents` / `store_balance_top_up*` owner,
+a sandbox-shaped Sakurupiah provider seam, and settlement through
+`StoreBalanceLedger.credit_top_up` plus the P08 global receipt claim. The
+provider/request factory is not installed by default, so the rail is inactive
+and every confirmation fails closed without a balance write. A separate
+`funding/grants.sql` grants only the writes this owner needs; startup still
+installs nothing. `balance:p:*`, `balance:confirm|cancel|back:*`,
+`balance:topup:*:check|retry` and `/deposit` are wired. Full top-up recovery,
+manual proof review, KlikQRIS/Binance and USDT funding remain P15/P17.
 
 ## Explicit schema and runtime admission
 
@@ -118,7 +128,11 @@ PostgreSQL smoke compared actual PHP Home/catalog/Family/detail, the #717 Orders
 captions/keyboards and the #718 Saldo screen plus first/older ledger pages,
 then exercised actual
 HTTP ingress through canonical screen ACK, quantity, Orders, Saldo, stale rejection and
-Back. The actual `navigate.py --once` command consumed a new
+Back. The funding follow-up then applies `funding/grants.sql`, inserts one
+active synthetic Sakurupiah setting and runs `smoke_funding.py` with a fake
+provider: intent/confirm/top-up, one credit, duplicate replay, a two-process
+check race and a second target reusing the same provider reference without a
+second credit. The actual `navigate.py --once` command consumed a new
 HTTP-accepted update and established Home. The smoke also exercised
 duplicate/stale/foreign/late updates, same-chat ordering, column privilege denial,
 exact-identity registration replay, expired/competing roots and a synchronized

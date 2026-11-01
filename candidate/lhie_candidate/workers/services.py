@@ -4,6 +4,7 @@ from .contract import LEASE_SECONDS, validate_queue_name
 
 
 def interaction_handler():
+    from ..funding.service import FundingService
     from ..navigation.presentation import CatalogPresenter
     from ..navigation.processor import NavigationProcessor
     from ..navigation.repository import CatalogRepository
@@ -17,7 +18,11 @@ def interaction_handler():
     banner = repository.banner_asset(scope) or {}
     roots = NavigationRoots(transport, bot_asset_scope=scope, banner_reference=banner.get("file_id"),
                             banner_version=banner.get("version"))
-    presenter = CatalogPresenter(repository, bot_scope=scope, custom_emoji=True)
+    # The funding rail is intentionally inactive here: no provider or request
+    # factory is installed until an approved P08/P15 operator configuration
+    # exists. The service still owns callback parsing and fails closed.
+    funding = FundingService()
+    presenter = CatalogPresenter(repository, bot_scope=scope, custom_emoji=True, funding=funding)
     return InteractionHandler(NavigationProcessor(repository, presenter, roots, transport))
 
 

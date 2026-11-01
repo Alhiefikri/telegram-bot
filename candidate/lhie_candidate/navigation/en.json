@@ -256,6 +256,7 @@
   "balance.compensation.resolved_at": "Processed at: :date",
   "balance.compensation.support": "Need help? Open Support.",
   "balance.topup.check": "Check payment",
+  "balance.topup.qr_open": "🧾 Open QRIS",
   "balance.topup.retry": "Retry setup",
   "balance.topup.help": "Need help? Open Support and never send secret data.",
   "balance.topup.awaiting_confirmation": "Already paid? Send the payment proof photo to this chat with the /payment caption. An admin verifies it and the balance is credited once the payment is confirmed.",

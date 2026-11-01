@@ -45,6 +45,33 @@ P09_UPDATE = {
     'orders': {'telegram_receipt_sent_at'},
 }
 
+FUNDING_INSERT = {
+    'store_balance_funding_intents': set('customer_id telegram_navigation_root_id chat_id canonical_message_id policy_version amount nonce status expires_at claimed_at created_at updated_at'.split()),
+    'store_balance_top_ups': set('customer_id store_balance_funding_intent_id telegram_navigation_root_id chat_id canonical_message_id locale provider payment_setting_id payment_provider_version merchant_ref idempotency_key currency amount sakurupiah_channel status provider_create_state provider_create_attempted_at expires_at created_at updated_at'.split()),
+    'store_balance_top_up_events': set('store_balance_top_up_id provider event_type merchant_ref provider_reference provider_status raw_payload idempotency_key received_count received_at last_received_at processed_at'.split()),
+    'external_money_receipts': set('canonical_key provider identity_kind account_namespace reference beneficiary currency amount_units decimals status target_type target_id fingerprint evidence_payload claimed_at created_at updated_at'.split()),
+    'external_money_receipt_aliases': set('external_money_receipt_id alias_key alias_type created_at'.split()),
+    'customer_balance_accounts': set('customer_id balance created_at updated_at'.split()),
+    'store_balance_entries': set('customer_balance_account_id kind amount balance_after source_type source_id idempotency_key created_at refund_order_id'.split()),
+}
+FUNDING_UPDATE = {
+    'store_balance_funding_policies': {'updated_at'},
+    'manual_payment_settings': {'updated_at'},
+    'store_balance_funding_intents': {'status', 'claimed_at', 'updated_at'},
+    'store_balance_top_ups': set('status provider_reference provider_payload provider_qris_url provider_fee provider_total_payment provider_payment_method provider_created_at provider_expires_at provider_create_state provider_create_attempted_at provider_create_last_error paid_at settled_at updated_at'.split()),
+    'external_money_receipts': {'updated_at'},
+    'customer_balance_accounts': {'balance', 'updated_at'},
+    'customers': {'updated_at'},
+}
+
+
+def _merge(*mappings):
+    merged = {}
+    for mapping in mappings:
+        for table, columns in mapping.items():
+            merged.setdefault(table, set()).update(columns)
+    return merged
+
 
 def verify_public_writes(cursor):
     cursor.execute("SELECT has_column_privilege(current_user,'public.orders','checkout_key','INSERT')")
@@ -63,6 +90,10 @@ def verify_public_writes(cursor):
         allowed_update = {**allowed_update, **{
             table: allowed_update.get(table, set()) | columns for table, columns in P09_UPDATE.items()
         }}
+    cursor.execute("SELECT has_column_privilege(current_user,'public.store_balance_top_ups','provider_reference','UPDATE')")
+    if cursor.fetchone()[0]:
+        allowed_insert = _merge(allowed_insert, FUNDING_INSERT)
+        allowed_update = _merge(allowed_update, FUNDING_UPDATE)
     cursor.execute('''SELECT c.relname FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p')

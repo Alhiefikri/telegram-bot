@@ -78,6 +78,57 @@ class StoreBalanceLedger:
             raise CheckoutError("balance_purchase_state_invalid")
         return self._post(account, "purchase_debit", amount, source_id, key)
 
+    def credit_top_up(self, customer_id, top_up_id, amount, key):
+        """Credit one verified top-up under the canonical account lock."""
+        self.db.require_transaction()
+        source_id = str(top_up_id)
+        if not source_id:
+            raise CheckoutError("balance_top_up_identity_invalid")
+        account = self.lock_for_top_up(customer_id)
+        existing = self._find_source_entry(
+            account, "top_up_credit", require_integer(amount, minimum=1),
+            "balance_top_up", source_id, key)
+        if existing is not None:
+            return existing
+        return self._post(account, "top_up_credit",
+                          require_integer(amount, minimum=1), source_id, key,
+                          source_type="balance_top_up")
+
+    def lock_for_top_up(self, customer_id):
+        """Lock the account and require only the newest cursor to agree.
+
+        PHP ``creditTopUp`` intentionally skips the full-history scan; a
+        mismatched cursor still blocks mutation, while independent operator
+        reconciliation remains the full-history check.
+        """
+        self.db.require_transaction()
+        customer_id = require_integer(customer_id, minimum=1)
+        account = self.db.one(
+            "SELECT * FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
+            (customer_id,))
+        if account is None:
+            self.db.execute(
+                """INSERT INTO public.customer_balance_accounts
+                       (customer_id, balance, created_at, updated_at)
+                   VALUES (%s, 0, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta',
+                           CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')
+                   ON CONFLICT (customer_id) DO NOTHING""",
+                (customer_id,))
+            account = self.db.one(
+                "SELECT * FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
+                (customer_id,))
+        if account is None:
+            raise CheckoutError("balance_account_unavailable")
+        latest = self.db.one(
+            """SELECT balance_after FROM public.store_balance_entries
+               WHERE customer_balance_account_id = %s ORDER BY id DESC LIMIT 1""",
+            (account["id"],))
+        balance = require_integer(account["balance"])
+        expected = 0 if latest is None else require_integer(latest["balance_after"])
+        if balance != expected:
+            raise CheckoutError("balance_projection_mismatch")
+        return account
+
     def refund_order(self, customer_id, order_id):
         """Post the remaining full refund; do not cancel or transition the Order."""
         account = self.lock_for_purchase(customer_id)
@@ -171,12 +222,15 @@ class StoreBalanceLedger:
             raise CheckoutError("supplier_refund_requires_lifecycle")
 
     def _find_entry(self, account, kind, amount, source_id, key):
+        return self._find_source_entry(account, kind, amount, "order", source_id, key)
+
+    def _find_source_entry(self, account, kind, amount, source_type, source_id, key):
         entries = self.db.rows(
             """SELECT * FROM public.store_balance_entries
                WHERE (customer_balance_account_id = %s AND idempotency_key = %s)
-                  OR (source_type = 'order' AND source_id = %s AND kind = %s)
+                  OR (source_type = %s AND source_id = %s AND kind = %s)
                ORDER BY id""",
-            (account["id"], key, source_id, kind),
+            (account["id"], key, source_type, source_id, kind),
         )
         if len(entries) > 1:
             raise CheckoutError("balance_identity_conflict")
@@ -185,14 +239,14 @@ class StoreBalanceLedger:
         entry = entries[0]
         if (entry["customer_balance_account_id"] != account["id"]
                 or entry["kind"] != kind or entry["amount"] != amount
-                or entry["source_type"] != "order" or entry["source_id"] != source_id
+                or entry["source_type"] != source_type or entry["source_id"] != source_id
                 or entry["refund_order_id"] is not None):
             raise CheckoutError("balance_identity_conflict")
         require_integer(entry["amount"], minimum=1)
         require_integer(entry["balance_after"])
         return entry
 
-    def _post(self, account, kind, amount, source_id, key):
+    def _post(self, account, kind, amount, source_id, key, source_type="order"):
         amount = require_integer(amount, minimum=1)
         balance = require_integer(account["balance"])
         if kind == "purchase_debit":
@@ -207,12 +261,12 @@ class StoreBalanceLedger:
             """INSERT INTO public.store_balance_entries
                    (customer_balance_account_id, kind, amount, balance_after,
                     source_type, source_id, idempotency_key, created_at, refund_order_id)
-               VALUES (%s, %s, %s, %s, 'order', %s, %s, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta', NULL)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta', NULL)
                ON CONFLICT DO NOTHING RETURNING *""",
-            (account["id"], kind, amount, balance_after, source_id, key),
+            (account["id"], kind, amount, balance_after, source_type, source_id, key),
         )
         if entry is None:
-            existing = self._find_entry(account, kind, amount, source_id, key)
+            existing = self._find_source_entry(account, kind, amount, source_type, source_id, key)
             if existing is None:
                 raise CheckoutError("balance_identity_conflict")
             return existing

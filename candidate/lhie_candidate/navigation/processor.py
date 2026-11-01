@@ -115,10 +115,15 @@ class NavigationProcessor:
             elif (state.get("selection") or {}).get("mode") == "awaiting_custom_quantity":
                 data = "quantity:input"
                 surface = self.presenter.quantity_input(customer, source.get("text", ""), state)
+            elif command.startswith("/deposit"):
+                data = "balance:deposit"
+                surface = self.presenter.funding_deposit(
+                    customer, source.get("text", ""), root=root, chat_id=str(chat["id"]))
             else:
                 return "unsupported"
         if surface is None:
-            surface = self.presenter.route(customer, data, state)
+            surface = self.presenter.route(customer, data, state,
+                                           root=root, chat_id=str(chat["id"]))
         if surface is None:
             if callback and self.presenter.callback_handled:
                 return self._feedback(customer, callback, "acknowledged")

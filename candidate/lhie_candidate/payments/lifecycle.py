@@ -1,7 +1,4 @@
 """Explicit, post-commit sandbox payment advancement; no background worker is installed."""
-import hashlib
-import json
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -13,6 +10,7 @@ from ..checkout.db import Database
 from ..checkout.errors import CheckoutError
 from ..checkout.inventory import InventoryLedger
 from ..receipt.jobs import wake_after_commit
+from .receipts import claim_provider_reference
 from .sakurupiah import CreateRequest, InvoiceIdentity, OutcomeState
 
 
@@ -315,33 +313,14 @@ class SakurupiahLifecycle:
                 or min(_deadline(order['expires_at']), _deadline(payment['expired_at']), _deadline(payment['provider_expires_at'])) <= _now())
         review = self.db.one("SELECT id FROM public.manual_fulfillment_reviews WHERE order_id=%s AND state IN ('pending','refund_uncertain')", (order['id'],))
         ref = payment['provider_reference'].strip()
-        segment = ref if re.fullmatch(r'[\x21-\x7e]{1,64}', ref) and '|' not in ref else hashlib.sha256(ref.encode()).hexdigest()
-        key = 'v1|provider_reference|sakurupiah|default|' + segment
-        payload = {'version': 1, 'identity': key, 'beneficiary': 'order:' + str(order['id']),
-                   'currency': 'IDR', 'amount_units': str(payment['amount']), 'decimals': 0,
-                   'target_type': 'order_payment', 'target_id': str(payment['id'])}
-        fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=True, separators=(',', ':')).encode()).hexdigest()
-        now = _now()
-        savepoint = transaction.savepoint(using=self.using)
-        self.db.execute('''INSERT INTO public.external_money_receipts
-            (canonical_key,provider,identity_kind,account_namespace,reference,beneficiary,currency,amount_units,
-             decimals,status,target_type,target_id,fingerprint,evidence_payload,claimed_at,created_at,updated_at)
-            VALUES (%s,'sakurupiah','provider_reference','default',%s,%s,'IDR',%s,0,'claimed',
-                    'order_payment',%s,%s,%s,%s,%s,%s) ON CONFLICT (canonical_key) DO NOTHING''',
-            (key, segment, payload['beneficiary'], payload['amount_units'], payload['target_id'], fingerprint,
-             json.dumps({'provider': 'sakurupiah', 'identity': 'provider_reference'}), now, now, now))
-        receipt = self.db.one('SELECT id,fingerprint,status FROM public.external_money_receipts WHERE canonical_key=%s FOR UPDATE', (key,))
-        if receipt is None or receipt['fingerprint'] != fingerprint or receipt['status'] != 'claimed':
-            transaction.savepoint_rollback(savepoint, using=self.using)
+        claim = claim_provider_reference(
+            self.db, provider='sakurupiah', reference=ref,
+            beneficiary='order:' + str(order['id']), currency='IDR',
+            amount=payment['amount'], target_type='order_payment',
+            target_id=str(payment['id']), now=_now(), using=self.using,
+        )
+        if claim.held:
             return self._review(order, payment, 'receipt_conflict')
-        self.db.execute('''INSERT INTO public.external_money_receipt_aliases
-            (external_money_receipt_id,alias_key,alias_type,created_at) VALUES (%s,%s,'canonical',%s)
-            ON CONFLICT (alias_key) DO NOTHING''', (receipt['id'], key, now))
-        alias = self.db.one('SELECT external_money_receipt_id FROM public.external_money_receipt_aliases WHERE alias_key=%s', (key,))
-        if alias is None or alias['external_money_receipt_id'] != receipt['id']:
-            transaction.savepoint_rollback(savepoint, using=self.using)
-            return self._review(order, payment, 'receipt_conflict')
-        transaction.savepoint_commit(savepoint, using=self.using)
         if late:
             return self._review(order, payment, 'late_payment')
         if review:
@@ -353,6 +332,7 @@ class SakurupiahLifecycle:
             transaction.savepoint_rollback(savepoint, using=self.using)
             return self._review(order, payment, 'local_credentials_missing')
         transaction.savepoint_commit(savepoint, using=self.using)
+        now = _now()
         self.db.execute("UPDATE public.payments SET status='paid',paid_at=%s,updated_at=%s WHERE id=%s", (now, now, payment['id']))
         self.db.execute("UPDATE public.orders SET payment_status='paid',order_status='completed',updated_at=%s WHERE id=%s", (now, order['id']))
         wake_after_commit('order', str(order['id']), using=self.using)

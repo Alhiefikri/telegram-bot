@@ -256,6 +256,7 @@
   "balance.compensation.resolved_at": "Diproses pada: :date",
   "balance.compensation.support": "Butuh bantuan? Buka Support.",
   "balance.topup.check": "Cek pembayaran",
+  "balance.topup.qr_open": "🧾 Buka QRIS",
   "balance.topup.retry": "Coba siapkan lagi",
   "balance.topup.help": "Butuh bantuan? Buka menu Support dan jangan kirim data rahasia.",
   "balance.topup.awaiting_confirmation": "Sudah bayar? Kirim foto bukti pembayaran ke chat ini dengan caption /payment. Admin akan mengonfirmasi dan saldo dikreditkan setelah pembayaran diterima.",

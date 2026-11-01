@@ -204,6 +204,43 @@ candidate base plus the current working tree because the canonical dependency
 rebuild could not finish against the slow package network; the smoke result
 records the current source hashes and image identity.
 
+### Minimum IDR funding/top-up (#719)
+
+`funding/` now owns one DB-backed `store_balance_funding_policy` read, the exact
+PHP `balance:p:<version>:<identity>` preset signature, one pending intent per
+Customer, the existing `store_balance_top_up*` rows and a sandbox-shaped
+Sakurupiah provider seam. No second ledger or provider lifecycle was added:
+`StoreBalanceLedger.credit_top_up()` remains the only IDR credit owner, and
+`payments/receipts.py` is the shared global provider-reference claim also used
+by P08 checkout. Provider calls run outside transactions; settlement re-locks
+the Customer, account, top-up and receipt before posting. The provider/request
+factory is absent from the default worker, so the rail is inactive and fails
+closed without a balance write. `funding/grants.sql` is applied explicitly after
+the #718 read-only proof and never at startup.
+
+Verification of this follow-up (not a gate rerun):
+
+| Check | Observed |
+| --- | --- |
+| Focused candidate unit lane | 64 tests passed (`test_funding`, `test_catalog_presentation`, `test_navigation_ingress`, `test_http`, `test_runtime`, `test_p08_callback`) |
+| PostgreSQL 16 disposable fake-provider smoke | `python smoke_funding.py` — `passed`; one intent/confirm/top-up, a pending provider observation left the balance unchanged, one ledger credit and one receipt claim, duplicate check unchanged, synchronized two-process check race still one credit, second target reusing the same provider reference held as `invalid_provider_result` with no second credit |
+| Runtime grant denial | `provider_payload`, immutable ledger amount, ledger DELETE, receipt status and account creation columns denied with SQLSTATE `42501` |
+| Provider safety | fake only; QRIS URL restricted to `sakurupiah.id` HTTPS, total must equal amount + observed fee, expired provider invoice rejected |
+
+The smoke used a local disposable PostgreSQL 16 database, Redis and the pinned
+`lhie-p05-candidate:1` image on host-network loopback; it was not the P01
+namespace harness and makes no performance claim. `smoke_navigation.py` now
+applies the funding grants only after its read-only proof and runs the funding
+probe as a separate step, so the #718 navigation authority remains SELECT-only.
+Full QRIS/manual/compensation/reconciliation remains P15, and USDT/Binance
+funding remains P17.
+
+**Approval is not claimed.** No Owner/H1/ADR approval is recorded by this
+change, the provider seam is inactive in the default worker, and no payment
+stage was measured or added to the protocol. ADR-0019 remains Proposed; H1 and
+the Owner must record activation approval (and P15 must qualify the provider/
+credentials) before this slice can be activated or measured.
+
 Still not fixed because they are product features, not P11 defects: the candidate
 checkout→paid→receipt surface. It needs a separate issue, grant/authority review
 and H1 authorization before another gate.

@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 
 from lhie_candidate.domain.money import Currency, Money
+from lhie_candidate.funding.policy import is_preset_callback, preset_callback
 from .types import Surface
 
 
@@ -29,6 +30,8 @@ _ORDER_STATUS_KEYS = {'draft': 'status.order.draft', 'pending_payment': 'status.
 _ORDER_HISTORY_PAGE_SIZE = 10
 _BALANCE_ACTIVITY = re.compile(r'balance:a:(o|n):([A-Za-z0-9_-]{25,})')
 _BALANCE_DETAIL = re.compile(r'balance:a:d:([A-Za-z0-9_-]{25,})')
+_FUNDING_INTENT = re.compile(r'balance:(confirm|cancel|back):([a-f0-9]{32})\Z')
+_FUNDING_TOPUP = re.compile(r'balance:topup:([1-9][0-9]{0,18}):(check|retry)\Z')
 _BALANCE_KINDS = {
     'admin_adjustment_credit': ('balance.activity.kind.adjustment', 1),
     'admin_adjustment_reversal': ('balance.activity.kind.adjustment_reversal', -1),
@@ -93,7 +96,7 @@ def plain(text):
 
 class CatalogPresenter:
     def __init__(self, repository, *, signing_key=None, custom_emoji=False, media_mapping=None,
-                 bot_scope='synthetic', dollar_rail_selectable=False, clock=None):
+                 bot_scope='synthetic', dollar_rail_selectable=False, clock=None, funding=None):
         self.repository = repository
         self.signing_key = signing_key
         self.custom_emoji = custom_emoji
@@ -103,6 +106,9 @@ class CatalogPresenter:
         self.bot_scope = bot_scope
         self.dollar_rail_selectable = dollar_rail_selectable
         self.clock = clock or (lambda: datetime.now(ZoneInfo('Asia/Jakarta')))
+        # The minimum P11 funding owner is injected explicitly. Without it the
+        # read-only Saldo screen keeps the #718 explicit-refusal behavior.
+        self.funding = funding
         self._icon_rows = None
         self.callback_handled = False
         self.callback_notice = None
@@ -309,6 +315,283 @@ class CatalogPresenter:
         rows.append(self._navigation_row(customer))
         return self._surface(customer, '\n'.join(html_text(line) for line in lines),
                              rows, screen='balance')
+
+    # -- minimum Store Balance IDR funding -----------------------------
+
+    def _funding_ready(self):
+        return (self.funding is not None and getattr(self.funding, 'callback_key', None)
+                and getattr(self.funding, 'encrypter', None) is not None)
+
+    def _funding_date(self, customer, value):
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if value is None:
+            return self.t(customer, 'balance.topup.deadline', expires=self.t(customer, 'welcome.missing_value'))
+        value = value.astimezone(ZoneInfo('Asia/Jakarta')) if value.tzinfo else value
+        month = self.t(customer, f'date.month.{value.month}')
+        return f'{value.day:02d} {month} {value.year} {value:%H:%M}'
+
+    def _url_button(self, customer, key, url):
+        return {'text': plain(self.t(customer, key)), 'url': url, 'style': 'primary'}
+
+    def _funding_row(self, customer, back_callback):
+        return [self._button(customer, 'menu.back', back_callback, slot='menu.back'),
+                self._button(customer, 'menu.home', 'menu:home', slot='menu.home')]
+
+    def _funding_state(self):
+        if not self._funding_ready():
+            return {'available': False, 'policy': None}
+        try:
+            state = self.funding.chooser()
+            return state if isinstance(state, dict) else {'available': False, 'policy': None}
+        except Exception:
+            return {'available': False, 'policy': None}
+
+    def add_balance(self, customer, notice_key=None):
+        """PHP-equivalent Add-Balance chooser with one explicitly active rail."""
+        idr = self.repository.balance_snapshot(value(customer, 'id'))
+        usd = self.repository.usdt_balance_snapshot(value(customer, 'id'))
+        state = self._funding_state()
+        lines = [self.t(customer, 'balance.add.title'), '━━━━━━━━━━━━━━',
+                 self.t(customer, 'balance.available', balance=(
+                     'Rp ' + number(idr['balance']) if idr['available']
+                     else self.t(customer, 'welcome.balance_unavailable')))]
+        if not usd['available']:
+            lines += ['', self.t(customer, 'balance.usdt.unavailable')]
+        elif usd['frozen']:
+            lines += ['', self.t(customer, 'balance.usdt.frozen')]
+        else:
+            lines += ['', self.t(customer, 'balance.usdt.available', amount=usdt(usd['balance_micro']))]
+        lines += ['', self.t(customer, 'balance.add.prompt_methods')]
+        if not state.get('available'):
+            lines.append(self.t(customer, 'balance.topup.provider_unavailable'))
+        if notice_key:
+            lines += ['', self.t(customer, notice_key)]
+        rows = []
+        if state.get('available') and idr['available']:
+            rows.append([self._legacy_button(customer, 'balance.method.qris', 'balance:currency:idr')])
+        rows.append(self._navigation_row(customer))
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines),
+                             rows, screen='balance')
+
+    def balance_presets(self, customer, notice_key=None, **replacements):
+        state = self._funding_state()
+        policy = state.get('policy')
+        if not state.get('available') or policy is None:
+            return self.add_balance(customer, 'balance.topup.provider_unavailable')
+        lines = [self.t(customer, 'balance.add.title'), '━━━━━━━━━━━━━━',
+                 self.t(customer, 'balance.add.minimum',
+                        amount='Rp ' + number(policy.minimum_amount)),
+                 self.t(customer, 'balance.add.prompt'), '',
+                 self.t(customer, 'balance.add.command_hint')]
+        if notice_key:
+            lines += ['', self.t(customer, notice_key, **replacements)]
+        rows, row = [], []
+        for index, amount in enumerate(policy.preset_amounts):
+            row.append({'text': 'Rp ' + number(amount), 'style': 'primary',
+                        'callback_data': preset_callback(self.funding.callback_key, policy, index)})
+            if len(row) == 2:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        rows.append(self._funding_row(customer, 'balance:add'))
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines),
+                             rows, screen='balance')
+
+    def funding_confirmation(self, customer, intent):
+        lines = [self.t(customer, 'balance.confirmation.title'), '━━━━━━━━━━━━━━',
+                 self.t(customer, 'balance.confirmation.credit',
+                        amount='Rp ' + number(int(intent['amount']))),
+                 self.t(customer, 'balance.confirmation.provider_note'),
+                 self.t(customer, 'balance.confirmation.no_invoice'),
+                 self.t(customer, 'balance.confirmation.expires',
+                        expires=self._funding_date(customer, intent['expires_at']))]
+        nonce = intent['nonce']
+        rows = [[self._legacy_button(customer, 'balance.confirmation.confirm',
+                                     f'balance:confirm:{nonce}')],
+                [self._legacy_button(customer, 'balance.confirmation.cancel',
+                                     f'balance:cancel:{nonce}'),
+                 self._legacy_button(customer, 'balance.confirmation.back',
+                                     f'balance:back:{nonce}')]]
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines),
+                             rows, screen='balance')
+
+    def funding_topup(self, customer, view, *, confirmation=False, notice_key=None):
+        if view is None:
+            return self.add_balance(customer, 'balance.topup.retryable')
+        topup_id = view.get('topup_id')
+        if view.get('paid'):
+            lines = ([self.t(customer, 'balance.confirmation.accepted')] if confirmation else [])
+            lines.append(self.t(customer, 'balance.topup.paid',
+                                amount='Rp ' + number(int(view['amount']))))
+            rows = [self._navigation_row(customer)]
+        elif view.get('payable'):
+            if confirmation:
+                lines = [self.t(customer, 'balance.confirmation.accepted'),
+                         self.t(customer, 'balance.confirmation.credit',
+                                amount='Rp ' + number(int(view['amount'])))]
+            else:
+                lines = []
+            lines += [self.t(customer, 'balance.topup.instruction.title'), '━━━━━━━━━━━━━━',
+                      self.t(customer, 'balance.topup.credit',
+                             amount='Rp ' + number(int(view['amount']))),
+                      self.t(customer, 'balance.topup.fee',
+                             amount='Rp ' + number(int(view.get('fee') or 0))),
+                      self.t(customer, 'balance.topup.total',
+                             amount='Rp ' + number(int(view.get('total') or view['amount']))),
+                      self.t(customer, 'balance.topup.deadline',
+                             expires=self._funding_date(customer, view.get('expires'))),
+                      self.t(customer, 'balance.topup.unpaid'),
+                      self.t(customer, 'balance.topup.instructions_queued')]
+            rows = []
+            if view.get('qris_url'):
+                rows.append([self._url_button(customer, 'balance.topup.qr_open', view['qris_url'])])
+            rows.append([self._legacy_button(customer, 'balance.topup.check',
+                                             f'balance:topup:{topup_id}:check')])
+            rows.append(self._navigation_row(customer))
+        elif view.get('expired'):
+            lines = [self.t(customer, 'balance.topup.expired')]
+            rows = [self._navigation_row(customer)]
+        elif view.get('manual_review'):
+            lines = [self.t(customer, 'balance.topup.manual_review'),
+                     self.t(customer, 'balance.topup.help')]
+            rows = [self._navigation_row(customer)]
+        elif view.get('retryable') or view.get('provider_unavailable'):
+            key = 'balance.topup.provider_unavailable' if view.get('provider_unavailable') else 'balance.topup.retryable'
+            lines = [self.t(customer, key), self.t(customer, 'balance.topup.help')]
+            rows = []
+            if view.get('retryable'):
+                rows.append([self._legacy_button(customer, 'balance.topup.retry',
+                                                 f'balance:topup:{topup_id}:retry')])
+            rows.append([self._legacy_button(customer, 'balance.topup.check',
+                                             f'balance:topup:{topup_id}:check')])
+            rows.append(self._navigation_row(customer))
+        elif view.get('recovery_pending'):
+            lines = [self.t(customer, 'balance.topup.pending'),
+                     self.t(customer, 'balance.topup.retry_later'),
+                     self.t(customer, 'balance.topup.help')]
+            rows = [[self._legacy_button(customer, 'balance.topup.check',
+                                        f'balance:topup:{topup_id}:check')],
+                    self._navigation_row(customer)]
+        else:
+            lines = [self.t(customer, 'balance.topup.preparing'),
+                     self.t(customer, 'balance.topup.help')]
+            rows = [[self._legacy_button(customer, 'balance.topup.check',
+                                        f'balance:topup:{topup_id}:check')],
+                    self._navigation_row(customer)]
+        if notice_key:
+            lines += ['', self.t(customer, notice_key)]
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines),
+                             rows, screen='balance')
+
+    def _open_intent_surface(self, customer, root, *, preset=None, raw_amount=None):
+        outcome = self.funding.open_intent(customer, root, preset=preset, raw_amount=raw_amount)
+        if outcome.state in ('opened', 'replayed'):
+            return self.funding_confirmation(customer, outcome.intent)
+        notice = {
+            'below_minimum': 'balance.deposit.minimum',
+            'invalid': 'balance.deposit.invalid',
+            'stale_policy': 'balance.add.preset_stale',
+            'stale': 'balance.confirmation.stale',
+            'unavailable': 'balance.topup.provider_unavailable',
+        }.get(outcome.state, 'balance.deposit.invalid')
+        replacements = {}
+        if notice == 'balance.deposit.minimum':
+            state = self._funding_state()
+            if state.get('policy') is not None:
+                replacements['amount'] = 'Rp ' + number(state['policy'].minimum_amount)
+        return self.balance_presets(customer, notice, **replacements)
+
+    def funding_deposit(self, customer, text, *, root=None, chat_id=None):
+        if root is None:
+            return self.add_balance(customer)
+        token = text.strip()
+        if not token.lower().startswith('/deposit') or self._funding_state().get('policy') is None:
+            return self.balance_presets(customer, 'balance.deposit.invalid')
+        raw = token[len('/deposit'):].strip()
+        if raw == '':
+            return self.balance_presets(customer, 'balance.deposit.invalid')
+        return self._open_intent_surface(customer, root, raw_amount=raw)
+
+    def _funding_callback(self, customer, data, *, root=None, chat_id=None):
+        if self.funding is None:
+            return None
+        if data == 'balance:add':
+            self.callback_handled = True
+            return self.add_balance(customer)
+        if data == 'balance:currency:idr':
+            self.callback_handled = True
+            return self.balance_presets(customer)
+        if data == 'balance:currency:usd':
+            self.callback_handled = True
+            self.callback_notice = plain(self.t(customer, 'balance.usdt.topup.unavailable'))
+            return self.add_balance(customer, 'balance.usdt.topup.unavailable')
+        if is_preset_callback(data):
+            self.callback_handled = True
+            selection = self.funding.parse_preset(data)
+            if selection is None:
+                self.callback_notice = plain(self.t(customer, 'balance.add.preset_stale'))
+                return self.balance_presets(customer, 'balance.add.preset_stale')
+            return self._open_intent_surface(customer, root, preset=selection)
+        match = _FUNDING_INTENT.fullmatch(data)
+        if match:
+            self.callback_handled = True
+            action, nonce = match.groups()
+            outcome = self.funding.claim(customer, root, nonce=nonce, action=action)
+            if outcome.state in ('confirmed', 'already_confirmed'):
+                confirmation = outcome.state == 'confirmed'
+                self.callback_notice = plain(self.t(
+                    customer, 'balance.confirmation.accepted' if confirmation
+                    else 'balance.confirmation.already_confirmed'))
+                topup = self.funding.create_top_up(customer, root, outcome.intent['id'])
+                if topup.topup is None:
+                    return self.add_balance(customer, 'balance.topup.retryable')
+                return self.funding_topup(customer, self.funding.presentation(topup.topup),
+                                          confirmation=True,
+                                          notice_key=None if confirmation else 'balance.confirmation.already_confirmed')
+            notice = {
+                'cancelled': 'balance.confirmation.cancelled',
+                'already_cancelled': 'balance.confirmation.cancelled',
+                'expired': 'balance.confirmation.expired',
+                'stale_policy': 'balance.confirmation.stale',
+                'stale': 'balance.confirmation.stale',
+            }.get(outcome.state, 'balance.confirmation.stale')
+            self.callback_notice = plain(self.t(customer, notice))
+            return self.balance_presets(customer, notice)
+        match = _FUNDING_TOPUP.fullmatch(data)
+        if match:
+            self.callback_handled = True
+            topup_id, action = match.groups()
+            topup = self.funding.top_up_for_action(customer, root, topup_id)
+            if topup is None:
+                self.callback_notice = plain(self.t(customer, 'callback.navigation_stale'))
+                return None
+            if action == 'retry':
+                result = self.funding.retry(topup)
+            else:
+                result = self.funding.check(topup)
+            row = result if isinstance(result, dict) else result.topup
+            if row is None:
+                self.callback_notice = plain(self.t(customer, 'balance.topup.retry_later'))
+                return None
+            view = self.funding.presentation(row)
+            notice_key = {
+                'paid': 'balance.topup.paid',
+                'expired': 'balance.topup.expired',
+                'manual_review': 'balance.topup.manual_review',
+                'retryable': 'balance.topup.retryable',
+                'provider_unavailable': 'balance.topup.provider_unavailable',
+                'recovery_pending': 'balance.topup.retry_later',
+            }.get(view.get('state'), 'balance.topup.pending')
+            self.callback_notice = plain(self.t(
+                customer, notice_key, amount='Rp ' + number(int(view.get('amount', 0)))))
+            return self.funding_topup(customer, view)
+        if data.startswith('balance:currency:'):
+            self.callback_handled = True
+            self.callback_notice = plain(self.t(customer, 'balance.add.preset_stale'))
+            return self.add_balance(customer, 'balance.add.preset_stale')
+        return None
 
     def _token_key(self):
         key = self.signing_key if self.signing_key is not None else settings.SECRET_KEY
@@ -916,7 +1199,7 @@ class CatalogPresenter:
             return self.quantity(customer,product['id'],selection['quantity'],state=state,feedback=feedback)
         return self.detail(customer,product['id'],state=state,quantity=quantity,navigation=selection['navigation'])
 
-    def route(self, customer, data, state):
+    def route(self, customer, data, state, *, root=None, chat_id=None):
         self._icon_rows = None
         self.callback_handled = False
         self.callback_notice = None
@@ -944,8 +1227,15 @@ class CatalogPresenter:
             self.callback_handled = True
             self.callback_notice = plain(self.t(customer,'balance.action.unavailable'))
             return None
-        if data == 'balance:add' or data.startswith(
-                ('balance:currency:','balance:p:','balance:topup:','balance:usd:','balance:usdt')):
+        if (data == 'balance:add' or data.startswith('balance:currency:')
+                or is_preset_callback(data) or _FUNDING_INTENT.fullmatch(data)
+                or _FUNDING_TOPUP.fullmatch(data)):
+            if self.funding is not None:
+                return self._funding_callback(customer, data, root=root, chat_id=chat_id)
+            self.callback_handled = True
+            self.callback_notice = plain(self.t(customer,'balance.action.unavailable'))
+            return None
+        if data.startswith(('balance:p:','balance:topup:','balance:usd:','balance:usdt')):
             self.callback_handled = True
             self.callback_notice = plain(self.t(customer,'balance.action.unavailable'))
             return None

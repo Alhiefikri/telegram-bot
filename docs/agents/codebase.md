@@ -30,8 +30,12 @@ customer-scoped keyset read over paid processing/completed Orders, PHP-equivalen
 invoice/status buttons and cursors, and Back/Home chrome. The #718 follow-up adds
 the read-only Saldo screen and IDR ledger history: projection-health snapshots,
 the USDT balance line, merged recent ledger rows, signed customer-scoped history
-cursors, and the PHP funding button identity rendered without executing it.
-Orders and balance column grants remain SELECT-only. The navigation SQL and
+cursors, and the PHP funding button identity. The #719 follow-up then wires the
+minimum DB-backed IDR funding intent/confirm/cancel path through the existing
+Store Balance ledger and shared external-receipt claim; its sandbox provider is
+injected only for the disposable fake-provider proof and is inactive by default.
+Orders and balance column grants remain SELECT-only; funding writes use a
+separate explicit grant file and are never installed at startup. The navigation SQL and
 column-limited grants require explicit disposable provisioning; startup never
 installs legacy or navigation tables. `navigate.py --once` remains a bounded manual
 consumer; the P10 isolated supervisor owns the automatic interaction process. `tools/migration_harness/smoke_navigation.py`
@@ -106,6 +110,14 @@ scenario/user case independently against 70% of current-PHP p50/p95. After the
 #717 and #718 follow-ups, declared candidate navigation gaps are closed; checkout
 and paid delivery remain declared gaps. The measured #692 evidence still records
 Orders and Balance as absent and is never relabelled.
+The #719 follow-up adds the minimum IDR funding path outside the measured gate:
+`funding/` owns DB-backed policy/preset identities, one sandbox-shaped top-up
+owner over `store_balance_top_up*`, an explicit provider/request injection point
+(default inactive), and settlement through the existing `StoreBalanceLedger`
+plus the shared external-receipt claim. It adds no second ledger, no automatic
+credit and no provider activation; `candidate/smoke_funding.py` proves replay,
+a two-process settlement race and global receipt ownership with a fake provider.
+Full IDR top-up/reconciliation remains P15 and USDT funding remains P17.
 `tests/migration_harness/test_p11_probe.py` and
 `test_p11_compare.py` are its regressions. It adds no production activation or
 payment-stage target; H1 owns the continue/fix/stop decision.
