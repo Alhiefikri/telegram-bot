@@ -34,6 +34,18 @@ Approved allowlisted `@LhieStoreTestBot` runs and operator visual confirmation c
 premium icons and separate test media; [P06 evidence](../migration/python-django/p06/README.md)
 records the bounded scope. Performance qualification remains P11-owned.
 
+P07 [checkout contract](../migration/python-django/p05/README.md#p07-atomic-checkout-inventory-and-idr-688)
+owns `candidate/lhie_candidate/checkout/`: immutable tier pricing/intent snapshots,
+Customer/Cart/account/guard/Product locking, stable checkout replay, local credential
+allocation/reservation/sale/release/retirement and canonical Store Balance IDR
+debit/original-order refund postings. No second ledger or legacy schema lifecycle
+is introduced. Explicit column grants retain immutable history and read-only
+spending/restore/maintenance settings. `tools/migration_harness/smoke_checkout.py`
+reuses P01/P03 in a separate fake-only disposable prefix, compares PHP economics
+and exercises real multiprocess PostgreSQL wallet/last-stock/replay and rollback
+boundaries. Later consumers reuse this shared proof; payment sandbox, delivery and
+full refund/supplier/warranty lifecycle remain P08/P09/P12/P18.
+
 P02 [acquisition and sanitization contract](../migration/python-django/p02/README.md)
 adds source-backed crypto/schema/file discovery and the deferred HD operator handoff.
 `tools/migration_data/rehearse.py` exercises authenticated encrypted synthetic backup,
