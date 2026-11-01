@@ -341,3 +341,131 @@ plus PostgreSQL 16
 [consistent lock order and deadlock recovery](https://www.postgresql.org/docs/16/explicit-locking.html#LOCKING-DEADLOCKS).
 The Context7 sources were `/websites/djangoproject_en/5.2` and
 `/websites/postgresql/16`; no dependency change was needed.
+
+## P08: Sakurupiah sandbox payment slice (#689)
+
+The candidate uses the active-provider inventory's Sakurupiah rail, not retired
+KlikQRIS or Pakasir. `checkout.sakurupiah.SakurupiahPreparation` requires the selected
+setting and a fresh observed active channel before P07 creates the Order and
+Payment. It snapshots the channel with the existing Payment, reference, amount
+and local deadline. Post-commit `payments.lifecycle.SakurupiahLifecycle` operates on that
+Payment; it never creates a replacement or falls back to another provider.
+
+`payments.sakurupiah.SakurupiahSandboxAdapter` sends through `payments.relay.SandboxRelay`.
+The P01 boundary holds the sandbox credential, signs requests and permits only
+the four documented `https://sakurupiah.id/api-sanbox/` POST operations. It
+refuses redirects, private DNS resolutions and unapproved phone, callback and
+return targets. A timed-out or otherwise ambiguous create remains
+`outcome_unknown`; it is not repeated blindly. A recovered invoice without a
+previously committed provider total remains `recovery_unconfirmed`.
+If a response has valid invoice facts but no safe presentation, the Payment
+retains its provider identity and amount for later verification; it is never
+presented as payable.
+
+Provider HMAC is verified on the original callback bytes in the boundary.
+An independent internal secret protects forwarding to the candidate; the
+candidate coalesces minimized hints in the existing `payment_events` table.
+Callbacks alone cannot mark a Payment paid. `consume_callbacks()` serializes
+per Payment and performs provider status and amount-bearing history lookups
+outside database transactions; settlement re-locks and revalidates the original
+snapshot. The existing external-money receipt and alias claim, inventory sale
+and paid transition share one transaction. Late/cancelled payments claim their
+receipt and enter manual review without releasing credentials.
+
+Enablement is explicit and disposable only: provision P06/P07 schema and
+`payments/grants.sql` separately; application startup never grants them. A
+P08 callback configuration adds an operator-attested scope, with sandbox API ID,
+credential, synthetic phone, exact HTTPS callback/return URLs and safe chats
+kept in the private P01 state. `p08-sandbox-testing-bot` additionally requires
+the distinct `P08-approved-dual-targets-only` scope and verifies the exact
+Testing Bot identity before startup. The callback listener publishes only
+`127.0.0.1:18803`; the operator must separately supply a restricted HTTPS
+forwarder and verify that it cannot reach production. No tunnel, webhook
+mutation, scheduler or payment worker starts automatically.
+
+For an operator-approved dual-target run, the private P01 candidate config must
+include all five P08 fields: `p08_callback` with gate
+`P08-approved-sandbox-callback-only`, `p08_api_id`, `p08_phone`,
+`p08_callback_url` ending in `/callback/sakurupiah`, and `p08_return_url`.
+Set `mode` to `p08-sandbox-testing-bot`, `sandbox_status_url` to the exact
+`https://sakurupiah.id/api-sanbox/` base, and `sandbox_token` to the protected
+sandbox key. `approval.scope_sha256` covers every config field except `approval`;
+the operator must recompute it after attesting all targets. The generated
+internal callback secret is separate from both provider and bot credentials.
+Do not put credentials, test numbers, callback secrets or full URLs in Git,
+shell history, logs or issue comments.
+
+`harness.py p08-draft candidate` can prepare a private, **unapproved** sandbox
+draft without changing the active configuration. Supply only the two existing
+`SAKURUPIAH_SANDBOX_API_ID` and `SAKURUPIAH_SANDBOX_API_KEY` variables in its
+environment, and pass a protected JSON file containing `phone`, `callback_url`
+and `return_url` on stdin. The URL fields must use the same temporary
+`ngrok-free.app`, `ngrok-free.dev` or `trycloudflare.com` host; the callback path
+must be `/callback/sakurupiah`. The draft does not attest credentials, identify
+the bot, activate the callback or compute approval. Independently verify the
+sandbox credentials and targets before the operator approves the final scope.
+
+An ephemeral HTTPS tunnel is suitable only while this isolated sandbox is running.
+For example, Cloudflare's [Quick Tunnel](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
+needs no account and forwards to `http://127.0.0.1:18803`; its hostname changes
+when restarted. The URL is publicly reachable, and the tunnel operator can see
+traffic: only the bounded HMAC-verified callback listener may be exposed. Do not
+use an email challenge, since the provider cannot complete it. Check the chosen
+tunnel's billing and account limits before starting it; never point it at a
+production service or change a Telegram webhook.
+
+### Qualification and limits
+
+Prior [merchant sandbox observations](../../../agents/sakurupiah-api-research.md#recommended-verification-sequence)
+showed channel listing, create, history, status and an app-linked Laravel
+settlement; the provider paid callback was not observed and one app-linked
+create omitted usable presentation. Those historical observations are not a
+qualification of this Python adapter or the current merchant configuration.
+On 2026-11-01, an operator-attested candidate run used an isolated synthetic
+database, the exact sandbox endpoint, a temporary ngrok HTTPS callback and the
+separately verified `@LhieStoreTestBot`. Sakurupiah reported QRIS active with
+limits Rp500–Rp2,000,000. One Rp500 checkout created one Payment with a QR-image
+presentation. A separate private Testing Bot message was accepted. After the
+operator marked that invoice successful, one authenticated provider callback
+arrived; manually consuming it checked both status and amount-bearing history,
+then committed `paid`, one receipt claim and one inventory sale. The Order
+became `completed`; reference, amount, provider, channel and deadlines remained
+unchanged. A subsequent checkout and callback-consumption replay returned the
+same Payment without a second Payment or sale. An invalid callback signature
+through the public tunnel received HTTP 403.
+
+This is a service-driven checkout and a separate bot delivery smoke, **not**
+an interactive Testing Bot checkout: P06's payment button is not yet connected
+to this service and durable checkout-instruction delivery belongs to P09.
+Automatic callback recovery belongs to P10. Interactive checkout-to-paid
+therefore remains unverified. No production credential, real payment, Telegram
+webhook mutation or CI operation was used. Sanitized run evidence is in
+`.local/migration-p08/verification-live.json`; the temporary tunnel was stopped.
+
+Status responses may omit the amount, so matching history remains mandatory.
+The single live run does not qualify rate limits, outages, duplicate provider
+callbacks, retries or expiry behavior. Raw EMV QR payloads are rejected; only
+exact-host HTTPS image or hosted presentations are supported. Provider expiry
+is observed but does not release the Order or reservation; full expiry and
+cancellation ownership is P12.
+
+Local verification uses `python3 tools/migration_harness/smoke_qris.py` and the
+focused `tests.test_sakurupiah_adapter`, `tests.test_p08_callback`,
+`tests.migration_harness.test_admission` and
+`tests.migration_harness.test_p08_relay` regressions. The smoke provisions the
+repository schema and synthetic P07 fixtures in its own disposable `lhie-p08-`
+prefix, invokes the actual checkout/lifecycle against a Unix-socket provider
+fixture and writes one private `.local/migration-p08/verification.json` linked
+to the P01 manifest. It does not contact the provider or Testing Bot. The
+shared P07 stock/wallet proofs remain in `.local/migration-p07/verification.json`.
+The smoke used the existing dependency image with current source mounted
+read-only, not a live relay. Separate candidate and boundary check images built
+successfully with `docker build`; the candidate regressions passed in the built
+image and the boundary module loaded. These check tags do not update P01's
+runtime tags: rebuild the admitted images before any operator-approved external
+smoke. An offline `--network none` build could not fetch uncached dependencies.
+
+Context7 documentation consulted: Django 5.2
+[atomic transactions](https://docs.djangoproject.com/en/5.2/topics/db/transactions/)
+and [row locks](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update),
+and PostgreSQL 16 [explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html).
