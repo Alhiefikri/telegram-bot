@@ -184,7 +184,6 @@ class PairedComparisonTest(unittest.TestCase):
         self.assertEqual(report['identity']['source_delta'],
                          ['tools/migration_benchmark/runner.py'])
         self.assertEqual(report['identity']['php_measurement_path_delta'], [])
-        self.assertTrue(report['baseline_reuse']['php_baseline_reused'])
         self.assertEqual(report['verdict']['decision'], 'continue')
         with self.assertRaises(compare.Mismatch):
             self.build(self.all_cells('laravel', table),

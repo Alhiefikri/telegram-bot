@@ -1,0 +1,632 @@
+{
+  "scope": "sequential synthetic Django navigation, same P01 resource envelope and logical dataset; real Testing Bot, no device rendering; not P11",
+  "plan": "10 alternating family/back callbacks, 4 s between starts, one fixed run per version",
+  "baseline_boundary_sha256": "53dc9497bcfe533351d05d8e28c0b301f5040d06524c048b9746331b5543339b",
+  "optimized_boundary_sha256": "ea3a76f675168854aa5160965fe374f76168437dc706a647642f14722fb2cbee",
+  "baseline_getme_diagnostic": [
+    {
+      "sample": 0,
+      "offset_s": 2.153,
+      "ok": true,
+      "timing": {
+        "reused": false,
+        "dns_ms": 300.932574,
+        "tls_context_ms": 93.06845,
+        "tcp_ms": 265.575962,
+        "tls_ms": 632.619337,
+        "request_ms": 991.689716,
+        "response_ms": 757.729799,
+        "total_ms": 2152.684373
+      }
+    },
+    {
+      "sample": 1,
+      "offset_s": 2.997,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.232865,
+        "response_ms": 496.871789,
+        "total_ms": 497.172298
+      }
+    },
+    {
+      "sample": 2,
+      "offset_s": 5.498,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.334751,
+        "response_ms": 497.5358,
+        "total_ms": 497.942769
+      }
+    },
+    {
+      "sample": 3,
+      "offset_s": 8.009,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.229941,
+        "response_ms": 508.493119,
+        "total_ms": 508.764729
+      }
+    },
+    {
+      "sample": 4,
+      "offset_s": 10.502,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.193032,
+        "response_ms": 501.783235,
+        "total_ms": 502.025219
+      }
+    },
+    {
+      "sample": 5,
+      "offset_s": 12.982,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.680038,
+        "response_ms": 481.37937,
+        "total_ms": 482.185367
+      }
+    },
+    {
+      "sample": 6,
+      "offset_s": 15.529,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.610646,
+        "response_ms": 528.022476,
+        "total_ms": 528.709396
+      }
+    },
+    {
+      "sample": 7,
+      "offset_s": 17.988,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.354431,
+        "response_ms": 487.27423,
+        "total_ms": 487.68031
+      }
+    },
+    {
+      "sample": 8,
+      "offset_s": 20.478,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.210876,
+        "response_ms": 477.50111,
+        "total_ms": 477.752792
+      }
+    },
+    {
+      "sample": 9,
+      "offset_s": 23.393,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.41735,
+        "response_ms": 892.375833,
+        "total_ms": 892.869408
+      }
+    },
+    {
+      "sample": 10,
+      "offset_s": 25.478,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 1.365987,
+        "response_ms": 475.865135,
+        "total_ms": 477.346219
+      }
+    },
+    {
+      "sample": 11,
+      "offset_s": 28.027,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.909799,
+        "response_ms": 525.413874,
+        "total_ms": 526.39648
+      }
+    },
+    {
+      "sample": 12,
+      "offset_s": 30.693,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.235348,
+        "response_ms": 691.65628,
+        "total_ms": 691.930544
+      }
+    },
+    {
+      "sample": 13,
+      "offset_s": 34.048,
+      "ok": true,
+      "timing": {
+        "reused": false,
+        "dns_ms": 1.154674,
+        "tls_context_ms": 79.763051,
+        "tcp_ms": 399.885694,
+        "tls_ms": 451.882351,
+        "request_ms": 931.683706,
+        "response_ms": 596.792974,
+        "total_ms": 1547.589874
+      }
+    },
+    {
+      "sample": 14,
+      "offset_s": 35.692,
+      "ok": true,
+      "timing": {
+        "reused": true,
+        "request_ms": 0.699113,
+        "response_ms": 691.185964,
+        "total_ms": 691.95671
+      }
+    }
+  ],
+  "navigation_before": {
+    "prepare": {
+      "status": "ready",
+      "initial_screen": "catalog",
+      "banner": "bot_scoped_asset",
+      "note": "family opens options; back returns to catalog; alternate family then back"
+    },
+    "samples": [
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 634.9716,
+        "database_ms": 16.6065,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 613.2051,
+            "relay_ms": {
+              "request_ms": 0.1799,
+              "response_ms": 610.752,
+              "total_ms": 611.0565,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 977.3586,
+        "database_ms": 28.5017,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 942.0952,
+            "relay_ms": {
+              "request_ms": 0.51,
+              "response_ms": 628.0224,
+              "total_ms": 628.6412,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 691.7069,
+        "database_ms": 24.97,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 658.8658,
+            "relay_ms": {
+              "request_ms": 0.4939,
+              "response_ms": 655.5558,
+              "total_ms": 656.1715,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 943.5803,
+        "database_ms": 26.0039,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 908.5161,
+            "relay_ms": {
+              "request_ms": 0.3551,
+              "response_ms": 893.818,
+              "total_ms": 894.248,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 679.4952,
+        "database_ms": 30.1731,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 642.2798,
+            "relay_ms": {
+              "request_ms": 0.2545,
+              "response_ms": 639.7437,
+              "total_ms": 640.1866,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 673.4285,
+        "database_ms": 29.7425,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 636.8337,
+            "relay_ms": {
+              "request_ms": 0.2824,
+              "response_ms": 634.1959,
+              "total_ms": 634.5867,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 949.6098,
+        "database_ms": 31.3209,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 910.9822,
+            "relay_ms": {
+              "request_ms": 0.2417,
+              "response_ms": 908.7189,
+              "total_ms": 909.0557,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 4223.449,
+        "database_ms": 41.9447,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 4170.8078,
+            "relay_ms": {
+              "dns_ms": 89.5556,
+              "tls_context_ms": 204.9827,
+              "tcp_ms": 380.1801,
+              "tls_ms": 1530.3872,
+              "request_ms": 2115.9368,
+              "response_ms": 1654.65,
+              "total_ms": 4167.5067,
+              "reused": false
+            }
+          }
+        ]
+      },
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 1146.1905,
+        "database_ms": 33.1027,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 1101.9729,
+            "relay_ms": {
+              "request_ms": 0.8224,
+              "response_ms": 1096.43,
+              "total_ms": 1097.3835,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 991.7855,
+        "database_ms": 35.3315,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 946.0105,
+            "relay_ms": {
+              "request_ms": 0.4329,
+              "response_ms": 942.2424,
+              "total_ms": 943.0316,
+              "reused": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "navigation_after": {
+    "prepare": {
+      "status": "ready",
+      "initial_screen": "catalog",
+      "banner": "bot_scoped_asset",
+      "note": "family opens options; back returns to catalog; alternate family then back"
+    },
+    "samples": [
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 1593.1451,
+        "database_ms": 143.456,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 1428.8339,
+            "relay_ms": {
+              "request_ms": 0.3523,
+              "response_ms": 1424.6612,
+              "total_ms": 1425.179,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 1275.0594,
+        "database_ms": 204.7631,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 1042.8863,
+            "relay_ms": {
+              "request_ms": 0.4722,
+              "response_ms": 909.0618,
+              "total_ms": 909.6643,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 971.0298,
+        "database_ms": 48.0716,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 913.4178,
+            "relay_ms": {
+              "request_ms": 0.4116,
+              "response_ms": 910.482,
+              "total_ms": 910.9873,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 1385.2183,
+        "database_ms": 35.4053,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 1341.8437,
+            "relay_ms": {
+              "request_ms": 0.3489,
+              "response_ms": 1252.739,
+              "total_ms": 1253.2281,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 958.3468,
+        "database_ms": 34.0159,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 916.5,
+            "relay_ms": {
+              "request_ms": 0.5007,
+              "response_ms": 913.4161,
+              "total_ms": 914.0507,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 974.8023,
+        "database_ms": 32.2161,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 932.5936,
+            "relay_ms": {
+              "request_ms": 0.397,
+              "response_ms": 929.314,
+              "total_ms": 929.8509,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 959.8552,
+        "database_ms": 23.6549,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 930.8118,
+            "relay_ms": {
+              "request_ms": 0.3175,
+              "response_ms": 926.7444,
+              "total_ms": 927.1953,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 976.0812,
+        "database_ms": 26.4526,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 942.9353,
+            "relay_ms": {
+              "dns_ms": 0.9523,
+              "request_ms": 0.3055,
+              "response_ms": 938.1828,
+              "total_ms": 939.5808,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "family",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 1033.9017,
+        "database_ms": 37.3783,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 934.5861,
+            "relay_ms": {
+              "request_ms": 0.2025,
+              "response_ms": 932.4803,
+              "total_ms": 932.7638,
+              "reused": true
+            }
+          }
+        ]
+      },
+      {
+        "target": "back",
+        "status": "processed",
+        "outcome": "applied",
+        "elapsed_ms": 944.0101,
+        "database_ms": 20.505,
+        "database_queries": 15,
+        "telegram": [
+          {
+            "method": "editMessageCaption",
+            "outcome": "success",
+            "wait_ms": 918.4615,
+            "relay_ms": {
+              "request_ms": 0.258,
+              "response_ms": 916.5687,
+              "total_ms": 916.8951,
+              "reused": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "limits": [
+    "Callbacks synthetic; no answerCallbackQuery benchmark",
+    "Runs sequential, network and CPU load variable",
+    "Only one 30-second rollover observed per run",
+    "No production or H1 claim"
+  ]
+}

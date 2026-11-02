@@ -58,6 +58,102 @@ def upstream(url, payload=None, token=None, *, telegram_errors=False, raw_body=N
         conn.close()
 
 
+class NavigationTelegramPool:
+    """Reuse bounded, exclusively leased Telegram connections without replaying requests."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._idle = []
+
+    def close(self):
+        with self._lock:
+            idle, self._idle = self._idle, []
+        for connection, _, _, _ in idle:
+            connection.close()
+
+    def request(self, url, payload):
+        parsed = public_https(url)
+        if parsed.hostname != "api.telegram.org":
+            raise ValueError("navigation upstream denied")
+        started = time.monotonic_ns()
+        timing = {'reused': False}
+        now = time.monotonic()
+        with self._lock:
+            while self._idle:
+                conn, dns_expires, idle_expires, pinned_ip = self._idle.pop()
+                if idle_expires > now:
+                    break
+                conn.close()
+            else:
+                conn = None
+        addresses = None
+        if conn is None or dns_expires <= now:
+            dns_started = time.monotonic_ns()
+            try:
+                addresses = socket.getaddrinfo(parsed.hostname, 443, family=socket.AF_INET,
+                                               type=socket.SOCK_STREAM)
+                if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
+                    raise ValueError("non-public upstream")
+                if conn is not None and not any(a[4][0] == pinned_ip for a in addresses):
+                    conn.close()
+                    conn = None
+            except BaseException:
+                if conn is not None:
+                    conn.close()
+                raise
+            timing['dns_ms'] = (time.monotonic_ns() - dns_started) / 1e6
+            dns_expires = time.monotonic() + 30
+        if conn is None:
+            address = addresses[0][4]
+            pinned_ip = address[0]
+            conn = http.client.HTTPSConnection(parsed.hostname, timeout=8)
+
+            def connect():
+                context_started = time.monotonic_ns()
+                context = ssl.create_default_context()
+                timing['tls_context_ms'] = (time.monotonic_ns() - context_started) / 1e6
+                tcp_started = time.monotonic_ns()
+                sock = socket.create_connection(address, timeout=8)
+                timing['tcp_ms'] = (time.monotonic_ns() - tcp_started) / 1e6
+                tls_started = time.monotonic_ns()
+                conn.sock = context.wrap_socket(sock, server_hostname=parsed.hostname)
+                timing['tls_ms'] = (time.monotonic_ns() - tls_started) / 1e6
+
+            conn.connect = connect
+        else:
+            timing['reused'] = True
+        reusable = False
+        try:
+            request_started = time.monotonic_ns()
+            conn.request("POST", parsed.path or "/", json.dumps(payload),
+                         {"Content-Type": "application/json"})
+            timing['request_ms'] = (time.monotonic_ns() - request_started) / 1e6
+            response_started = time.monotonic_ns()
+            response = conn.getresponse()
+            data = response.read(65537)
+            timing['response_ms'] = (time.monotonic_ns() - response_started) / 1e6
+            if response.status not in (200, 400, 403, 429) or len(data) > 65536:
+                raise ValueError("upstream refused")
+            result = json.loads(data)
+            if isinstance(result, dict):
+                timing['total_ms'] = (time.monotonic_ns() - started) / 1e6
+                result['_relay_timing'] = timing
+            reusable = not response.will_close
+            return result
+        finally:
+            if reusable:
+                with self._lock:
+                    if len(self._idle) < 8:
+                        self._idle.append((conn, dns_expires, time.monotonic() + 30, pinned_ip))
+                    else:
+                        conn.close()
+            else:
+                conn.close()
+
+
+navigation_telegram = NavigationTelegramPool()
+
+
 def verify_bot(config):
     token = config["bot_token"]
     result = upstream("https://api.telegram.org/bot" + token + "/getMe")
@@ -183,8 +279,8 @@ def navigation_request(config, body, next_message_id):
     if config["mode"] == "sandbox":
         raise ValueError("sandbox mode cannot send Telegram navigation")
     if config["mode"] in ("testing-bot", "p08-sandbox-testing-bot"):
-        return upstream("https://api.telegram.org/bot" + config["bot_token"] + "/" + method,
-                        payload, telegram_errors=True)
+        return navigation_telegram.request(
+            "https://api.telegram.org/bot" + config["bot_token"] + "/" + method, payload)
     if method in ("deleteMessage", "answerCallbackQuery"):
         return {"ok": True, "result": True}
     return {"ok": True, "result": {"message_id": payload.get("message_id") or next_message_id}}

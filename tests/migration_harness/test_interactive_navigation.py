@@ -33,3 +33,5 @@ class InteractiveNavigationTests(unittest.TestCase):
                 with self.subTest(method=method),self.assertRaises(ValueError):
                     runner.telegram({'bot_token':'synthetic'},method,{})
         request.assert_not_called()
+
+

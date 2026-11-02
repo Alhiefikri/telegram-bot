@@ -305,6 +305,222 @@ connection reuse with the documented role budget (see P11). Further transport
 tuning and fair comparison belong to P11
 (#692), not completion of P06. Correctness/parity bugs remain in P06 scope.
 
+### Interactive navigation latency follow-up
+
+The manual consumer processes each durable update serially. After processing, a
+bounded single-worker queue sends a blank callback answer using a separate
+transport, so an in-flight blank answer does not hold up the next update. If the
+processor sends a stale, recovery or other notice, no blank answer is scheduled.
+Duplicate, busy and waiting updates also do not schedule a competing answer.
+A full ACK queue applies backpressure rather than dropping a normal answer;
+no ambiguous ACK is retried. Shutdown attempts to drain for at most 18 seconds.
+An unconfirmed or interrupted answer can leave Telegram's indicator active.
+This changes only manual polling QA, not the candidate webhook or production bot.
+Screen renders remain single-threaded: a slow earlier screen still holds up the
+next update.
+
+`getUpdates` now uses a dedicated persistent HTTPS connection. The next
+independent poll may reconnect after a clean close; a request or response
+failure is not retried and goes through webhook restoration.
+
+The live navigation relay retains at most eight idle HTTPS connections to
+`api.telegram.org`. A connection is exclusively leased and is not reused after
+30 seconds idle. Active connections are checked against freshly resolved public
+DNS at least every 30 seconds when next leased; reuse requires the original
+pinned address to remain in that answer. Changed public DNS causes a fresh
+connection; invalid or private DNS fails closed before sending. TLS hostname
+verification applies when a connection is opened, and a fully read response is
+required before reuse. Closed, idle-expired, failed or ambiguous connections are
+discarded; the failed request is never resent.
+The next independent request can establish a fresh connection. Provider and
+receipt transports remain unchanged. A silently closed idle connection can
+make the next navigation ambiguous rather than being transparently retried.
+
+The interactive driver's sanitized output records `driver_queue_ms` from the
+current `getUpdates` batch to dispatch and `driver_roundtrip_ms` until the worker
+returns. The consumer records `admission_ms`, `total_ms`, database query count
+and cumulative query duration, and each Telegram method's duration, outcome and
+end time relative to consumer receipt. Live navigation responses also provide
+sanitized connection reuse, DNS, TLS-context, TCP, TLS, request and response
+durations when those phases occur. These timings overlap: database time is
+inside admission/processing, and Telegram durations are inside total. The end of
+the successful screen send/edit is an API ACK, not confirmation of display on
+the phone. Time in Telegram or on the phone before polling returns is unknown;
+the queue measurement also excludes updates not fetched while a previous update
+was being processed. No callback data, chat IDs, tokens, SQL, screen contents or
+webhook URL are included in the timing output.
+`empty_ack=queued` means scheduled, not confirmed. `empty_ack_completed` and
+the shutdown `ack_summary` report cumulative success/unconfirmed counts;
+asynchronous blank ACK duration and outcome are not part of each update's
+`telegram` list or `total_ms`. The earlier table below was captured before this
+asynchronous change and includes the then-synchronous callback answer.
+
+One synthetic sequential-callback diagnostic delayed the first ACK by 400 ms:
+before the change the next render waited 400.4 ms; with the first ACK held after
+the change the next render began after 0.31 ms. This isolates head-of-line
+blocking, not live Telegram or phone-to-screen latency.
+
+On the approved local Testing Bot relay, three read-only `getMe` calls with a
+new connection each took 1890.3, 1099.3 and 1133.7 ms. A separate keep-alive
+prototype took 2636.1, 280.3 and 252.1 ms; a subsequent check of the implemented
+pool took 1760.6, 573.6 and 540.5 ms. The first call in each reuse sequence was
+cold; the next two reused the connection. All nine succeeded. These sequential,
+small, network-variable diagnostics were used to investigate and verify the
+transport, not to extend or rerun the P11 gate.
+
+An isolated real-HTTP relay test dropped a response after receiving an edit:
+the candidate classified it ambiguous and the relay sent it only once; a later
+independent edit used a fresh connection. This is simulated failure evidence,
+not a live Telegram failure.
+
+The absolute 30-second connection lifetime previously reopened TCP/TLS even
+while a user was navigating. A fixed 15-request `getMe` diagnostic reproduced
+that rollover: sample 14 opened a new connection and took 1547.6 ms, including
+399.9 ms TCP, 451.9 ms TLS and 596.8 ms response wait. The adjacent reused
+connections took 691.9 and 691.2 ms. All 15 calls succeeded; the first was cold.
+
+After the change, one fixed comparison used two fresh P01 synthetic datasets
+from the same seed, the same Testing Bot/chat and app image, and ten alternating
+Family/Back callbacks at four-second start intervals. Only the relay source
+changed; both versions used the same boundary image and resource limits. The
+callbacks were injected into the actual candidate inbox/processor and edits
+reached Telegram; there was no polling, webhook change or callback ACK.
+
+| Transition | Before (ms) | After (ms) |
+| --- | ---: | ---: |
+| Family 1 | 635.0 | 1593.1 |
+| Back 1 | 977.4 | 1275.1 |
+| Family 2 | 691.7 | 971.0 |
+| Back 2 | 943.6 | 1385.2 |
+| Family 3 | 679.5 | 958.3 |
+| Back 3 | 673.4 | 974.8 |
+| Family 4 | 949.6 | 959.9 |
+| Back 4 | 4223.4 | 976.1 |
+| Family 5 | 1146.2 | 1033.9 |
+| Back 5 | 991.8 | 944.0 |
+
+All 20 edits were acknowledged. At Back 4 the old relay opened a new connection
+(380.2 ms TCP, 1530.4 ms TLS, 1654.6 ms response); the new relay revalidated
+DNS in 1.0 ms and reused the connection. The total difference cannot be
+attributed entirely to connection setup: Telegram response times also varied.
+Median total was 946.6 ms before and 975.4 ms after; this sample does not prove
+an overall median improvement. The runs were sequential, and local CPU and
+network load were not controlled. Raw sanitized phase timings and source hashes
+are in [`navigation-ttl-evidence.json`](navigation-ttl-evidence.json)
+(SHA-256 `cc8b96b7f42930cb8f34ad456f0299c353608c55617f327de29347c8515167c5`).
+
+The connection tests cover idle expiry, unchanged/changed/private DNS, exclusive
+concurrent leases and a lost response after revalidation without replay.
+The local synthetic comparison is not device-visible latency, a P11 rerun, a
+production claim, or an Owner/H1 decision. A continuously active TLS connection
+can now last longer than 30 seconds; DNS is revalidated, but a server-side close
+can still make the next request ambiguous without an automatic retry.
+
+After explicit operator approval, the existing polling session exited normally,
+its webhook was checked, and the candidate stack restarted without resetting
+volumes using separate local images built from the exact running image IDs. The
+runtime hashes for the interactive consumer, relay, presenter, repository and
+processor matched this source. One bounded post-change session produced these
+measurements, in order (milliseconds):
+
+| Update | Outcome | Admission | DB time / queries | Telegram screen call | Screen call end | Callback answer | Consumer total | Driver round trip |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `/start` | established | 16.5 | 116.7 / 18 | 1879.1 | 2007.3 | — | 2017.6 | 2018.4 |
+| Catalog | applied | 9.8 | 66.1 / 15 | 726.7 | 791.8 | 600.0 | 1404.3 | 1405.4 |
+| Family | applied | 42.5 | 46.9 / 15 | 708.7 | 794.1 | 703.7 | 1511.7 | 1512.6 |
+| Family | unchanged | 68.9 | 31.6 / 14 | 637.0 | 726.2 | 655.6 | 1393.0 | 1393.8 |
+| Family | applied | 8.6 | 34.2 / 15 | 720.8 | 752.5 | 654.5 | 1420.0 | 1420.8 |
+| Home/Back | applied | 8.1 | 34.0 / 14 | 665.6 | 693.6 | 593.3 | 1300.7 | 1301.2 |
+
+Screen call end is relative to consumer receipt; the unchanged call received
+`message is not modified`, not a successful transition to a different screen.
+All five callback answers returned success. Driver batch-to-dispatch was
+0.08–0.20 ms; it excludes time before the batch arrived and all later updates
+not yet fetched. The operator reported seeing Catalog, Orders and Balance, but
+the six durable updates for this measured session contain `/start`, Catalog,
+three Family callbacks and Home/Back, with no Orders or Balance callback.
+Therefore the operator's visual report cannot be attributed to this measured
+trace, and Orders/Balance latency is unmeasured in this session.
+The six retained updates were already `processed`; invoking the actual
+`NavigationProcessor` twice for each returned `duplicate` in all 12 attempts,
+with unchanged states/outcomes and no transport supplied. This verifies replay
+of settled updates in this session, not a new concurrent PostgreSQL race proof.
+
+The earlier user-provided two click processing times, approximately 3800 and
+9400 ms with 2000 and 2600 ms before menu processing, are not paired by menu or
+network condition with the new five callbacks (1300.7–1511.7 ms to consumer
+completion). Four successful screen calls completed 693.6–794.1 ms after
+consumer receipt; their callback answers occurred afterward. The new breakdown
+shows Telegram dominating these samples, not a universal database or production
+conclusion. It excludes phone-to-application and device-display latency. A
+single short session, one unchanged edit, different routes and variable network
+conditions prevent a reliable comparative percentage or recommendation that
+the candidate meets the P11 target.
+
+The session exited normally and `getWebhookInfo` matched the saved Testing Bot
+URL, connection limit and allowed-update settings; no custom certificate was
+present. The separate local candidate stack remains running with the measured
+images, and no polling runner remains. Future live measurement still requires
+operator approval and the same restoration procedure. The P11 protocol and its
+historical run identities remain unchanged; H1 is still the owner's decision.
+
+#### Follow-up after operator reported continued delay
+
+With separate explicit permission, one new local Django polling session used
+the asynchronous empty ACK and persistent `getUpdates` changes. The operator
+reported noticeable delay from Catalog to Family. The durable update categories
+and sanitized timings were:
+
+| Update | Outcome | DB time / queries | Telegram screen call | Screen call end | Consumer total |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `/start` | established | 210.9 / 18 | 3245.4 | 3446.5 | 3510.6 |
+| Catalog | applied | 58.5 / 15 | 4054.4 | 4108.0 | 4122.6 |
+| Family | applied | 35.1 / 15 | 2899.4 | 2930.7 | 2945.0 |
+
+Both empty callback answers were confirmed in the final ACK summary; neither
+was on the screen's critical path. The next updates were accepted 1.69 and
+0.33 seconds after the preceding update completed. These observations confirm
+the operator's reported delay, not an acceptable latency. The measurements do
+not yet separate connection setup, Telegram response wait, and network delay
+within the 2.90-second Family edit.
+
+After this session the Testing Bot webhook was restored and its saved URL,
+connection limit and allowed updates were verified. The saved URL has the
+Laravel webhook route shape, not the Django route; that shape alone does not
+establish the remote server's identity. Slow navigation after restoration is
+not evidence that the local Django candidate processed those later clicks.
+No production change or P11 rerun followed from these observations.
+
+#### Focused connection trace
+
+With a separate explicit operator approval, one additional diagnostic session
+captured `/start`, Catalog and Family, with the operator again reporting that
+Family appeared slowly. The relay emitted only sanitized duration and reuse
+fields. The screen call timings, in milliseconds, were:
+
+| Update | Outcome | DB time / queries | Admission | Screen call | Consumer to screen ACK | Connection | Response wait |
+| --- | --- | ---: | ---: | ---: | ---: | --- | ---: |
+| `/start` | established | 265.0 / 18 | 23.1 | 5651.0 | 5963.6 | new | 1441.6 |
+| Catalog | applied | 57.1 / 15 | 9.8 | 1046.6 | 1105.5 | reused | 1042.9 |
+| Family | applied | 36.1 / 15 | 191.5 | 1960.7 | 2178.0 | reused | 1958.0 |
+
+For the cold `/start` connection, DNS took 69.6 ms, SSL-context setup 112.1 ms,
+TCP connect 385.2 ms and TLS handshake 3596.1 ms. The Family request reused an
+existing connection and its write took 0.27 ms; 1958.0 ms elapsed between
+waiting for and reading Telegram's response. This rules out a new handshake
+for that Family sample, but cannot distinguish network transit from Telegram
+processing. The 191.5-ms Family admission includes DB work and wakeup overhead;
+it overlaps the total and is not added to the DB duration. Phone-to-application
+and device-display time remain unknown. No reliable percentage comparison to
+the previous session follows from different network conditions.
+
+Both callback ACKs were confirmed in the final summary. The session stopped
+normally, the saved Testing Bot webhook URL, allowed updates and connection
+limit were restored and checked, and no polling runner remains. The operator
+reported Family was still slow; the candidate is not recommended as fast
+enough on the basis of this diagnostic. An infrastructure or production-like
+comparison needs separate explicit operator authorization and a safe test target.
+
 ## Context7 references
 
 The implementation consulted Context7's official Django 5.2 and Telegram Bot API

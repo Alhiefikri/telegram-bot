@@ -498,3 +498,92 @@ See [README.md](README.md#context7-references). Django 5.2
 `execute_wrapper` (thread-local context manager) and test-client WSGI environ
 defaults were used as documented; PostgreSQL lock behaviour is unchanged from
 the accepted P06–P10 owners.
+
+## P11-fix #722: fresh paired gate
+
+This is a new schema-5 campaign, not a relabeling or pooling of #692. Both
+implementations were built locally and measured sequentially using
+`runner.py --protocol p11 --implementation laravel|django --benchmark`, then
+`compare.py` with the [scoped security review](evidence/issue722/security-review.json).
+Both runs completed and reset their owned disposable namespaces.
+
+| Run | Run ID | UTC start–finish | Measured outcomes |
+| --- | --- | --- | --- |
+| PHP | `00e7213d515547f3a3a8b532b27a30de` | 00:38:20–01:21:46 | 1,200 success; 0 error/timeout/unknown |
+| Django | `c13071a32a86447587c3bbccfe388100` | 01:21:47–02:35:50 | 1,200 success; 0 error/timeout/unknown |
+
+Each of the 24 cases per implementation has two batches of 25 measured
+attempts and five excluded warmups per batch. Both used revision
+`c60b34a84c5a466e6cb428bf4f5bfc6f775a9cc4`, protocol SHA256
+`c7d553dd8f97d8ed7fdac6b48c8ce319354d8e9a0fa2c9f60d187d2b9d2a12f9`,
+and logical dataset SHA256
+`68c6c859de3e25ecadaedd28a04bc4455fdb7177f5c8a33bda28e47d4cb2c08e`.
+The source maps agree, including an empty PHP measurement-path delta. PHP was
+measured anew, not reused from #692. No auto-extension or targeted rerun occurred.
+
+### Screen ACK by case
+
+Values are milliseconds, nearest-rank p50/p95 of successful measured attempts.
+Each row is judged independently. `inconclusive` means batch-p95 spread exceeded
+the protocol's 20% threshold on at least one side; it is not a pass or failure.
+The compressed paired report retains the individual batch ranges and reasons.
+
+| Scenario | Users | PHP p50 | Django p50 | PHP p95 | Django p95 | Verdict |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| home_catalog | 1 | 63.03 | 30.68 | 298.82 | 107.65 | inconclusive |
+| home_catalog | 5 | 221.96 | 137.83 | 612.81 | 380.44 | inconclusive |
+| home_catalog | 10 | 464.91 | 444.48 | 3103.27 | 899.34 | inconclusive |
+| catalog_plans | 1 | 80.39 | 19.41 | 402.26 | 90.23 | inconclusive |
+| catalog_plans | 5 | 222.77 | 79.89 | 593.37 | 307.98 | inconclusive |
+| catalog_plans | 10 | 763.95 | 185.83 | 2823.85 | 418.89 | inconclusive |
+| plan_detail | 1 | 60.54 | 22.69 | 227.43 | 90.65 | pass |
+| plan_detail | 5 | 350.41 | 97.81 | 801.81 | 372.15 | inconclusive |
+| plan_detail | 10 | 805.80 | 156.53 | 1898.14 | 356.60 | pass |
+| back | 1 | 62.99 | 17.53 | 186.62 | 92.76 | inconclusive |
+| back | 5 | 306.06 | 160.37 | 595.14 | 547.68 | inconclusive |
+| back | 10 | 743.92 | 257.19 | 1352.26 | 682.85 | inconclusive |
+| home | 1 | 106.91 | 16.78 | 423.47 | 86.42 | pass |
+| home | 5 | 303.86 | 77.87 | 620.66 | 311.63 | inconclusive |
+| home | 10 | 710.45 | 160.03 | 6090.44 | 332.28 | inconclusive |
+| quantity | 1 | 47.56 | 19.15 | 180.54 | 86.81 | inconclusive |
+| quantity | 5 | 127.80 | 90.99 | 251.26 | 315.29 | inconclusive |
+| quantity | 10 | 386.52 | 196.26 | 1082.22 | 384.40 | inconclusive |
+| orders | 1 | 37.77 | 14.63 | 98.99 | 74.41 | inconclusive |
+| orders | 5 | 118.02 | 77.41 | 283.84 | 289.44 | inconclusive |
+| orders | 10 | 260.97 | 238.16 | 774.09 | 580.68 | inconclusive |
+| balance | 1 | 43.36 | 17.11 | 108.94 | 87.64 | inconclusive |
+| balance | 5 | 139.19 | 86.02 | 289.63 | 258.04 | inconclusive |
+| balance | 10 | 316.40 | 673.30 | 909.60 | 1288.34 | inconclusive |
+
+The machine recommendation is **fix**: 3 pass, 0 fail, 21 inconclusive, 0
+navigation gaps. PHP had 15 inconclusive cells and Django had 16; all of the
+21 paired inconclusive cases include an unstable batch p95. This is not a
+blanket performance pass. All 96 candidate phase audits found zero changed
+audited public tables. `customers` is excluded from row hashing; candidate
+profile writes are bounded by its column grants instead. The scoped security
+review records no unresolved critical/high finding; it does not approve money
+activation or substitute for the separately owned money/effect proofs.
+
+### Payment and decision boundary
+
+`checkout` and `paid_delivery` remain `not_implemented` **in the paired
+runner**, which provisions navigation-only grants and does not start payment or
+receipt workers. The candidate surface exists; #720's one-sample fake-provider
+probe is separate integration evidence, not a paired distribution. The
+comparator retains the historical two-attempt PHP payment diagnostic and its
+`proposed_unratified` budget, explicitly outside this campaign. Funding stage
+measurement additionally requires the Owner/H1/ADR approval recorded as
+outstanding in #719. No provider, production, live Testing Bot, customer or
+real-money operation was used.
+
+**H1 decision: fix.** The Owner accepted `fix` on 2026-11-02 and requested
+recording the result. The machine recommendation and this Owner decision do not
+authorize production migration, provider activation or real-money payments.
+Payment-stage budgets remain unratified.
+
+Sanitized run identities, per-case reports, samples, phase/authority accounting,
+resource observations, scoped review and SHA256 checksums are retained in
+[`evidence/issue722/`](evidence/issue722/). The run metadata is allowlisted;
+private payloads, secrets, filesystem evidence paths and host boot IDs are not
+published. Backend synthetic ACKs do not prove device-visible latency or
+production compatibility.

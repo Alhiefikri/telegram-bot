@@ -8,6 +8,11 @@ and performs no production, CI/CD, provider or live-Testing-Bot operation.
 
 Observed commands, raw results and limits: [verification.md](verification.md).
 
+The later [#722 paired rerun](verification.md#p11-fix-722-fresh-paired-gate)
+uses fresh PHP and Django identities: 24/24 navigation cases per side,
+3 pass and 21 inconclusive. The machine recommendation and Owner/H1 decision
+are `fix`. Historical #692 results below retain their original identity.
+
 ## What this gate measures
 
 The paired protocol is `tools/migration_benchmark/protocol_p11.json`
@@ -142,6 +147,11 @@ python3 tools/migration_benchmark/compare.py \
   --findings docs/migration/python-django/p11/evidence/security-review.json \
   -o .local/migration-p11/paired-report.json
 ```
+
+Use a security review for the measured revision; the example's review records
+the historical #692 scope. When deliberately pairing an applicable PHP run
+from an earlier campaign, add `--php-baseline-reused`; the comparator still
+refuses a PHP measurement-path source delta.
 
 The runner refuses a new local directory that already exists, a non-default
 synthetic configuration, a running disposable stack, or a resume whose

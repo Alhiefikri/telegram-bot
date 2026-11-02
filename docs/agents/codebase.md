@@ -109,7 +109,11 @@ batch and stops on any change. The paired report judges each navigation
 scenario/user case independently against 70% of current-PHP p50/p95. After the
 #717, #718 and #720 follow-ups, candidate navigation and navigation-payment
 surfaces exist; the measured #692 identity still records Orders, Balance and
-payment stages as absent and is never relabelled. #722 owns the new paired run.
+payment stages as absent and is never relabelled. The fresh #722 paired run
+measured 24/24 navigation cases per side: 3 pass, 21 inconclusive, zero
+authority violations and machine recommendation `fix`; the Owner/H1 decision is `fix`.
+Payment-stage cells remain unimplemented in the paired runner, and funding
+measurement remains subject to Owner/H1/ADR approval.
 The #721 follow-up removes navigation read round trips without adding a cache:
 Product rows carry their active Family, Catalog/Family/Detail/quantity/Back share
 loaded rows, Home and the category picker use one statement each, the processor

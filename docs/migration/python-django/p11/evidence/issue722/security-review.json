@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "issue": 722,
+  "review": [
+    "The P11 candidate probe runs in the P01 disposable namespace with a read-only root filesystem, dropped capabilities, an unprivileged user and the fake transport boundary. It mounts the candidate and benchmark tools read-only.",
+    "The paired navigation runner provisions only the navigation grants; payment and receipt workers are not started. It compares every public table except customers before and after each phase and stops on any changed table. The customers exclusion is limited by the explicitly granted profile columns, not a row-level audit.",
+    "The #717-#721 follow-up evidence records disposable PostgreSQL parity and grant-denial checks, fake-provider replay and race checks, and no production provider, money or customer delivery. These are reused, not repeated or represented as paired payment measurements.",
+    "The paired runner does not exercise funding, checkout, settlement or receipt stages. Owner/H1/ADR approval remains required before funding activation or stage measurement; the present review is not an approval.",
+    "The comparator refuses incompatible protocol, dataset, PostgreSQL settings and PHP measurement-path identities. Critical or high unresolved findings supplied to it force stop; a missing authority audit blocks continue."
+  ],
+  "findings": [],
+  "residual_risks": [
+    {
+      "severity": "low",
+      "status": "documented",
+      "text": "Backend synthetic ACKs are not device-visible latency, provider qualification, production compatibility or H1 authorization."
+    },
+    {
+      "severity": "medium",
+      "status": "open",
+      "text": "Paired payment-stage cells are not implemented by the navigation-only runner; #720 provides only a local single-sample fake-provider probe."
+    }
+  ]
+}

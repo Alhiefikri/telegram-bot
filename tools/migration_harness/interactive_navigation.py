@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit, time-bounded Testing Bot QA. Never starts from deployment or scheduler."""
 import argparse
+import http.client
 import json
 from pathlib import Path
 import signal
@@ -26,6 +27,33 @@ def telegram(config, method, payload):
     if result.get('ok') is not True:
         raise ValueError('Testing Bot management rejected')
     return result['result']
+
+
+class PollingConnection:
+    def __init__(self, config):
+        self.path = '/bot' + config['bot_token'] + '/getUpdates'
+        self.connection = http.client.HTTPSConnection('api.telegram.org', timeout=25)
+
+    def get_updates(self, payload):
+        try:
+            self.connection.request('POST', self.path, json.dumps(payload).encode(),
+                                    {'Content-Type':'application/json'})
+            response = self.connection.getresponse()
+            if not 200 <= response.status < 300:
+                raise ValueError('Testing Bot management rejected')
+            body = response.read(262145)
+            if len(body) > 262144:
+                raise ValueError('Oversized Telegram update response')
+            result = json.loads(body)
+            if result.get('ok') is not True:
+                raise ValueError('Testing Bot management rejected')
+            return result['result']
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        self.connection.close()
 
 
 def admitted(update, safe_chats):
@@ -55,7 +83,9 @@ def run(minutes, restore_path):
     worker = subprocess.Popen(['docker','exec','-i',app,'python','-u','interactive_navigation.py',
         '--testing-bot-stdin'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
     switched = False
+    polling = None
     try:
+        polling = PollingConnection(config)
         if json.loads(worker.stdout.readline()).get('status') != 'ready':
             raise ValueError('Interactive candidate refused startup')
         switched = True
@@ -64,8 +94,9 @@ def run(minutes, restore_path):
         offset = 0
         deadline = time.monotonic() + minutes * 60
         while time.monotonic() < deadline:
-            updates = telegram(config,'getUpdates',{'offset':offset,'timeout':10,'limit':25,
-                                                   'allowed_updates':['message','callback_query']})
+            updates = polling.get_updates({'offset':offset,'timeout':10,'limit':25,
+                                           'allowed_updates':['message','callback_query']})
+            batch_received = time.monotonic_ns()
             for update in updates:
                 identity = update.get('update_id')
                 if type(identity) is not int or identity < 1:
@@ -73,26 +104,55 @@ def run(minutes, restore_path):
                 if admitted(update,config['safe_chat_ids']):
                     encoded = json.dumps(update)
                     if len(encoded.encode()) < 16384:
+                        dispatched = time.monotonic_ns()
                         worker.stdin.write(encoded + '\n'); worker.stdin.flush()
                         outcome = json.loads(worker.stdout.readline())
+                        completed = time.monotonic_ns()
+                        outcome['driver_queue_ms'] = (dispatched - batch_received) / 1e6
+                        outcome['driver_roundtrip_ms'] = (completed - dispatched) / 1e6
                         print(json.dumps(outcome),flush=True)
                 offset = max(offset,identity + 1)
     finally:
-        if worker.stdin:
-            worker.stdin.close()
         try:
-            worker.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            worker.terminate(); worker.wait(timeout=5)
-        if switched:
-            if restore['url']:
-                payload = {'url':restore['url'],'drop_pending_updates':False,
-                           'max_connections':restore.get('max_connections',40)}
-                for key in ('secret_token','allowed_updates'):
-                    if restore.get(key):
-                        payload[key] = restore[key]
-                telegram(config,'setWebhook',payload)
-            print('TESTING_BOT_ROUTING_RESTORED',flush=True)
+            if polling is not None:
+                polling.close()
+        finally:
+            try:
+                if worker.stdin:
+                    try:
+                        worker.stdin.close()
+                    except OSError:
+                        pass
+                try:
+                    worker.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    worker.terminate(); worker.wait(timeout=5)
+                trailing = worker.stdout.read(32768) if worker.stdout else ''
+                if isinstance(trailing, str):
+                    for line in trailing.splitlines():
+                        try:
+                            summary = json.loads(line)
+                        except (ValueError, UnicodeError):
+                            continue
+                        if (isinstance(summary, dict) and summary.get('status') == 'ack_summary'
+                                and type(summary.get('drained')) is bool
+                                and isinstance(summary.get('completed'), dict)):
+                            counts = summary['completed']
+                            if all(type(counts.get(key)) is int and counts[key] >= 0
+                                   for key in ('success', 'unconfirmed')):
+                                print(json.dumps({'status': 'ack_summary', 'drained': summary['drained'],
+                                                  'completed': {key: counts[key] for key in
+                                                                ('success', 'unconfirmed')}}), flush=True)
+            finally:
+                if switched:
+                    if restore['url']:
+                        payload = {'url':restore['url'],'drop_pending_updates':False,
+                                   'max_connections':restore.get('max_connections',40)}
+                        for key in ('secret_token','allowed_updates'):
+                            if restore.get(key):
+                                payload[key] = restore[key]
+                        telegram(config,'setWebhook',payload)
+                    print('TESTING_BOT_ROUTING_RESTORED',flush=True)
 
 
 def main():

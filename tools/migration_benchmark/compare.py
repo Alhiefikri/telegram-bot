@@ -266,7 +266,7 @@ def payment_stages():
         "conditions": "small dataset, 1 user, warm/distinct/idle, one diagnostic batch of 2 attempts; not a p95 confidence",
         "cells": cells,
         "candidate_counterpart": "not_implemented",
-        "candidate_reason": "no candidate navigation-to-checkout, paid detection or credential delivery surface exists in the P06-P10 slice",
+        "candidate_reason": "the candidate checkout/paid/receipt surface has a local single-sample probe, but the paired runner does not implement payment cells",
         "budget_proposal": {
             "status": "proposed_unratified",
             "rule": "0.70 x current-PHP p95 per boundary, rounded up to 0.1 ms",
@@ -276,7 +276,7 @@ def payment_stages():
     }
 
 
-def build(php_directory, django_directory, findings_path):
+def build(php_directory, django_directory, findings_path, *, php_baseline_reused=False):
     php_run, php_report = load(php_directory)
     django_run, django_report = load(django_directory)
     identity = pairing_identity(php_run, django_run)
@@ -335,7 +335,7 @@ def build(php_directory, django_directory, findings_path):
         },
         "identity": identity,
         "baseline_reuse": {
-            "php_baseline_reused": True,
+            "php_baseline_reused": php_baseline_reused,
             "reason": identity["source_reuse_basis"],
             "php_measurement_path_delta": identity["php_measurement_path_delta"],
         },
@@ -375,10 +375,13 @@ def main(argv=None):
     parser.add_argument("--php-run", required=True, help="completed p11 laravel run directory")
     parser.add_argument("--django-run", required=True, help="completed p11 django run directory")
     parser.add_argument("--findings", required=True, help="security review JSON with a findings list")
+    parser.add_argument("--php-baseline-reused", action="store_true",
+                        help="record that the PHP run predates this paired campaign")
     parser.add_argument("-o", "--output", default="-", help="paired report path or - for stdout")
     args = parser.parse_args(argv)
     try:
-        report = build(args.php_run, args.django_run, args.findings)
+        report = build(args.php_run, args.django_run, args.findings,
+                       php_baseline_reused=args.php_baseline_reused)
     except Mismatch as error:
         parser.exit(2, "p11 compare: " + str(error) + "\n")
     serialized = json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
