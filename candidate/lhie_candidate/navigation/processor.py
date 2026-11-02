@@ -17,26 +17,30 @@ class NavigationProcessor:
         if connection.in_atomic_block or not connection.get_autocommit():
             raise RuntimeError("Navigation processing requires autocommit")
         with connection.cursor() as cursor:
-            cursor.execute("SELECT chat_id,state FROM django_candidate.navigation_updates WHERE update_id=%s", [update_id])
+            # The CASE prevents a lock from being taken for an already-settled row.
+            cursor.execute("SELECT chat_id,state,"
+                           "CASE WHEN state='pending' THEN pg_try_advisory_lock(chat_id) END "
+                           "FROM django_candidate.navigation_updates WHERE update_id=%s", [update_id])
             row = cursor.fetchone()
             if row is None or row[1] != "pending":
                 return "duplicate"
             chat_id = row[0]
             # A session lock, not a transaction: Telegram never holds catalog/payment row locks.
-            cursor.execute("SELECT pg_try_advisory_lock(%s)", [chat_id])
-            if not cursor.fetchone()[0]:
+            if not row[2]:
                 return "busy"
         try:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT 1 FROM django_candidate.navigation_updates "
-                               "WHERE chat_id=%s AND update_id<%s AND state='pending' LIMIT 1",
-                               [chat_id, update_id])
-                if cursor.fetchone():
+                cursor.execute("SELECT "
+                               "EXISTS (SELECT 1 FROM django_candidate.navigation_updates "
+                               "WHERE chat_id=%s AND update_id<%s AND state='pending'),"
+                               "EXISTS (SELECT 1 FROM django_candidate.navigation_updates "
+                               "WHERE chat_id=%s AND update_id>%s "
+                               "AND state IN ('processing','processed','unknown'))",
+                               [chat_id, update_id, chat_id, update_id])
+                earlier, later = cursor.fetchone()
+                if earlier:
                     return "waiting"
-                cursor.execute("SELECT 1 FROM django_candidate.navigation_updates "
-                               "WHERE chat_id=%s AND update_id>%s AND state IN ('processing','processed','unknown') LIMIT 1",
-                               [chat_id, update_id])
-                if cursor.fetchone():
+                if later:
                     cursor.execute("UPDATE django_candidate.navigation_updates "
                                    "SET state='processed',outcome='superseded',completed_at=clock_timestamp() "
                                    "WHERE update_id=%s AND state='pending'", [update_id])
@@ -95,7 +99,8 @@ class NavigationProcessor:
                     return self._feedback(customer, callback, "acknowledged" if result else "stale")
                 receipt_action = 'menu' if action == 'receipt:main_menu' else 'katalog'
         root = self.roots.current_for_chat(customer, str(chat["id"]))
-        if callback and receipt_action is None and (root is None or self.roots.match(customer, str(chat["id"]), message["message_id"]) is None):
+        if callback and receipt_action is None and (
+                root is None or root.message_id != message["message_id"]):
             return self._feedback(customer, callback, "stale")
         with connection.cursor() as cursor:
             cursor.execute("SELECT state FROM django_candidate.navigation_sessions WHERE customer_id=%s", [customer["id"]])

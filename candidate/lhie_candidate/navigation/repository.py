@@ -14,6 +14,12 @@ PRODUCT_COLUMNS = (
     "region account_type device_limit included_items limitations fulfillment_expectation support_policy"
 ).split()
 
+FAMILY_COLUMNS = (
+    "id name slug description icon custom_emoji_id telegram_image_path sort_order"
+).split()
+
+CATEGORY_COLUMNS = "id name slug description".split()
+
 ORDER_HISTORY_PAGE_SIZE = 10
 BALANCE_ACTIVITY_PAGE_SIZE = 10
 USDT_ACTIVITY_ROWS = 25
@@ -21,9 +27,12 @@ USDT_ACTIVITY_ROWS = 25
 # One projection shared by the catalog scan and targeted detail lookups. Detail,
 # quantity and Back renders must not re-scan every Product with its correlated
 # stock/order subqueries; P11 measured that full scan as the dominant cost.
+# Family columns ride the same row: a separate Family read per Product render was
+# a second round trip that never carried authority or changed presentation.
 _PRODUCT_SELECT = f"""
     SELECT {", ".join("p." + name for name in PRODUCT_COLUMNS)},
       c.name AS category_name,c.slug AS category_slug,
+      {", ".join("f." + name + " AS family_" + name for name in FAMILY_COLUMNS)},
       CASE WHEN EXISTS (SELECT 1 FROM public.product_stock_items s
              WHERE s.product_id=p.id AND s.supplier_purchase_id IS NULL)
         THEN LEAST(GREATEST(0,p.stock-p.reserved_stock),
@@ -35,10 +44,14 @@ _PRODUCT_SELECT = f"""
       COALESCE((SELECT SUM(i.quantity) FROM public.order_items i JOIN public.orders o ON o.id=i.order_id
                 WHERE i.product_id=p.id AND o.payment_status='paid'
                   AND o.order_status IN ('processing','completed')),0) AS sold_quantity
-    FROM public.products p LEFT JOIN public.categories c ON c.id=p.category_id AND c.deleted_at IS NULL
+    FROM public.products p
+    LEFT JOIN public.categories c ON c.id=p.category_id AND c.deleted_at IS NULL
+    LEFT JOIN public.product_families f ON f.id=p.product_family_id AND f.deleted_at IS NULL
     WHERE p.deleted_at IS NULL AND p.is_active=TRUE
       AND (p.category_id IS NULL OR c.is_active=TRUE)
 """
+
+_UNSET = object()
 
 
 def _json(value):
@@ -230,9 +243,12 @@ class CatalogRepository:
     def _product_rows(self, suffix="", params=()):
         return self._rows(_PRODUCT_SELECT + suffix, params)
 
-    def _enrich_products(self, rows, families):
+    @staticmethod
+    def _enrich_products(rows):
         for product in rows:
-            family = families.get(product['product_family_id'])
+            family = {name: product.pop('family_' + name) for name in FAMILY_COLUMNS}
+            if family['id'] is None:
+                family = None
             product['family'] = family
             if family is None:
                 product['product_family_id'] = None
@@ -245,60 +261,61 @@ class CatalogRepository:
         return rows
 
     def products(self):
-        return self._enrich_products(
-            self._product_rows(),
-            {family['id']: family for family in self.families()},
-        )
+        return self._enrich_products(self._product_rows())
 
     def product(self, product_id):
         rows = self._product_rows(" AND p.id=%s", (product_id,))
-        if not rows:
-            return None
-        family = self._family(rows[0]['product_family_id'])
-        return self._enrich_products(rows, {family['id']: family} if family else {})[0]
+        return self._enrich_products(rows)[0] if rows else None
 
     def families(self):
         return self._rows("""SELECT id,name,slug,description,icon,custom_emoji_id,telegram_image_path,sort_order
                              FROM public.product_families WHERE deleted_at IS NULL ORDER BY sort_order,name,id""")
 
-    def _family(self, family_id):
-        if family_id is None:
-            return None
-        return self._one("""SELECT id,name,slug,description,icon,custom_emoji_id,telegram_image_path,sort_order
-                            FROM public.product_families WHERE id=%s AND deleted_at IS NULL""", (family_id,))
-
     def family(self, family_id):
-        family = self._family(family_id)
-        if family is None:
-            return None
-        members = self._enrich_products(
+        rows = self._enrich_products(
             self._product_rows(" AND p.product_family_id=%s", (family_id,)),
-            {family['id']: family},
         )
-        if not members:
+        if not rows or rows[0]['family'] is None:
             return None
-        return dict(family, members=sorted(members, key=self.member_key))
+        return dict(rows[0]['family'], members=sorted(rows, key=self.member_key))
 
     @staticmethod
     def member_key(product):
         return (product.get('family_sort_order') or 0, product['name'].lower(), product['id'])
 
-    def categories(self):
-        return self._rows("""SELECT c.id,c.name,c.slug,c.description FROM public.categories c
-            WHERE c.is_active=TRUE AND c.deleted_at IS NULL AND EXISTS (
+    def category_options(self):
+        """Categories and the uncategorized flag in one read."""
+        rows = self._rows("""SELECT c.id,c.name,c.slug,c.description,flags.has_uncategorized
+            FROM (SELECT EXISTS (
+              SELECT 1 FROM public.products p WHERE p.category_id IS NULL
+                AND p.is_active=TRUE AND p.deleted_at IS NULL) AS has_uncategorized) flags
+            LEFT JOIN public.categories c ON c.is_active=TRUE AND c.deleted_at IS NULL AND EXISTS (
               SELECT 1 FROM public.products p WHERE p.category_id=c.id AND p.is_active=TRUE AND p.deleted_at IS NULL)
             ORDER BY c.sort_order,c.name,c.id""")
+        has_uncategorized = bool(rows[0]['has_uncategorized']) if rows else False
+        categories = [
+            {name: row[name] for name in CATEGORY_COLUMNS}
+            for row in rows if row['id'] is not None
+        ]
+        return {'categories': categories, 'has_uncategorized': has_uncategorized}
+
+    def categories(self):
+        return self.category_options()['categories']
 
     def category(self, identity):
         field = 'id' if str(identity).isdigit() else 'slug'
         return self._one(f"""SELECT id,name,slug,description FROM public.categories
             WHERE {field}=%s AND is_active=TRUE AND deleted_at IS NULL""", (identity,))
 
-    def browse(self, *, category=None, search=None):
+    def browse(self, *, category=None, search=None, category_row=_UNSET):
         products = self.products()
         if category is not None:
-            category_row = self.category(category) if category != 'uncategorized' else None
-            category_id = category_row['id'] if category_row else None
+            if category != 'uncategorized':
+                if category_row is _UNSET:
+                    category_row = self.category(category)
+                category_id = category_row['id'] if category_row else None
+            else:
+                category_id = None
             products = [p for p in products if p['category_id'] == category_id]
         keyword = (search or '').strip().lower()
         def matches(row):
@@ -307,8 +324,13 @@ class CatalogRepository:
                 'category_name','category_slug','product_type','access_duration','region','account_type',
                 'device_limit','included_items','limitations','fulfillment_expectation','warranty_policy',
                 'warranty_policy_en','warranty_policy_ms','support_policy'))
+        families = {}
+        for product in products:
+            family = product.get('family')
+            if family is not None:
+                families.setdefault(family['id'], family)
         entries = []
-        for family in self.families():
+        for family in families.values():
             members = [p for p in products if p['product_family_id'] == family['id']]
             if members and (not keyword or matches(family) or any(matches(p) for p in members)):
                 members.sort(key=lambda p: ((not matches(p)) if keyword else False, *self.member_key(p)))
@@ -340,6 +362,24 @@ class CatalogRepository:
         return self._one("""SELECT is_active,public_note FROM public.checkout_maintenance_settings
                             WHERE singleton_key='checkout_maintenance'""") or {'is_active': False}
 
+    def detail_flags(self):
+        """Maintenance and Store-Balance availability in one round trip."""
+        row = self._one("""SELECT
+            COALESCE((SELECT is_active FROM public.checkout_maintenance_settings
+                      WHERE singleton_key='checkout_maintenance'), FALSE) AS maintenance_active,
+            (SELECT public_note FROM public.checkout_maintenance_settings
+             WHERE singleton_key='checkout_maintenance') AS maintenance_note,
+            (EXISTS (SELECT 1 FROM public.customer_usdt_funding_policies
+                     WHERE singleton_key='customer_usdt_funding_policy')
+             AND NOT EXISTS (SELECT 1 FROM public.customer_usdt_funding_pauses WHERE scope='spending')
+             AND NOT EXISTS (SELECT 1 FROM public.balance_restore_gates
+                             WHERE id=1 AND state='open')) AS spending_available""") or {}
+        return {
+            'maintenance': {'is_active': bool(row.get('maintenance_active')),
+                            'public_note': row.get('maintenance_note')},
+            'spending_available': bool(row.get('spending_available')),
+        }
+
     def asset(self, source_path, bot_scope='synthetic'):
         if not source_path:
             return None
@@ -359,32 +399,78 @@ class CatalogRepository:
             EXISTS (SELECT 1 FROM public.balance_restore_gates WHERE id=1 AND state='open') AS restoring""")
         return bool(row['has_policy'] and not row['paused'] and not row['restoring'])
 
-    def home_data(self, customer_id):
-        canonical = """WITH canonical AS (SELECT DISTINCT ON (order_id) order_id,amount,currency
-            FROM public.payments WHERE status='paid' AND paid_at IS NOT NULL ORDER BY order_id,paid_at,id) """
-        metrics = self._one(canonical + """SELECT
-            (SELECT COUNT(*) FROM public.customers WHERE telegram_id IS NOT NULL) AS bot_users,
-            (SELECT COUNT(*) FROM canonical c JOIN public.orders o ON o.id=c.order_id
-             WHERE o.order_status IN ('processing','completed')) AS successful_orders""")
-        totals = self._one(canonical + """SELECT
-            COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(c.currency),''),'IDR'))='IDR'
-                THEN GREATEST(c.amount,0) ELSE 0 END),0) AS idr_total,
-            COALESCE(SUM(CASE WHEN UPPER(c.currency)='USDT' THEN GREATEST(c.amount,0) ELSE 0 END),0) AS usdt_total
-            FROM canonical c JOIN public.orders o ON o.id=c.order_id
-            WHERE o.customer_id=%s AND o.order_status IN ('processing','completed')""", (customer_id,))
-        balance = self._one("""SELECT a.balance,(SELECT e.balance_after FROM public.store_balance_entries e
-            WHERE e.customer_balance_account_id=a.id ORDER BY e.id DESC LIMIT 1) AS latest_balance_after
-            FROM public.customer_balance_accounts a WHERE a.customer_id=%s""", (customer_id,))
-        amount = 0 if balance is None else balance['balance']
-        if balance and ((balance['latest_balance_after'] is None and amount != 0)
-                        or (balance['latest_balance_after'] is not None and balance['latest_balance_after'] != amount)):
+    def home_data(self, customer_id, bot_scope='synthetic'):
+        """Home metrics, wallet, channel and banner/asset in one statement.
+
+        These reads are independent and were previously seven round trips on
+        every Home render. PHP serves Home from warm projections; the candidate
+        keeps the reads live but does not pay one connection round trip each.
+        """
+        row = self._one("""
+            WITH canonical AS (
+              SELECT DISTINCT ON (order_id) order_id,amount,currency
+              FROM public.payments
+              WHERE status='paid' AND paid_at IS NOT NULL
+              ORDER BY order_id,paid_at,id
+            )
+            SELECT
+              (SELECT COUNT(*) FROM public.customers WHERE telegram_id IS NOT NULL) AS bot_users,
+              (SELECT COUNT(*) FROM canonical c JOIN public.orders o ON o.id=c.order_id
+               WHERE o.order_status IN ('processing','completed')) AS successful_orders,
+              (SELECT COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(c.currency),''),'IDR'))='IDR'
+                  THEN GREATEST(c.amount,0) ELSE 0 END),0)
+               FROM canonical c JOIN public.orders o ON o.id=c.order_id
+               WHERE o.customer_id=%s AND o.order_status IN ('processing','completed')) AS idr_total,
+              (SELECT COALESCE(SUM(CASE WHEN UPPER(c.currency)='USDT'
+                  THEN GREATEST(c.amount,0) ELSE 0 END),0)
+               FROM canonical c JOIN public.orders o ON o.id=c.order_id
+               WHERE o.customer_id=%s AND o.order_status IN ('processing','completed')) AS usdt_total,
+              (SELECT a.balance FROM public.customer_balance_accounts a
+               WHERE a.customer_id=%s) AS balance,
+              (SELECT e.balance_after FROM public.store_balance_entries e
+               JOIN public.customer_balance_accounts a ON a.id=e.customer_balance_account_id
+               WHERE a.customer_id=%s ORDER BY e.id DESC LIMIT 1) AS latest_balance_after,
+              (SELECT channel_link FROM public.store_channel_settings
+               WHERE singleton_key='store_channel') AS channel_link,
+              (SELECT channel_username FROM public.store_channel_settings
+               WHERE singleton_key='store_channel') AS channel_username,
+              (SELECT enabled FROM public.customer_api_settings
+               WHERE singleton_key='customer_api') AS api_enabled,
+              (SELECT telegram_welcome_banner_path FROM public.storefront_settings
+               WHERE singleton_key='storefront') AS banner_path,
+              (SELECT is_active FROM public.checkout_maintenance_settings
+               WHERE singleton_key='checkout_maintenance') AS maintenance_active,
+              (SELECT public_note FROM public.checkout_maintenance_settings
+               WHERE singleton_key='checkout_maintenance') AS maintenance_note,
+              (SELECT file_id FROM django_candidate.navigation_assets
+               WHERE bot_scope=%s AND source_path=(
+                 SELECT telegram_welcome_banner_path FROM public.storefront_settings
+                 WHERE singleton_key='storefront')) AS banner_file_id,
+              (SELECT version FROM django_candidate.navigation_assets
+               WHERE bot_scope=%s AND source_path=(
+                 SELECT telegram_welcome_banner_path FROM public.storefront_settings
+                 WHERE singleton_key='storefront')) AS banner_version
+        """, (customer_id, customer_id, customer_id, customer_id, bot_scope, bot_scope))
+        amount = 0 if row['balance'] is None else row['balance']
+        if row['balance'] is not None and (
+                (row['latest_balance_after'] is None and amount != 0)
+                or (row['latest_balance_after'] is not None and row['latest_balance_after'] != amount)):
             amount = None
-        channel = self._one("""SELECT channel_link,channel_username FROM public.store_channel_settings
-                               WHERE singleton_key='store_channel'""") or {}
-        username = (channel.get('channel_username') or '').strip().lstrip('@')
-        url = (channel.get('channel_link') or '').strip() or ('https://t.me/' + username if username else None)
-        api = self._one("SELECT enabled FROM public.customer_api_settings WHERE singleton_key='customer_api'")
-        banner = self._one("""SELECT telegram_welcome_banner_path FROM public.storefront_settings
-                              WHERE singleton_key='storefront'""") or {}
-        return dict(metrics, **totals, balance=amount, channel_url=url,
-                    api_enabled=bool(api and api['enabled']), banner_path=banner.get('telegram_welcome_banner_path'))
+        username = (row['channel_username'] or '').strip().lstrip('@')
+        url = (row['channel_link'] or '').strip() or ('https://t.me/' + username if username else None)
+        asset = None
+        if row['banner_file_id'] is not None:
+            asset = {'file_id': row['banner_file_id'], 'version': row['banner_version']}
+        return {
+            'bot_users': row['bot_users'],
+            'successful_orders': row['successful_orders'],
+            'idr_total': row['idr_total'],
+            'usdt_total': row['usdt_total'],
+            'balance': amount,
+            'channel_url': url,
+            'api_enabled': bool(row['api_enabled']),
+            'banner_path': row['banner_path'],
+            'banner_asset': asset,
+            'maintenance': {'is_active': bool(row['maintenance_active']),
+                            'public_note': row['maintenance_note']},
+        }

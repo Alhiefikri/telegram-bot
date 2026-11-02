@@ -141,14 +141,16 @@ not a reason to expose arbitrary files with DEBUG or a production dev server.
 ## PostgreSQL connection and process budget
 
 The local HTTP server is deliberately one process and one thread with no reload
-or worker children. `CONN_MAX_AGE=0`; no pool is added. Each request can hold at
-at most one runtime connection; readiness closes its connection. The role
-ceiling of six reserves four connections for the P10 HTTP/worker runtime (one
-HTTP and one per queue) and leaves two bounded diagnostic/test slots; it is not
-permission to spawn six workers. The runtime's own admitted ceiling remains
-four. PostgreSQL's existing `max_connections=30` retains
-three reserved slots: budget one HTTP + four synchronized test processes + one
-coordinator + at most two operator connections = eight normal connections,
+or worker children. Each process owns at most one connection and keeps it for
+`CONN_MAX_AGE=60` so a burst of updates does not pay a fresh PostgreSQL
+handshake per request; `close_old_connections()` still returns an expired or
+unusable connection. No pool is added. Readiness closes its connection after the
+check. The role ceiling of six reserves four connections for the P10
+HTTP/worker runtime (one HTTP and one per queue) and leaves two bounded
+diagnostic/test slots; it is not permission to spawn six workers. The runtime's
+own admitted ceiling remains four. PostgreSQL's existing `max_connections=30`
+retains three reserved slots: budget one HTTP + four synchronized test processes
++ one coordinator + at most two operator connections = eight normal connections,
 leaving nineteen normal slots unused. Concurrency smoke is a diagnostic alongside
 HTTP, never benchmark load. Future queue allocation must explicitly account for
 processes × threads × aliases/pools, keep slow work separate from receipts and

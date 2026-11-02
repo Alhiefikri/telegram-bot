@@ -1,0 +1,518 @@
+{
+  "schema_version": 1,
+  "issue": 721,
+  "generated_at": "2026-11-02",
+  "claim": "diagnostic profile only; not a paired-gate verdict or pooled sample",
+  "fixture": {
+    "parity_smoke": "tools/migration_harness/smoke_navigation.py with the P06 PHP reference and disposable PostgreSQL 16.15",
+    "structural_smoke": "tools/migration_benchmark/runner.py --protocol p11 --implementation django --smoke (small dataset, 1 user, 2 measured attempts per scenario)",
+    "pairing": "before and after used the same fixture, host and candidate image tag; only the mounted candidate source changed"
+  },
+  "images": {
+    "before": "lhie-p05-candidate:perf721-base",
+    "after": "lhie-p05-candidate:perf721-after"
+  },
+  "parity_smoke": {
+    "status": {
+      "before": "passed",
+      "after": "passed"
+    },
+    "php_surface_parity": [
+      "home",
+      "catalog",
+      "family",
+      "detail",
+      "orders",
+      "balance",
+      "balance_activity"
+    ],
+    "profile": {
+      "before": {
+        "home": {
+          "queries": 8,
+          "db_ms": 75.275,
+          "elapsed_ms": 84.806,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "catalog": {
+          "queries": 5,
+          "db_ms": 18.916,
+          "elapsed_ms": 24.842,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "family": {
+          "queries": 4,
+          "db_ms": 57.531,
+          "elapsed_ms": 62.68,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "detail": {
+          "queries": 8,
+          "db_ms": 27.526,
+          "elapsed_ms": 36.446,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "orders": {
+          "queries": 2,
+          "db_ms": 57.911,
+          "elapsed_ms": 63.975,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "balance": {
+          "queries": 6,
+          "db_ms": 13.918,
+          "elapsed_ms": 25.879,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "balance_activity": {
+          "queries": 5,
+          "db_ms": 17.039,
+          "elapsed_ms": 30.688,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "route_catalog": {
+          "queries": 22,
+          "db_ms": 34.184,
+          "elapsed_ms": 43.597,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "route_family": {
+          "queries": 23,
+          "db_ms": 50.801,
+          "elapsed_ms": 89.722,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "route_detail": {
+          "queries": 26,
+          "db_ms": 57.281,
+          "elapsed_ms": 78.402,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "route_quantity": {
+          "queries": 26,
+          "db_ms": 54.06,
+          "elapsed_ms": 78.052,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "route_back": {
+          "queries": 22,
+          "db_ms": 52.523,
+          "elapsed_ms": 66.257,
+          "connection_reused": false,
+          "connection_opened": true
+        },
+        "route_home": {
+          "queries": 25,
+          "db_ms": 37.822,
+          "elapsed_ms": 48.677,
+          "connection_reused": false,
+          "connection_opened": true
+        }
+      },
+      "after": {
+        "home": {
+          "queries": 2,
+          "db_ms": 13.219,
+          "elapsed_ms": 16.174,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "catalog": {
+          "queries": 3,
+          "db_ms": 8.926,
+          "elapsed_ms": 11.08,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "family": {
+          "queries": 3,
+          "db_ms": 3.817,
+          "elapsed_ms": 5.795,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "detail": {
+          "queries": 5,
+          "db_ms": 7.082,
+          "elapsed_ms": 9.633,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "orders": {
+          "queries": 2,
+          "db_ms": 1.477,
+          "elapsed_ms": 4.269,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "balance": {
+          "queries": 6,
+          "db_ms": 3.56,
+          "elapsed_ms": 8.765,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "balance_activity": {
+          "queries": 5,
+          "db_ms": 2.814,
+          "elapsed_ms": 11.455,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "route_catalog": {
+          "queries": 14,
+          "db_ms": 56.326,
+          "elapsed_ms": 62.685,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "route_family": {
+          "queries": 14,
+          "db_ms": 13.703,
+          "elapsed_ms": 20.232,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "route_detail": {
+          "queries": 16,
+          "db_ms": 15.408,
+          "elapsed_ms": 22.287,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "route_quantity": {
+          "queries": 15,
+          "db_ms": 13.22,
+          "elapsed_ms": 19.431,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "route_back": {
+          "queries": 15,
+          "db_ms": 12.605,
+          "elapsed_ms": 19.224,
+          "connection_reused": true,
+          "connection_opened": false
+        },
+        "route_home": {
+          "queries": 13,
+          "db_ms": 60.449,
+          "elapsed_ms": 65.323,
+          "connection_reused": true,
+          "connection_opened": false
+        }
+      }
+    }
+  },
+  "p11_structural_smoke": {
+    "before": {
+      "back": [
+        {
+          "db_queries": 23,
+          "ingress_queries": 1,
+          "worker_queries": 22,
+          "db_ms": 55.081,
+          "screen_ack_ms": 82.598,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 23,
+          "ingress_queries": 1,
+          "worker_queries": 22,
+          "db_ms": 77.572,
+          "screen_ack_ms": 85.394,
+          "outcome": "success"
+        }
+      ],
+      "balance": [
+        {
+          "db_queries": 23,
+          "ingress_queries": 1,
+          "worker_queries": 22,
+          "db_ms": 46.492,
+          "screen_ack_ms": 216.644,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 23,
+          "ingress_queries": 1,
+          "worker_queries": 22,
+          "db_ms": 35.991,
+          "screen_ack_ms": 81.474,
+          "outcome": "success"
+        }
+      ],
+      "catalog_plans": [
+        {
+          "db_queries": 24,
+          "ingress_queries": 1,
+          "worker_queries": 23,
+          "db_ms": 45.889,
+          "screen_ack_ms": 70.718,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 24,
+          "ingress_queries": 1,
+          "worker_queries": 23,
+          "db_ms": 93.293,
+          "screen_ack_ms": 101.712,
+          "outcome": "success"
+        }
+      ],
+      "home": [
+        {
+          "db_queries": 26,
+          "ingress_queries": 1,
+          "worker_queries": 25,
+          "db_ms": 59.5,
+          "screen_ack_ms": 88.734,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 26,
+          "ingress_queries": 1,
+          "worker_queries": 25,
+          "db_ms": 142.677,
+          "screen_ack_ms": 203.887,
+          "outcome": "success"
+        }
+      ],
+      "home_catalog": [
+        {
+          "db_queries": 23,
+          "ingress_queries": 1,
+          "worker_queries": 22,
+          "db_ms": 45.215,
+          "screen_ack_ms": 69.823,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 23,
+          "ingress_queries": 1,
+          "worker_queries": 22,
+          "db_ms": 75.315,
+          "screen_ack_ms": 120.614,
+          "outcome": "success"
+        }
+      ],
+      "orders": [
+        {
+          "db_queries": 20,
+          "ingress_queries": 1,
+          "worker_queries": 19,
+          "db_ms": 39.404,
+          "screen_ack_ms": 60.48,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 20,
+          "ingress_queries": 1,
+          "worker_queries": 19,
+          "db_ms": 65.327,
+          "screen_ack_ms": 74.275,
+          "outcome": "success"
+        }
+      ],
+      "plan_detail": [
+        {
+          "db_queries": 28,
+          "ingress_queries": 1,
+          "worker_queries": 27,
+          "db_ms": 60.24,
+          "screen_ack_ms": 101.623,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 28,
+          "ingress_queries": 1,
+          "worker_queries": 27,
+          "db_ms": 55.635,
+          "screen_ack_ms": 86.651,
+          "outcome": "success"
+        }
+      ],
+      "quantity": [
+        {
+          "db_queries": 28,
+          "ingress_queries": 1,
+          "worker_queries": 27,
+          "db_ms": 85.732,
+          "screen_ack_ms": 112.1,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 28,
+          "ingress_queries": 1,
+          "worker_queries": 27,
+          "db_ms": 78.953,
+          "screen_ack_ms": 92.357,
+          "outcome": "success"
+        }
+      ]
+    },
+    "after": {
+      "back": [
+        {
+          "db_queries": 16,
+          "ingress_queries": 1,
+          "worker_queries": 15,
+          "db_ms": 33.376,
+          "screen_ack_ms": 54.569,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 16,
+          "ingress_queries": 1,
+          "worker_queries": 15,
+          "db_ms": 16.316,
+          "screen_ack_ms": 18.25,
+          "outcome": "success"
+        }
+      ],
+      "balance": [
+        {
+          "db_queries": 17,
+          "ingress_queries": 1,
+          "worker_queries": 16,
+          "db_ms": 30.021,
+          "screen_ack_ms": 82.689,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 17,
+          "ingress_queries": 1,
+          "worker_queries": 16,
+          "db_ms": 106.762,
+          "screen_ack_ms": 111.958,
+          "outcome": "success"
+        }
+      ],
+      "catalog_plans": [
+        {
+          "db_queries": 15,
+          "ingress_queries": 1,
+          "worker_queries": 14,
+          "db_ms": 24.278,
+          "screen_ack_ms": 134.269,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 15,
+          "ingress_queries": 1,
+          "worker_queries": 14,
+          "db_ms": 17.717,
+          "screen_ack_ms": 19.625,
+          "outcome": "success"
+        }
+      ],
+      "home": [
+        {
+          "db_queries": 14,
+          "ingress_queries": 1,
+          "worker_queries": 13,
+          "db_ms": 30.874,
+          "screen_ack_ms": 53.088,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 14,
+          "ingress_queries": 1,
+          "worker_queries": 13,
+          "db_ms": 18.377,
+          "screen_ack_ms": 21.573,
+          "outcome": "success"
+        }
+      ],
+      "home_catalog": [
+        {
+          "db_queries": 15,
+          "ingress_queries": 1,
+          "worker_queries": 14,
+          "db_ms": 38.73,
+          "screen_ack_ms": 209.868,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 15,
+          "ingress_queries": 1,
+          "worker_queries": 14,
+          "db_ms": 18.477,
+          "screen_ack_ms": 89.999,
+          "outcome": "success"
+        }
+      ],
+      "orders": [
+        {
+          "db_queries": 14,
+          "ingress_queries": 1,
+          "worker_queries": 13,
+          "db_ms": 21.909,
+          "screen_ack_ms": 42.163,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 14,
+          "ingress_queries": 1,
+          "worker_queries": 13,
+          "db_ms": 17.303,
+          "screen_ack_ms": 18.97,
+          "outcome": "success"
+        }
+      ],
+      "plan_detail": [
+        {
+          "db_queries": 18,
+          "ingress_queries": 1,
+          "worker_queries": 17,
+          "db_ms": 26.267,
+          "screen_ack_ms": 49.958,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 18,
+          "ingress_queries": 1,
+          "worker_queries": 17,
+          "db_ms": 19.637,
+          "screen_ack_ms": 23.266,
+          "outcome": "success"
+        }
+      ],
+      "quantity": [
+        {
+          "db_queries": 17,
+          "ingress_queries": 1,
+          "worker_queries": 16,
+          "db_ms": 19.869,
+          "screen_ack_ms": 39.607,
+          "outcome": "success"
+        },
+        {
+          "db_queries": 17,
+          "ingress_queries": 1,
+          "worker_queries": 16,
+          "db_ms": 19.272,
+          "screen_ack_ms": 91.845,
+          "outcome": "success"
+        }
+      ]
+    }
+  },
+  "notes": [
+    "screen_ack_ms is two-attempt diagnostic spread, not p50/p95 evidence.",
+    "Query counts are deterministic for the structural-smoke dataset; parity-smoke timings are single renders.",
+    "Candidate used CONN_MAX_AGE=0 before and 60 after; connection_reused records close_old_connections behaviour at each render boundary.",
+    "No PHP sample was rerun or pooled; #722 owns the paired gate."
+  ]
+}

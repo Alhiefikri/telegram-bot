@@ -9,9 +9,9 @@ installed only in this probe process tree (``execute_wrapper`` plus two
 per-process method wrappers); no product module gains a benchmark branch.
 
 Evidence on disk is limited to protocol dimensions, monotonic timestamps,
-outcome and error code. Update payloads, callbacks, customer identities and
-rows stay in private ``/tmp`` state and are never printed or copied into the
-evidence directory.
+outcome, error code, SQL duration and a query count. Update payloads, callbacks,
+customer identities and rows stay in private ``/tmp`` state and are never
+printed or copied into the evidence directory.
 """
 
 import fcntl
@@ -268,6 +268,7 @@ class Events:
                 continue
             merged = self.records.setdefault(record["update_id"], {
                 "timestamps": dict.fromkeys(BOUNDARIES), "db_ms": None,
+                "db_queries": None,
                 "outcome": None, "completed": False, "callbacks": [],
             })
             boundary = record.get("boundary")
@@ -275,6 +276,8 @@ class Events:
                 merged["timestamps"][boundary] = record["ns"]
             elif boundary == "db" and type(record.get("db_ms")) in (int, float):
                 merged["db_ms"] = float(record["db_ms"])
+                if type(record.get("db_queries")) is int and record["db_queries"] >= 0:
+                    merged["db_queries"] = record["db_queries"]
             elif boundary == "completed":
                 merged["completed"] = True
                 value = record.get("outcome")
@@ -308,9 +311,11 @@ def instrument(handler, events):
         current["update_id"] = update_id
         append_json(events, {"update_id": update_id, "boundary": "pickup", "ns": now_ns()})
         total = 0.0
+        queries = 0
 
         def wrapper(execute, sql, params, many, context):
-            nonlocal total
+            nonlocal total, queries
+            queries += 1
             started = time.monotonic()
             try:
                 return execute(sql, params, many, context)
@@ -328,7 +333,8 @@ def instrument(handler, events):
             raise
         finally:
             current["update_id"] = None
-            append_json(events, {"update_id": update_id, "boundary": "db", "db_ms": total * 1000.0})
+            append_json(events, {"update_id": update_id, "boundary": "db", "db_ms": total * 1000.0,
+                                 "db_queries": queries})
             append_json(events, {"update_id": update_id, "boundary": "completed", "outcome": outcome})
 
     def execute(self, method, payload):
@@ -384,20 +390,23 @@ def install_queue_recorder():
 
 
 class TimedApplication:
-    """Measures ingress query time per attempt without changing the view path."""
+    """Measures ingress query time/count per attempt without changing the view path."""
 
     def __init__(self, application):
         self.application = application
         self.db_ms = {}
+        self.queries = {}
         self.lock = threading.Lock()
 
     def __call__(self, environ, start_response):
         from django.db import connections
         attempt = environ.get("HTTP_X_P11_ATTEMPT", "")
         total = 0.0
+        queries = 0
 
         def wrapper(execute, sql, params, many, context):
-            nonlocal total
+            nonlocal total, queries
+            queries += 1
             started = time.monotonic()
             try:
                 return execute(sql, params, many, context)
@@ -409,6 +418,7 @@ class TimedApplication:
         if attempt.isdigit():
             with self.lock:
                 self.db_ms[int(attempt)] = total * 1000.0
+                self.queries[int(attempt)] = queries
         return result
 
 
@@ -677,7 +687,7 @@ def record(payload, attempt, outcome, error_code):
         "background": payload["background"], "batch": payload["batch"],
         "attempt": attempt, "warmup": payload["warmup"], "outcome": outcome,
         "retries": 0, "timestamps": dict.fromkeys(BOUNDARIES), "db_ms": None,
-        "error_code": error_code,
+        "db_queries": None, "error_code": error_code,
     }
 
 
@@ -839,6 +849,11 @@ def batch(payload):
                 for name in ("pickup", "screen_ack"):
                     sample["timestamps"][name] = event["timestamps"][name]
                 sample["db_ms"] = timed.db_ms.get(job["ordinal"], 0.0) + (event["db_ms"] or 0.0)
+                ingress_queries = timed.queries.get(job["ordinal"], 0)
+                worker_queries = event.get("db_queries") or 0
+                sample["db_queries"] = ingress_queries + worker_queries
+                sample["ingress_queries"] = ingress_queries
+                sample["worker_queries"] = worker_queries
                 note_outcome(job["update_id"])
                 if sample["timestamps"]["screen_ack"] is not None and event.get("outcome") in SUCCESS_OUTCOMES:
                     sample["outcome"] = "success"

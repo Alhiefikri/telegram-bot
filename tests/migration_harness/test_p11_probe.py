@@ -57,7 +57,7 @@ class CandidateProbeContractTest(unittest.TestCase):
             path = Path(directory) / 'events.jsonl'
             lines = [
                 {'update_id': 5, 'boundary': 'pickup', 'ns': 100},
-                {'update_id': 5, 'boundary': 'db', 'db_ms': 1.5},
+                {'update_id': 5, 'boundary': 'db', 'db_ms': 1.5, 'db_queries': 7},
                 {'update_id': 5, 'boundary': 'screen_ack', 'ns': 180},
                 {'update_id': 5, 'boundary': 'callbacks',
                  'callbacks': ['katalog', 'x' * 65, 7]},
@@ -70,6 +70,7 @@ class CandidateProbeContractTest(unittest.TestCase):
             self.assertEqual(record['timestamps']['pickup'], 100)
             self.assertEqual(record['timestamps']['screen_ack'], 180)
             self.assertEqual(record['db_ms'], 1.5)
+            self.assertEqual(record['db_queries'], 7)
             self.assertEqual(record['callbacks'], ['katalog'])
             self.assertTrue(record['completed'])
             self.assertEqual(record['outcome'], 'applied')
@@ -88,6 +89,7 @@ class CandidateProbeContractTest(unittest.TestCase):
         self.assertEqual(sample['transport'], 'synthetic')
         self.assertTrue(sample['warmup'])
         self.assertEqual(set(sample['timestamps']), set(probe.BOUNDARIES))
+        self.assertIsNone(sample['db_queries'])
         self.assertEqual(report.summarize([dict(sample, warmup=False)])['cells'][0]
                          ['dimensions']['implementation'], 'django')
         self.assertNotIn('payload', sample)

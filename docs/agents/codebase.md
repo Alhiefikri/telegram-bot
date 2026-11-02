@@ -110,6 +110,13 @@ scenario/user case independently against 70% of current-PHP p50/p95. After the
 #717, #718 and #720 follow-ups, candidate navigation and navigation-payment
 surfaces exist; the measured #692 identity still records Orders, Balance and
 payment stages as absent and is never relabelled. #722 owns the new paired run.
+The #721 follow-up removes navigation read round trips without adding a cache:
+Product rows carry their active Family, Catalog/Family/Detail/quantity/Back share
+loaded rows, Home and the category picker use one statement each, the processor
+combines its update/order checks and verifies root ownership in the root read,
+and the single admitted connection persists for `CONN_MAX_AGE=60`. Diagnostic
+query/db-time/no-pool evidence is in `p11/verification.md` and
+`p11/evidence/p11-fix-721-profile.json`; it is not a paired verdict.
 The #719 follow-up adds the minimum IDR funding path outside the measured gate:
 `funding/` owns DB-backed policy/preset identities, one sandbox-shaped top-up
 owner over `store_balance_top_up*`, an explicit provider/request injection point

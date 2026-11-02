@@ -12,6 +12,10 @@ CREATE TABLE django_candidate.navigation_updates (
 );
 CREATE INDEX navigation_updates_pending ON django_candidate.navigation_updates (update_id)
     WHERE state = 'pending';
+-- One accepted update per chat sequence: the processor checks earlier pending
+-- and later settled work before it claims the current row.
+CREATE INDEX navigation_updates_chat_sequence
+    ON django_candidate.navigation_updates (chat_id, update_id);
 CREATE TABLE django_candidate.navigation_sessions (
     customer_id bigint PRIMARY KEY CHECK (customer_id > 0),
     state jsonb NOT NULL DEFAULT '{}'::jsonb

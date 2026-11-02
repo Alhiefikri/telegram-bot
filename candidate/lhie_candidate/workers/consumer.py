@@ -12,10 +12,17 @@ class WorkerTimeout(BaseException):
     """Deliberately not an Exception: handlers must not mistake it for a send failure."""
 
 
-def close_connections():
+def close_connections(*, discard=False):
     try:
-        from django.db import connections
-        connections.close_all()
+        # Respect CONN_MAX_AGE on success: a busy worker keeps its single
+        # admitted connection, while an expired/unusable one is closed before
+        # the next task. A timeout/failure discards it so no aborted session
+        # state survives; the role budget still reserves one per worker.
+        from django.db import close_old_connections, connections
+        if discard:
+            connections.close_all()
+        else:
+            close_old_connections()
     except Exception:
         # Cleanup must never replace the recorded job outcome.
         pass
@@ -52,16 +59,19 @@ class BoundedConsumer:
 
     def _sweep(self):
         started = self.clock()
+        discard = False
         try:
             self._bounded(self.handler.sweep, self.spec.sweep_limit)
         except WorkerTimeout:
+            discard = True
             self.metrics.record("sweep_timeout")
         except Exception:
+            discard = True
             self.metrics.record("sweep_failed")
         else:
             self.metrics.record("sweep", self.clock() - started)
         finally:
-            close_connections()
+            close_connections(discard=discard)
 
     def _job(self, raw):
         try:
@@ -71,17 +81,20 @@ class BoundedConsumer:
             return
         self.metrics.record("picked")
         started = self.clock()
+        discard = False
         try:
             self._bounded(self.handler.handle, raw)
         except WorkerTimeout:
+            discard = True
             self.metrics.record("timeout")
         except Exception:
+            discard = True
             self.metrics.record("failed")
         else:
             self.metrics.record("finished")
             self.metrics.record("handle", self.clock() - started)
         finally:
-            close_connections()
+            close_connections(discard=discard)
 
     def run(self, *, max_iterations=None):
         if max_iterations is not None and (type(max_iterations) is not int or not 1 <= max_iterations <= 10000):

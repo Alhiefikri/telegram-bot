@@ -319,6 +319,113 @@ prior economic fixture identity changes.
 - P04 retained schema-4 comparator evidence keeps its own identity and is not
   pooled with P11 samples.
 
+## P11-fix #721 navigation profile
+
+Raw before/after records are in
+[evidence/p11-fix-721-profile.json](evidence/p11-fix-721-profile.json). The
+profile reused the existing P11 small structural smoke and the P06 PHP parity
+fixture; no second benchmark and no PHP rerun were added. Both sides of each
+comparison used the same host, fixture, candidate image tag and source-tree
+mount. The only changed variable was the candidate source.
+
+### Query count per screen
+
+The parity fixture renders each screen directly and then exercises the same
+callback through the real processor/root path. `queries` is the number of SQL
+executions; it does not count the Telegram relay HTTP call.
+
+| Screen | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Home | 8 | 2 | -75% |
+| Catalog | 5 | 3 | -40% |
+| Family / Plans | 4 | 3 | -25% |
+| Detail | 8 | 5 | -37% |
+| Orders | 2 | 2 | 0% |
+| Saldo | 6 | 6 | 0% |
+| Saldo history | 5 | 5 | 0% |
+
+The end-to-end P11 structural smoke counts ingress plus worker execution:
+
+| P11 scenario | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `home_catalog` | 23 | 15 | -35% |
+| `catalog_plans` | 24 | 15 | -38% |
+| `plan_detail` | 28 | 18 | -36% |
+| `back` | 23 | 16 | -30% |
+| `home` | 26 | 14 | -46% |
+| `quantity` | 28 | 17 | -39% |
+| `orders` | 20 | 14 | -30% |
+| `balance` | 23 | 17 | -26% |
+
+### Database time and connection reuse
+
+The parity fixture called `close_old_connections()` before each profiled
+render, mirroring a request boundary, and measured SQL time only:
+
+| Screen | Before `db_ms` | After `db_ms` |
+| --- | ---: | ---: |
+| Home | 75.3 | 13.2 |
+| Catalog | 18.9 | 8.9 |
+| Family / Plans | 57.5 | 3.8 |
+| Detail | 27.5 | 7.1 |
+| Orders | 57.9 | 1.5 |
+| Saldo | 13.9 | 3.6 |
+| Saldo history | 17.0 | 2.8 |
+
+The end-to-end structural smoke separately observed most after-change `db_ms`
+readings between 16 and 39 ms versus 36–143 ms before. Its two-attempt spread
+also produced scheduler outliers (for example one 106.8 ms `balance` attempt),
+so those numbers are not a p50/p95 distribution and are not used as a target.
+
+Before #721 every profiled render reported `connection_reused = false` and
+`connection_opened = true`; after #721 every render reported
+`connection_reused = true` and `connection_opened = false`. The changed setting
+is `CONN_MAX_AGE=60` with `CONN_HEALTH_CHECKS=True`, and the bounded worker now
+calls `close_old_connections()` after a successful job/sweep while discarding
+the connection after a timeout or handler failure. The admitted runtime still
+owns at most one connection per HTTP/worker process and four
+`candidate_runtime` connections in total; no pool or extra process was added.
+
+### What changed
+
+- One Product projection carries its active Family columns, so Product,
+  Family, Detail, quantity and Back no longer issue a second Family SELECT.
+- Catalog browsing uses the same single Product scan for grouping; it no longer
+  reloads Product and Family sets or resolves the same Category twice.
+- The category picker returns categories plus the uncategorized flag in one
+  statement. Home returns metrics, wallet, channel, banner asset and maintenance
+  in one statement. Detail/quantity share one maintenance+spending flag read.
+- The `family:select` and quantity routes reuse the Product/Family row already
+  loaded for validation instead of loading it again for the render. This is
+  request-scoped presentation reuse only: checkout still revalidates stock and
+  price under its existing locks, so no write authority or oversell path changes.
+- The processor takes the update row and its chat advisory lock in one
+  statement, combines the earlier/later ordering checks, verifies Customer/chat
+  root ownership inside the root read and claim, and never re-reads the root for
+  `match()` after it has already been read under the chat lock.
+- `navigation_updates (chat_id, update_id)` adds the bounded per-chat sequence
+  index used by the combined ordering check.
+- No cache was added. PHP's `TelegramCatalogProjectionCache` uses a 30-minute
+  projection plus an observer-driven version bump; the read-only candidate has
+  no counterpart observer and must not serve stale stock, price or plan copy.
+  Keeping live reads is the documented tradeoff, not an unmeasured cache claim.
+
+### Verification and limits
+
+- `python3 tools/migration_harness/smoke_navigation.py` passed the full PHP
+  surface parity, Orders/Balance pages, stale/foreign callbacks, root protocol,
+  grant denial and PostgreSQL checks before and after the change.
+- `python3 tools/migration_benchmark/runner.py --protocol p11 --implementation
+  django --smoke` completed 8/8 cells with 16/16 successful attempts and zero
+  probe errors after the change.
+- Focused candidate tests passed: 28 catalog/presentation tests, plus
+  `test_navigation_ingress`, `test_http`, `test_runtime`; P11 contract tests
+  passed 14/14.
+- These are small-dataset structural diagnostics. They do not produce a paired
+  p50/p95 verdict, do not replace #722, and are not pooled with the measured
+  #692 samples. The high finding `django_navigation_performance_target_not_met`
+  remains open until a new paired gate rerun judges it.
+
 ## Payment stages and budget proposal
 
 No paired payment stage exists: the candidate has no navigation-to-checkout,
@@ -357,8 +464,10 @@ observed, so nothing here is a post-hoc candidate target.
 5. Batch p95 spread above 20% marks a cell inconclusive. 15/24 PHP and 14/18
    Django cells were inconclusive; the per-batch range is descriptive, not a
    confidence interval. No auto-extension or pass-hunting rerun was done.
-6. Django `db_ms` includes per-request connection establishment
-   (`CONN_MAX_AGE=0`); database numbers are descriptive, never the gate.
+6. The measured #692 Django identity used `CONN_MAX_AGE=0`, so its `db_ms`
+   includes per-request connection establishment. The #721 follow-up uses one
+   reused per-process connection; its diagnostic numbers are descriptive and
+   never the gate.
 7. Synthetic dataset and local Docker only. No production data, key, provider,
    real money or HD acquisition. Visible latency, live Testing Bot and sandbox
    qualification remain separate H1 obligations.

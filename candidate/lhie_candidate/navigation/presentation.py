@@ -67,6 +67,7 @@ _WALLET_ACTIVITY_ROWS = 4
 _DEFAULT_ICONS = {'message.search': '🔎', 'message.refresh': '🔄', 'menu.back': '⬅️',
                   'menu.products': '🛍️', 'menu.balance': '💰', 'menu.orders': '📦',
                   'menu.language': '🌐', 'menu.support': '💬', 'menu.channel': '📢', 'menu.api': '🔌'}
+_UNSET = object()
 
 
 def value(customer, key, default=None):
@@ -901,7 +902,8 @@ class CatalogPresenter:
     def _icon_fields(self, glyph, identifier):
         return {'icon_custom_emoji_id': identifier} if self.custom_emoji and identifier else {}
 
-    def _surface(self, customer, caption, rows, *, screen='catalog', html=True, photo_path=None):
+    def _surface(self, customer, caption, rows, *, screen='catalog', html=True, photo_path=None,
+                 asset=_UNSET):
         for row in rows:
             for button in row:
                 button.setdefault('style', 'primary')
@@ -911,10 +913,10 @@ class CatalogPresenter:
             caption = unescape(caption)
         # Only a mapping owned by this bot may authorize a legacy catalog path.
         photo = self.media_mapping.get(photo_path)
-        asset = None
-        if not photo and photo_path:
-            asset = self.repository.asset(photo_path,self.bot_scope)
-            photo = asset['file_id'] if asset else None
+        if asset is _UNSET:
+            asset = self.repository.asset(photo_path,self.bot_scope) if not photo and photo_path else None
+        if not photo and asset:
+            photo = asset['file_id']
         if photo:
             options['photo_url'] = photo
             options['asset_version'] = asset['version'] if asset else 1
@@ -922,8 +924,8 @@ class CatalogPresenter:
         self._icon_rows = None
         return result
 
-    def _maintenance(self, customer):
-        maintenance = self.repository.maintenance()
+    def _maintenance(self, customer, maintenance=None):
+        maintenance = self.repository.maintenance() if maintenance is None else maintenance
         if not maintenance.get('is_active'):
             return ''
         text = html_text(self.t(customer, 'menu.maintenance'))
@@ -932,7 +934,7 @@ class CatalogPresenter:
         return text
 
     def home(self, customer, private=True):
-        data = self.repository.home_data(value(customer, 'id'))
+        data = self.repository.home_data(value(customer, 'id'), self.bot_scope)
         hour = self.clock().astimezone(ZoneInfo('Asia/Jakarta')).hour
         greeting, glyph = ('morning','🌅') if 5 <= hour < 11 else ('afternoon','☀️') if 11 <= hour < 15 else ('evening','🌇') if 15 <= hour < 18 else ('night','🌙')
         greeting_text = self._legacy_icons(glyph) + ' ' + self.t(customer, 'welcome.greeting.' + greeting)
@@ -960,10 +962,11 @@ class CatalogPresenter:
                 button['url'] = data['channel_url']
                 rows.append([button])
         caption = self.t(customer,'welcome.caption' if private else 'welcome.group_caption', **replacements)
-        notice = self._maintenance(customer)
+        notice = self._maintenance(customer, data.get('maintenance'))
         if notice:
             caption += '\n\n' + notice
-        return self._surface(customer,caption,rows,screen='home',photo_path=data.get('banner_path'))
+        return self._surface(customer,caption,rows,screen='home',photo_path=data.get('banner_path'),
+                             asset=data.get('banner_asset'))
 
     def group(self, customer):
         return self.home(customer, private=False)
@@ -1014,7 +1017,7 @@ class CatalogPresenter:
         category_row = self.repository.category(category) if category not in (None,'uncategorized') else None
         if category not in (None,'uncategorized') and category_row is None:
             return self.unavailable(customer,'catalog.category.unavailable')
-        entries = self.repository.browse(category=category,search=search)
+        entries = self.repository.browse(category=category,search=search,category_row=category_row)
         per_page = 15 if mode == 'catalog' else 10
         pages = max(1,(len(entries) + per_page - 1)//per_page)
         page = max(1,page)
@@ -1089,18 +1092,19 @@ class CatalogPresenter:
         return self._surface(customer,'\n'.join(lines),rows,html=mode != 'catalog' or self.custom_emoji)
 
     def categories(self, customer):
-        categories = self.repository.categories()
-        products = self.repository.products()
+        options = self.repository.category_options()
+        categories = options['categories']
         rows = [[{'text': self._legacy_icons('📂 ') + category['name'],'callback_data': 'category:' + str(category['id'])}] for category in categories]
-        uncategorized = any(p['category_id'] is None for p in products)
+        uncategorized = options['has_uncategorized']
         if uncategorized:
             rows.append([self._button(customer,'catalog.uncategorized','category:uncategorized')])
         rows.append([self._button(customer,'catalog.family.back_menu','family:back:menu',slot='menu.back')])
         return self._surface(customer,html_text(self.t(customer,'catalog.category_filter' if categories or uncategorized else 'catalog.empty')),rows,html=self.custom_emoji)
 
-    def family(self, customer, family_id, page=1, return_page=1, origin_token=None, state_token=None, state=None):
+    def family(self, customer, family_id, page=1, return_page=1, origin_token=None, state_token=None,
+               state=None, family_row=None):
         state = state if state is not None else {}
-        family = self.repository.family(family_id)
+        family = self.repository.family(family_id) if family_row is None else family_row
         if family is None:
             return self.unavailable(customer,'catalog.family.unavailable')
         members = family['members']
@@ -1198,9 +1202,11 @@ class CatalogPresenter:
         return {'tiers':tiers,'active':active,'unit':unit,'total':total,'dollar_unit':dollar_unit,'dollar_total':dollar_total,
                 'next':next((tier for tier in tiers if quantity < tier['minimum_quantity'] <= product['available_stock']),None)}
 
-    def detail(self, customer, product_id, *, state=None, navigation=None, quantity=1, interaction_token=None, quantity_token=None):
+    def detail(self, customer, product_id, *, state=None, navigation=None, quantity=1,
+               interaction_token=None, quantity_token=None, product=None, maintenance=None,
+               spending=None):
         state = state if state is not None else {}
-        product = self.repository.product(product_id)
+        product = self.repository.product(product_id) if product is None else product
         if product is None:
             return self.unavailable(customer,'catalog.product_unavailable')
         navigation = dict(navigation or {})
@@ -1222,7 +1228,11 @@ class CatalogPresenter:
         selection = {'product_id':product_id,'quantity':quantity,'interaction_token':token,'quantity_token':qty_token,
                      'mode':'browsing','navigation':navigation,'locale':locale(customer)}
         can_select = stock > 0 and quote is not None
-        notice = self._maintenance(customer)
+        if maintenance is None or spending is None:
+            flags = self.repository.detail_flags()
+            maintenance = flags['maintenance'] if maintenance is None else maintenance
+            spending = flags['spending_available'] if spending is None else spending
+        notice = self._maintenance(customer, maintenance)
         dual = bool(not notice and can_select and quote['dollar_total'] is not None and self.dollar_rail_selectable)
         def price_line(key, amount, dollars=None, **values):
             return html_text(self.t(customer,key + ('_dual' if dual else ''),amount=number(amount),
@@ -1293,7 +1303,7 @@ class CatalogPresenter:
             else:
                 rows.append([{'text':self.t(customer,'catalog.detail.pay_qris',amount=number(quote['total'])),
                               'callback_data':f'detail:pay:qris:{product_id}:{token}','style':'primary'}])
-                if self.repository.spending_available():
+                if spending:
                     rows.append([self._button(customer,'catalog.detail.pay_balance',f'detail:pay:balance:{product_id}:{token}',slot='menu.balance')])
                 if dual:
                     rows.append([{'text':self.t(customer,'catalog.detail.pay_binance',amount=usdt(quote['dollar_total'])),
@@ -1318,10 +1328,10 @@ class CatalogPresenter:
         category = product.get('category_id') or 'uncategorized'
         return f'category:{category}','catalog.back_categories'
 
-    def quantity(self, customer, product_id, quantity, *, state=None, feedback=None):
+    def quantity(self, customer, product_id, quantity, *, state=None, feedback=None, product=None):
         state = state if state is not None else {}
         selection = state.get('selection')
-        product = self.repository.product(product_id)
+        product = self.repository.product(product_id) if product is None else product
         if not selection or not product or selection['product_id'] != product_id:
             return self.unavailable(customer,'catalog.selection.stale')
         if selection['mode'] != 'awaiting_custom_quantity':
@@ -1340,7 +1350,7 @@ class CatalogPresenter:
         rows = [[self._button(customer,'catalog.quantity.cancel',f'detail:qty:cancel:{product_id}:' + selection['interaction_token'])]]
         return self._surface(customer,'\n'.join(lines),rows,screen='product',photo_path=product.get('telegram_image_path') or (product.get('family') or {}).get('telegram_image_path'))
 
-    def quantity_input(self, customer, text, state):
+    def quantity_input(self, customer, text, state, *, product=None):
         selection = state.get('selection') or {}
         if selection.get('mode') != 'awaiting_custom_quantity':
             return None
@@ -1348,7 +1358,7 @@ class CatalogPresenter:
         if notice:
             state.pop('selection',None)
             return self._surface(customer,notice,[[self._button(customer,'catalog.check_status','checkout-maintenance:status')]])
-        product = self.repository.product(selection['product_id'])
+        product = self.repository.product(selection['product_id']) if product is None else product
         if not product or product['available_stock'] < 1:
             state.pop('selection',None)
             return self.unavailable(customer,'catalog.selection.unavailable')
@@ -1360,8 +1370,10 @@ class CatalogPresenter:
             feedback = self.t(customer,key,stock=product['available_stock'])
             if not valid and selection['quantity'] > product['available_stock']:
                 feedback = self.t(customer,'catalog.quantity.stock_changed') + '\n\n' + feedback
-            return self.quantity(customer,product['id'],selection['quantity'],state=state,feedback=feedback)
-        return self.detail(customer,product['id'],state=state,quantity=quantity,navigation=selection['navigation'])
+            return self.quantity(customer,product['id'],selection['quantity'],state=state,
+                                 feedback=feedback,product=product)
+        return self.detail(customer,product['id'],state=state,quantity=quantity,
+                           navigation=selection['navigation'],product=product)
 
     def route(self, customer, data, state, *, root=None, chat_id=None):
         self._icon_rows = None
@@ -1455,7 +1467,8 @@ class CatalogPresenter:
             family = self.repository.family(family_id)
             if not family or page > max(1,(len(family['members'])+9)//10):
                 return None
-            return self.family(customer,family_id,page,return_page,origin_token,state=state)
+            return self.family(customer,family_id,page,return_page,origin_token,state=state,
+                               family_row=family)
         match = re.fullmatch(r'family:select:(v[A-Za-z0-9_-]+)',data)
         if match:
             decoded = self._decode(match[1],select=True)
@@ -1475,7 +1488,7 @@ class CatalogPresenter:
             if selection.get('mode') == 'browsing' and selection.get('product_id') == product_id and selection.get('navigation') == navigation:
                 self.callback_handled = True
                 return None
-            return self.detail(customer,product_id,state=state,navigation=navigation)
+            return self.detail(customer,product_id,state=state,navigation=navigation,product=member)
         match = re.fullmatch(r'product:([1-9][0-9]*)(?::o(' + _TOKEN + '))?',data)
         if match:
             if match[2] and (state.get('catalog') or {}).get('token') != match[2]:
@@ -1508,9 +1521,12 @@ class CatalogPresenter:
                 state.pop('selection',None)
                 return self.unavailable(customer,'catalog.selection.unavailable')
             stock = product['available_stock']
-            if self._maintenance(customer):
+            flags = self.repository.detail_flags()
+            maintenance, spending = flags['maintenance'], flags['spending_available']
+            notice = self._maintenance(customer, maintenance)
+            if notice:
                 state.pop('selection',None)
-                return self._surface(customer,self._maintenance(customer),[[self._button(customer,'catalog.check_status','checkout-maintenance:status')]])
+                return self._surface(customer,notice,[[self._button(customer,'catalog.check_status','checkout-maintenance:status')]])
             if action == 'current':
                 if selection['quantity'] > stock:
                     state.pop('selection',None)
@@ -1520,14 +1536,17 @@ class CatalogPresenter:
             if action == 'manual':
                 if selection['quantity'] > stock:
                     self.callback_notice = plain(self.t(customer,'catalog.quantity.stock_changed'))
-                return self.quantity(customer,product_id,min(selection['quantity'],stock),state=state)
+                return self.quantity(customer,product_id,min(selection['quantity'],stock),state=state,
+                                     product=product)
             quantity = selection['quantity']
             if action == 'cancel':
                 quantity = selection.get('previous_quantity',quantity)
+            detail_options = {'product': product, 'maintenance': maintenance, 'spending': spending}
             if quantity > stock:
                 self.callback_notice = plain(self.t(customer,'catalog.quantity.stock_changed'))
                 return self.detail(customer,product_id,state=state,quantity=stock,navigation=selection.get('navigation'),
-                                   quantity_token=selection['quantity_token'] if selection['mode'] == 'browsing' else None)
+                                   quantity_token=selection['quantity_token'] if selection['mode'] == 'browsing' else None,
+                                   **detail_options)
             if action in ('-','+'):
                 quantity += 1 if action == '+' else -1
                 if quantity < 1 or quantity > stock:
@@ -1535,11 +1554,11 @@ class CatalogPresenter:
                     self.callback_notice = plain(self.t(customer,'catalog.quantity.minimum' if quantity < 1 else 'catalog.quantity.maximum',stock=stock))
                     return None
             if action == 'tier':
-                product = self.repository.product(product_id)
                 quote = self._quote(product,quantity) if product else None
                 if not quote or not quote['next']:
                     return None
                 quantity = quote['next']['minimum_quantity']
             return self.detail(customer,product_id,state=state,quantity=max(1,quantity),navigation=selection.get('navigation'),
-                               quantity_token=selection['quantity_token'] if selection['mode'] == 'browsing' else None)
+                               quantity_token=selection['quantity_token'] if selection['mode'] == 'browsing' else None,
+                               **detail_options)
         return None

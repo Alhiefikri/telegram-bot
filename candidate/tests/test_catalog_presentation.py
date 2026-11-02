@@ -1,4 +1,5 @@
 import copy
+from collections import Counter
 from datetime import datetime, timedelta
 import unittest
 from zoneinfo import ZoneInfo
@@ -130,8 +131,12 @@ class MemoryCatalog(CatalogRepository):
         members = [row for row in self.products() if row['product_family_id'] == family_id]
         return dict(family, members=sorted(members, key=self.member_key)) if members else None
 
+    def category_options(self):
+        return {'categories': copy.deepcopy(self.category_rows),
+                'has_uncategorized': any(row['category_id'] is None for row in self.product_rows)}
+
     def categories(self):
-        return copy.deepcopy(self.category_rows)
+        return self.category_options()['categories']
 
     def category(self, identity):
         return next((row for row in self.category_rows if str(row['id']) == str(identity) or row['slug'] == identity),None)
@@ -145,15 +150,54 @@ class MemoryCatalog(CatalogRepository):
     def maintenance(self):
         return {'is_active':self.paused,'public_note':None}
 
+    def detail_flags(self):
+        return {'maintenance': self.maintenance(), 'spending_available': self.spending}
+
     def spending_available(self):
         return self.spending
 
     def asset(self, source_path, bot_scope='synthetic'):
         return self.assets.get((bot_scope,source_path))
 
-    def home_data(self, customer_id):
+    def home_data(self, customer_id, bot_scope='synthetic'):
         return dict(bot_users=17, successful_orders=9, idr_total=100000, usdt_total=1234567,
-                    balance=12500, channel_url='https://t.me/example', api_enabled=False, banner_path='banner.webp')
+                    balance=12500, channel_url='https://t.me/example', api_enabled=False,
+                    banner_path='banner.webp', banner_asset=self.assets.get((bot_scope,'banner.webp')),
+                    maintenance=self.maintenance())
+
+
+class CountingCatalog(MemoryCatalog):
+    def __init__(self):
+        super().__init__()
+        self.calls = Counter()
+
+    def product(self, product_id):
+        self.calls['product'] += 1
+        return super().product(product_id)
+
+    def family(self, family_id):
+        self.calls['family'] += 1
+        return super().family(family_id)
+
+    def products(self):
+        self.calls['products'] += 1
+        return super().products()
+
+    def category(self, identity):
+        self.calls['category'] += 1
+        return super().category(identity)
+
+    def category_options(self):
+        self.calls['category_options'] += 1
+        return super().category_options()
+
+    def detail_flags(self):
+        self.calls['detail_flags'] += 1
+        return super().detail_flags()
+
+    def home_data(self, customer_id, bot_scope='synthetic'):
+        self.calls['home_data'] += 1
+        return super().home_data(customer_id, bot_scope)
 
 
 def buttons(surface):
@@ -244,6 +288,39 @@ class CatalogPresentationTests(unittest.TestCase):
         selected = family.keyboard['inline_keyboard'][0][1]['callback_data']
         self.state['family']['page'] = 2
         self.assertIsNone(self.presenter.route(self.customer,selected,self.state))
+
+    def test_navigation_reuses_loaded_rows_instead_of_rescanning(self):
+        repository = self.repository = CountingCatalog()
+        self.presenter.repository = repository
+        self.repository.category_rows = [dict(id=7,name='Music & Audio',slug='music',description='')]
+        self.repository.product_rows[2]['category_id'] = 7
+        catalog = self.presenter.route(self.customer,'katalog',self.state)
+        family_callback = buttons(catalog)[0]['callback_data']
+        family = self.presenter.route(self.customer,family_callback,self.state)
+        select_callback = next(button['callback_data'] for button in buttons(family)
+                              if button.get('callback_data','').startswith('family:select:'))
+
+        repository.calls.clear()
+        detail = self.presenter.route(self.customer,select_callback,self.state)
+        self.assertEqual(repository.calls['family'], 1)
+        self.assertEqual(repository.calls['product'], 0)
+        self.assertIn('Premium', detail.caption)
+
+        increase = next(button['callback_data'] for button in buttons(detail) if ':qty:+:' in button.get('callback_data',''))
+        repository.calls.clear()
+        self.presenter.route(self.customer,increase,self.state)
+        self.assertEqual(repository.calls['product'], 1)
+        self.assertEqual(repository.calls['detail_flags'], 1)
+
+        repository.calls.clear()
+        self.presenter.route(self.customer,'catalog:categories',self.state)
+        self.assertEqual(repository.calls['category_options'], 1)
+        self.assertEqual(repository.calls['products'], 0)
+
+        repository.calls.clear()
+        self.presenter.home(self.customer)
+        self.assertEqual(repository.calls['home_data'], 1)
+        self.assertEqual(repository.calls['products'], 0)
 
     def test_quantity_uses_exact_tiers_rotates_payment_token_and_keeps_burst_token(self):
         self.repository.product_rows[2]['available_stock'] = 10

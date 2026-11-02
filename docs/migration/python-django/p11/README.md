@@ -56,6 +56,26 @@ single-sample local integration evidence, not a paired measurement. The measured
 declare both payment scenarios `not_implemented` for that run and no sample is
 pooled. #722 owns a new paired run; H1 still owns any payment-stage budget.
 
+The #721 follow-up profiles the measured navigation read path and removes
+round trips without changing presentation, authority or money/stock writes.
+Products now carry their active Family projection on the same row, targeted
+Product/Family/Back reads reuse that row, catalog browsing no longer loads the
+same Product or Family set twice, the category picker and Home each use one
+bounded statement, and detail/quantity reuse the Product and maintenance/spending
+flags already loaded. The processor reads a pending update and takes its chat
+advisory lock in one statement, checks earlier/later sequence in one statement,
+and verifies root ownership inside the root read/claim instead of a separate
+Customer SELECT. `CONN_MAX_AGE=60` plus `close_old_connections()` keeps the one
+admitted connection per HTTP/worker process while an expired connection is still
+returned. A chat-sequence index bounds the per-chat ordering checks. This is
+query/connection work, not a cache: PHP's projection cache has an observer-driven
+version bump that the read-only candidate cannot reproduce, so the candidate
+keeps live reads and the stock/price invalidation tradeoff stays explicit.
+Diagnostic before/after records (small P11 structural smoke and the P06 parity
+fixture) are in [verification.md](verification.md#p11-fix-721-navigation-profile).
+No sample is pooled with the measured #692 run and #722 still owns the paired
+rerun.
+
 ## How both sides produce comparable evidence
 
 - The dataset is built once per dataset by the existing PHP domain owners
@@ -213,3 +233,11 @@ remain owned by their existing P04/P06/P07/P08/P09/P10 modules and ADRs.
 - [Django `select_for_update`](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update):
   the same-key replay/race path uses real PostgreSQL Customer and Cart row locks;
   SQLite/TestCase cannot prove that boundary.
+- [Django persistent connections](https://docs.djangoproject.com/en/5.2/ref/databases/#persistent-connections):
+  `CONN_MAX_AGE=60` reuses the one admitted connection in a single-threaded
+  HTTP/worker process; `CONN_HEALTH_CHECKS=True` validates a reused connection,
+  and `close_old_connections()` after each worker task returns an expired or
+  unusable slot without adding a pool.
+- [PostgreSQL multicolumn indexes](https://www.postgresql.org/docs/16/indexes-multicolumn.html):
+  the B-tree on `navigation_updates (chat_id, update_id)` leads with the equality
+  column and then bounds the per-chat sequence range used by the processor.

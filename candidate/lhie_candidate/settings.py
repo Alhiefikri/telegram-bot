@@ -23,8 +23,11 @@ DATABASES = {
         "PASSWORD": "candidate-local-only",
         "HOST": "127.0.0.1",
         "PORT": "5432",
-        "CONN_MAX_AGE": 0,
-        "CONN_HEALTH_CHECKS": False,
+        # One process/thread owns at most one connection. Reuse it while the
+        # process is active instead of reconnecting on every Telegram update;
+        # close_old_connections() still returns the slot after the bounded age.
+        "CONN_MAX_AGE": 60,
+        "CONN_HEALTH_CHECKS": True,
         "ATOMIC_REQUESTS": False,
         "OPTIONS": {
             "connect_timeout": 2,

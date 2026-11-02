@@ -39,10 +39,14 @@ allocation. The supervisor holds no database or Redis connection.
 - Each loop runs a durable sweep first, then waits up to one second for an
   ID-only wakeup (`BRPOP`). Sweeps are bounded and repeat every 2 s
   (interaction), 5 s (payment) and 5 s (receipt).
-- A job runs under a 60 s process alarm. On timeout the connection is discarded;
-  durable state decides whether the unit is unknown, failed or retryable.
-- `SIGTERM`/`SIGINT` stop pickup, let the current job finish and close
-  connections. The supervisor waits 75 s, then terminates and finally kills.
+- A job runs under a 60 s process alarm. On timeout or handler failure the
+  connection is discarded; a successful job keeps its single admitted connection
+  for `CONN_MAX_AGE=60` and `close_old_connections()` returns it once expired or
+  unusable. Durable state decides whether the unit is unknown, failed or
+  retryable.
+- `SIGTERM`/`SIGINT` stop pickup and let the current job finish. The process exit
+  closes its connection; the supervisor waits 75 s, then terminates and finally
+  kills.
 - An unexpected child exit is restarted at most three times in 60 s. A fourth
   exit stops the whole supervised runtime instead of looping forever.
 - No PHP job payload is decoded. Wakeups are ASCII JSON with exactly
@@ -150,11 +154,12 @@ Consulted through Context7's public v2 context API on 2026-11-01:
   only fires after commit. The callback itself catches Redis errors, so a lost
   hint cannot suppress later callbacks or roll back a committed write.
 - `/websites/djangoproject_en/5.2`, query "CONN_MAX_AGE database connections
-  per thread close_all": each thread owns its connection, a long-lived worker
-  should close unusable connections after each task, and `CONN_MAX_AGE=0`
-  closes after each unit. The bounded consumer calls `connections.close_all()`
-  after every job and sweep, which also returns the connection slot to the
-  fixed role budget.
+  per thread close_all": each thread owns its connection and a long-lived worker
+  should close unusable connections after each task. The #721 follow-up keeps a
+  successful worker on one connection for `CONN_MAX_AGE=60` and calls
+  `close_old_connections()` after each job/sweep; timeout or handler failure
+  still calls `connections.close_all()` so aborted session state is discarded.
+  The four-slot role budget is unchanged.
 - `/websites/postgresql/16`, query "FOR UPDATE SKIP LOCKED concurrent queue":
   `SKIP LOCKED` is the documented option for queue-like tables; stale
   interaction resolution uses it behind a bound. Receipt and payment claims

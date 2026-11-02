@@ -300,7 +300,9 @@ TLS handshake and 1933.9 ms total for `getMe`. These are local-path diagnostics,
 not a PHP/Python comparison, device latency or a performance acceptance result.
 Artifacts are `.local/migration-p06/live-latency-diagnostic.json` and
 `relay-network-diagnostic.json`. A connection-reuse experiment was removed
-without deployment. Further transport tuning and fair comparison belong to P11
+without deployment; the later #721 P11-fix reintroduced bounded per-process
+connection reuse with the documented role budget (see P11). Further transport
+tuning and fair comparison belong to P11
 (#692), not completion of P06. Correctness/parity bugs remain in P06 scope.
 
 ## Context7 references

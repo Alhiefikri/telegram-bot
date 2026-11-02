@@ -81,7 +81,8 @@ class NavigationRoots:
         if self.connection.in_atomic_block or not self.connection.get_autocommit():
             raise RuntimeError('Navigation I/O cannot run inside a database transaction')
 
-    def _owner(self, customer, chat_id):
+    @staticmethod
+    def _identity(customer, chat_id):
         value = customer.get if isinstance(customer, dict) else lambda name: getattr(customer, name, None)
         customer_id, telegram_id = value('id'), value('telegram_id')
         chat_id = str(chat_id).strip()
@@ -89,19 +90,22 @@ class NavigationRoots:
             return None
         if telegram_id < 1 or str(telegram_id) != chat_id:
             return None
-        with self.connection.cursor() as cursor:
-            cursor.execute('SELECT id FROM public.customers WHERE id = %s AND telegram_id = %s',
-                           [customer_id, telegram_id])
-            return (customer_id, chat_id) if cursor.fetchone() else None
+        return customer_id, telegram_id, chat_id
 
     def current_for_chat(self, customer, chat_id):
-        owner = self._owner(customer, chat_id)
-        if owner is None:
+        identity = self._identity(customer, chat_id)
+        if identity is None:
             return None
+        customer_id, telegram_id, chat_id = identity
         with self.connection.cursor() as cursor:
-            cursor.execute(f'SELECT {self.COLUMNS} FROM {self.TABLE} '
-                           'WHERE bot_asset_scope = %s AND customer_id = %s AND chat_id = %s '
-                           'AND message_id IS NOT NULL', [self.bot_asset_scope, *owner])
+            # The customer join proves the exact Customer/Telegram/chat binding
+            # without a second ownership statement.
+            cursor.execute(
+                f'SELECT {", ".join("r." + name for name in Root.__dataclass_fields__)} '
+                f'FROM {self.TABLE} r JOIN public.customers c ON c.id = r.customer_id '
+                'WHERE c.id = %s AND c.telegram_id = %s AND r.bot_asset_scope = %s '
+                'AND r.chat_id = %s AND r.message_id IS NOT NULL',
+                [customer_id, telegram_id, self.bot_asset_scope, chat_id])
             row = cursor.fetchone()
         return Root(*row) if row else None
 
@@ -112,27 +116,33 @@ class NavigationRoots:
         return root if root and root.message_id == message_id else None
 
     def _claim(self, customer, chat_id, root=None, *, establish=False):
-        owner = self._owner(customer, chat_id)
-        if owner is None:
+        identity = self._identity(customer, chat_id)
+        if identity is None:
             return None
-        if root is not None and (root.customer_id != owner[0] or root.chat_id != owner[1]
+        customer_id, telegram_id, chat_id = identity
+        if root is not None and (root.customer_id != customer_id or root.chat_id != chat_id
                                  or root.bot_asset_scope != self.bot_asset_scope):
             return None
         token = uuid4()
         with transaction.atomic(using=self.using):
             with self.connection.cursor() as cursor:
                 if establish:
-                    cursor.execute(f'INSERT INTO {self.TABLE} (bot_asset_scope, customer_id, chat_id) '
-                                   'VALUES (%s, %s, %s) ON CONFLICT DO NOTHING',
-                                   [self.bot_asset_scope, *owner])
+                    cursor.execute(
+                        f'INSERT INTO {self.TABLE} (bot_asset_scope, customer_id, chat_id) '
+                        'SELECT %s, c.id, %s FROM public.customers c '
+                        'WHERE c.id = %s AND c.telegram_id = %s ON CONFLICT DO NOTHING',
+                        [self.bot_asset_scope, chat_id, customer_id, telegram_id])
                 predicates = ''
-                params = [token, self.LEASE_SECONDS, self.bot_asset_scope, *owner]
+                params = [token, self.LEASE_SECONDS, self.bot_asset_scope, customer_id, chat_id,
+                          customer_id, telegram_id]
                 if root is not None:
                     predicates = ' AND generation = %s AND message_id = %s'
                     params += [root.generation, root.message_id]
                 cursor.execute(f'UPDATE {self.TABLE} SET generation = generation + 1, render_token = %s, '
                                "lease_expires_at = clock_timestamp() + %s * interval '1 second' "
                                'WHERE bot_asset_scope = %s AND customer_id = %s AND chat_id = %s '
+                               'AND EXISTS (SELECT 1 FROM public.customers c '
+                               'WHERE c.id = %s AND c.telegram_id = %s) '
                                'AND (render_token IS NULL OR lease_expires_at <= clock_timestamp())'
                                f'{predicates} RETURNING {self.COLUMNS}', params)
                 row = cursor.fetchone()

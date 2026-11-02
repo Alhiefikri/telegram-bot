@@ -3,7 +3,38 @@ from datetime import datetime
 import json
 import os
 import re
+import time
 from zoneinfo import ZoneInfo
+
+
+def _profile(function):
+    """Measure one render through the same request-boundary connection rules."""
+    from django.db import close_old_connections, connection
+    close_old_connections()
+    reused = connection.connection is not None
+    queries = 0
+    database_ns = 0
+
+    def wrapper(execute, sql, params, many, context):
+        nonlocal queries, database_ns
+        queries += 1
+        started = time.monotonic_ns()
+        try:
+            return execute(sql, params, many, context)
+        finally:
+            database_ns += time.monotonic_ns() - started
+
+    started = time.monotonic_ns()
+    with connection.execute_wrapper(wrapper):
+        result = function()
+    elapsed_ns = time.monotonic_ns() - started
+    return result, {
+        'queries': queries,
+        'db_ms': round(database_ns / 1_000_000, 3),
+        'elapsed_ms': round(elapsed_ns / 1_000_000, 3),
+        'connection_reused': reused,
+        'connection_opened': not reused and connection.connection is not None,
+    }
 
 
 def canonical(value):
@@ -81,11 +112,16 @@ def run():
         clock=lambda: datetime(2026,11,1,10,0,tzinfo=ZoneInfo('Asia/Jakarta')))
     customer = repository.customer(1)
     state = {}
-    surfaces = {'home': presenter.home(customer), 'catalog': presenter.catalog(customer,state=state),
-        'family': presenter.family(customer,reference['family_id'],state=state),
-        'detail': presenter.detail(customer,reference['product_id'],state=state),
-        'orders': presenter.orders(customer), 'balance': presenter.balance(customer),
-        'balance_activity': presenter.balance_activity(customer)}
+    surfaces, profile = {}, {}
+    screens = {'home': lambda: presenter.home(customer),
+        'catalog': lambda: presenter.catalog(customer,state=state),
+        'family': lambda: presenter.family(customer,reference['family_id'],state=state),
+        'detail': lambda: presenter.detail(customer,reference['product_id'],state=state),
+        'orders': lambda: presenter.orders(customer),
+        'balance': lambda: presenter.balance(customer),
+        'balance_activity': lambda: presenter.balance_activity(customer)}
+    for name, render in screens.items():
+        surfaces[name], profile[name] = _profile(render)
     for name,surface in surfaces.items():
         actual = canonical({'caption':surface.caption,'keyboard':surface.keyboard,'options':surface.options})
         expected = canonical(reference['expected'][name])
@@ -170,28 +206,31 @@ def run():
         return {'update_id':update,'callback_query':{'id':str(update),'from':{'id':actor},
             'data':data,'message':{'message_id':message_id or roots.current_for_chat(customer,'1').message_id,
             'chat':{'id':1,'type':'private'}}}}
-    def click(update,data):
+    def click(update,data,*,profile_name=None):
         receive(callback(update,data))
-        assert processor.process(update) in ('applied','replaced')
+        outcome, measured = _profile(lambda: processor.process(update))
+        assert outcome in ('applied','replaced')
+        if profile_name:
+            profile[profile_name] = measured
     def session():
         with connection.cursor() as cursor:
             cursor.execute('SELECT state FROM django_candidate.navigation_sessions WHERE customer_id=%s',[customer['id']])
             stored = cursor.fetchone()[0]
         return json.loads(stored) if isinstance(stored,str) else stored
-    click(101,'katalog')
+    click(101,'katalog',profile_name='route_catalog')
     state = session()
     # Use the actual persisted catalog's signed token, not a freshly rendered token.
     origin = state['catalog']['token']
     family = 'family:options:' + presenter._signed(reference['family_id'],1,1) + ':o' + origin
-    click(102,family)
+    click(102,family,profile_name='route_family')
     select = 'family:select:' + presenter._signed(reference['family_id'],reference['product_id'],1,1)
-    click(103,select)
+    click(103,select,profile_name='route_detail')
     selection = session()['selection']
-    click(104,f"detail:qty:+:{reference['product_id']}:{selection['quantity_token']}")
+    click(104,f"detail:qty:+:{reference['product_id']}:{selection['quantity_token']}",profile_name='route_quantity')
     selection = session()['selection']
     assert selection['quantity'] == 2
-    click(105,f"detail:back:{reference['product_id']}:{selection['interaction_token']}")
-    click(106,'family:back:menu')
+    click(105,f"detail:back:{reference['product_id']}:{selection['interaction_token']}",profile_name='route_back')
+    click(106,'family:back:menu',profile_name='route_home')
     receive(callback(107,'katalog',message_id=999999))
     assert processor.process(107) == 'stale'
     receive(callback(108,'katalog',actor=2))
@@ -251,7 +290,8 @@ def run():
         'duplicate_stale_foreign_burst':'passed','webhook_authentication':'passed',
         'registration':'exact_telegram_identity_replay_passed',
         'bounded_consumer_command':'navigate.py --once rendered accepted Home',
-        'transport':'P01 fake relay only','live_testing_bot_qa':'not_run_requires_attested_target',**protocol}
+        'transport':'P01 fake relay only','live_testing_bot_qa':'not_run_requires_attested_target',
+        'profile':profile,**protocol}
 
 
 if __name__ == '__main__':
