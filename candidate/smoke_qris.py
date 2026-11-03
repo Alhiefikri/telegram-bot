@@ -43,6 +43,9 @@ def run():
     from tests.test_checkout_postgres import admin_connection
 
     fixtures = json.load(sys.stdin)
+    integrated = os.environ.get('P08_INTEGRATED_SMOKE') == '1'
+    if integrated:
+        fixtures['duplicate'] = fixtures['receipt_lost']
     admin = admin_connection()
     sandbox = Sandbox()
     callback = CallbackProbe()
@@ -51,6 +54,11 @@ def run():
     lifecycle = SakurupiahLifecycle(adapter, cipher)
     checkout = CheckoutService(preparation=SakurupiahPreparation(adapter))
     db = Database()
+    if integrated:
+        from lhie_candidate.workers.payment import PaymentHandler
+        from lhie_candidate.workers.receipt import ReceiptHandler
+        from lhie_candidate.workers.wakeup import encode
+        payment_worker = PaymentHandler(lifecycle, db)
     args = {'phone': '08000000000', 'callback_url': 'https://synthetic.invalid/callback/sakurupiah',
             'return_url': 'https://synthetic.invalid/return'}
 
@@ -62,7 +70,8 @@ def run():
         duplicate = checkout.checkout(request)
         assert duplicate.replayed and (duplicate.order_id, duplicate.payment_id, duplicate.invoice_number) == (
             result.order_id, result.payment_id, result.invoice_number)
-        assert (result.order_status, result.payment_status, result.amount) == ('pending_payment', 'pending', 15000)
+        expected_amount = 30000 if integrated and name == 'duplicate' else 15000
+        assert (result.order_status, result.payment_status, result.amount) == ('pending_payment', 'pending', expected_amount)
         return fixture, result
 
     def payment(payment_id):
@@ -99,32 +108,109 @@ def run():
         created = lifecycle.create(result.payment_id, **args)
         assert created.state == 'created' and created.presentation
         snapshot = payment(result.payment_id)
-        assert snapshot[0] and snapshot[1] and snapshot[2:4] == (15000, 0)
+        assert snapshot[0] and snapshot[1] and snapshot[2:4] == (30000 if integrated else 15000, 0)
         assert snapshot[4] and snapshot[5:] == ('created', 'pending')
         assert lifecycle.create(result.payment_id, **args).presentation == created.presentation
         assert payment(result.payment_id) == snapshot
         assert sum(path.endswith('/create.php') for path, _ in sandbox.calls) == 1
-        assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 1, 1, 0, 0)
+        assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 2 if integrated else 1, 2 if integrated else 1, 0, 0)
         ref, trx = snapshot[:2]
         assert callback.send(event(ref, trx), valid=False) == 403
+        if integrated:
+            try:
+                oversized = callback.send({**event(ref, trx), 'padding': 'x' * 16384})
+            except ConnectionResetError:
+                oversized = None
+            assert oversized in (403, None)
         assert admin.execute('SELECT count(*) FROM public.payment_events WHERE merchant_ref=%s', (ref,)).fetchone() == (0,)
         assert callback.send(event(ref, trx + '-mismatch')) == 200
         assert lifecycle.consume_callbacks(result.payment_id).state == 'created'
-        assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 1, 1, 0, 0)
+        assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 2 if integrated else 1, 2 if integrated else 1, 0, 0)
         assert callback.send(event(ref, trx)) == 200
         assert callback.send(event(ref, trx)) == 200
         assert admin.execute('SELECT received_count FROM public.payment_events WHERE merchant_ref=%s AND provider_reference=%s',
                              (ref, trx)).fetchone() == (2,)
-        assert lifecycle.consume_callbacks(result.payment_id).state == 'created'
-        assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 1, 1, 0, 0)
+        if integrated:
+            event_id = admin.execute('''SELECT id FROM public.payment_events
+                WHERE merchant_ref=%s AND provider_reference=%s''', (ref, trx)).fetchone()[0]
+            assert payment_worker.handle(encode('payment.event', event_id)) == 'created'
+            assert callback.send(event(ref, trx, 'pending', 0)) == 200
+        else:
+            assert lifecycle.consume_callbacks(result.payment_id).state == 'created'
+        assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 2 if integrated else 1, 2 if integrated else 1, 0, 0)
         sandbox.rows[ref]['status'] = 'berhasil'
-        assert lifecycle.consume_callbacks(result.payment_id).state == 'paid'
-        assert lifecycle.consume_callbacks(result.payment_id).state == 'paid'
-        assert economics(fixture, result) == ('completed', 'paid', 'paid', 3, 0, 1, 1, 1)
+        if integrated:
+            sandbox.rows[ref]['total'] = '30001'
+            assert payment_worker.handle(encode('payment.event', event_id)) == 'recovery_unconfirmed'
+            assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 2, 2, 0, 0)
+            sandbox.rows[ref]['total'] = '30000'
+            sandbox.rows[ref]['amount'] = '29999'
+            assert payment_worker.handle(encode('payment.event', event_id)) == 'recovery_unconfirmed'
+            sandbox.rows[ref]['amount'] = '30000'
+            sandbox.rows[ref]['payment_kode'] = 'QRIS2'
+            assert payment_worker.handle(encode('payment.event', event_id)) == 'recovery_unconfirmed'
+            sandbox.rows[ref]['payment_kode'] = 'QRIS'
+            from unittest.mock import patch
+            with patch.object(sandbox, 'post', side_effect=TimeoutError):
+                assert payment_worker.handle(encode('payment.event', event_id)) == 'recovery_unconfirmed'
+            assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 2, 2, 0, 0)
+        if integrated:
+            from lhie_candidate.workers.consumer import BoundedConsumer
+            from lhie_candidate.workers.metrics import WorkerMetrics
+            observed_calls = len(sandbox.calls)
+            consumer = BoundedConsumer(payment_worker.spec, payment_worker, WorkerMetrics('payment'))
+            consumer.run(max_iterations=1)
+            paths = [path for path, _ in sandbox.calls[observed_calls:]]
+            assert any(path.endswith('/status-transaction.php') for path in paths)
+            assert any(path.endswith('/transaction.php') for path in paths)
+            assert payment(result.payment_id)[-1] == 'paid'
+            assert payment_worker.handle(encode('payment.event', event_id)) == 'paid'
+        else:
+            assert lifecycle.consume_callbacks(result.payment_id).state == 'paid'
+            assert lifecycle.consume_callbacks(result.payment_id).state == 'paid'
+        assert economics(fixture, result) == ('completed', 'paid', 'paid', 2 if integrated else 3, 0, 2 if integrated else 1, 1, 1)
         receipt = admin.execute('''SELECT canonical_key,provider,reference,status,target_type,target_id,amount_units
             FROM public.external_money_receipts WHERE target_id=%s''', (result.payment_id,)).fetchone()
         assert receipt == ('v1|provider_reference|sakurupiah|default|' + trx, 'sakurupiah', trx,
-                           'claimed', 'order_payment', result.payment_id, '15000')
+                           'claimed', 'order_payment', result.payment_id, '30000' if integrated else '15000')
+        if integrated:
+            from lhie_candidate.receipt.runtime import receipt_service
+            from lhie_candidate.receipt.transport import ReceiptResult
+
+            class SyntheticTelegram:
+                def __init__(self, unknown=False):
+                    self.methods = []
+                    self.credential_seen = False
+                    self.unknown = unknown
+
+                def execute(self, method, payload):
+                    self.methods.append(method)
+                    content = payload.get('document', b'')
+                    if isinstance(content, bytes):
+                        self.credential_seen |= b'Synthetic P07 receipt-lost-ack credential' in content
+                    self.credential_seen |= 'Synthetic P07 receipt-lost-ack credential' in payload.get('text', '')
+                    return ReceiptResult(None, 'ambiguous') if self.unknown else ReceiptResult(2000 + len(self.methods), 'success')
+
+            service = receipt_service()
+            transport = SyntheticTelegram()
+            service.transport = transport
+            receipt_worker = ReceiptHandler(service)
+            receipt_consumer = BoundedConsumer(receipt_worker.spec, receipt_worker, WorkerMetrics('receipt'))
+            receipt_consumer.run(max_iterations=1)
+            group = admin.execute('''SELECT id,sequence,state,outcome_metadata->>'contains_credentials',telegram_method,sent_at
+                FROM public.telegram_outbound_effects WHERE source_id=%s AND effect_type='receipt.credentials'
+                ORDER BY sequence''', (str(result.order_id),)).fetchall()
+            assert len(group) >= 2 and sum(row[3] == 'true' for row in group) == 1
+            assert all(row[2] == 'sent' for row in group)
+            assert all(row[5] is not None for row in group)
+            assert [row[5] for row in group] == sorted(row[5] for row in group)
+            assert transport.methods[:len(group)] == [row[4] for row in group]
+            assert transport.credential_seen
+            assert admin.execute('SELECT telegram_receipt_sent_at IS NOT NULL FROM public.orders WHERE id=%s',
+                                 (result.order_id,)).fetchone() == (True,)
+            assert receipt_worker.handle(encode('effect', group[-1][0])) == 'not_ready'
+            assert admin.execute('SELECT count(*) FROM public.payments WHERE order_id=%s',
+                                 (result.order_id,)).fetchone() == (1,)
 
         ambiguous_fixture, ambiguous = begin('stale')
         sandbox.ambiguous = True
@@ -165,6 +251,60 @@ def run():
         sandbox.rows[missing_ref]['status'] = 'berhasil'
         assert lifecycle.refresh(missing.payment_id).state == 'paid'
         assert economics(missing_fixture, missing) == ('completed', 'paid', 'paid', 3, 0, 1, 1, 1)
+        if integrated:
+            lost_transport = SyntheticTelegram(unknown=True)
+            service.transport = lost_transport
+            lost = receipt_worker.handle(encode('order', missing.order_id))
+            assert lost and lost['state'] != 'failed'
+            assert receipt_worker.handle(encode('effect', lost['id'])) == 'unknown'
+            assert receipt_worker.handle(encode('effect', lost['id'])) == 'not_ready'
+            receipt_worker.sweep(50)
+            assert len(lost_transport.methods) == 1
+            assert admin.execute('SELECT state FROM public.telegram_outbound_effects WHERE id=%s',
+                                 (lost['id'],)).fetchone() == ('unknown',)
+            candidates = []
+            for name in ('restore', 'foreign'):
+                pending_fixture, pending = begin(name)
+                assert lifecycle.create(pending.payment_id, **args).state == 'created'
+                pending_ref, pending_trx = payment(pending.payment_id)[:2]
+                candidates.append((str(pending.payment_id), pending_fixture, pending, pending_ref, pending_trx))
+            candidates.sort(key=lambda item: item[0])
+            _, earlier_fixture, earlier, earlier_ref, earlier_trx = candidates[0]
+            _, late_fixture, late, late_ref, late_trx = candidates[1]
+            with transaction.atomic():
+                InventoryLedger().release(late.order_id)
+                db.execute("UPDATE public.payments SET status='expired' WHERE id=%s", (late.payment_id,))
+                db.execute("UPDATE public.orders SET order_status='expired',payment_status='expired' WHERE id=%s", (late.order_id,))
+            sandbox.rows[late_ref]['status'] = 'berhasil'
+            assert callback.send(event(earlier_ref, earlier_trx)) == 200
+            assert callback.send(event(late_ref, late_trx)) == 200
+            for _ in range(3):
+                assert payment_worker.sweep(1)['failures'] == 0
+            assert economics(earlier_fixture, earlier) == ('pending_payment', 'pending', 'pending', 4, 1, 1, 0, 0)
+            assert economics(late_fixture, late) == ('expired', 'expired', 'expired', 4, 0, 0, 1, 1)
+            assert admin.execute("SELECT count(*) FROM public.manual_fulfillment_reviews WHERE payment_id=%s AND reason='late_payment'",
+                                 (late.payment_id,)).fetchone() == (1,)
+            assert admin.execute("SELECT count(*) FROM public.telegram_outbound_effects WHERE source_id=%s",
+                                 (str(late.order_id),)).fetchone() == (0,)
+            assert admin.execute('''SELECT processed_at IS NULL FROM public.payment_events
+                WHERE merchant_ref=%s AND provider_reference=%s''', (earlier_ref, earlier_trx)).fetchone() == (True,)
+            recovery_refs = []
+            for name in ('retry_success', 'retry_exhausted'):
+                recovery_fixture, recovery = begin(name)
+                assert lifecycle.create(recovery.payment_id, **args).state == 'created'
+                recovery_refs.append(payment(recovery.payment_id)[1])
+                admin.execute("""UPDATE public.payments SET provider_create_state='outcome_unknown',
+                    provider_create_attempted_at=CURRENT_TIMESTAMP - INTERVAL '2 minutes' WHERE id=%s""",
+                    (recovery.payment_id,))
+                assert economics(recovery_fixture, recovery) == ('pending_payment', 'pending', 'pending', 4, 1, 1, 0, 0)
+            calls_before = len(sandbox.calls)
+            for _ in range(3):
+                assert payment_worker.sweep(1)['failures'] == 0
+            recovery_calls = sandbox.calls[calls_before:]
+            observed_refs = {fields['trx_id'] for path, fields in recovery_calls
+                             if path.endswith('/status-transaction.php')}
+            assert set(recovery_refs) <= observed_refs
+            assert not any(path.endswith('/create.php') for path, _ in recovery_calls)
 
         race_fixture, race = begin('release')
         assert lifecycle.create(race.payment_id, **args).state == 'created'
@@ -228,9 +368,12 @@ def run():
         return {'status': 'passed', 'dataset': 'synthetic-p08-qris',
                 'scope': ['P07 checkout and idempotent invoice snapshot', 'ambiguous create fails closed',
                           'authenticated callback replay and identity mismatch', 'provider-confirmed settlement and receipt',
-                          'PostgreSQL lock contention, terminal release and late-payment review'],
+                          'PostgreSQL lock contention, terminal release and late-payment review']
+                         + (['Payment and receipt bounded consumers, ordered synthetic credential delivery',
+                             'history total mismatch, unknown delivery and bounded lost-wakeup fairness'] if integrated else []),
                 'limits': ['Synthetic Unix HTTP only; no production credentials or network targets',
-                           'Callback signature uses synthetic HMAC; no live provider certification']}
+                           'Callback signature uses synthetic HMAC; no live provider certification',
+                           'Worker handlers invoked in-process; no long-lived worker scheduling claim']}
     finally:
         callback.close()
         sandbox.close()
@@ -244,8 +387,11 @@ if __name__ == '__main__':
     except Exception as error:
         from pathlib import Path
         import traceback
+        sys.tracebacklimit = 100
         diagnostic = Path('/evidence/probe-failure.txt')
         diagnostic.write_text(traceback.format_exc())
         diagnostic.chmod(0o600)
-        print(json.dumps({'status': 'failed', 'error_type': type(error).__name__}), file=sys.stderr)
+        frames = traceback.extract_tb(error.__traceback__)
+        location = {'file': frames[-1].filename.rsplit('/', 1)[-1], 'line': frames[-1].lineno} if frames else {}
+        print(json.dumps({'status': 'failed', 'error_type': type(error).__name__, **location}), file=sys.stderr)
         raise SystemExit(1)

@@ -67,8 +67,12 @@ allocation. The supervisor holds no database or Redis connection.
   processing rows fence later same-chat updates. Bounded sweeps skip blocked
   chats; an abandoned processing row becomes `unknown`, never blindly replayed.
 - Payment also discovers unprocessed callback hints and recoverable ambiguous
-  creates from PostgreSQL. Recovery observes authoritative provider history;
-  it never creates another invoice or settles from a callback alone.
+  creates from PostgreSQL. Terminal unpaid Payments remain eligible for
+  authoritative late-payment review even if a Redis wakeup is lost. Bounded
+  hint and recovery pages rotate by Payment ID after each attempted operation,
+  wrapping at the end so unresolved earlier Payments cannot permanently block
+  later ones. Recovery observes authoritative provider history; it never creates
+  another invoice or settles from a callback alone.
 - Receipt: the bounded sweep repairs the sent projection, expires stale leases
   to `unknown`, discovers paid orders and failed photo fallbacks, and processes
   due ordered effects directly from PostgreSQL even when Redis is absent. An
@@ -196,3 +200,90 @@ expired-lease and no-resend assertions are recorded in
 apart from RSS and container limits; a limit is a ceiling, never actual usage.
 Later runs can vary; the JSON and its source/image/manifest identity are the
 authoritative record, not this summary.
+
+## Callback-to-receipt follow-up (#726)
+
+On 2026-11-03, `python3 tools/migration_harness/smoke_qris.py --integrated`
+passed in a fresh, randomly named P01 disposable namespace. It used synthetic
+identities, a real isolated PostgreSQL database, Python 3.13.18 / Django 5.2.18
+and the existing fake provider and Telegram transports. The command resets only
+its own new namespace; it does not reset prior P08/P09/P10 volumes or
+single-attempt markers.
+
+The probe sent signed bytes through the actual bounded HMAC callback handler and
+the existing Django inbox, then ran the payment and receipt `BoundedConsumer`
+loops. The boundary-to-view forwarding is substituted in process with Django's
+`RequestFactory`; the provider is a synthetic Unix-socket HTTP server and
+Telegram is an in-process fake. The workers run in the probe process, not as
+independently supervised daemons. This proves the exercised local chain, not
+internet callback delivery, Telegram delivery, or long-lived scheduling.
+
+The successful case observed one Payment, one external receipt claim, inventory
+sale, and one credential-bearing effect within an ordered receipt group; all
+group effects were sent to the fake transport in sequence. A success hint while
+the provider was still pending did not settle. The payment consumer observed
+both status and history before the paid transition; the receipt consumer
+discovered and delivered the group. Repeated success and an out-of-order pending
+hint did not produce a second Payment or credential effect.
+
+Invalid HMAC and oversized bodies did not enter the inbox. Mismatched callback
+reference, history channel, amount or supplied total, and a status timeout did
+not settle or sell stock. Ambiguous invoice creation remained unresolved after
+one create. A simulated ambiguous Telegram result remained `unknown` through a
+receipt sweep and was not resent. A terminal expired Payment's authenticated
+hint was discovered by a bounded sweep behind an earlier unresolved hint; its
+confirmed money was claimed for `late_payment` review without fulfillment or
+receipt effects. The same run exercised the existing PostgreSQL lock-contention
+late-payment and receipt-conflict scenarios.
+
+The local proof found two gaps: terminal unpaid Payments were excluded from
+lost-wakeup hint sweeps, and fixed first-page selection could starve later hints.
+The worker now includes terminal unpaid Payments and rotates bounded pages for
+both hint and ambiguous-create recovery. A history `total`, when supplied, must
+also match the committed provider total; omitted history totals remain allowed.
+These changes do not alter rail selection or authorize a callback as money.
+
+Focused command, 34 tests passed:
+
+```sh
+cd candidate
+.venv/bin/python -m unittest tests.test_sakurupiah_adapter tests.test_payment_sweep_timeout tests.test_workers tests.test_p08_callback
+```
+
+The passing smoke's sanitized record is
+`.local/migration-726-10fe6c8738964d538b1fe4495ab19736/verification.json`.
+Its base revision was `94c3d74e7628d7df3f82038e9c09383cde8ea933` with the
+following exercised working-tree source SHA-256 values:
+
+| Source | SHA-256 |
+| --- | --- |
+| `candidate/lhie_candidate/payments/sakurupiah.py` | `df270f589ace0e3ce48d980e30f82b7866bb005813f8d14b7286a1db7852d641` |
+| `candidate/lhie_candidate/workers/payment.py` | `ddf52fa02c68a21c445ce4bd294001ecece1b35c085e5b9f11e419dc2144d4c6` |
+| `candidate/smoke_qris.py` | `1ecd932316ac1b767ba10fa70b6b98ca7c6333b48abd925f8c4dc6fb7f58bc5b` |
+| `tools/migration_harness/smoke_qris.py` | `928886a413135b470a0d9e65fcdbdea2de4d82c0fa7f099f1b5514af172cc645` |
+| `tools/migration_harness/boundary.py` | `21daac1ea63bc4191dd381c4101f7ea63c27b34b58885aede80e1d1cd60e802c` |
+| `candidate/p08_callback_probe.py` | `4a3265e37e0a805db893a3aa1ca31385d67b4aa7c1b00083370e695f1c2b8628` |
+
+The candidate image was
+`sha256:5e2c9e4e801e0fa6baf26331a9c600752b6d4ccc6cf9ec3d611dbe4eaca8f652`.
+Context7 `/websites/djangoproject_en/5.2`, queried for
+`transaction.on_commit` and rollback, confirms that the wakeup runs after the
+outermost successful transaction and is discarded on rollback; see
+[Django's transaction documentation](https://docs.djangoproject.com/en/5.2/topics/db/transactions/#performing-actions-after-commit).
+
+**External evidence remains inconclusive.** The historical [#689 P08
+observation](../p05/README.md#qualification-and-limits) received an authenticated
+provider callback on an earlier revision and consumed it manually; it is not
+evidence for this changed revision. In the later [interactive Testing Bot
+run](../p11/verification.md#testing-bot-checkout-and-synthetic-receipt), the
+polling session and webhook restoration preceded success consumption; an
+explicit status/history check settled the Payment and the owner saw synthetic
+credentials. No callback was observed in that run. A separate QR/button retest
+did not independently check payment status.
+
+No new external test was approved or performed for #726. Any gate requiring a
+current-revision live callback remains blocked. A future attempt requires new
+owner approval for the exact bot/chat, callback and return URLs, amount,
+one-invoice cap, webhook restoration, receipt scope and stop conditions. It
+must not retry an ambiguous create or delivery, reset retained markers or
+volumes, or request a real payment.

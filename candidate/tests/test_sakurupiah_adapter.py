@@ -104,7 +104,8 @@ class SakurupiahAdapterTests(TestCase):
                          OutcomeState.UNKNOWN)
 
     def test_mismatched_or_ambiguous_history_is_unknown(self):
-        for rows in ([self.history(amount="9999")], [self.history(), self.history()], []):
+        for rows in ([self.history(amount="9999")], [self.history(total="9999")],
+                     [self.history(), self.history()], []):
             with self.subTest(rows=rows):
                 adapter, _ = self.adapter([envelope(*rows)])
                 self.assertEqual(adapter.recover(self.identity, provider_total=10070).state, OutcomeState.UNKNOWN)

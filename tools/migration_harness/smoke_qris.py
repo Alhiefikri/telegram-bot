@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+from uuid import uuid4
 
 import harness
 from smoke import container, docker
@@ -14,9 +15,9 @@ from smoke_checkout import ROOT, php
 
 def cli(*args):
     entry = ("import sys; from pathlib import Path; import harness; "
-             "harness.STATE=Path(sys.argv[1]); harness.PREFIX='lhie-p08-'; "
-             "sys.argv=[harness.__file__,*sys.argv[2:]]; harness.main()")
-    result = subprocess.run([sys.executable, '-c', entry, str(harness.STATE), *args],
+             "harness.STATE=Path(sys.argv[1]); harness.PREFIX=sys.argv[2]; "
+             "sys.argv=[harness.__file__,*sys.argv[3:]]; harness.main()")
+    result = subprocess.run([sys.executable, '-c', entry, str(harness.STATE), harness.PREFIX, *args],
         cwd=ROOT / 'tools/migration_harness', capture_output=True, text=True, timeout=180)
     if result.returncode:
         raise RuntimeError('P08 disposable lifecycle command failed: ' + ' '.join(args))
@@ -24,9 +25,13 @@ def cli(*args):
 
 
 def main():
+    integrated = sys.argv[1:] == ['--integrated']
+    if sys.argv[1:] not in ([], ['--integrated']):
+        raise ValueError('Usage: smoke_qris.py [--integrated]')
     os.umask(0o077)
-    harness.STATE = ROOT / '.local/migration-p08/lifecycle'
-    harness.PREFIX = 'lhie-p08-'
+    namespace = 'migration-726-' + uuid4().hex if integrated else 'migration-p08'
+    harness.STATE = ROOT / '.local' / namespace / 'lifecycle'
+    harness.PREFIX = 'lhie-726-' + namespace[-12:] + '-' if integrated else 'lhie-p08-'
     directory = harness.STATE / 'candidate'
     if not (directory / 'config.json').exists():
         cli('init', 'candidate')
@@ -35,9 +40,10 @@ def main():
         raise RuntimeError('P08 requires default synthetic fake configuration')
     if docker('ps', '-q', '--filter', 'label=lhie.p01=disposable'):
         raise RuntimeError('Stop existing disposable stack before P08')
-    output = ROOT / '.local/migration-p08'
+    output = ROOT / '.local' / namespace
     output.mkdir(parents=True, exist_ok=True)
-    cli('reset', 'candidate')
+    if not integrated:
+        cli('reset', 'candidate')
     harness.candidate_admission(config, directory)
     try:
         manifest = cli('start', 'candidate', '--quarantine')
@@ -50,7 +56,17 @@ def main():
             for name in ('schema.sql', 'ingress_schema.sql', 'assets_schema.sql', 'grants.sql'))
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/checkout/grants.sql').read_text()
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
+        if integrated:
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
         docker('exec', database, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'harness', '-d', 'disposable', '-c', schema)
+        oracle_key = directory / 'receipt-oracle-key'
+        if integrated:
+            docker('exec', database, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'harness', '-d', 'disposable', '-c',
+                   "UPDATE public.orders SET telegram_receipt_sent_at=now() "
+                   "WHERE customer_id IN (SELECT id FROM public.customers WHERE telegram_id=700001) "
+                   "AND payment_status='paid'")
+            oracle_key.write_text('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n')
+            oracle_key.chmod(0o600)
         command = ['docker', 'run', '--rm', '-i', '--network', 'container:' + boundary,
             '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
             '--user', '1000:1000', '--cpus', '1.25', '--memory', '1216m', '--memory-swap', '1216m',
@@ -60,13 +76,15 @@ def main():
             '--mount', f'type=bind,src={directory / "candidate.json"},dst=/run/harness/candidate.json,readonly',
             '--mount', f'type=bind,src={directory / "django-key"},dst=/run/harness/django-key,readonly',
             '--mount', f'type=bind,src={output},dst=/evidence',
+            *(['--mount', f'type=bind,src={oracle_key},dst=/run/harness/app-key,readonly'] if integrated else []),
             '--env', 'P07_CHECKOUT_SMOKE=disposable-local-only',
-            '--env', 'P08_QRIS_SMOKE=disposable-local-only', '--entrypoint', 'python',
-            'lhie-p05-candidate:1', 'smoke_qris.py']
+            '--env', 'P08_QRIS_SMOKE=disposable-local-only',
+            '--env', f'P08_INTEGRATED_SMOKE={"1" if integrated else "0"}', '--entrypoint', 'python',
+            'lhie-p09-candidate:local' if integrated else 'lhie-p05-candidate:1', 'smoke_qris.py']
         probe = subprocess.run(command, input=json.dumps(fixtures), capture_output=True, text=True, timeout=180)
         if probe.returncode:
             (output / 'probe-failure.stderr').write_text(probe.stderr)
-            raise RuntimeError('P08 probe failed; private diagnostics in .local/migration-p08')
+            raise RuntimeError(f'P08 probe failed; private diagnostics in {output.relative_to(ROOT)}')
         observed = json.loads(probe.stdout)
         assert observed['status'] == 'passed'
         observed['harness_manifest'] = str(Path(manifest).relative_to(ROOT))

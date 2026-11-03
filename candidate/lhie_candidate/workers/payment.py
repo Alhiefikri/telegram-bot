@@ -22,6 +22,7 @@ class PaymentHandler:
         self.processor = processor
         self.spec = queue_spec("payment")
         self._sweep_start = 0
+        self._payment_cursors = {"hints": None, "ambiguous": None}
 
     def _payment_for_event(self, event_id):
         rows = self.db.rows(
@@ -47,19 +48,30 @@ class PaymentHandler:
             return "ignored"
         return self.lifecycle.consume_callbacks(payment_id).state
 
-    def _pending_hint_payments(self, limit):
+    def _payment_page(self, key, query, params, limit):
+        cursor = self._payment_cursors[key]
+        if cursor is not None:
+            rows = self.db.rows(query + " AND p.id > %s ORDER BY p.id LIMIT %s",
+                                (*params, cursor, limit))
+            if rows:
+                return [row["id"] for row in rows]
+            self._payment_cursors[key] = None
         return [row["id"] for row in self.db.rows(
+            query + " ORDER BY p.id LIMIT %s", (*params, limit))]
+
+    def _pending_hint_payments(self, limit):
+        return self._payment_page(
+            "hints",
             """SELECT DISTINCT p.id FROM public.payment_events e
                JOIN public.payments p ON p.merchant_ref=e.merchant_ref
                  AND p.provider_reference=e.provider_reference
                WHERE e.provider='sakurupiah' AND e.event_type='callback'
-                 AND e.processed_at IS NULL AND p.provider='sakurupiah' AND p.status='pending'
-               ORDER BY p.id LIMIT %s""",
-            (limit,),
-        )]
+                 AND e.processed_at IS NULL AND p.provider='sakurupiah'
+                 AND p.status NOT IN ('paid', 'refunded')""", (), limit)
 
     def _ambiguous_payments(self, limit):
-        return [row["id"] for row in self.db.rows(
+        return self._payment_page(
+            "ambiguous",
             """SELECT p.id FROM public.payments p JOIN public.orders o ON o.id=p.order_id
                WHERE p.provider='sakurupiah' AND p.status='pending'
                  AND p.provider_create_state='outcome_unknown'
@@ -67,10 +79,8 @@ class PaymentHandler:
                  AND p.provider_create_attempted_at IS NOT NULL AND p.provider_create_attempted_at < %s
                  AND o.order_status='pending_payment' AND o.payment_status='pending'
                  AND NOT EXISTS (SELECT 1 FROM public.manual_fulfillment_reviews r
-                     WHERE r.order_id=o.id AND r.state IN ('pending','refund_uncertain'))
-               ORDER BY p.provider_create_attempted_at,p.id LIMIT %s""",
-            (_now() - timedelta(seconds=10), limit),
-        )]
+                     WHERE r.order_id=o.id AND r.state IN ('pending','refund_uncertain'))""",
+            (_now() - timedelta(seconds=10),), limit)
 
     def _next_navigation(self, attempted):
         rows = self.db.rows(
@@ -117,6 +127,7 @@ class PaymentHandler:
             for identity in identities:
                 if stopped():
                     break
+                self._payment_cursors[key] = identity
                 try:
                     bounded(operation, identity)
                 except Exception:

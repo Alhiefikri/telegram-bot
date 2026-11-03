@@ -271,7 +271,8 @@ class SakurupiahSandboxAdapter:
                   "expired": OutcomeState.EXPIRED}
         if (not _text(ref) or row.get("merchant_ref") != identity.merchant_ref
                 or row.get("payment_kode") != identity.channel
-                or _amount(row.get("amount")) not in (identity.amount, provider_total) or state not in states):
+                or _amount(row.get("amount")) not in (identity.amount, provider_total)
+                or ("total" in row and _amount(row["total"]) != provider_total) or state not in states):
             raise ValueError
         if row.get("currency") not in (None, "IDR"):
             raise ValueError
