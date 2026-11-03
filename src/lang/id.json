@@ -232,6 +232,7 @@
   "balance.usdt.notice.active_target": "Masih ada top-up berjalan; selesaikan atau tunggu batas waktunya.",
   "balance.usdt.notice.refreshed": "Status diperbarui dari catatan durabel. Pemeriksaan jaringan berjalan otomatis.",
   "balance.usdt.notice.hash_prompt": "Kirim hash transaksi BSC (0x...) atau link transaksi BscScan sebagai petunjuk pemeriksaan.",
+  "balance.usdt.notice.hash_session_expired": "Sesi input TXID tidak aktif atau sudah kedaluwarsa. Pilih top-up USDT BEP20 yang benar di bawah, lalu tekan Kirim TXID / link BscScan dan kirim ulang TXID. TXID belum dicatat.",
   "balance.usdt.notice.order_prompt": "Kirim Binance Order ID sebagai petunjuk pemeriksaan. ID saja tidak mengkreditkan saldo.",
   "balance.usdt.notice.order_invalid": "Binance Order ID tidak valid. Kirim Order ID persis seperti di riwayat Binance Pay.",
   "balance.usdt.notice.order_recorded": "Order ID diterima sebagai petunjuk. Pemeriksaan berjalan otomatis; saldo hanya berubah setelah bukti terverifikasi.",
@@ -1159,7 +1160,7 @@
   "balance.usdt.status.binance_howto": "Buka Binance → Pay → Bayar dengan Binance ID, lalu kirim nominal tepat.",
   "balance.usdt.status.bep20_howto": "Kirim hanya USDT BEP20 ke alamat ini. Aset dari jaringan lain tidak bisa dikembalikan.",
   "balance.usdt.status.order_howto": "🧾 Tempel Order ID Binance di chat ini setelah bayar.\nCari di: Binance → Pay → Riwayat → buka pembayaran → salin Order ID.",
-  "balance.usdt.status.hash_howto": "🧾 Tempel TXID atau link BscScan di chat ini setelah transfer.\nCari di: BscScan → transaksi masuk → salin TXID.",
+  "balance.usdt.status.hash_howto": "🧾 Tempel TXID atau link BscScan di chat ini setelah transfer.\nCari di: BscScan → transaksi masuk → salin TXID.\nJika sesi input berakhir, buka kembali top-up ini dan tekan Kirim TXID / link BscScan.",
   "balance.usdt.status.wait_hint": "🌐 Tunggu 5–10 detik. Tekan Cek status bila perlu.",
   "balance.usdt.rail_label.binance": "Binance Pay",
   "balance.usdt.rail_label.bep20": "USDT BEP20"

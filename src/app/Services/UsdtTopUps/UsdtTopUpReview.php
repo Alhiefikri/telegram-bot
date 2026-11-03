@@ -10,6 +10,7 @@ use App\Models\CustomerUsdtDepositReceiver;
 use App\Models\CustomerUsdtFundingReservation;
 use App\Models\CustomerUsdtTopUp;
 use App\Models\UsdtBscRailInvoice;
+use App\Models\UsdtSharedTopUpReceiver;
 use App\Models\UsdtTopUpReviewRequest;
 use App\Models\User;
 use App\Services\Binance\BinancePayTransaction;
@@ -48,6 +49,7 @@ final class UsdtTopUpReview
     public function __construct(
         private readonly BscVerificationRpcClientInterface $rpc,
         private readonly BscFinalReceiptInspector $inspector,
+        private readonly SharedBscReceiptInspector $sharedInspector,
         private readonly BscTokenAmount $amounts,
         private readonly BalanceAdjustmentPasswordConfirmation $passwords,
         private readonly CustomerUsdtBalanceLedger $ledger,
@@ -76,6 +78,9 @@ final class UsdtTopUpReview
             if ($target === null) {
                 throw new AuthorizationException('Customer does not own this USDT target.');
             }
+            if ($target->rail === 'bsc_shared') {
+                throw new DomainException('Shared BSC review does not support external returns.');
+            }
             $existing = DB::table('usdt_top_up_external_return_authorizations')->where('customer_id', $actor->id)->where('nonce', $nonce)->first();
             if ($existing !== null) {
                 if ($existing->top_up_id !== $topUpId || (int) $existing->amount_micro !== $amount->units()
@@ -102,6 +107,32 @@ final class UsdtTopUpReview
         }, 5);
     }
 
+    public function requestShared(User $actor, string $topUpId, string $reason, ?string $transactionHash = null): UsdtTopUpReviewRequest
+    {
+        $this->outsideTransaction();
+        $this->owner($actor);
+        $target = CustomerUsdtTopUp::query()->findOrFail($topUpId);
+        if ($target->rail !== 'bsc_shared') {
+            throw new DomainException('Shared BSC target required.');
+        }
+        $candidates = DB::table('customer_usdt_top_up_inbox as inbox')
+            ->join('customer_usdt_top_up_evidence as evidence', 'evidence.inbox_id', '=', 'inbox.id')
+            ->where('inbox.top_up_id', $topUpId)->where('evidence.top_up_id', $topUpId)
+            ->where('evidence.reason', 'canonical_final_amount_mismatch');
+        if ($transactionHash !== null) {
+            $candidates->where('inbox.tx_hash', $this->hash($transactionHash));
+        }
+        $rows = $candidates->orderByDesc('evidence.id')->get(['inbox.tx_hash', 'evidence.chain_evidence']);
+        if ($rows->pluck('tx_hash')->unique()->count() !== 1) {
+            throw new DomainException('A single Customer-submitted finalized mismatch is required; select a transaction if ambiguous.');
+        }
+        $row = $rows->first();
+        $payload = json_decode($row->chain_evidence, true, 512, JSON_THROW_ON_ERROR);
+        $amount = UsdtMicroAmount::fromRawTokenUnits((string) ($payload['amount_units'] ?? ''), 18);
+
+        return $this->request($actor, $topUpId, 'settled', $amount->decimal(), $row->tx_hash, $reason);
+    }
+
     public function request(User $actor, string $topUpId, string $decision, string $amountDecimal,
         string $transactionHash, string $reason, ?string $refundTransactionHash = null,
         ?string $refundAuthorizationId = null): UsdtTopUpReviewRequest
@@ -115,6 +146,12 @@ final class UsdtTopUpReview
             }
 
             return $this->requestBinance($actor, $target, $decision, $amountDecimal, $transactionHash, $reason);
+        }
+        if ($target->rail === 'bsc_shared' && ($decision !== 'settled' || $refundTransactionHash !== null || $refundAuthorizationId !== null)) {
+            throw new DomainException('Shared BSC review supports deposit settlement only.');
+        }
+        if ($target->rail === 'bsc_shared' && mb_strlen(trim($reason)) < 20) {
+            throw new DomainException('An Owner attribution basis describing independent corroboration is required.');
         }
         if (! in_array($decision, ['settled', 'resolved_by_compensation', 'externally_refunded'], true)
             || trim($reason) === '' || mb_strlen($reason) > 1000) {
@@ -143,7 +180,9 @@ final class UsdtTopUpReview
         }
         $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->firstOrFail();
         $checkpoint = DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $target->receiver_id)->first();
-        $evidence = $this->inspect($invoice, $hash, $amount, $invoice->receiver_address);
+        $evidence = $target->rail === 'bsc_shared'
+            ? $this->inspectShared($target, $hash, $amount)
+            : $this->inspect($invoice, $hash, $amount, $invoice->receiver_address);
         $this->attribution($target, $evidence);
         $refund = null;
         if ($decision === 'externally_refunded') {
@@ -173,10 +212,14 @@ final class UsdtTopUpReview
             $this->owner($actor);
             Customer::query()->whereKey($target->customer_id)->lockForUpdate()->firstOrFail();
             CustomerUsdtTopUp::query()->whereKey($target->id)->lockForUpdate()->firstOrFail();
-            $receiver = CustomerUsdtDepositReceiver::query()->whereKey($target->receiver_id)->lockForUpdate()->firstOrFail();
-            if ((int) $receiver->customer_id !== (int) $target->customer_id || $receiver->verified_at === null
-                || $receiver->address_normalized !== $target->payment_snapshot['receiver_address']) {
-                throw new DomainException('Permanent receiver binding unavailable.');
+            if ($target->rail === 'bsc_shared') {
+                $this->sharedBinding($target, $attributes['transaction_hash'], true);
+            } else {
+                $receiver = CustomerUsdtDepositReceiver::query()->whereKey($target->receiver_id)->lockForUpdate()->firstOrFail();
+                if ((int) $receiver->customer_id !== (int) $target->customer_id || $receiver->verified_at === null
+                    || $receiver->address_normalized !== $target->payment_snapshot['receiver_address']) {
+                    throw new DomainException('Permanent receiver binding unavailable.');
+                }
             }
             $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->lockForUpdate()->firstOrFail();
             $reservation = CustomerUsdtFundingReservation::query()->whereKey($target->reservation_id)->lockForUpdate()->firstOrFail();
@@ -209,7 +252,9 @@ final class UsdtTopUpReview
         $invoice = $this->invoice($target);
         $amount = UsdtMicroAmount::fromUnits($preview->amount_micro);
         // Fresh RPC before KDF/money locks, never in retry closures.
-        $evidence = $this->inspect($invoice, $preview->transaction_hash, $amount, $invoice->receiver_address);
+        $evidence = $target->rail === 'bsc_shared'
+            ? $this->inspectShared($target, $preview->transaction_hash, $amount)
+            : $this->inspect($invoice, $preview->transaction_hash, $amount, $invoice->receiver_address);
         $this->attribution($target, $evidence);
         $refund = $preview->decision === 'externally_refunded'
             ? $this->inspect($invoice, $preview->refund_transaction_hash, $amount, $preview->refund_address,
@@ -227,7 +272,8 @@ final class UsdtTopUpReview
                 $customer = Customer::query()->whereKey($target->customer_id)->lockForUpdate()->firstOrFail();
                 $this->ledger->lockForTransaction($customer);
                 $lockedTarget = CustomerUsdtTopUp::query()->whereKey($target->id)->lockForUpdate()->firstOrFail();
-                $receiver = CustomerUsdtDepositReceiver::query()->whereKey($target->receiver_id)->lockForUpdate()->firstOrFail();
+                $receiver = $target->rail === 'bsc_shared' ? null
+                    : CustomerUsdtDepositReceiver::query()->whereKey($target->receiver_id)->lockForUpdate()->firstOrFail();
                 $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->lockForUpdate()->firstOrFail();
                 $reservation = CustomerUsdtFundingReservation::query()->whereKey($target->reservation_id)->lockForUpdate()->firstOrFail();
                 $checkpoint = DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $target->receiver_id)->lockForUpdate()->first();
@@ -243,9 +289,12 @@ final class UsdtTopUpReview
                 if ($reservation->resolved_at !== null || (int) $work->version !== $preview->work_version
                     || ($checkpoint?->version) != $preview->checkpoint_version || $checkpoint?->review_reason !== null
                     || $lockedTarget->request_fingerprint !== $preview->target_fingerprint
-                    || (int) $receiver->customer_id !== (int) $customer->id || $receiver->verified_at === null
-                    || $receiver->address_normalized !== $invoice->receiver_address) {
+                    || ($receiver !== null && ((int) $receiver->customer_id !== (int) $customer->id || $receiver->verified_at === null
+                        || $receiver->address_normalized !== $invoice->receiver_address))) {
                     throw new DomainException('USDT review evidence or receiver changed.');
+                }
+                if ($target->rail === 'bsc_shared') {
+                    $this->sharedBinding($lockedTarget, $evidence->txHash, true);
                 }
                 $this->attribution($lockedTarget, $evidence);
                 $this->passwords->consume($freshActor, $authority->token);
@@ -544,8 +593,72 @@ final class UsdtTopUpReview
         return $current === $previewEvidence;
     }
 
+    private function inspectShared(CustomerUsdtTopUp $target, string $hash, UsdtMicroAmount $amount): BscTransferEvidence
+    {
+        $this->sharedBinding($target, $hash, false);
+        $inspection = $this->sharedInspector->inspect($hash, $target->payment_snapshot, $amount->units(), allowLate: true);
+        if (! $inspection->verified() || $inspection->evidence === null) {
+            throw new DomainException('USDT review requires one authentic exactly representable finalized transfer: '.$inspection->reason);
+        }
+        $stored = DB::table('customer_usdt_top_up_evidence as evidence')
+            ->join('customer_usdt_top_up_inbox as inbox', 'inbox.id', '=', 'evidence.inbox_id')
+            ->where('inbox.top_up_id', $target->id)->where('evidence.top_up_id', $target->id)
+            ->where('inbox.tx_hash', $hash)->where('evidence.reason', 'canonical_final_amount_mismatch')
+            ->orderByDesc('evidence.id')->value('evidence.chain_evidence');
+        $payload = $stored === null ? null : json_decode($stored, true, 512, JSON_THROW_ON_ERROR);
+        if (! $this->matchesPreviewEvidence($inspection->evidence, $payload)) {
+            throw new DomainException('Customer-submitted transfer evidence changed; review is held.');
+        }
+
+        return $inspection->evidence;
+    }
+
+    private function sharedBinding(CustomerUsdtTopUp $target, ?string $hash, bool $lock): void
+    {
+        $snapshot = $target->payment_snapshot;
+        $query = UsdtSharedTopUpReceiver::query()->whereKey($target->shared_receiver_id);
+        $receiver = ($lock ? $query->lockForUpdate() : $query)->first();
+        if (! is_array($snapshot) || $receiver === null || $target->receiver_id !== null
+            || (int) ($snapshot['shared_receiver_id'] ?? 0) !== (int) $receiver->getKey()
+            || ($snapshot['receiver_address'] ?? null) !== $receiver->address_normalized
+            || (int) ($snapshot['chain_id'] ?? 0) !== (int) $receiver->chain_id
+            || ($snapshot['token_contract'] ?? null) !== $receiver->token_contract
+            || (int) ($snapshot['token_decimals'] ?? 0) !== (int) $receiver->token_decimals
+            || ($snapshot['requires_finalized_block'] ?? false) !== true) {
+            throw new DomainException('Shared BSC receiver snapshot mismatch.');
+        }
+        if ($hash === null) {
+            return;
+        }
+        $evidence = DB::table('customer_usdt_top_up_inbox as inbox')
+            ->join('customer_usdt_top_up_evidence as evidence', 'evidence.inbox_id', '=', 'inbox.id')
+            ->where('inbox.top_up_id', $target->id)->where('evidence.top_up_id', $target->id)
+            ->where('inbox.tx_hash', $hash)->where('evidence.reason', 'canonical_final_amount_mismatch')->exists();
+        $ambiguous = DB::table('customer_usdt_top_up_inbox')->where('tx_hash', $hash)
+            ->where('top_up_id', '<>', $target->id)->exists();
+        $receipt = DB::table('external_money_receipts')->where('chain_id', $snapshot['chain_id'])
+            ->where('tx_hash', $hash)->where('target_type', MoneyReceiptTarget::customerUsdtTopUp($target->id)->type->value)
+            ->where('target_id', $target->id)->where('beneficiary', 'customer:'.$target->customer_id)
+            ->where('status', 'claimed')->first();
+        $parent = $receipt === null ? null : DB::table('external_money_receipt_parent_claims')
+            ->where('chain_id', $snapshot['chain_id'])->where('tx_hash', $hash)
+            ->where('external_money_receipt_id', $receipt->id)->where('status', 'claimed')
+            ->where('target_id', $target->id)->where('target_type', $receipt->target_type)->first();
+        if (! $evidence || $ambiguous || $parent === null) {
+            throw new DomainException('Customer submission or unambiguous receipt attribution unavailable.');
+        }
+    }
+
     private function invoice(CustomerUsdtTopUp $target): UsdtBscRailInvoice
     {
+        if ($target->rail === 'bsc_shared') {
+            $this->sharedBinding($target, null, false);
+            $snapshot = $target->payment_snapshot;
+            $invoice = new UsdtBscRailInvoice;
+            $invoice->forceFill($snapshot);
+
+            return $invoice;
+        }
         $invoice = UsdtBscRailInvoice::query()->where('reference', $target->reference)->firstOrFail();
         $snapshot = $target->payment_snapshot;
         foreach (['chain_id', 'token_contract', 'token_decimals', 'custody_namespace', 'minimum_confirmations'] as $field) {
@@ -565,6 +678,32 @@ final class UsdtTopUpReview
 
     private function attribution(CustomerUsdtTopUp $target, BscTransferEvidence $evidence): void
     {
+        if ($target->rail === 'bsc_shared') {
+            $this->sharedBinding($target, $evidence->txHash, false);
+            $at = $evidence->blockTimestamp->copy()->setTimezone(config('app.timezone'));
+            $recent = $at->copy()->subHours(24);
+            $actual = UsdtMicroAmount::fromRawTokenUnits($evidence->amountUnits, (int) $target->payment_snapshot['token_decimals'])->units();
+            $otherTopUp = DB::table('customer_usdt_top_ups as targets')
+                ->leftJoin('customer_usdt_top_up_resolutions as resolutions', 'resolutions.top_up_id', '=', 'targets.id')
+                ->where('targets.rail', 'bsc_shared')->where('targets.id', '<>', $target->id)
+                ->where('targets.payable_micro', $actual)->where('targets.created_at', '<=', $at)
+                ->where(fn ($query) => $query->where('targets.created_at', '>=', $recent)->orWhereNull('resolutions.top_up_id'))
+                ->exists();
+            $otherIntent = DB::table('customer_usdt_funding_intents')
+                ->where('rail', 'bsc_shared')->where('id', '<>', $target->intent_id)
+                ->where('payable_micro', $actual)->where('created_at', '<=', $at)
+                ->where(fn ($query) => $query->where('created_at', '>=', $recent)->orWhere('state', 'pending'))
+                ->exists();
+            $checkout = DB::table('payments')->where('provider', 'manual')->where('method', 'USDT_BEP20')
+                ->where('currency', 'USDT')->where('amount', $actual)->where('created_at', '<=', $at)
+                ->where(fn ($query) => $query->where('created_at', '>=', $recent)->orWhere('status', 'pending'))
+                ->exists();
+            if ($otherTopUp || $otherIntent || $checkout) {
+                throw new DomainException('Transfer amount conflicts with another shared invoice or checkout; attribution is ambiguous.');
+            }
+
+            return;
+        }
         if (CustomerUsdtTopUp::query()->where('receiver_id', $target->receiver_id)->where('intent_id', '>', $target->intent_id)
             ->where('created_at', '<=', $evidence->blockTimestamp->copy()->setTimezone(config('app.timezone')))->exists()) {
             throw new DomainException('Receipt belongs to a later receiver payment window.');

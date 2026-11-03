@@ -9,6 +9,7 @@ use App\Models\CustomerUsdtTopUp;
 use App\Models\UsdtReorgRecoveryRequest;
 use App\Models\UsdtTopUpReviewRequest;
 use App\Models\User;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtTopUps\UsdtReorgIncidentService;
 use App\Services\UsdtTopUps\UsdtTopUpReview;
 use DomainException;
@@ -66,7 +67,7 @@ final class AdminUsdtTopUpReviewController extends Controller
         $previewOriginal = $preview === null ? null : DB::table('customer_usdt_top_ups as targets')
             ->join('customers', 'customers.id', '=', 'targets.customer_id')
             ->where('targets.id', $preview->top_up_id)
-            ->select(['targets.customer_id', 'customers.telegram_id', 'targets.amount_micro', 'targets.fee_micro'])
+            ->select(['targets.customer_id', 'customers.telegram_id', 'targets.amount_micro', 'targets.payable_micro', 'targets.fee_micro'])
             ->firstOrFail();
         $recoveryPreview = UsdtReorgRecoveryRequest::query()
             ->whereKey($request->query('recovery_preview'))
@@ -91,6 +92,22 @@ final class AdminUsdtTopUpReviewController extends Controller
         $request->validate(['top_up_id' => ['required', 'uuid']]);
         $target = CustomerUsdtTopUp::query()->findOrFail($request->input('top_up_id'));
         $binance = $target->rail === 'binance_pay';
+        if ($target->rail === 'bsc_shared') {
+            $data = $request->validate([
+                'top_up_id' => ['required', 'uuid'],
+                'transaction_hash' => ['nullable', 'string', 'regex:/\A0x[a-fA-F0-9]{64}\z/'],
+                'reason' => ['required', 'string', 'min:20', 'max:1000'],
+            ]);
+            try {
+                $preview = $reviews->requestShared($request->user(), $target->id, $data['reason'], $data['transaction_hash'] ?? null);
+            } catch (DomainException|InvalidArgumentException $error) {
+                return redirect()->route('admin.store-balance.usdt-review.index', ['top_up' => $target->id])
+                    ->withErrors(['review' => 'Review ditahan. '.$error->getMessage()])
+                    ->withInput($request->only('reason', 'transaction_hash'));
+            }
+
+            return redirect()->route('admin.store-balance.usdt-review.index', ['top_up' => $target->id, 'preview' => $preview->id]);
+        }
         $data = $request->validate([
             'top_up_id' => ['required', 'uuid'],
             'decision' => ['required', $binance ? 'in:settled,rejected' : 'in:settled,resolved_by_compensation,externally_refunded'],
@@ -122,13 +139,30 @@ final class AdminUsdtTopUpReviewController extends Controller
         ]);
         try {
             $resolution = $reviews->confirm($request->user(), $review, $data['fingerprint'], (int) $data['version'], $data['password']);
-        } catch (BalanceAdjustmentRejected|DomainException|InvalidArgumentException $error) {
+        } catch (BalanceAdjustmentRejected $error) {
+            $message = match ($error->reason) {
+                'invalid_password' => 'Password Owner salah. Saldo tidak berubah.',
+                'owner_locked' => 'Konfirmasi Owner terkunci sementara. Coba lagi setelah masa kunci berakhir.',
+                'confirmation_busy' => 'Konfirmasi lain sedang diproses. Periksa status sebelum mencoba lagi.',
+                'owner_notification_unavailable' => 'Notifikasi Owner belum tersedia. Perbaiki konfigurasi notifikasi sebelum mencoba lagi.',
+                default => 'Otorisasi kedaluwarsa atau tidak tersedia. Buat preview baru.',
+            };
+
+            return redirect()->route('admin.store-balance.usdt-review.index', ['preview' => $review])
+                ->withErrors(['review' => $message]);
+        } catch (DomainException|InvalidArgumentException $error) {
             return redirect()->route('admin.store-balance.usdt-review.index', ['preview' => $review])
                 ->withErrors(['review' => 'Resolusi ditahan. '.$error->getMessage()]);
         }
 
+        $credit = $resolution->entry_id === null ? null : DB::table('customer_usdt_balance_entries')->where('id', $resolution->entry_id)->value('amount_micro');
+        $message = 'Resolusi tercatat: '.$resolution->kind.'. Invoice asli tetap tidak berubah.';
+        if ($credit !== null) {
+            $message .= ' Saldo dikreditkan '.UsdtMicroAmount::formatUnits((int) $credit).' USDT.';
+        }
+
         return redirect()->route('admin.store-balance.usdt-review.index', ['top_up' => $resolution->top_up_id])
-            ->with('status', 'Resolusi tercatat: '.$resolution->kind.'. Invoice asli tetap tidak berubah.');
+            ->with('status', $message);
     }
 
     public function recoveryPreview(Request $request, UsdtReorgIncidentService $reorgs): RedirectResponse

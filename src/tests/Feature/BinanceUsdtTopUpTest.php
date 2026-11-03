@@ -580,6 +580,23 @@ final class BinanceUsdtTopUpTest extends TestCase
         $this->assertSame(1, DB::table('telegram_outbound_effects')->where('effect_key', 'balance-adjustment:usdt-review:'.$preview->id.':owner:v1')->count());
     }
 
+    public function test_foreign_currency_review_does_not_compare_it_to_the_usdt_invoice(): void
+    {
+        $target = $this->target(771021);
+        $this->fakeHistory($this->transaction($target, ['amount' => '2', 'currency' => 'BTC']));
+        $settlement = app(BinanceUsdtTopUpSettlement::class);
+        $settlement->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+        $settlement->check($target->id);
+        $owner = $this->reviewOwner();
+        $preview = app(UsdtTopUpReview::class)->request($owner, $target->id, 'rejected', '2', '445011487581044736', 'Reject foreign currency');
+
+        $this->withCookie(config('session.cookie'), session()->getId());
+        $this->get(route('admin.store-balance.usdt-review.index', ['preview' => $preview->id]))
+            ->assertOk()->assertSee('2 BTC')
+            ->assertSee('Mata uang transfer berbeda dari invoice')
+            ->assertDontSee('Selisih dari invoice:');
+    }
+
     public static function reviewMismatchCases(): array
     {
         return [

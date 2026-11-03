@@ -232,6 +232,7 @@
   "balance.usdt.notice.active_target": "A top-up is still open; finish it or wait for its deadline.",
   "balance.usdt.notice.refreshed": "Status refreshed from durable records. Network verification runs automatically.",
   "balance.usdt.notice.hash_prompt": "Send the BSC transaction hash (0x...) or BscScan transaction link as a lookup hint.",
+  "balance.usdt.notice.hash_session_expired": "The TXID input session is inactive or expired. Select the correct USDT BEP20 top-up below, tap Send TXID / BscScan link, then send the TXID again. The TXID has not been recorded.",
   "balance.usdt.notice.order_prompt": "Send the Binance Order ID as a lookup hint. Payment is not credited by the ID alone.",
   "balance.usdt.notice.order_invalid": "Invalid Binance Order ID. Send the Order ID exactly as shown in Binance Pay history.",
   "balance.usdt.notice.order_recorded": "Order ID received as a lookup hint. Verification runs automatically; the balance changes only after verified evidence.",
@@ -1159,7 +1160,7 @@
   "balance.usdt.status.binance_howto": "Open Binance → Pay → Pay with Binance ID, send the exact amount.",
   "balance.usdt.status.bep20_howto": "Send only USDT BEP20 to this address. Assets from other networks cannot be returned.",
   "balance.usdt.status.order_howto": "🧾 Then paste your Binance Order ID in this chat.\nFind it: Binance → Pay → Transaction history → open the payment → copy Order ID.",
-  "balance.usdt.status.hash_howto": "🧾 Then paste the TXID or BscScan link in this chat.\nFind it: BscScan → incoming transfer → copy the TXID.",
+  "balance.usdt.status.hash_howto": "🧾 Then paste the TXID or BscScan link in this chat.\nFind it: BscScan → incoming transfer → copy the TXID.\nIf the input session expires, reopen this top-up and tap Send TXID / BscScan link.",
   "balance.usdt.status.wait_hint": "🌐 After pasting, wait 5–10 seconds. Tap Check status if needed.",
   "balance.usdt.rail_label.binance": "Binance Pay",
   "balance.usdt.rail_label.bep20": "USDT BEP20"

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
 use App\Enums\UserRole;
@@ -14,6 +15,9 @@ use App\Models\TelegramNavigationRoot;
 use App\Models\User;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\Telegram\TelegramUsdtFundingActions;
+use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\UsdtFunding\SharedTopUpReceiverRegistry;
+use App\Services\UsdtFunding\UsdtFundingIntentService;
 use App\Services\UsdtReceivers\UsdtDepositReceiverRegistry;
 use App\Services\UsdtTopUps\UsdtTopUpPreparation;
 use App\Services\UsdtTopUps\UsdtTopUpReview;
@@ -130,6 +134,47 @@ final class UsdtTopUpReviewPostgresConcurrencyTest extends TestCase
         $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
         $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
         $this->assertSame(1, DB::table('external_money_receipts')->count());
+    }
+
+    public function test_shared_mismatch_owner_confirmations_race_to_one_credit(): void
+    {
+        $address = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+        $hash = '0x'.str_repeat('c', 64);
+        app(SharedTopUpReceiverRegistry::class)->activate($this->owner, $address, 'Shared top-up');
+        $customer = Customer::factory()->create(['telegram_id' => 951002]);
+        $root = TelegramNavigationRoot::query()->create([
+            'customer_id' => $customer->id, 'chat_id' => '951002', 'message_id' => 101,
+            'media_kind' => TelegramNavigationMediaKind::Text, 'screen' => TelegramNavigationScreen::Home,
+            'locale' => 'id', 'generation' => 1,
+        ]);
+        $intents = app(UsdtFundingIntentService::class);
+        $opened = $intents->open($customer, '951002', (int) $root->id, (int) $root->message_id,
+            UsdtMicroAmount::fromDecimalString('1'), CustomerUsdtFundingRail::BscShared);
+        $target = $intents->claim($customer, '951002', (int) $root->id, (int) $root->message_id,
+            (string) $opened->intent->nonce, 'confirm')->topUp;
+        $rpc = app(BscVerificationRpcClientInterface::class);
+        $log = $rpc->log(amount: '990000000000000000', receiver: $address);
+        $log['transactionHash'] = $hash;
+        $rpc->receipt['transactionHash'] = $hash;
+        $rpc->receipt['logs'] = [$log];
+        $settlement = app(UsdtTopUpSettlement::class);
+        $settlement->submit($customer, $target->id, $hash);
+        $settlement->check($target->id);
+        $preview = app(UsdtTopUpReview::class)->requestShared($this->owner, $target->id, 'Matched exchange withdrawal records with Customer account.');
+        $results = $this->runConcurrentWorkers(2, function () use ($preview): string {
+            try {
+                app(UsdtTopUpReview::class)->confirm($this->owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+
+                return 'confirmed';
+            } catch (BalanceAdjustmentRejected|\DomainException) {
+                return 'fenced';
+            }
+        });
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->count());
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+        $this->assertSame(990000, (int) DB::table('customer_usdt_balance_accounts')->where('customer_id', $customer->id)->value('balance_micro'));
+        $this->assertSame(1, DB::table('external_money_receipts')->where('tx_hash', $hash)->count());
     }
 
     public function test_external_return_racing_auto_settlement_cannot_resolve_twice(): void

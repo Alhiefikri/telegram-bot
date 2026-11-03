@@ -17,7 +17,12 @@
                 <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink sm:text-3xl">Laporan saldo Customer</h1>
                 <p class="mt-2 max-w-3xl text-sm leading-6 text-admin-muted">Saldo IDR dan USDT ditampilkan terpisah. Nilai saldo berasal dari proyeksi akun; rekonsiliasi USDT menampilkan status custody yang tercatat.</p>
             </div>
+        <nav class="flex flex-wrap gap-x-5" aria-label="Navigasi saldo">
             <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Kembali ke Dashboard</a>
+        @if (auth()->user()->role->canManagePaymentSettings())
+            <a href="{{ route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">Pengelolaan saldo dan top-up</a>
+        @endif
+        </nav>
 
         <section class="grid gap-3 sm:grid-cols-2" aria-label="Total proyeksi per mata uang">
             <x-admin-dashboard.card as="article" padding="compact" shadow="sm">

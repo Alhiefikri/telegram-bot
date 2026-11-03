@@ -587,6 +587,22 @@
 
     @endif
     @if ($settingsSection === 'saldo')
+                <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Pengelolaan saldo Customer">
+                    <h2 class="text-lg font-semibold text-admin-ink">Pengelolaan saldo Customer</h2>
+                    <p class="mt-2 text-sm leading-6 text-admin-muted">Saldo, riwayat, dan kebijakan IDR dan USDT tetap terpisah; tidak ada konversi antar mata uang.</p>
+                    <nav class="mt-3 flex flex-wrap gap-3" aria-label="Tindakan saldo">
+                        @if (auth()->user()->role->canReconcilePayments())
+                            <x-admin-dashboard.button :href="route('admin.store-balance.reports.index')" variant="neutral">Saldo dan riwayat IDR / USDT</x-admin-dashboard.button>
+                        @endif
+                        @if ($canManageBalanceAdjustments)
+                            <x-admin-dashboard.button :href="route('admin.store-balance.adjustments.index')" variant="neutral">Tambah atau reversal IDR</x-admin-dashboard.button>
+                        @endif
+                        @if ($canManageBalanceIssues)
+                            <x-admin-dashboard.button :href="route('admin.store-balance.usdt-review.index')" variant="neutral">Review top-up USDT</x-admin-dashboard.button>
+                            <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => 'balance-issues'])" variant="neutral">Kompensasi top-up IDR</x-admin-dashboard.button>
+                        @endif
+                    </nav>
+                </x-admin-dashboard.card>
                 <x-admin-dashboard.card
                     id="admin-store-balance-funding-policy"
                     data-admin-return-target

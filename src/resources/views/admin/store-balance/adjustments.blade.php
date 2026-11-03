@@ -22,7 +22,10 @@
                 @endforeach
             </x-admin-dashboard.notice>
         @endif
+        <nav class="flex flex-wrap gap-x-5" aria-label="Navigasi saldo">
         <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Kembali ke Ringkasan Admin</a>
+        <a href="{{ route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">Pengelolaan saldo dan top-up</a>
+        </nav>
 
         {{-- Status and validation errors are rendered in the shared shell above. --}}
 

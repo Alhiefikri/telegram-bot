@@ -287,6 +287,21 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
         $this->bot->editMessageText($chatId, $messageId, $result->caption, $result->keyboard, $result->options);
     }
 
+    public function guideUnpromptedHash(Customer $customer, string $chatId, string $text): bool
+    {
+        if (BscTransactionInput::normalize($text) === null) {
+            return false;
+        }
+
+        $this->navigation->presentOrEstablish(
+            $customer,
+            $chatId,
+            $this->usdt->historySurface($customer, $this->usdt->firstPage($customer), 'balance.usdt.notice.hash_session_expired'),
+        );
+
+        return true;
+    }
+
     public function handleHashInput(Customer $customer, string $chatId, string $text): bool
     {
         $topUpId = $this->hashSession->promptedTopUpId($customer);
@@ -455,6 +470,10 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
                 ->where('customer_id', $customer->id)
                 ->first();
             if ($target === null) {
+                if (in_array($prefix, [self::HASH_PREFIX, self::ORDER_PREFIX], true)) {
+                    $this->hashSession->forget($customer);
+                }
+
                 return [$this->staleSurface($customer), 'balance.usdt.stale'];
             }
             $notice = match ($prefix) {
@@ -465,6 +484,12 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             };
             $targetRail = $target->rail instanceof CustomerUsdtFundingRail ? $target->rail->value : (string) ($target->rail ?? '');
             $railValue = $targetRail !== '' ? $targetRail : (string) (is_array($target->payment_snapshot) ? ($target->payment_snapshot['rail'] ?? '') : '');
+            if (($prefix === self::HASH_PREFIX && ! in_array($railValue, [CustomerUsdtFundingRail::BscUsdt->value, CustomerUsdtFundingRail::BscShared->value], true))
+                || ($prefix === self::ORDER_PREFIX && $railValue !== CustomerUsdtFundingRail::BinancePay->value)) {
+                $this->hashSession->forget($customer);
+
+                return [$this->staleSurface($customer), 'balance.usdt.stale'];
+            }
             if ($prefix === self::CHECK_PREFIX) {
                 try {
                     if ($railValue === CustomerUsdtFundingRail::BinancePay->value) {
@@ -478,9 +503,13 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
                     // while the surface below renders the honest durable state.
                 }
             }
-            if (in_array($prefix, [self::HASH_PREFIX, self::ORDER_PREFIX], true)
-                && $this->statuses->for($target)->acceptsCustomerLookup()) {
-                $this->hashSession->promptHash($customer, (string) $target->id);
+            if (in_array($prefix, [self::HASH_PREFIX, self::ORDER_PREFIX], true)) {
+                if ($this->statuses->for($target)->acceptsCustomerLookup()) {
+                    $this->hashSession->promptHash($customer, (string) $target->id);
+                } else {
+                    $this->hashSession->forget($customer);
+                    $notice = 'balance.usdt.notice.hash_closed';
+                }
             }
 
             return [

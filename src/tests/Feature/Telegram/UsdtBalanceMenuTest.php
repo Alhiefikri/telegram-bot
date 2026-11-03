@@ -644,6 +644,83 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertNoMoney();
     }
 
+    #[DataProvider('inactiveHashSessions')]
+    public function test_unprompted_hash_guides_buyer_to_the_right_top_up_without_submitting(bool $expire): void
+    {
+        $target = $this->openSharedTarget();
+        $root = TelegramNavigationRoot::query()->sole();
+        if ($expire) {
+            $this->travel(11)->minutes();
+        } else {
+            app(TelegramUsdtFundingSession::class)->forget($this->customer);
+        }
+        $hash = '0x'.str_repeat('ab', 32);
+
+        $this->sendText($hash);
+
+        $history = $this->lastCanonicalEdit(self::CHAT_ID);
+        $this->assertStringContainsString('Sesi input TXID tidak aktif atau sudah kedaluwarsa', $this->editCopy($history));
+        $this->assertContains('usdt:status:'.$target->id, $this->callbacks($history));
+        $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
+        $this->assertNoMoney();
+
+        $this->tap('open-target', 'usdt:status:'.$target->id, $root->fresh());
+        $this->tap('reopen-hash', 'usdt:hash:'.$target->id, $root->fresh());
+        $this->sendText('https://bscscan.com/tx/'.$hash);
+        $this->assertSame($target->id, DB::table('customer_usdt_top_up_inbox')->value('top_up_id'));
+        $this->assertSame($hash, DB::table('customer_usdt_top_up_inbox')->value('tx_hash'));
+        $this->assertNoMoney();
+    }
+
+    public static function inactiveHashSessions(): array
+    {
+        return [[false], [true]];
+    }
+
+    public function test_wrong_target_callback_cannot_leave_an_old_hash_session_active(): void
+    {
+        $target = $this->openSharedTarget();
+        $root = TelegramNavigationRoot::query()->sole();
+        $this->tap('wrong-target', 'usdt:hash:'.Str::uuid(), $root);
+        $this->assertNull(app(TelegramUsdtFundingSession::class)->promptedTopUpId($this->customer));
+
+        $this->sendText('0x'.str_repeat('ab', 32));
+
+        $this->assertStringContainsString('Sesi input TXID tidak aktif', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
+        $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
+        $this->assertSame($target->id, CustomerUsdtTopUp::query()->sole()->id);
+        $this->assertNoMoney();
+    }
+
+    public function test_foreign_target_in_hash_session_is_not_submitted(): void
+    {
+        $target = $this->openSharedTarget();
+        $other = Customer::factory()->create(['telegram_id' => 554002, 'locale' => 'id']);
+        app(TelegramUsdtFundingSession::class)->promptHash($other, (string) $target->id);
+
+        $this->postTelegramWebhook($this->messageUpdate($this->nextUpdateId(), '0x'.str_repeat('ab', 32), [], 554002))->assertOk();
+
+        $this->assertNull(app(TelegramUsdtFundingSession::class)->promptedTopUpId($other));
+        $this->assertStringContainsString('Sesi input TXID tidak aktif', $this->editCopy($this->lastCanonicalEdit(554002)));
+        $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
+        $this->assertNoMoney();
+    }
+
+    public function test_hash_callback_cannot_prompt_for_a_binance_target(): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $target = $this->openBinanceTarget($root, '1 USD');
+        $this->tap('wrong-rail', 'usdt:hash:'.$target->id, $root->fresh());
+        $this->assertNull(app(TelegramUsdtFundingSession::class)->promptedTopUpId($this->customer));
+
+        $this->sendText('0x'.str_repeat('ab', 32));
+
+        $this->assertStringContainsString('Sesi input TXID tidak aktif', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
+        $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
+        $this->assertNoMoney();
+    }
+
     public function test_history_lists_ledger_entries_and_open_targets_with_status_buttons(): void
     {
         $this->seedUsdtBalance(1_500_000);

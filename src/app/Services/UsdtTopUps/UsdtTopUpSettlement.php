@@ -55,6 +55,9 @@ final class UsdtTopUpSettlement
             if ($target === null) {
                 throw new AuthorizationException('USDT funding target unavailable.');
             }
+            if ($target->rail === 'bsc_shared') {
+                UsdtSharedTopUpReceiver::query()->whereKey($target->shared_receiver_id)->lockForUpdate()->firstOrFail();
+            }
             $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $topUpId)->lockForUpdate()->firstOrFail();
             if (DB::table('customer_usdt_top_up_inbox')->where('top_up_id', $topUpId)->where('tx_hash', $hash)->exists()) {
                 return;

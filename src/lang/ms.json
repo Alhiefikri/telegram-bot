@@ -232,6 +232,7 @@
   "balance.usdt.notice.active_target": "Masih ada tambah baki terbuka; selesaikan atau tunggu tarikh akhirnya.",
   "balance.usdt.notice.refreshed": "Status dikemas kini daripada rekod kekal. Semakan rangkaian berjalan automatik.",
   "balance.usdt.notice.hash_prompt": "Hantar hash transaksi BSC (0x...) atau pautan transaksi BscScan sebagai petunjuk semakan.",
+  "balance.usdt.notice.hash_session_expired": "Sesi input TXID tidak aktif atau telah tamat. Pilih tambah nilai USDT BEP20 yang betul di bawah, tekan Hantar TXID / pautan BscScan, kemudian hantar TXID semula. TXID belum direkodkan.",
   "balance.usdt.notice.order_prompt": "Hantar Binance Order ID sebagai petunjuk semakan. ID sahaja tidak mengkreditkan baki.",
   "balance.usdt.notice.order_invalid": "Binance Order ID tidak sah. Hantar Order ID tepat seperti dalam sejarah Binance Pay.",
   "balance.usdt.notice.order_recorded": "Order ID diterima sebagai petunjuk. Semakan berjalan automatik; baki hanya berubah selepas bukti disahkan.",
@@ -1159,7 +1160,7 @@
   "balance.usdt.status.binance_howto": "Buka Binance → Pay → Bayar dengan Binance ID, hantar jumlah tepat.",
   "balance.usdt.status.bep20_howto": "Hantar USDT BEP20 sahaja ke alamat ini. Aset dari rangkaian lain tidak boleh dipulangkan.",
   "balance.usdt.status.order_howto": "🧾 Kemudian tampal Order ID Binance dalam chat ini.\nCari: Binance → Pay → Sejarah transaksi → buka bayaran → salin Order ID.",
-  "balance.usdt.status.hash_howto": "🧾 Kemudian tampal TXID atau pautan BscScan dalam chat ini.\nCari: BscScan → pemindahan masuk → salin TXID.",
+  "balance.usdt.status.hash_howto": "🧾 Kemudian tampal TXID atau pautan BscScan dalam chat ini.\nCari: BscScan → pemindahan masuk → salin TXID.\nJika sesi input tamat, buka semula tambah nilai ini dan tekan Hantar TXID / pautan BscScan.",
   "balance.usdt.status.wait_hint": "🌐 Selepas tampal, tunggu 5–10 saat. Tekan Semak status jika perlu.",
   "balance.usdt.rail_label.binance": "Binance Pay",
   "balance.usdt.rail_label.bep20": "USDT BEP20"

@@ -11,6 +11,7 @@ use App\Models\CustomerUsdtTopUp;
 use App\Models\UsdtReorgIncident;
 use App\Models\UsdtReorgRecoveryCase;
 use App\Models\UsdtReorgRecoveryRequest;
+use App\Models\UsdtSharedTopUpReceiver;
 use App\Models\User;
 use App\Services\Bsc\BscChainFacts;
 use App\Services\Bsc\BscVerificationRpcClientInterface;
@@ -102,7 +103,11 @@ final class UsdtReorgIncidentService
             Customer::query()->whereKey($target->customer_id)->lockForUpdate()->firstOrFail();
             $account = CustomerUsdtBalanceAccount::query()->where('customer_id', $target->customer_id)->lockForUpdate()->firstOrFail();
             CustomerUsdtTopUp::query()->whereKey($target->id)->lockForUpdate()->firstOrFail();
-            CustomerUsdtDepositReceiver::query()->whereKey($target->receiver_id)->lockForUpdate()->firstOrFail();
+            if ($target->rail === 'bsc_shared') {
+                UsdtSharedTopUpReceiver::query()->whereKey($target->shared_receiver_id)->lockForUpdate()->firstOrFail();
+            } else {
+                CustomerUsdtDepositReceiver::query()->whereKey($target->receiver_id)->lockForUpdate()->firstOrFail();
+            }
             $current = DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $target->receiver_id)->lockForUpdate()->first();
             if ($current?->version !== $checkpoint?->version || $current?->review_reason !== $checkpoint?->review_reason) {
                 return false;

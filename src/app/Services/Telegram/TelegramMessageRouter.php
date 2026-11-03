@@ -387,6 +387,9 @@ class TelegramMessageRouter
         if ($selection !== null) {
             $this->session->forgetWithLock($customer);
         }
+        if ($isPrivateChat && $this->usdtFunding->guideUnpromptedHash($customer, $chatId, $text)) {
+            return;
+        }
 
         $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.unknown_command'));
 

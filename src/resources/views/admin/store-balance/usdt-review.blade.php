@@ -12,7 +12,10 @@
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
 <x-admin-dashboard.linked-shell active-tab="stats" active-navigation-id="usdt-review" title="Review deposit USDT dan insiden">
     <div class="space-y-5">
+        <nav class="flex flex-wrap gap-x-5" aria-label="Navigasi saldo">
         <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Ringkasan Admin</a>
+        <a href="{{ route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">Pengelolaan saldo dan top-up</a>
+        </nav>
         <h1 class="text-2xl font-semibold tracking-tight text-admin-ink">Review deposit USDT dan insiden</h1>
         <x-admin-dashboard.notice tone="warning">Hash dan Order ID hanya petunjuk lookup, bukan bukti dana. Invoice asli tidak berubah; bukti ambigu tetap unresolved, tanpa pembulatan atau grant. Review memerlukan verifikasi provider terkini dan tidak mengaktifkan pendanaan produksi.</x-admin-dashboard.notice>
         @if(session('status'))
@@ -28,8 +31,14 @@
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Preview resolusi USDT">
             <h2 class="text-lg font-semibold text-admin-ink">Periksa resolusi sebelum konfirmasi</h2>
             <p class="mt-2 break-all font-mono text-xs font-medium text-admin-muted">Target {{ $preview->top_up_id }} · {{ $preview->decision }}</p>
-            <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $previewOriginal->customer_id }} · Telegram {{ $previewOriginal->telegram_id }} · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($previewOriginal->amount_micro)->decimal() }} USDT · fee awal {{ $previewOriginal->fee_micro }} micro-USDT</p>
-            <p class="mt-2 font-semibold text-admin-ink">Nominal transfer terverifikasi {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($preview->amount_micro)->decimal() }} {{ $preview->provider_reference !== null ? ($preview->chain_evidence['currency'] ?? 'USDT') : 'USDT' }}</p>
+            <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $previewOriginal->customer_id }} · Telegram {{ $previewOriginal->telegram_id }} · invoice {{ \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($previewOriginal->payable_micro) }} USDT · fee aplikasi {{ \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($previewOriginal->fee_micro) }} USDT</p>
+            <p class="mt-2 font-semibold text-admin-ink">Nominal transfer terverifikasi {{ \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($preview->amount_micro) }} {{ $preview->provider_reference !== null ? ($preview->chain_evidence['currency'] ?? 'USDT') : 'USDT' }}</p>
+            @if($preview->provider_reference === null || ($preview->chain_evidence['currency'] ?? 'USDT') === 'USDT')
+                @php($difference = $preview->amount_micro - $previewOriginal->payable_micro)
+                <p class="mt-2 text-sm font-medium text-admin-ink">Selisih dari invoice: {{ $difference < 0 ? '-' : ($difference > 0 ? '+' : '') }}{{ \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits(abs($difference)) }} USDT</p>
+            @else
+                <p class="mt-2 text-sm font-medium text-admin-ink">Mata uang transfer berbeda dari invoice; selisih tidak dibandingkan atau dikonversi.</p>
+            @endif
             @if($preview->decision === 'rejected')
                 <p class="mt-2 font-semibold text-admin-ink">Target ditutup sebagai ditolak; tidak ada kredit saldo.</p>
             @elseif($preview->decision !== 'externally_refunded')
@@ -40,6 +49,7 @@
             <p class="mt-2 text-sm font-medium text-admin-ink">{{ $preview->reason }}</p>
             <p class="mt-2 text-sm font-medium text-admin-muted">Bukti transfer <span class="break-all font-mono text-xs">{{ substr($preview->provider_reference ?? $preview->transaction_hash, 0, 10) }}…{{ substr($preview->provider_reference ?? $preview->transaction_hash, -6) }}</span> · berlaku sampai {{ $preview->expires_at }}</p>
             <p class="mt-2 text-sm font-medium text-admin-muted">Invoice asli tidak berubah. Satu resolusi menutup settlement berikutnya; uang tambahan tetap unresolved.</p>
+            <p class="mt-2 text-sm font-medium text-admin-muted">Jika respons konfirmasi terputus, hasil belum pasti. Buka kembali target dan periksa status serta ledger sebelum mencoba lagi; jangan buat kredit terpisah.</p>
             @if(now()->lt($preview->expires_at))
                 <form method="POST" action="{{ route('admin.store-balance.usdt-review.previews.confirm', $preview->id) }}" class="mt-4 space-y-3">
                     @csrf
@@ -101,7 +111,7 @@
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Bukti target">
             <h2 class="text-lg font-semibold text-admin-ink">Target {{ $selected->id }}</h2>
             <p class="mt-2 text-sm font-semibold text-admin-ink">Rail: {{ $selected->rail === 'binance_pay' ? 'Binance Pay' : 'BSC USDT' }}</p>
-            <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $selected->customer_id }} · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::fromUnits($selected->amount_micro)->decimal() }} USDT · fee {{ $selected->fee_micro }} micro-USDT</p>
+            <p class="mt-2 text-sm font-medium text-admin-ink">Customer #{{ $selected->customer_id }} · invoice {{ \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($selected->payable_micro) }} USDT · kredit awal {{ \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($selected->amount_micro) }} USDT · fee aplikasi {{ \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($selected->fee_micro) }} USDT</p>
             <h3 class="mt-4 text-sm font-semibold text-admin-ink">Riwayat pemeriksaan authoritative</h3>
             @forelse($evidence as $item)
                 <p class="mt-2 text-sm font-medium text-admin-muted">Versi {{ $item->version }} · {{ $item->status }} · {{ $item->reason }} · {{ $item->created_at }}</p>
@@ -109,6 +119,21 @@
                 <p class="mt-2 text-sm font-medium text-admin-muted">Belum ada pemeriksaan. Creation unknown bukan bukti dana diterima.</p>
             @endforelse
             <div class="mt-3">{{ $evidence->links() }}</div>
+            @if($selected->rail === 'bsc_shared')
+                <form method="POST" action="{{ route('admin.store-balance.usdt-review.previews.store') }}" class="mt-5 grid gap-3 border-t border-admin-line pt-4" aria-label="Tinjau transfer BSC">
+                    @csrf
+                    <input type="hidden" name="top_up_id" value="{{ $selected->id }}">
+                    <p class="text-sm font-medium text-admin-muted">Preview menggunakan TXID yang dikirim Customer untuk target ini dan transfer yang sudah diperiksa. TXID dan alamat pengirim bukan bukti kepemilikan. Periksa bukti independen yang menghubungkan transfer dengan Customer; bukti ambigu atau belum final ditahan tanpa kredit.</p>
+                    <x-admin-dashboard.field-label for="shared-review-reason">Dasar atribusi Customer (bukan TXID atau nominal saja)</x-admin-dashboard.field-label>
+                    <x-admin-dashboard.textarea id="shared-review-reason" name="reason" :value="old('reason')" :rows="3" minlength="20" maxlength="1000" required />
+                    <details @if(old('transaction_hash')) open @endif>
+                        <summary class="min-h-11 cursor-pointer py-3 text-sm font-semibold text-admin-accent-strong">Pilih TXID jika ada lebih dari satu</summary>
+                        <x-admin-dashboard.field-label for="shared-review-hash">TXID yang dikirim Customer untuk target ini</x-admin-dashboard.field-label>
+                        <x-admin-dashboard.input id="shared-review-hash" name="transaction_hash" type="text" autocomplete="off" maxlength="66" :value="old('transaction_hash')" />
+                    </details>
+                    <x-admin-dashboard.button type="submit" variant="ink">Periksa transfer dan kredit</x-admin-dashboard.button>
+                </form>
+            @else
             <form method="POST" action="{{ route('admin.store-balance.usdt-review.previews.store') }}" class="mt-5 grid gap-3 border-t border-admin-line pt-4" aria-label="Tinjau resolusi deposit">
                 @csrf
                 <input type="hidden" name="top_up_id" value="{{ $selected->id }}">
@@ -144,6 +169,7 @@
                 @endif
                 <x-admin-dashboard.button type="submit" variant="ink">Buat preview resolusi</x-admin-dashboard.button>
             </form>
+            @endif
         </x-admin-dashboard.card>
     @endif
 
