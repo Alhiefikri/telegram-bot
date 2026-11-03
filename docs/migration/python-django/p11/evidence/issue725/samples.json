@@ -1,0 +1,122 @@
+{
+  "php": {
+    "attempts": [
+      {
+        "scenario": "checkout",
+        "attempt": 1,
+        "outcome": "success",
+        "error_code": null,
+        "retries": 0,
+        "durations_ms": {
+          "submission_to_commit": 340.317634,
+          "submission_to_instructions_ack": 1982.403268,
+          "fixture_trigger_to_paid_observed": null,
+          "paid_observed_to_commit": null,
+          "commit_to_receipt_enqueue": null,
+          "receipt_enqueue_to_pickup": null,
+          "receipt_pickup_to_credential_ack": null,
+          "paid_observed_to_credential_ack": null,
+          "paid_observed_to_group_complete": null,
+          "checkout_commit_to_instructions_ack": 1642.085634
+        },
+        "db_ms": 478.78
+      },
+      {
+        "scenario": "checkout",
+        "attempt": 2,
+        "outcome": "success",
+        "error_code": null,
+        "retries": 0,
+        "durations_ms": {
+          "submission_to_commit": 438.943139,
+          "submission_to_instructions_ack": 1202.175008,
+          "fixture_trigger_to_paid_observed": null,
+          "paid_observed_to_commit": null,
+          "commit_to_receipt_enqueue": null,
+          "receipt_enqueue_to_pickup": null,
+          "receipt_pickup_to_credential_ack": null,
+          "paid_observed_to_credential_ack": null,
+          "paid_observed_to_group_complete": null,
+          "checkout_commit_to_instructions_ack": 763.231869
+        },
+        "db_ms": 359.0999999999999
+      },
+      {
+        "scenario": "paid_delivery",
+        "attempt": 1,
+        "outcome": "success",
+        "error_code": null,
+        "retries": 0,
+        "durations_ms": {
+          "submission_to_commit": 859.992123,
+          "submission_to_instructions_ack": 2240.073038,
+          "fixture_trigger_to_paid_observed": 299.84245,
+          "paid_observed_to_commit": 337.270028,
+          "commit_to_receipt_enqueue": 1.769478,
+          "receipt_enqueue_to_pickup": 159.471933,
+          "receipt_pickup_to_credential_ack": 986.714235,
+          "paid_observed_to_credential_ack": 1485.225674,
+          "paid_observed_to_group_complete": 1489.039538,
+          "checkout_commit_to_instructions_ack": 1380.080915
+        },
+        "db_ms": 889.3699999999999
+      },
+      {
+        "scenario": "paid_delivery",
+        "attempt": 2,
+        "outcome": "success",
+        "error_code": null,
+        "retries": 0,
+        "durations_ms": {
+          "submission_to_commit": 225.309195,
+          "submission_to_instructions_ack": 691.673615,
+          "fixture_trigger_to_paid_observed": 343.195615,
+          "paid_observed_to_commit": 129.483111,
+          "commit_to_receipt_enqueue": 0.473347,
+          "receipt_enqueue_to_pickup": 4.011931,
+          "receipt_pickup_to_credential_ack": 391.970081,
+          "paid_observed_to_credential_ack": 525.93847,
+          "paid_observed_to_group_complete": 528.23292,
+          "checkout_commit_to_instructions_ack": 466.36442
+        },
+        "db_ms": 396.46999999999997
+      }
+    ]
+  },
+  "django": {
+    "status": "passed",
+    "stage_samples": [
+      {
+        "rail": "qris",
+        "checkout_ready_ms": null,
+        "paid_observed_ms": 11.604655,
+        "paid_committed_ms": 48.680279,
+        "receipt_queued_ms": 293.673786,
+        "receipt_pickup_ms": null,
+        "credential_ack_ms": 178.744946,
+        "group_complete_ms": 194.340196,
+        "fake_observation_to_credential_ack_ms": 669.397183,
+        "fake_observation_to_group_complete_ms": 684.992433,
+        "credential_ack": "sent",
+        "group_complete": true,
+        "observation_method": "explicit_poll",
+        "provider_outcome": "synthetic_success",
+        "receipt_transport_outcome": "synthetic_success",
+        "device_visibility": "unknown",
+        "ambiguous_delivery": "not_exercised",
+        "target_status": "provisional_inconclusive"
+      }
+    ],
+    "authority_denials": 6,
+    "limits": [
+      "In-process fake provider and receipt transport only; no network, real money or provider credential",
+      "QRIS checkout route is deliberately blocked for concurrency checks; checkout_ready_ms is unknown",
+      "Paid timestamps run from explicit payment-worker drain to fake status return and the outer settlement on_commit callback; the latter is a post-commit observation, not the exact commit instant; no provider callback or real provider timing",
+      "Receipt queue is materialize duration; pickup is unknown; acknowledgement and group completion are fake transport/backend outcomes, not device visibility",
+      "Fake observation to receipt timings include extra harness/admin queries and direct synchronous receipt delivery; diagnostic upper-bound durations for this instrumented path, not normal worker end-to-end or a bound on another path",
+      "One local sample per boundary, with different fixtures and worker paths; not a paired measurement or performance claim",
+      "H1 recorded provisional budgets; this single diagnostic cannot establish p95 or a budget pass"
+    ],
+    "fixture_sha256": "9501a34c9a0d8987b0a4095bf9ff94920a4290bc436a25d58a6b45e60c1b0030"
+  }
+}

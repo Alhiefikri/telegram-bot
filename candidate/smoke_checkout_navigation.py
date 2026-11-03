@@ -58,6 +58,7 @@ class FakeProvider:
         self.block_status = False
         self.status_entered = threading.Event()
         self.release_status = threading.Event()
+        self.success_observed_ns = None
 
     @staticmethod
     def _outside_locks():
@@ -94,7 +95,10 @@ class FakeProvider:
                 raise RuntimeError('Synthetic status was not released')
         with self.lock:
             self.checks += 1
-        return ProviderOutcome(identity, self.state, provider_ref)
+        outcome = ProviderOutcome(identity, self.state, provider_ref)
+        if outcome.state is OutcomeState.SUCCESS:
+            self.success_observed_ns = time.monotonic_ns()
+        return outcome
 
     def recover(self, identity, *, provider_total):
         return self.status(identity, self.reference, provider_total=provider_total)
@@ -120,12 +124,15 @@ class FakeReceiptTransport:
     def __init__(self):
         self.calls = 0
         self.message_id = 2000
+        self.ack_ns = []
 
     def execute(self, method, payload):
         from lhie_candidate.receipt.transport import ReceiptResult
         self.calls += 1
         self.message_id += 1
-        return ReceiptResult(self.message_id, 'success')
+        result = ReceiptResult(self.message_id, 'success')
+        self.ack_ns.append(time.monotonic_ns())
+        return result
 
 
 def _admin_counters(admin, customer_id):
@@ -181,7 +188,7 @@ def _render(roots, presenter, customer, chat_id, state, data, root):
     return surface, roots.current_for_chat(customer, chat_id), elapsed
 
 
-def _receipt_evidence(admin, order_id, transport):
+def _receipt_evidence(admin, order_id, transport, *, observation_ns=None):
     from lhie_candidate.receipt.runtime import receipt_service
     service = receipt_service()
     service.transport = transport
@@ -189,26 +196,38 @@ def _receipt_evidence(admin, order_id, transport):
     first = service.materialize(str(order_id))
     queued_ms = (time.monotonic_ns() - started) / 1_000_000
     assert first is not None and first['state'] != 'failed'
-    rows = admin.execute('''SELECT id,sequence,state FROM public.telegram_outbound_effects
+    rows = admin.execute('''SELECT id,sequence,state,outcome_metadata->>'contains_credentials'
+        FROM public.telegram_outbound_effects
         WHERE effect_type='receipt.credentials' AND source_id=%s ORDER BY sequence''',
         (str(order_id),)).fetchall()
     assert rows and all(row[2] != 'failed' for row in rows)
+    assert str(rows[0][0]) == str(first['id'])
     delivery_started = time.monotonic_ns()
-    assert service.deliver(first['id']) == 'sent'
-    pickup_ms = (time.monotonic_ns() - delivery_started) / 1_000_000
-    for effect_id, _, _ in rows[1:]:
+    credential_ack_ns = None
+    for effect_id, _, _, contains_credentials in rows:
         assert service.deliver(effect_id) == 'sent'
-    group_ms = (time.monotonic_ns() - delivery_started) / 1_000_000
+        if contains_credentials == 'true' and credential_ack_ns is None:
+            credential_ack_ns = transport.ack_ns[-1]
+    ack_ms = ((credential_ack_ns - delivery_started) / 1_000_000
+              if credential_ack_ns is not None else None)
+    group_completed_ns = time.monotonic_ns()
+    group_ms = (group_completed_ns - delivery_started) / 1_000_000
     assert admin.execute('SELECT telegram_receipt_sent_at IS NOT NULL FROM public.orders WHERE id=%s',
                          (str(order_id),)).fetchone() == (True,)
     assert service.deliver(rows[0][0]) == 'not_ready'
     return {
         'receipt_queued_ms': queued_ms,
-        'receipt_pickup_ms': pickup_ms,
-        'credential_ack_ms': pickup_ms,
+        'receipt_pickup_ms': None,
+        'credential_ack_ms': ack_ms,
         'group_complete_ms': group_ms,
+        'fake_observation_to_credential_ack_ms': (
+            (credential_ack_ns - observation_ns) / 1_000_000
+            if observation_ns is not None and credential_ack_ns is not None else None),
+        'fake_observation_to_group_complete_ms': (
+            (group_completed_ns - observation_ns) / 1_000_000
+            if observation_ns is not None else None),
         'receipt_effects': len(rows),
-        'credential_ack': True,
+        'credential_ack': credential_ack_ns is not None,
         'group_complete': True,
         'duplicate_delivery_after_completion': 'not_ready',
     }
@@ -281,7 +300,10 @@ def _qris_flow(admin, roots, presenter, checkout, provider, customer, chat_id, p
     captured = {}
     original_route = presenter.route
     def capture(*args, **kwargs):
+        route_started = time.monotonic_ns()
         surface = original_route(*args, **kwargs)
+        if args[1] == pay_callback:
+            captured['blocked_checkout_route_ms'] = (time.monotonic_ns() - route_started) / 1_000_000
         captured['surface'] = surface
         if args[1] == pay_callback and surface is not None:
             captured['replay'] = checkout.checkout(
@@ -297,7 +319,6 @@ def _qris_flow(admin, roots, presenter, checkout, provider, customer, chat_id, p
             captured['error'] = error
         finally:
             connections.close_all()
-    started = time.monotonic_ns()
     worker = threading.Thread(target=process_payment)
     worker.start()
     try:
@@ -321,7 +342,7 @@ def _qris_flow(admin, roots, presenter, checkout, provider, customer, chat_id, p
         presenter.route = original_route
         provider.block_preflight = False
     assert not worker.is_alive() and 'error' not in captured, captured
-    assert any(method == 'sendPhoto' and payload.get('photo') == 'fresh-banner'
+    assert any(method == 'sendPhoto' and payload.get('photo') == QRIS
                for method, payload in roots.transport.calls), roots.transport.calls
     assert len(captured['outcomes']) == 1 and captured['outcomes'][0] in ('applied', 'replaced'), captured
     assert interaction.drain(25) == ['unsupported'] * 25
@@ -332,7 +353,7 @@ def _qris_flow(admin, roots, presenter, checkout, provider, customer, chat_id, p
     assert [state for _, state in backlog] == ['processed'] * 25 + ['pending'] * 5, backlog
     assert interaction.drain(25) == ['unsupported'] * 5
     surface = captured['surface']
-    checkout_ms = (time.monotonic_ns() - started) / 1_000_000
+    checkout_ms = captured['blocked_checkout_route_ms']
     assert surface is not None and 'QRIS berhasil dibuat' in surface.caption
     assert 'Rp 200' in surface.caption
     order = admin.execute('''SELECT o.id,p.id,p.merchant_ref,p.provider_reference,p.provider_presentation
@@ -416,28 +437,41 @@ def _qris_flow(admin, roots, presenter, checkout, provider, customer, chat_id, p
     pay['callback_query']['data'] = check_callback
     with patch('lhie_candidate.workers.wakeup.enqueue', return_value=False):
         inbox.receive(pay)
+    from django.db import transaction
+    original_settle = checkout.lifecycle._settle
+    def timed_settle(*args, **kwargs):
+        result = original_settle(*args, **kwargs)
+        if result.state == 'paid':
+            transaction.on_commit(
+                lambda: captured.__setitem__('paid_commit_ns', time.monotonic_ns()),
+                using=checkout.lifecycle.using)
+        return result
     presenter.route = capture
     started = time.monotonic_ns()
     try:
-        assert payment_processor.drain() == ['applied']
+        with patch.object(checkout.lifecycle, '_settle', side_effect=timed_settle):
+            outcomes = payment_processor.drain()
+            assert outcomes in (['applied'], ['replaced']), outcomes
     finally:
         presenter.route = original_route
-    observed_ms = (time.monotonic_ns() - started) / 1_000_000
+    assert provider.success_observed_ns is not None and 'paid_commit_ns' in captured
+    observed_ms = (provider.success_observed_ns - started) / 1_000_000
+    committed_ms = (captured['paid_commit_ns'] - started) / 1_000_000
     surface = captured['surface']
     root = roots.current_for_chat(customer, chat_id)
     assert 'Pembayaran sudah diterima' in surface.caption
-    committed_started = time.monotonic_ns()
     row = admin.execute('''SELECT order_status,payment_status FROM public.orders o
         JOIN public.payments p ON p.order_id=o.id WHERE o.id=%s AND p.id=%s''',
         (order_id, payment_id)).fetchone()
-    committed_ms = (time.monotonic_ns() - committed_started) / 1_000_000
     assert row == ('completed', 'paid'), row
-    receipt = _receipt_evidence(admin, order_id, FakeReceiptTransport())
+    receipt = _receipt_evidence(admin, order_id, FakeReceiptTransport(),
+                                observation_ns=provider.success_observed_ns)
     counters = _admin_counters(admin, customer['id'])
     assert counters[:4] == (1, 1, 1, 1), counters
     return {
         'order_id': order_id, 'payment_id': payment_id,
-        'checkout_ready_ms': checkout_ms, 'paid_observed_ms': observed_ms,
+        'checkout_ready_ms': None, 'blocked_checkout_route_ms': checkout_ms,
+        'paid_observed_ms': observed_ms,
         'paid_committed_ms': committed_ms,
         'provider_creates': provider.creates, 'provider_checks': provider.checks,
         **receipt,
@@ -555,14 +589,25 @@ def run():
             'receipt_pickup_ms': qris_result['receipt_pickup_ms'],
             'credential_ack_ms': qris_result['credential_ack_ms'],
             'group_complete_ms': qris_result['group_complete_ms'],
-            'credential_ack': 'sent',
+            'fake_observation_to_credential_ack_ms': qris_result['fake_observation_to_credential_ack_ms'],
+            'fake_observation_to_group_complete_ms': qris_result['fake_observation_to_group_complete_ms'],
+            'credential_ack': 'sent' if qris_result['credential_ack'] else 'unknown',
             'group_complete': True,
-            'target_status': 'proposed_unratified',
+            'observation_method': 'explicit_poll',
+            'provider_outcome': 'synthetic_success',
+            'receipt_transport_outcome': 'synthetic_success',
+            'device_visibility': 'unknown',
+            'ambiguous_delivery': 'not_exercised',
+            'target_status': 'provisional_inconclusive',
         }],
         'limits': [
-            'In-process fake provider only; no network, real money or provider credential',
-            'One local sample per boundary; not a P11 paired measurement or performance claim',
-            'H1 must ratify any payment-stage budget after a qualified paired run',
+            'In-process fake provider and receipt transport only; no network, real money or provider credential',
+            'QRIS checkout route is deliberately blocked for concurrency checks; checkout_ready_ms is unknown',
+            'Paid timestamps run from explicit payment-worker drain to fake status return and the outer settlement on_commit callback; the latter is a post-commit observation, not the exact commit instant; no provider callback or real provider timing',
+            'Receipt queue is materialize duration; pickup is unknown; acknowledgement and group completion are fake transport/backend outcomes, not device visibility',
+            'Fake observation to receipt timings include extra harness/admin queries and direct synchronous receipt delivery; diagnostic upper-bound durations for this instrumented path, not normal worker end-to-end or a bound on another path',
+            'One local sample per boundary, with different fixtures and worker paths; not a paired measurement or performance claim',
+            'H1 recorded provisional budgets; this single diagnostic cannot establish p95 or a budget pass',
         ],
     }
 

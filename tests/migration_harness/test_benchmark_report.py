@@ -47,13 +47,13 @@ class BenchmarkReportTest(unittest.TestCase):
             "ingress": 100_000_000, "ingress_ack": 101_000_000,
             "interaction_queued": 102_000_000,
             "pickup": 103_000_000, "screen_ack": 107_000_000,
-            "checkout_ready": 111_000_000, "provider_paid": 120_000_000,
+            "checkout_committed": 109_000_000, "checkout_ready": 111_000_000, "provider_paid": 120_000_000,
             "paid_observed": 133_000_000, "paid_committed": 150_000_000,
             "receipt_queued": 151_000_000, "receipt_pickup": 170_000_000,
             "credential_ack": 156_000_000, "group_complete": 162_000_000,
         })
         cell = self.cell([row])
-        expected = {"ingress_ack": 1, "pickup": 1, "screen_ack": 7, "checkout_ready": 11,
+        expected = {"ingress_ack": 1, "pickup": 1, "screen_ack": 7, "checkout_committed": 9, "checkout_ready": 11,
                     "paid_observed": 13, "paid_committed": 17, "receipt_queued": 1,
                     "receipt_pickup": 19, "credential_ack": 23, "group_complete": 29}
         for name, milliseconds in expected.items():

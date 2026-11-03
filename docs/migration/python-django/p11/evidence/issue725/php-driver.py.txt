@@ -1,0 +1,23 @@
+import sys, subprocess, uuid
+from pathlib import Path
+root = Path.cwd()
+sys.path[:0] = [str(root / 'tools/migration_benchmark'), str(root / 'tools/migration_harness')]
+import runner, harness
+prefix = 'lhie-i725-' + uuid.uuid4().hex[:10] + '-'
+state = root / '.local' / (prefix + 'state')
+entry = "import sys;from pathlib import Path;import harness;harness.STATE=Path(sys.argv[1]);harness.PREFIX=sys.argv[2];sys.argv=[harness.__file__,*sys.argv[3:]];harness.main()"
+def lifecycle(*args):
+    result = subprocess.run([sys.executable, '-c', entry, str(state), prefix, *args], cwd=root / 'tools/migration_harness', text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError('isolated lifecycle failed: ' + ' '.join(args) + ' ' + result.stderr)
+    return result.stdout.strip()
+harness.STATE = state
+harness.PREFIX = prefix
+runner.cli = lifecycle
+lifecycle('init', 'laravel')
+def selected(smoke=False, implementation='laravel'):
+    for name in ('checkout', 'paid_delivery'):
+        yield dict(dataset='small', profile='current', scenario=name, users=1, traffic='distinct', temperature='warm', background='idle', implementation=implementation)
+runner.planned_cells = selected
+sys.argv = ['runner.py', '--smoke', '--output', '.local/migration-p725/php']
+raise SystemExit(runner.main())

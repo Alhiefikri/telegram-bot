@@ -116,9 +116,16 @@ scenario/user case independently against 70% of current-PHP p50/p95. After the
 surfaces exist; the measured #692 identity still records Orders, Balance and
 payment stages as absent and is never relabelled. The fresh #722 paired run
 measured 24/24 navigation cases per side: 3 pass, 21 inconclusive, zero
-authority violations and machine recommendation `fix`; the Owner/H1 decision is `fix`.
-Payment-stage cells remain unimplemented in the paired runner, and funding
-measurement remains subject to Owner/H1/ADR approval.
+authority violations and machine recommendation `fix`; the owner's earlier
+decision was `fix`. The later H1 decision continued the experiment with
+provisional payment budgets. Payment-stage cells remain unimplemented in the
+paired navigation runner, and funding measurement remains subject to applicable
+Owner/H1/ADR approval.
+The [#725 payment diagnostic](../migration/python-django/p11/evidence/issue725/report.md)
+reuses the PHP comparator and the candidate checkout smoke. It records
+post-commit and credential-bearing effect ACK observations without changing
+business authority. Different fixtures, transports and worker paths prevent a
+paired comparison; provider timing, device visibility and p95 remain inconclusive.
 The #721 follow-up removes navigation read round trips without adding a cache:
 Product rows carry their active Family, Catalog/Family/Detail/quantity/Back share
 loaded rows, Home and the category picker use one statement each, the processor

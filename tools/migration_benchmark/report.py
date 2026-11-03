@@ -57,6 +57,7 @@ BOUNDARIES = {
     "ingress_ack": ("ingress", "ingress_ack"),
     "pickup": ("interaction_queued", "pickup"),
     "screen_ack": ("ingress", "screen_ack"),
+    "checkout_committed": ("ingress", "checkout_committed"),
     "checkout_ready": ("ingress", "checkout_ready"),
     "paid_observed": ("provider_paid", "paid_observed"),
     "paid_committed": ("paid_observed", "paid_committed"),

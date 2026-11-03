@@ -51,7 +51,7 @@ use Illuminate\Support\Facades\Storage;
 // separate, sanitized evidence spool survives until the host has persisted it.
 final class MigrationProbe
 {
-    private const BOUNDARIES = ['ingress', 'ingress_ack', 'interaction_queued', 'pickup', 'screen_ack', 'checkout_ready', 'provider_paid', 'paid_observed', 'paid_committed', 'receipt_queued', 'receipt_pickup', 'credential_ack', 'group_complete'];
+    private const BOUNDARIES = ['ingress', 'ingress_ack', 'interaction_queued', 'pickup', 'screen_ack', 'checkout_committed', 'checkout_ready', 'provider_paid', 'paid_observed', 'paid_committed', 'receipt_queued', 'receipt_pickup', 'credential_ack', 'group_complete'];
     private const SCENARIOS = ['home_catalog', 'catalog_plans', 'plan_detail', 'back', 'home', 'quantity', 'orders', 'balance', 'checkout', 'paid_delivery'];
     private static string $directory;
     private static ?string $active = null;
@@ -424,7 +424,12 @@ final class MigrationProbe
         });
         Order::created(static function (Order $order): void {
             if (self::$activeUpdate !== null) {
-                self::observe(self::$activeUpdate, 'checkout_order', ['order_lookup' => (string) $order->id]);
+                $updateKey = self::$activeUpdate;
+                $orderId = (string) $order->id;
+                DB::afterCommit(static function () use ($updateKey, $orderId): void {
+                    self::observe($updateKey, 'checkout_committed');
+                    self::observe($updateKey, 'checkout_order', ['order_lookup' => $orderId]);
+                });
             }
         });
         Event::listen(JobQueueing::class, static function (JobQueueing $event): void {
@@ -1261,7 +1266,7 @@ final class MigrationProbe
             self::awaitUpdate($received);
             $events = self::events($received['key']);
             foreach ($events as $event) {
-                if (in_array($event['boundary'], ['interaction_queued', 'pickup', 'screen_ack'], true) && $record['timestamps'][$event['boundary']] === null) {
+                if (in_array($event['boundary'], ['interaction_queued', 'pickup', 'screen_ack', 'checkout_committed'], true) && $record['timestamps'][$event['boundary']] === null) {
                     $record['timestamps'][$event['boundary']] = $event['ns'];
                 }
                 if (isset($event['db_ms'])) {
@@ -1270,8 +1275,8 @@ final class MigrationProbe
             }
             $record['retries'] = max(0, count(array_filter($events, static fn (array $event): bool => $event['boundary'] === 'pickup')) - 1);
             if (in_array($job['scenario'], ['checkout', 'paid_delivery'], true)) {
-                // The handler's real Order::created event elects the originating
-                // update. Concurrent idempotent callbacks never borrow its ACK.
+                // Only the creating update's committed order owns these timings.
+                // Rolled-back creations and coalesced updates do not borrow an ACK.
                 $ownership = array_values(array_filter($events, static fn (array $event): bool => $event['boundary'] === 'checkout_order'));
                 if ($ownership === []) {
                     if ($job['traffic'] !== 'same_chat') {
@@ -1315,10 +1320,10 @@ final class MigrationProbe
                     }
                     if ($job['scenario'] === 'paid_delivery') {
                         $key = (string) DogfoodTiming::correlation($order->id);
-                        // The fixture's state changes here; provider wall time is
-                        // not converted to an invented monotonic timestamp.
-                        Cache::put('p04:paid:'.DogfoodTiming::correlation($payment->id), true, 3600);
+                        // This marks the start of publishing synthetic fixture state,
+                        // not a trusted provider confirmation or provider latency.
                         $record['timestamps']['provider_paid'] = hrtime(true);
+                        Cache::put('p04:paid:'.DogfoodTiming::correlation($payment->id), true, 3600);
                         self::$dbMs = 0;
                         self::$queryActive = true;
                         // The existing status-verification job owns provider read
@@ -1369,6 +1374,27 @@ final class MigrationProbe
         } catch (Throwable $exception) {
             $record['error_code'] = self::errorCode($exception);
             $record['outcome'] = $record['error_code'] === 'timeout' ? 'timeout' : 'error';
+            if (isset($received)) {
+                $updateEvents = self::events($received['key']);
+                foreach ($updateEvents as $event) {
+                    if (in_array($event['boundary'], ['interaction_queued', 'pickup', 'screen_ack', 'checkout_committed'], true)
+                        && $record['timestamps'][$event['boundary']] === null) {
+                        $record['timestamps'][$event['boundary']] = $event['ns'];
+                    }
+                }
+                $record['retries'] = max(0, count(array_filter($updateEvents, static fn (array $event): bool => $event['boundary'] === 'pickup')) - 1);
+            }
+            if (isset($orderKey)) {
+                $allowed = ['checkout_ready'];
+                if ($record['timestamps']['provider_paid'] !== null) {
+                    $allowed = array_merge($allowed, ['paid_observed', 'paid_committed', 'receipt_queued', 'receipt_pickup', 'credential_ack', 'group_complete']);
+                }
+                foreach (self::events($orderKey) as $event) {
+                    if (in_array($event['boundary'], $allowed, true) && $record['timestamps'][$event['boundary']] === null) {
+                        $record['timestamps'][$event['boundary']] = $event['ns'];
+                    }
+                }
+            }
         }
         self::persistRecord($job['evidence_path'], $record);
         file_put_contents(self::$directory.'/result-'.$job['ordinal'].'.json', json_encode($record, JSON_THROW_ON_ERROR));

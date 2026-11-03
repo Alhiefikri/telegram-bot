@@ -13,6 +13,12 @@ uses fresh PHP and Django identities: 24/24 navigation cases per side,
 3 pass and 21 inconclusive. The machine recommendation and Owner/H1 decision
 are `fix`. Historical #692 results below retain their original identity.
 
+The [#725 payment-stage diagnostic](evidence/issue725/report.md) records fresh
+synthetic PHP and Django observations and the H1 provisional budgets. Different
+fixtures, transports and worker paths prevent a paired comparison; provider
+confirmation timing, device visibility and statistically meaningful p95 remain
+inconclusive.
+
 ## What this gate measures
 
 The paired protocol is `tools/migration_benchmark/protocol_p11.json`

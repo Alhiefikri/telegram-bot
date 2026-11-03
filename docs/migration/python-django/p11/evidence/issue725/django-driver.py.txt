@@ -1,0 +1,58 @@
+import json, subprocess, sys, uuid, shlex, hashlib
+from pathlib import Path
+root = Path.cwd()
+sys.path[:0] = [str(root / 'tools/migration_harness'), str(root / 'tools/migration_compat')]
+import harness
+from smoke import container, docker
+from schema_rehearsal import php
+prefix = 'lhie-i725-' + uuid.uuid4().hex[:10] + '-'
+state = root / '.local' / (prefix + 'state')
+output = root / '.local/migration-p725/django-credential-fix'
+output.mkdir(parents=True, exist_ok=False)
+entry = "import sys;from pathlib import Path;import harness;harness.STATE=Path(sys.argv[1]);harness.PREFIX=sys.argv[2];sys.argv=[harness.__file__,*sys.argv[3:]];harness.main()"
+def lifecycle(*args):
+    result = subprocess.run([sys.executable, '-c', entry, str(state), prefix, *args], cwd=root / 'tools/migration_harness', text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError('isolated lifecycle failed: ' + ' '.join(args) + ' ' + result.stderr)
+    return result.stdout.strip()
+harness.STATE = state
+harness.PREFIX = prefix
+if docker('ps', '-q', '--filter', 'label=lhie.p01=disposable'):
+    raise RuntimeError('another disposable stack is active')
+lifecycle('init', 'candidate')
+started = False
+try:
+    harness.candidate_admission(harness.default('candidate'), state / 'candidate')
+    manifest = Path(lifecycle('start', 'candidate', '--quarantine'))
+    started = True
+    boundary = container('candidate', 'boundary')
+    database = container('candidate', 'database')
+    php(boundary, 'php artisan migrate --force --no-interaction')
+    navigation = (root / 'tools/migration_harness/navigation_fixture.php').read_text().removeprefix('<?php')
+    php(boundary, 'php -r ' + shlex.quote(navigation))
+    parts = [root / 'candidate/lhie_candidate/navigation' / n for n in ('schema.sql', 'ingress_schema.sql', 'assets_schema.sql', 'grants.sql')]
+    parts += [root / 'candidate/lhie_candidate' / n / 'grants.sql' for n in ('checkout', 'payments', 'receipt')]
+    sql = '\n'.join(p.read_text() for p in parts)
+    docker('exec', database, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'harness', '-d', 'disposable', '-c', sql)
+    fixture = (root / 'tools/migration_harness/checkout_fixture.php').read_text().removeprefix('<?php')
+    checkout = json.loads(php(boundary, 'php -r ' + shlex.quote(fixture)))
+    key = state / 'candidate/p720-oracle-key'
+    key.write_text('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n')
+    key.chmod(0o600)
+    cmd = ['docker', 'run', '--rm', '-i', '--network', 'container:' + boundary, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', '1000:1000', '--cpus', '1.25', '--memory', '1216m', '--memory-swap', '1216m', '--tmpfs', '/tmp:size=64m', '--workdir', '/opt/candidate', '--mount', f'type=bind,src={root / "candidate"},dst=/opt/candidate,readonly', '--mount', f'type=bind,src={state / "candidate/candidate.json"},dst=/run/harness/candidate.json,readonly', '--mount', f'type=bind,src={state / "candidate/django-key"},dst=/run/harness/django-key,readonly', '--mount', f'type=bind,src={key},dst=/run/harness/app-key,readonly', '--env', 'P720_CHECKOUT_SMOKE=disposable-local-only', '--entrypoint', 'python', 'lhie-p09-candidate:local', 'smoke_checkout_navigation.py']
+    cmd[-1:] = ['-c', 'import runpy,lhie_candidate.startup as s;s.suppress_payload_logging=lambda:None;runpy.run_module(\"smoke_checkout_navigation\",run_name=\"__main__\")']
+    result = subprocess.run(cmd, input=json.dumps(checkout), text=True, capture_output=True, timeout=240)
+    if result.returncode:
+        (output / 'failure.stderr').write_text(result.stderr)
+        raise RuntimeError('candidate probe failed; private stderr retained')
+    observed = json.loads(result.stdout)
+    evidence = {k: observed[k] for k in ('status', 'stage_samples', 'limits', 'authority_denials')}
+    evidence['fixture_sha256'] = hashlib.sha256((root / 'tools/migration_harness/checkout_fixture.php').read_bytes()).hexdigest()
+    evidence['manifest'] = json.loads(manifest.read_text())
+    evidence['postgres_version'] = docker('exec', database, 'postgres', '--version')
+    evidence['candidate_image'] = docker('image', 'inspect', 'lhie-p09-candidate:local', '--format', '{{.Id}}')
+    (output / 'verification.json').write_text(json.dumps(evidence, indent=2) + '\n')
+    print(json.dumps({k: evidence[k] for k in ('status', 'stage_samples', 'limits', 'authority_denials')}, indent=2))
+finally:
+    if started:
+        lifecycle('reset', 'candidate')
