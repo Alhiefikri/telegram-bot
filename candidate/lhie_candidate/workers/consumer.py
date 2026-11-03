@@ -5,7 +5,7 @@ import threading
 import time
 
 from . import wakeup
-from .contract import IDLE_POLL_SECONDS
+from .contract import IDLE_POLL_SECONDS, JOB_TIMEOUT_SECONDS
 
 
 class WorkerTimeout(BaseException):
@@ -61,7 +61,17 @@ class BoundedConsumer:
         started = self.clock()
         discard = False
         try:
-            self._bounded(self.handler.sweep, self.spec.sweep_limit)
+            sweep_bounded = getattr(self.handler, "sweep_bounded", None)
+            if sweep_bounded is None:
+                self._bounded(self.handler.sweep, self.spec.sweep_limit)
+            else:
+                # Limit scheduling, not an in-flight operation's timeout.
+                deadline = started + JOB_TIMEOUT_SECONDS
+                sweep_bounded(
+                    self.spec.sweep_limit,
+                    self._bounded,
+                    lambda: self.stopped.is_set() or self.clock() >= deadline,
+                )
         except WorkerTimeout:
             discard = True
             self.metrics.record("sweep_timeout")

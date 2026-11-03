@@ -1,9 +1,46 @@
 """Manual Testing Bot QA: one persistent consumer fed admitted JSON updates on stdin."""
 import json
 import queue
+import re
 import sys
 import threading
 import time
+
+
+_INTEGRATED_CALLBACK = re.compile(
+    r'(?:katalog|catalog|catalog:refresh|catalog:categories|back:categories|'
+    r'menu:home|menu:back|menu:orders|orders:open|family:back:menu|'
+    r'orders:(?:older|newer):[0-9]{14}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|'
+    r'category:(?:[1-9][0-9]*|uncategorized)(?::page:[1-9][0-9]*)?|'
+    r'family:list:[1-9][0-9]*(?::o[a-f0-9]{16})?|'
+    r'family:options:v[A-Za-z0-9_-]+(?::[os][a-f0-9]{16})?|'
+    r'family:select:v[A-Za-z0-9_-]+|'
+    r'product:[1-9][0-9]*(?::o[a-f0-9]{16})?|'
+    r'detail:back:[1-9][0-9]*:[a-f0-9]{16}|'
+    r'detail:qty:(?:-|\+|current|tier):[1-9][0-9]*:[a-f0-9]{16}|'
+    r'detail:pay:qris:[1-9][0-9]*:[A-Za-z0-9_-]+|'
+    r'checkout:check:[0-9a-fA-F-]{36})\Z'
+)
+
+
+def integrated_update_allowed(payload):
+    if not isinstance(payload, dict) or (('message' in payload) == ('callback_query' in payload)):
+        return False
+    if 'message' in payload:
+        message = payload['message']
+        return (isinstance(message, dict)
+                and set(message) <= {'message_id', 'from', 'chat', 'date', 'text', 'entities'}
+                and message.get('text') == '/start')
+    callback = payload['callback_query']
+    if not isinstance(callback, dict) or not isinstance(callback.get('message'), dict):
+        return False
+    message = callback['message']
+    if not set(message) <= {'message_id', 'from', 'chat', 'date', 'edit_date',
+                            'text', 'entities', 'photo', 'caption', 'caption_entities',
+                            'reply_markup', 'has_protected_content'}:
+        return False
+    data = callback.get('data')
+    return isinstance(data, str) and _INTEGRATED_CALLBACK.fullmatch(data) is not None
 
 
 class EmptyAckWorker:
@@ -103,8 +140,13 @@ def process_update(admitted, processor, transport, payload, ack_worker):
 
 
 def main():
-    if sys.argv[1:] != ['--testing-bot-stdin']:
+    if sys.argv[1:] not in (['--testing-bot-stdin'], ['--testing-bot-workers-stdin']):
         raise ValueError('Explicit interactive QA mode required')
+    integrated = sys.argv[1:] == ['--testing-bot-workers-stdin']
+    if integrated:
+        from lhie_candidate.runtime import load_runtime
+        if not load_runtime().workers:
+            raise ValueError('Worker admission required')
     from lhie_candidate.startup import configure_django
     configure_django()
     from lhie_candidate.readiness import verify_dependencies
@@ -129,6 +171,16 @@ def main():
                 self.relay_timings.append(timing)
             return response
 
+    if integrated:
+        ack_worker = EmptyAckWorker(RelayTransport())
+        try:
+            run_worker_stream(InvalidUpdate, UpdateInbox(), ack_worker)
+        finally:
+            drained = ack_worker.close()
+            print(json.dumps({'status': 'ack_summary', 'drained': drained,
+                              'completed': ack_worker.snapshot()}), flush=True)
+        return
+
     repository = CatalogRepository()
     transport = MeasuredTransport(ProfiledRelayTransport())
     scope = 'LhieStoreTestBot'
@@ -144,6 +196,30 @@ def main():
         drained = ack_worker.close()
         print(json.dumps({'status': 'ack_summary', 'drained': drained,
                           'completed': ack_worker.snapshot()}), flush=True)
+
+
+def run_worker_stream(invalid_update, inbox, ack_worker):
+    print(json.dumps({'status': 'ready'}), flush=True)
+    while True:
+        line = sys.stdin.buffer.readline(16386)
+        if not line:
+            return
+        if len(line) > 16384 or not line.endswith(b'\n'):
+            raise ValueError('Bounded update required')
+        try:
+            payload = json.loads(line)
+            if not integrated_update_allowed(payload):
+                raise ValueError('Update outside integrated scope')
+            admitted = inbox.receive(payload)
+        except (invalid_update, ValueError, UnicodeError):
+            print(json.dumps({'status': 'rejected'}), flush=True)
+            return
+        if admitted.response.get('method') == 'answerCallbackQuery':
+            callback = payload['callback_query']
+            if not ack_worker.submit({'chat_id': callback['message']['chat']['id'],
+                                      'callback_query_id': admitted.response['callback_query_id']}):
+                raise ValueError('Callback acknowledgement unavailable')
+        print(json.dumps({'status': 'admitted'}), flush=True)
 
 
 def run_stream(connection, invalid_update, inbox, processor, transport, ack_worker):

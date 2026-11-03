@@ -10,8 +10,8 @@ stays local and does not activate production, real money or CI/CD.
 
 | Queue | Durable source | Wakeup | Process | Batch | Timeout / retry_after | Attempts |
 | --- | --- | --- | --- | --- | --- | --- |
-| `interaction` | `django_candidate.navigation_updates` | `candidate:interaction` | 1 | 25 | 60 s / 180 s | no blind replay |
-| `payment` | `payment_events` hints and ambiguous `payments` | `candidate:payments` | 1 | 10 | 60 s / 180 s | 3 |
+| `interaction` | non-payment `django_candidate.navigation_updates` | `candidate:interaction` | 1 | 25 | 60 s / 180 s | no blind replay |
+| `payment` | checkout/check `navigation_updates`, `payment_events` hints and ambiguous `payments` | `candidate:payments` | 1 | 10 | 60 s / 180 s | navigation: no blind replay; other work: 3 |
 | `receipt` | `telegram_outbound_effects` | `candidate:telegram-receipts` | 1 | 25 | 60 s / 180 s | 3 |
 
 `notifications`, broadcast, stock, Binance and supplier families are reserved
@@ -44,6 +44,10 @@ allocation. The supervisor holds no database or Redis connection.
   for `CONN_MAX_AGE=60` and `close_old_connections()` returns it once expired or
   unusable. Durable state decides whether the unit is unknown, failed or
   retryable.
+- Payment sweeps interleave navigation, hints and ambiguous-create recovery.
+  Each operation gets its own timeout. A 60-second scheduling budget prevents
+  starting more work after expiry without cutting off an operation in flight;
+  the first family rotates on the next sweep.
 - `SIGTERM`/`SIGINT` stop pickup and let the current job finish. The process exit
   closes its connection; the supervisor waits 75 s, then terminates and finally
   kills.
@@ -54,13 +58,17 @@ allocation. The supervisor holds no database or Redis connection.
 
 ## Durable discovery and recovery
 
-- Interaction: pending updates are drained in ascending update order. A row
-  left `processing` by a lost worker becomes `unknown` after 60 s with
-  `outcome='worker_lost'`; it is not replayed and `/start` remains the explicit
-  recovery surface.
-- Payment: unprocessed callback hints and recoverable ambiguous creates are
-  discovered from PostgreSQL. Recovery only observes authoritative provider
-  history; it never creates another invoice or settles from a callback alone.
+- Interaction and payment share the durable navigation inbox but process disjoint
+  callback families. Checkout and payment-check callbacks run on the payment
+  worker, including provider I/O; other navigation runs on interaction. The
+  payment processor validates and claims under the per-chat advisory lock,
+  releases it for provider I/O, then reacquires it and revalidates the claim,
+  Customer, root generation and session before rendering. Earlier pending or
+  processing rows fence later same-chat updates. Bounded sweeps skip blocked
+  chats; an abandoned processing row becomes `unknown`, never blindly replayed.
+- Payment also discovers unprocessed callback hints and recoverable ambiguous
+  creates from PostgreSQL. Recovery observes authoritative provider history;
+  it never creates another invoice or settles from a callback alone.
 - Receipt: the bounded sweep repairs the sent projection, expires stale leases
   to `unknown`, discovers paid orders and failed photo fallbacks, and processes
   due ordered effects directly from PostgreSQL even when Redis is absent. An

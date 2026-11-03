@@ -1,7 +1,6 @@
-"""Explicit, post-commit sandbox payment advancement; no background worker is installed."""
+"""Post-commit sandbox payment advancement with fenced provider observations."""
 from dataclasses import dataclass
 from datetime import datetime
-from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from django.db import connections, transaction
@@ -12,6 +11,7 @@ from ..checkout.inventory import InventoryLedger
 from ..receipt.jobs import wake_after_commit
 from .receipts import claim_provider_reference
 from .sakurupiah import CreateRequest, InvoiceIdentity, OutcomeState
+from .sakurupiah_urls import validate_sakurupiah_checkout_url, validate_sakurupiah_qr_image_url
 
 
 _JAKARTA = ZoneInfo('Asia/Jakarta')
@@ -29,18 +29,6 @@ def _deadline(value):
     return value.astimezone(_JAKARTA).replace(tzinfo=None) if value.tzinfo else value
 
 
-def _url(value):
-    if not isinstance(value, str) or len(value) > 2048 or value.strip() != value:
-        return False
-    if any(ord(c) <= 32 or ord(c) >= 127 or c == '\\' for c in value):
-        return False
-    try:
-        parts = urlsplit(value)
-        return (parts.scheme == 'https' and parts.hostname == 'sakurupiah.id'
-                and parts.netloc == 'sakurupiah.id' and not parts.fragment
-                and parts.username is None and parts.password is None and parts.port is None)
-    except ValueError:
-        return False
 
 
 def _invoice_expiry(outcome, payment, merchant_fee):
@@ -56,9 +44,9 @@ def _presentation(outcome, payment, order, merchant_fee, expiry):
     effective = min(expiry, _deadline(payment['expired_at']), _deadline(order['expires_at']))
     # Only hosted and provider-hosted QR images are supported; arbitrary EMV
     # strings are not accepted without the legacy parser's integrity checks.
-    if outcome.qr is not None and not _url(outcome.qr):
+    if outcome.qr is not None and not validate_sakurupiah_qr_image_url(outcome.qr):
         raise ValueError('Unsupported QR presentation')
-    if outcome.checkout_url is not None and not _url(outcome.checkout_url):
+    if outcome.checkout_url is not None and not validate_sakurupiah_checkout_url(outcome.checkout_url):
         raise ValueError('Invalid checkout URL')
     if outcome.qr is None and outcome.checkout_url is None:
         raise ValueError('Missing presentation')
@@ -73,6 +61,9 @@ def _presentation(outcome, payment, order, merchant_fee, expiry):
 class LifecycleResult:
     state: str
     presentation: dict | None = None
+    fee: int | None = None
+    total: int | None = None
+    customer_pays_fee: bool | None = None
 
 
 class SakurupiahLifecycle:
@@ -142,8 +133,10 @@ class SakurupiahLifecycle:
                         or presentation.get('mode') not in ('qris_image', 'hosted')
                         or presentation.get('qris_payload') is not None
                         or type(presentation.get('customer_pays_fee')) is not bool
-                        or (presentation.get('qris_image_url') is not None and not _url(presentation['qris_image_url']))
-                        or (presentation.get('checkout_url') is not None and not _url(presentation['checkout_url']))
+                        or (presentation.get('qris_image_url') is not None
+                            and not validate_sakurupiah_qr_image_url(presentation['qris_image_url']))
+                        or (presentation.get('checkout_url') is not None
+                            and not validate_sakurupiah_checkout_url(presentation['checkout_url']))
                         or (presentation['mode'] == 'qris_image' and not presentation.get('qris_image_url'))
                         or (presentation['mode'] == 'hosted' and not presentation.get('checkout_url'))
                         or _deadline(presentation.get('effective_expires_at')) <= _now()
@@ -158,7 +151,8 @@ class SakurupiahLifecycle:
                     return LifecycleResult('provider_invalid_result')
             except Exception:
                 return LifecycleResult('provider_invalid_result')
-            return LifecycleResult('created', presentation)
+            return LifecycleResult('created', presentation, payment['provider_fee'],
+                                   payment['provider_total_payment'], presentation['customer_pays_fee'])
         return LifecycleResult(state)
 
     def classify(self, payment_id):

@@ -13,6 +13,9 @@ from uuid import uuid4
 
 from django.db import connections, transaction
 
+from lhie_candidate.payments.sakurupiah_urls import validate_sakurupiah_qr_image_url
+
+
 from .types import TelegramResult
 
 
@@ -162,6 +165,15 @@ class NavigationRoots:
                            f'WHERE {where}', params)
             return cursor.rowcount == 1
 
+    def _invalidate_root(self, root):
+        where, params = self._fence(root)
+        with self.connection.cursor() as cursor:
+            cursor.execute(f'UPDATE {self.TABLE} SET message_id = NULL, media_kind = NULL, '
+                           'screen = NULL, locale = NULL, rendered_at = NULL, '
+                           'render_token = NULL, lease_expires_at = NULL '
+                           f'WHERE {where}', params)
+            return cursor.rowcount == 1
+
     def _live(self, root):
         where, params = self._fence(root)
         with self.connection.cursor() as cursor:
@@ -195,7 +207,8 @@ class NavigationRoots:
 
     @staticmethod
     def _options(surface):
-        return {key: value for key, value in surface.options.items() if key not in ('photo_url', 'asset_version')}
+        return {key: value for key, value in surface.options.items()
+                if key not in ('photo_url', 'asset_version', 'text_fallback')}
 
     def _payload(self, root, surface):
         return {**self._options(surface), 'chat_id': root.chat_id,
@@ -209,6 +222,9 @@ class NavigationRoots:
             reference = root.banner_reference
         if media_reference is not None:
             reference = media_reference
+        if surface.screen == 'checkout':
+            photo = surface.options.get('photo_url')
+            return ('photo', photo) if validate_sakurupiah_qr_image_url(photo) and fits_caption(surface) else ('text', None)
         if surface.screen == 'product':
             return ('photo', surface.options['photo_url']) if surface.options.get('photo_url') and fits_caption(surface) else ('text', None)
         return (kind, reference) if reference and fits_caption(surface) else ('text', None)
@@ -225,6 +241,15 @@ class NavigationRoots:
             payload.update({media_kind: reference, 'caption': surface.caption})
             method = 'sendAnimation' if media_kind == 'animation' else 'sendPhoto'
         result = self._execute(method, payload)
+        if (result.outcome == 'definite' and surface.screen == 'checkout'
+                and media_kind == 'photo' and isinstance(surface.options.get('text_fallback'), str)):
+            if not self._live(root):
+                return 'superseded'
+            payload.pop('photo')
+            payload.pop('caption')
+            payload['text'] = surface.options['text_fallback']
+            media_kind, reference = 'text', None
+            result = self._execute('sendMessage', payload)
         if result.outcome != 'success' or type(result.message_id) is not int or result.message_id < 1:
             return result.outcome if result.outcome == 'definite' else 'ambiguous'
         if remove_legacy_reply_keyboard:
@@ -235,8 +260,9 @@ class NavigationRoots:
             })
             if restored.outcome != 'success':
                 return 'definite' if restored.outcome == 'definite' else 'ambiguous'
-        banner = reference if media_kind != 'text' and surface.screen != 'product' else (root.banner_reference or self.banner_reference)
-        version = self.banner_version if surface.screen != 'product' else root.banner_version
+        scoped_photo = surface.screen in ('product', 'checkout')
+        banner = (root.banner_reference or self.banner_reference) if scoped_photo else reference
+        version = root.banner_version if scoped_photo else self.banner_version
         return 'replaced' if self._finish(root, surface, sent_id=result.message_id,
                                           media_kind=media_kind, reference=banner, version=version,
                                           establishing=establishing) else 'superseded'
@@ -260,10 +286,12 @@ class NavigationRoots:
         if claimed is None:
             return 'superseded'
         product_transition = ((claimed.screen == 'product') != (surface.screen == 'product'))
-        media_change = (surface.screen == 'product' and (
-            (claimed.media_kind == 'text' and surface.options.get('photo_url') and fits_caption(surface))
-            or (claimed.media_kind != 'text' and not surface.options.get('photo_url'))))
-        replace = refresh or product_transition or media_change or (
+        checkout_transition = ((claimed.screen == 'checkout') != (surface.screen == 'checkout'))
+        checkout_photo = claimed.screen == 'checkout' and claimed.media_kind == 'photo'
+        desired_kind, _ = self._media(claimed, surface)
+        media_change = (surface.screen in ('product', 'checkout')
+                        and ((claimed.media_kind == 'text') != (desired_kind == 'text')))
+        replace = refresh or product_transition or checkout_transition or checkout_photo or media_change or (
             claimed.media_kind != 'text' and not fits_caption(surface))
         if not replace:
             payload = self._payload(claimed, surface)
@@ -277,16 +305,20 @@ class NavigationRoots:
                 return ('unchanged' if result.outcome == 'not_modified' else 'ambiguous') if released else 'superseded'
         if not self._live(claimed):
             return 'superseded'
-        if refresh:
+        if refresh or checkout_photo:
             result = self._execute('deleteMessage', {'chat_id': claimed.chat_id, 'message_id': claimed.message_id})
             if result.outcome != 'success':
+                if checkout_photo and result.outcome != 'definite':
+                    return 'invalidated' if self._invalidate_root(claimed) else 'superseded'
                 self._release(claimed)
                 return 'definite' if result.outcome == 'definite' else 'ambiguous'
             if not self._live(claimed):
                 return 'superseded'
         outcome = self._send(claimed, surface)
         if outcome != 'replaced':
+            if checkout_photo:
+                return 'invalidated' if self._invalidate_root(claimed) else 'superseded'
             self._release(claimed)
-        elif product_transition or media_change:
+        elif not (refresh or checkout_photo) and (product_transition or checkout_transition or media_change):
             self._execute('deleteMessage', {'chat_id': claimed.chat_id, 'message_id': claimed.message_id})
         return outcome

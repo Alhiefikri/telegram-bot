@@ -585,6 +585,7 @@
   "payment.sakurupiah.expiry_warning": "Jangan bayar QR lama setelah pesanan kedaluwarsa atau dibatalkan. Jika terlanjur bayar, hubungi bantuan dengan nomor invoice dan bukti pembayaran.",
   "payment.sakurupiah.scan": "Scan QRIS ini langsung dari Telegram. Bayar hanya dari gambar QR di atas.",
   "payment.sakurupiah.hosted": "Buka halaman pembayaran QRIS melalui tombol website di bawah.",
+  "payment.sakurupiah.open_qr": "Buka gambar QRIS melalui tombol Buka QRIS di bawah.",
   "payment.sakurupiah.retry.expired_title": "QRIS kedaluwarsa",
   "payment.sakurupiah.retry.expired_body": "QRIS ini sudah tidak bisa dibayar. Jangan bayar QR ini. Buat pesanan baru jika masih ingin membeli.",
   "payment.sakurupiah.retry.creating_lead": "Sedang menyiapkan pembayaran QRIS",

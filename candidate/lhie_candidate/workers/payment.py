@@ -1,8 +1,7 @@
-"""Payment family: callback hints and ambiguous-create reconciliation only.
+"""Payment family: checkout navigation, callback hints, and reconciliation.
 
-No worker creates a second invoice, expires an order, or settles from a
-callback alone. Provider observations happen outside database transactions and
-every settlement relocks/revalidates the original snapshot in the lifecycle.
+Provider observations happen outside database transactions; settlement
+relocks and revalidates the original payment snapshot.
 """
 
 from datetime import datetime, timedelta
@@ -17,10 +16,12 @@ def _now():
 
 
 class PaymentHandler:
-    def __init__(self, lifecycle, db):
+    def __init__(self, lifecycle, db, *, processor=None):
         self.lifecycle = lifecycle
         self.db = db
+        self.processor = processor
         self.spec = queue_spec("payment")
+        self._sweep_start = 0
 
     def _payment_for_event(self, event_id):
         rows = self.db.rows(
@@ -35,6 +36,10 @@ class PaymentHandler:
 
     def handle(self, raw):
         kind, identity = wakeup.decode(self.spec.wakeup_queue, raw)
+        if kind == "payment.navigation":
+            if self.processor is None:
+                raise wakeup.InvalidWakeup("Navigation processor unavailable")
+            return self.processor.process(identity)
         if kind != "payment.event":
             raise wakeup.InvalidWakeup("Invalid wakeup family")
         payment_id = self._payment_for_event(identity)
@@ -67,18 +72,75 @@ class PaymentHandler:
             (_now() - timedelta(seconds=10), limit),
         )]
 
+    def _next_navigation(self, attempted):
+        rows = self.db.rows(
+            "SELECT updates.update_id FROM django_candidate.navigation_updates updates "
+            "WHERE updates.state='pending' " + self.processor.family_filter +
+            " AND NOT (updates.update_id=ANY(%s))"
+            " AND NOT EXISTS (SELECT 1 FROM django_candidate.navigation_updates earlier "
+            "WHERE earlier.chat_id=updates.chat_id AND "
+            "(earlier.state='processing' OR "
+            "(earlier.state='pending' AND earlier.update_id<updates.update_id))) "
+            "ORDER BY updates.update_id LIMIT 1", (attempted,),
+        )
+        return rows[0]["update_id"] if rows else None
+
     def sweep(self, limit):
-        hints = self._pending_hint_payments(limit)
-        ambiguous = self._ambiguous_payments(limit)
-        failures = 0
-        for payment_id in hints:
-            try:
-                self.lifecycle.consume_callbacks(payment_id)
-            except Exception:
-                failures += 1
-        for payment_id in ambiguous:
-            try:
-                self.lifecycle.recover(payment_id)
-            except Exception:
-                failures += 1
-        return {"hints": len(hints), "ambiguous": len(ambiguous), "failures": failures}
+        return self.sweep_bounded(limit, lambda function, *args: function(*args), lambda: False)
+
+    def sweep_bounded(self, limit, bounded, stopped):
+        result = {"hints": 0, "ambiguous": 0, "failures": 0}
+        if self.processor:
+            result.update(navigation=0, recovered=0)
+
+        def recover_navigation():
+            if self.processor:
+                result["recovered"] = bounded(self.processor.recover, limit)
+            yield
+
+        def navigation():
+            if not self.processor:
+                return
+            attempted = []
+            while len(attempted) < limit and not stopped():
+                identity = bounded(self._next_navigation, attempted)
+                if identity is None or stopped():
+                    break
+                attempted.append(identity)
+                bounded(self.processor.process, identity)
+                result["navigation"] += 1
+                yield
+
+        def payments(key, select, operation):
+            identities = bounded(select, limit)
+            result[key] = len(identities)
+            for identity in identities:
+                if stopped():
+                    break
+                try:
+                    bounded(operation, identity)
+                except Exception:
+                    result["failures"] += 1
+                yield
+
+        phases = [
+            iter(recover_navigation()),
+            iter(navigation()),
+            iter(payments("hints", self._pending_hint_payments, self.lifecycle.consume_callbacks)),
+            iter(payments("ambiguous", self._ambiguous_payments, self.lifecycle.recover)),
+        ]
+        start = self._sweep_start
+        self._sweep_start = (start + 1) % len(phases)
+        phases = phases[start:] + phases[:start]
+        while phases and not stopped():
+            remaining = []
+            for phase in phases:
+                if stopped():
+                    break
+                try:
+                    next(phase)
+                except StopIteration:
+                    continue
+                remaining.append(phase)
+            phases = remaining
+        return result

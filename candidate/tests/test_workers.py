@@ -18,7 +18,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(contract.QUEUES, ("interaction", "payment", "receipt"))
         self.assertEqual(len({spec.wakeup_queue for spec in contract.TOPOLOGY.values()}), 3)
         self.assertEqual(contract.TOPOLOGY["receipt"].kinds, ("effect", "order"))
-        self.assertEqual(contract.TOPOLOGY["payment"].kinds, ("payment.event",))
+        self.assertEqual(contract.TOPOLOGY["payment"].kinds, ("payment.event", "payment.navigation"))
         self.assertEqual(contract.TOPOLOGY["interaction"].kinds, ("navigation.update",))
         families = [kind for spec in contract.TOPOLOGY.values() for kind in spec.kinds]
         self.assertEqual(len(families), len(set(families)))
@@ -60,6 +60,7 @@ class ContractTests(unittest.TestCase):
 class WakeupTests(unittest.TestCase):
     def test_integer_and_uuid_identities_round_trip(self):
         for kind, identity in (("navigation.update", 7), ("payment.event", 9),
+                               ("payment.navigation", 11),
                                ("order", "123e4567-e89b-12d3-a456-426614174000"),
                                ("effect", "123E4567-E89B-12D3-A456-426614174000")):
             with self.subTest(kind=kind):
@@ -70,6 +71,23 @@ class WakeupTests(unittest.TestCase):
                 self.assertEqual(decoded[1], identity if type(identity) is int
                                  else "123e4567-e89b-12d3-a456-426614174000")
                 self.assertNotIn('"version": 1', wire)
+
+    def test_checkout_routing_uses_only_admitted_callback_identity(self):
+        from lhie_candidate.navigation.ingress import minimize
+        from lhie_candidate.navigation.processor import payment_callback
+        base = {"update_id": 51, "callback_query": {
+            "id": "synthetic", "from": {"id": 101, "is_bot": False},
+            "message": {"message_id": 7, "chat": {"id": 101, "type": "private"}},
+            "data": "detail:pay:qris:2:abcdef"}}
+        self.assertTrue(payment_callback(minimize(base)))
+        base["callback_query"]["data"] = "checkout:check:123"
+        self.assertTrue(payment_callback(minimize(base)))
+        base["callback_query"]["data"] = "catalog:refresh"
+        self.assertFalse(payment_callback(minimize(base)))
+        wire = wakeup.encode("payment.navigation", 51)
+        self.assertEqual(wakeup.decode("candidate:payments", wire), ("payment.navigation", 51))
+        with self.assertRaises(wakeup.InvalidWakeup):
+            wakeup.decode("candidate:interaction", wire)
 
     def test_rejects_php_payloads_foreign_families_and_extra_data(self):
         for raw in (

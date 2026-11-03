@@ -68,9 +68,9 @@ adds an explicitly attested Sakurupiah-only relay, provider-authenticated callba
 hints in existing Payment Events, immutable same-Payment create/recovery and
 authoritative status/history settlement using canonical receipt and inventory
 owners. `tools/migration_harness/smoke_qris.py` exercises the local synthetic
-path. It does not qualify the real sandbox or Testing Bot: P06's payment button
-is not yet connected, P10 owns the bounded automatic consumer, and real target/credential
-verification plus external smoke remain open P08/H1 requirements.
+path. The later #720 bridge connects the payment button locally; real
+target/credential verification and integrated Testing Bot/sandbox smoke remain
+open P08/H1 requirements.
 
 P09 [receipt delivery](../migration/python-django/p05/README.md#p09-credential-receipts-and-outbound-effects-690)
 owns `candidate/lhie_candidate/receipt/`: authorized transient rendering,
@@ -86,10 +86,15 @@ P10 [isolated workers](../migration/python-django/p10/README.md) owns
 It adds a standard-library bounded supervisor with one process each for
 interaction, payment and receipt, one `candidate_runtime` connection per worker,
 ID-only shared wakeups, bounded PostgreSQL sweeps and bounded restart/drain.
-`interaction` preserves P06 per-chat serialization and marks abandoned claims
-unknown instead of replaying; `payment` consumes P08 hints and ambiguous-create
-recovery without a second invoice; `receipt` delivers P09 ordered effects
-directly from PostgreSQL when Redis is absent and never resends an unknown.
+`interaction` handles non-payment navigation; checkout and payment-check
+callbacks use ID-only wakeups and the same durable navigation inbox on the
+`payment` worker. A durable processing claim preserves same-chat order while the
+advisory lock is released for provider I/O; claim, Customer, root generation and
+session are revalidated before rendering. Fair bounded sweeps prevent a blocked
+chat from starving unrelated navigation, and refresh the DB-backed banner before
+rendering. Payment hints, navigation and recovery receive independent timeouts
+and bounded scheduling. Abandoned claims become unknown; `receipt` delivers
+P09 ordered effects directly from PostgreSQL and never resends an unknown.
 `tools/migration_harness/smoke_workers.py` runs the mixed-load and
 Redis-stopped recovery drills inside P01 isolation and writes
 `.local/migration-p10/verification.json`. It reuses P07/P08/P09 fixtures and

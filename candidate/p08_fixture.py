@@ -69,8 +69,8 @@ class Sandbox:
                     row = sandbox.rows.setdefault(ref, {'trx_id': 'synthetic-' + ref,
                         'merchant_ref': ref, 'payment_kode': fields['method'],
                         'amount': fields['amount'], 'total': fields['amount'], 'fee': '0',
-                        'expired': '2099-01-01 00:00:00', 'qr': 'https://sakurupiah.id/synthetic-qr',
-                        'checkout_url': 'https://sakurupiah.id/synthetic-checkout', 'status': 'pending'})
+                        'expired': '2099-01-01 00:00:00', 'qr': 'https://sakurupiah.id/assets/synthetic-qr.png',
+                        'checkout_url': 'https://sakurupiah.id/sanbox-payout.php?token=synthetic', 'status': 'pending'})
                     if sandbox.block_create:
                         sandbox.create_received.set()
                         if not sandbox.release_create.wait(timeout=8):

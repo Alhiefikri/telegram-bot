@@ -3,7 +3,7 @@
 from .contract import LEASE_SECONDS, validate_queue_name
 
 
-def interaction_handler():
+def _navigation_processor(*, lifecycle=None, key=None, family):
     from ..checkout.navigation import NavigationCheckout, sandbox_request
     from ..funding.service import FundingService
     from ..navigation.presentation import CatalogPresenter
@@ -11,12 +11,6 @@ def interaction_handler():
     from ..navigation.repository import CatalogRepository
     from ..navigation.roots import NavigationRoots
     from ..navigation.transport import RelayTransport
-    from ..payments.lifecycle import SakurupiahLifecycle
-    from ..payments.relay import SandboxRelay
-    from ..payments.sakurupiah import SakurupiahSandboxAdapter
-    from ..compat.crypto import LaravelEncrypter
-    from ..runtime import application_key
-    from .interaction import InteractionHandler
 
     repository = CatalogRepository()
     transport = RelayTransport()
@@ -28,23 +22,24 @@ def interaction_handler():
     # factory is installed until an approved P08/P15 operator configuration
     # exists. The service still owns callback parsing and fails closed.
     funding = FundingService()
-    # Checkout uses the same sandbox-only Sakurupiah lifecycle as the payment
-    # worker. It never retargets the provider and fails closed when the local
-    # sandbox relay is absent. The request identity is synthetic and carries no
-    # production credential or endpoint. A missing admitted key disables
-    # checkout instead of taking the read-only navigation worker down.
-    try:
-        key = application_key()
-        lifecycle = SakurupiahLifecycle(SakurupiahSandboxAdapter(transport=SandboxRelay()),
-                                        LaravelEncrypter(key))
-    except Exception:
-        key, lifecycle = None, None
+    # Provider access is installed only on the payment worker.
     checkout = NavigationCheckout(lifecycle=lifecycle,
                                   request_factory=sandbox_request if lifecycle else None,
                                   key=key)
     presenter = CatalogPresenter(repository, bot_scope=scope, custom_emoji=True,
                                  funding=funding, checkout=checkout)
-    return InteractionHandler(NavigationProcessor(repository, presenter, roots, transport))
+    return NavigationProcessor(repository, presenter, roots, transport, family=family)
+
+
+def interaction_handler():
+    from ..runtime import application_key
+    from .interaction import InteractionHandler
+
+    try:
+        key = application_key()
+    except Exception:
+        key = None
+    return InteractionHandler(_navigation_processor(key=key, family="interaction"))
 
 
 def payment_handler():
@@ -56,9 +51,11 @@ def payment_handler():
     from ..runtime import application_key
     from .payment import PaymentHandler
 
+    key = application_key()
     lifecycle = SakurupiahLifecycle(SakurupiahSandboxAdapter(transport=SandboxRelay()),
-                                    LaravelEncrypter(application_key()))
-    return PaymentHandler(lifecycle, Database())
+                                    LaravelEncrypter(key))
+    processor = _navigation_processor(lifecycle=lifecycle, key=key, family="payment")
+    return PaymentHandler(lifecycle, Database(), processor=processor)
 
 
 def receipt_handler():

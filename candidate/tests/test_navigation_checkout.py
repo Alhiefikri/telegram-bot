@@ -34,7 +34,7 @@ def pending(**values):
     return CheckoutView(
         'pending', order_id=str(uuid4()), payment_id=str(uuid4()),
         invoice_number='INV-720', amount=25000, fee=200, total=25200,
-        qris_url='https://sakurupiah.id/qr/synthetic.png', rail='qris', **values)
+        qris_url='https://sakurupiah.id/assets/synthetic.png', rail='qris', **values)
 
 
 def paid(**values):
@@ -74,10 +74,111 @@ class NavigationCheckoutPresentationTests(unittest.TestCase):
         self.assertIn('Rp 25.200', surface.caption)
         check = callback(surface, 'checkout:check:')
         self.assertRegex(check, r'^checkout:check:[0-9a-f-]{36}$')
-        self.assertTrue(any(button.get('url') == 'https://sakurupiah.id/qr/synthetic.png'
+        self.assertEqual(surface.options['photo_url'], 'https://sakurupiah.id/assets/synthetic.png')
+        self.assertTrue(any(button.get('url') == 'https://sakurupiah.id/assets/synthetic.png'
                             for button in buttons(surface)))
         self.assertTrue(any(button.get('callback_data') == 'menu:orders'
                             for button in buttons(surface)))
+    def test_hosted_link_is_the_only_website_button_and_qr_is_media(self):
+        presenter = self.presenter(None)
+        surface = presenter._checkout_surface(
+            CUSTOMER, pending(checkout_url='https://sakurupiah.id/sanbox-payout.php?token=synthetic'))
+        links = [button for button in buttons(surface) if 'url' in button]
+        self.assertEqual([button['url'] for button in links], ['https://sakurupiah.id/sanbox-payout.php?token=synthetic'])
+        self.assertIn('Website', links[0]['text'])
+        self.assertEqual(surface.options['photo_url'], 'https://sakurupiah.id/assets/synthetic.png')
+        self.assertIn('tombol website', surface.options['text_fallback'])
+
+    def test_qr_only_has_open_qr_fallback_and_no_website_button(self):
+        surface = self.presenter(None)._checkout_surface(CUSTOMER, pending())
+        links = [button for button in buttons(surface) if 'url' in button]
+        self.assertEqual(len(links), 1)
+        self.assertIn('QRIS', links[0]['text'])
+        self.assertNotIn('Website', links[0]['text'])
+        self.assertIn('tombol Buka QRIS', surface.options['text_fallback'])
+
+    def test_hosted_only_and_invalid_media_do_not_attach_a_photo(self):
+        presenter = self.presenter(None)
+        hosted = CheckoutView('pending', checkout_url='https://sakurupiah.id/sanbox-payout.php?token=synthetic')
+        surface = presenter._checkout_surface(CUSTOMER, hosted)
+        self.assertNotIn('photo_url', surface.options)
+        self.assertIn('tombol website', surface.caption)
+        invalid = CheckoutView('pending', qris_url='https://example.com/qr.png',
+                               checkout_url='https://example.com/pay')
+        surface = presenter._checkout_surface(CUSTOMER, invalid)
+        self.assertNotIn('photo_url', surface.options)
+        self.assertFalse(any('url' in button for button in buttons(surface)))
+
+    def test_same_host_unapproved_qr_or_hosted_paths_are_not_exposed(self):
+        presenter = self.presenter(None)
+        for qr in ('https://sakurupiah.id/qr/image.png',
+                   'https://sakurupiah.id/assets/image.png?token=x',
+                   'https://sakurupiah.id/assets/%2e%2e/image.png'):
+            with self.subTest(qr=qr):
+                surface = presenter._checkout_surface(CUSTOMER, CheckoutView(
+                    'pending', qris_url=qr, checkout_url='https://sakurupiah.id/other'))
+                self.assertNotIn('photo_url', surface.options)
+                self.assertFalse(any('url' in button for button in buttons(surface)))
+
+    def test_long_qr_checkout_keeps_open_qr_fallback_without_claiming_image_above(self):
+        from lhie_candidate.navigation.roots import fits_caption
+        surface = self.presenter(None)._checkout_surface(
+            CUSTOMER, pending(), product={'name': 'x' * 1100}, quantity=1)
+        self.assertFalse(fits_caption(surface))
+        self.assertNotIn('gambar QR di atas', surface.caption)
+        self.assertNotIn('photo_url', surface.options)
+        self.assertIn('tombol Buka QRIS', surface.caption)
+        self.assertTrue(any(button.get('url') == 'https://sakurupiah.id/assets/synthetic.png'
+                            for button in buttons(surface)))
+
+    def test_localized_long_caption_uses_matching_hosted_or_qr_instruction(self):
+        cases = (
+            ('id', 'tombol Buka QRIS', 'tombol website'),
+            ('en', 'Open QRIS button', 'website button'),
+            ('ms', 'butang Buka QRIS', 'butang laman web'),
+        )
+        for code, qr_instruction, hosted_instruction in cases:
+            for hosted in (False, True):
+                with self.subTest(locale=code, hosted=hosted):
+                    customer = {**CUSTOMER, 'locale': code}
+                    view = pending(**({'checkout_url': 'https://sakurupiah.id/sanbox-payout.php?token=synthetic'} if hosted else {}))
+                    surface = self.presenter(None)._checkout_surface(
+                        customer, view, product={'name': 'x' * 1100}, quantity=1)
+                    self.assertIn(hosted_instruction if hosted else qr_instruction, surface.caption)
+                    self.assertNotIn('photo_url', surface.options)
+
+    def test_paid_never_retains_qr_even_if_view_contains_url(self):
+        view = CheckoutView('paid', rail='qris', qris_url='https://sakurupiah.id/qr/old.png')
+        surface = self.presenter(None)._checkout_surface(CUSTOMER, view)
+        self.assertNotIn('photo_url', surface.options)
+        self.assertFalse(any('url' in button for button in buttons(surface)))
+
+
+    def test_committed_invoice_amounts_reach_initial_and_refresh_surfaces(self):
+        from lhie_candidate.checkout.navigation import _lifecycle_view
+        from lhie_candidate.payments.lifecycle import LifecycleResult
+
+        presentation = {'mode': 'qris_image', 'qris_payload': None,
+                        'qris_image_url': 'https://sakurupiah.id/assets/synthetic.png',
+                        'checkout_url': None, 'effective_expires_at': None}
+        presenter = self.presenter(None)
+        for customer_pays, expected_fee, expected_total in ((True, 200, 25200), (False, None, 25000)):
+            for replayed in (False, True):
+                result = LifecycleResult('created', presentation, 200, expected_total, customer_pays)
+                view = _lifecycle_view(result, order_id=str(uuid4()), payment_id=str(uuid4()),
+                                       invoice_number='INV-720', amount=25000,
+                                       replayed=replayed, rail='qris')
+                self.assertEqual((view.fee, view.total), (expected_fee, expected_total))
+                surface = presenter._checkout_surface(CUSTOMER, view)
+                self.assertIn('Rp ' + ('25.200' if customer_pays else '25.000'), surface.caption)
+                self.assertEqual('Rp 200' in surface.caption, customer_pays)
+
+    def test_unknown_total_is_not_fabricated(self):
+        presenter = self.presenter(None)
+        view = CheckoutView('pending', payment_id=str(uuid4()), invoice_number='INV-720',
+                            amount=25000, rail='qris')
+        surface = presenter._checkout_surface(CUSTOMER, view)
+        self.assertEqual(surface.caption.count('Rp 25.000'), 1)
 
     def test_balance_success_and_insufficient_copy_are_localized(self):
         gateway = FakeCheckout(paid(), CheckoutView('balance_insufficient', rail='balance'))

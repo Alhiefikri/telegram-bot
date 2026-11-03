@@ -178,12 +178,29 @@ logical checksums, PostgreSQL settings and excluded-claim limits match. Per case
 1. Missing candidate cell for a declared gap → `not_implemented`.
 2. Either side non-exploratory, incomplete batches or missing distributions →
    `inconclusive`.
-3. Otherwise `pass` when both ratios are ≤ 0.70, else `fail`.
+3. Compare decimal representations of p50 and p95 separately against the
+   unchanged 0.70 target. For each reported latency, conservatively allow
+   ±0.005 ms, half the 0.01 ms display unit used in the retained
+   [verification table](verification.md). A ratio is clearly above only if
+   `(Django - 0.005) > 0.70 × (PHP + 0.005)`; it is clearly below only if
+   `(Django + 0.005) < 0.70 × (PHP - 0.005)` with a positive lower PHP bound.
+   Any clearly above metric fails the case; otherwise, any metric whose interval
+   touches or crosses the target is `inconclusive`; only two clearly below
+   metrics pass. Reasons identify the affected p50 or p95. Ratios are retained
+   without display rounding, as JSON numbers.
+
+This display-precision guard is not a statistical confidence interval or a
+change to #679's target. The underlying report retains finer timing values;
+the guard avoids treating distinctions hidden in the retained presentation as
+decisive, but does not quantify sampling or measurement uncertainty.
 
 The engine recommendation is `stop` for any authority violation or unresolved
-critical/high security finding, `fix` for failing/inconclusive/gap evidence and
-`continue` only when every expected case passed. It sets `owner_decision: false`;
-H1 owns continue/fix/stop.
+critical/high security finding. Otherwise it is `fix`: even if every navigation
+case passes, this comparator does not evaluate paired payment stages or
+representative-background workloads. The verdict enumerates both missing
+evidence classes and the payment scenarios and boundaries. It sets
+`owner_decision: false`; H1 owns continue/fix/stop. Previously retained reports
+remain historical evidence and are not relabeled by these rules.
 
 ## Payment stages and budgets
 

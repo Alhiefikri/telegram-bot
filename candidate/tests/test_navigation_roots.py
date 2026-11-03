@@ -9,11 +9,12 @@ import multiprocessing
 from dataclasses import replace
 from threading import Lock
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.db import connections, transaction
 
-from lhie_candidate.navigation.roots import NavigationRoots, fits_caption
+from lhie_candidate.navigation.roots import NavigationRoots, Root, fits_caption
 from lhie_candidate.navigation.types import Surface, TelegramResult
 
 
@@ -31,6 +32,181 @@ class CaptionTests(unittest.TestCase):
 
     def test_plain_text_does_not_strip_literal_markup(self):
         self.assertFalse(fits_caption(replace(panel('<b>' * 400), options={})))
+
+class CheckoutMediaTests(unittest.TestCase):
+    QR = 'https://sakurupiah.id/assets/synthetic.png'
+
+    class Transport:
+        def __init__(self, outcomes=()):
+            self.calls = []
+            self.outcomes = iter(outcomes)
+
+        def execute(self, method, payload):
+            self.calls.append((method, payload))
+            outcome = next(self.outcomes, 'success')
+            return TelegramResult(message_id=123 if method.startswith('send') else None, outcome=outcome)
+
+    class Roots(NavigationRoots):
+        def _outside_transaction(self):
+            pass
+
+        def _claim(self, customer, chat_id, root=None, *, establish=False):
+            return root
+
+        def _live(self, root):
+            return True
+
+        def _release(self, root):
+            return True
+
+        def _invalidate_root(self, root):
+            self.cleared = root
+            return True
+
+        def _finish(self, root, surface, **kwargs):
+            self.finished = kwargs
+            return True
+
+    def root(self, screen, media_kind):
+        return Root('synthetic', 1, '41001', 7, media_kind, screen, 'id',
+                    'banner', 3, 'photo', 1, uuid4(), None, None)
+
+    def roots(self, outcomes=()):
+        transport = self.Transport(outcomes)
+        return self.Roots(transport, banner_reference='banner', banner_version=3), transport
+
+    def test_checkout_photo_uses_qr_without_overwriting_banner(self):
+        roots, transport = self.roots()
+        result = roots.render({}, self.root('home', 'photo'), '41001',
+                              panel('Scan', 'checkout', photo_url=self.QR))
+        self.assertEqual(result, 'replaced')
+        self.assertEqual([method for method, _ in transport.calls], ['sendPhoto', 'deleteMessage'])
+        self.assertEqual(transport.calls[0][1]['photo'], self.QR)
+        self.assertNotIn('photo_url', transport.calls[0][1])
+        self.assertEqual(roots.finished['reference'], 'banner')
+
+    def test_pending_photo_is_deleted_before_paid_or_navigation(self):
+        for target in (panel('Paid', 'checkout'), panel('Orders', 'orders')):
+            with self.subTest(screen=target.screen):
+                roots, transport = self.roots()
+                result = roots.render({}, self.root('checkout', 'photo'), '41001', target)
+                self.assertEqual(result, 'replaced')
+                self.assertEqual([method for method, _ in transport.calls],
+                                 ['deleteMessage', 'sendMessage' if target.screen == 'checkout' else 'sendPhoto'])
+
+    def test_ambiguous_delete_never_sends_and_ambiguous_send_is_not_retried(self):
+        for outcomes, methods in ((['ambiguous'], ['deleteMessage']),
+                                  (['success', 'ambiguous'], ['deleteMessage', 'sendMessage'])):
+            with self.subTest(outcomes=outcomes):
+                roots, transport = self.roots(outcomes)
+                result = roots.render({}, self.root('checkout', 'photo'), '41001', panel('Paid', 'checkout'))
+                self.assertEqual(result, 'invalidated')
+                self.assertEqual([method for method, _ in transport.calls], methods)
+                self.assertEqual(roots.cleared.screen, 'checkout')
+
+    def test_invalidated_checkout_feedback_directs_each_locale_to_start(self):
+        from lhie_candidate.navigation.presentation import CatalogPresenter
+        from lhie_candidate.navigation.processor import NavigationProcessor
+        from tests.test_catalog_presentation import CUSTOMER, MemoryCatalog
+
+        callback = {'id': 'callback', 'message': {'chat': {'id': 41001}}}
+        for locale in ('id', 'en', 'ms'):
+            for outcomes, methods in ((['ambiguous'], ['deleteMessage']),
+                                      (['success', 'definite'], ['deleteMessage', 'sendMessage']),
+                                      (['success', 'ambiguous'], ['deleteMessage', 'sendMessage'])):
+                with self.subTest(locale=locale, outcomes=outcomes):
+                    roots, transport = self.roots()
+                    transport.execute('answerCallbackQuery', {'callback_query_id': callback['id']})
+                    transport.outcomes = iter(outcomes + ['ambiguous'])
+                    presenter = CatalogPresenter(MemoryCatalog(), signing_key='synthetic-key')
+                    processor = NavigationProcessor(None, presenter, roots, transport)
+                    outcome = roots.render({}, self.root('checkout', 'photo'), '41001', panel('Paid', 'checkout'))
+                    self.assertEqual(processor._feedback({**CUSTOMER, 'locale': locale}, callback, outcome), 'invalidated')
+                    self.assertEqual([method for method, _ in transport.calls],
+                                     ['answerCallbackQuery'] + methods + ['sendMessage'])
+                    self.assertEqual(transport.calls[-1][1]['chat_id'], 41001)
+                    self.assertIn('/start', transport.calls[-1][1]['text'])
+
+    def test_lost_invalidation_fence_reports_superseded(self):
+        roots, transport = self.roots(['ambiguous'])
+        with patch.object(roots, '_invalidate_root', return_value=False):
+            outcome = roots.render({}, self.root('checkout', 'photo'), '41001', panel('Paid', 'checkout'))
+        self.assertEqual(outcome, 'superseded')
+        self.assertEqual([method for method, _ in transport.calls], ['deleteMessage'])
+
+    def test_new_qr_replaces_old_photo_and_long_caption_uses_text(self):
+        for caption, expected in (('Scan', 'sendPhoto'), ('x' * 1025, 'sendMessage')):
+            with self.subTest(method=expected):
+                roots, transport = self.roots()
+                result = roots.render({}, self.root('checkout', 'photo'), '41001',
+                                      panel(caption, 'checkout', photo_url=self.QR))
+                self.assertEqual(result, 'replaced')
+                self.assertEqual([method for method, _ in transport.calls], ['deleteMessage', expected])
+
+    def test_pending_text_upgrades_to_qr_photo(self):
+        roots, transport = self.roots()
+        result = roots.render({}, self.root('checkout', 'text'), '41001',
+                              panel('Scan', 'checkout', photo_url=self.QR))
+        self.assertEqual(result, 'replaced')
+        self.assertEqual([method for method, _ in transport.calls], ['sendPhoto', 'deleteMessage'])
+
+    def test_checkout_rejects_untrusted_photo_and_ignores_photo_on_other_screens(self):
+        roots, transport = self.roots()
+        root = self.root('checkout', 'text')
+        result = roots.render({}, root, '41001',
+                              panel('Pending', 'checkout', photo_url='https://example.com/qr.png'))
+        self.assertEqual(result, 'applied')
+        self.assertEqual([method for method, _ in transport.calls], ['editMessageText'])
+        self.assertNotIn('photo_url', transport.calls[0][1])
+        self.assertEqual(roots._media(root, panel('Home', 'home', photo_url=self.QR)),
+                         ('photo', 'banner'))
+
+    def test_definite_checkout_photo_failure_sends_one_text_fallback(self):
+        roots, transport = self.roots(['definite', 'success', 'success'])
+        surface = panel('Scan image above', 'checkout', photo_url=self.QR,
+                        text_fallback='Open QRIS below')
+        result = roots.render({}, self.root('home', 'photo'), '41001', surface)
+        self.assertEqual(result, 'replaced')
+        self.assertEqual([method for method, _ in transport.calls],
+                         ['sendPhoto', 'sendMessage', 'deleteMessage'])
+        photo, text = transport.calls[0][1], transport.calls[1][1]
+        self.assertEqual(text['text'], 'Open QRIS below')
+        self.assertEqual(text['reply_markup'], photo['reply_markup'])
+        self.assertNotIn('photo', text)
+        self.assertNotIn('caption', text)
+        self.assertNotIn('text_fallback', photo)
+        self.assertNotIn('text_fallback', text)
+        self.assertEqual(roots.finished['media_kind'], 'text')
+
+    def test_ambiguous_checkout_photo_failure_never_sends_fallback(self):
+        roots, transport = self.roots(['ambiguous'])
+        surface = panel('Scan image above', 'checkout', photo_url=self.QR,
+                        text_fallback='Open QRIS below')
+        result = roots.render({}, self.root('home', 'photo'), '41001', surface)
+        self.assertEqual(result, 'ambiguous')
+        self.assertEqual([method for method, _ in transport.calls], ['sendPhoto'])
+
+    def test_relay_classifier_drives_definite_only_photo_fallback(self):
+        from lhie_candidate.navigation.transport import RelayTransport
+
+        responses = (
+            ({'ok': False, 'error_code': 400, 'description': 'wrong file identifier'}, True),
+            ({'ok': False, 'error_code': 500, 'description': 'server error'}, False),
+            ({}, False),
+        )
+        for response, fallback_expected in responses:
+            with self.subTest(response=response):
+                roots, _ = self.roots()
+                relay = RelayTransport()
+                roots.transport = relay
+                success = {'ok': True, 'result': {'message_id': 123}}
+                surface = panel('Scan above', 'checkout', photo_url=self.QR,
+                                text_fallback='Open QRIS below')
+                with patch.object(relay, '_request', side_effect=[response, success, {'ok': True, 'result': True}]) as request:
+                    outcome = roots.render({}, self.root('home', 'photo'), '41001', surface)
+                self.assertEqual(outcome, 'replaced' if fallback_expected else 'ambiguous')
+                self.assertEqual([call.args[0] for call in request.call_args_list],
+                                 ['sendPhoto', 'sendMessage', 'deleteMessage'] if fallback_expected else ['sendPhoto'])
 
 
 class RecordingTransport:
@@ -269,6 +445,40 @@ def exercise_root_protocol(customer, *, using='default'):
         check.assertEqual(current().banner_reference, 'test-bot-banner')
         check.assertEqual(other.current_for_chat(customer, chat).banner_reference, 'other-bot-animation')
         passed.append('unproven_first_send_and_animation_bot_scope_isolation')
+
+        checkout_scope = scope + '-checkout'
+        scopes.append(checkout_scope)
+        checkout_transport = RecordingTransport(using)
+        checkout_roots = NavigationRoots(checkout_transport, using=using, bot_asset_scope=checkout_scope)
+        for failure in ('definite', 'ambiguous'):
+            checkout_transport.hook = None
+            check.assertEqual(checkout_roots.establish(
+                customer, chat, panel('QR', 'checkout', photo_url=CheckoutMediaTests.QR)), 'established')
+            old = checkout_roots.current_for_chat(customer, chat)
+
+            def failed_replacement(method, payload, message_id):
+                return TelegramResult(message_id=message_id,
+                                      outcome=failure if method.startswith('send') else 'success')
+
+            checkout_transport.hook = failed_replacement
+            check.assertEqual(checkout_roots.render(customer, old, chat, panel('Paid', 'checkout')), 'invalidated')
+            check.assertIsNone(checkout_roots.current_for_chat(customer, chat))
+            check.assertFalse(checkout_roots._invalidate_root(old))
+            checkout_transport.hook = None
+            check.assertEqual(checkout_roots.establish(customer, chat, panel('Home')), 'established')
+        checkout_transport.hook = None
+        check.assertEqual(checkout_roots.establish(
+            customer, chat, panel('QR', 'checkout', photo_url=CheckoutMediaTests.QR)), 'established')
+        old = checkout_roots.current_for_chat(customer, chat)
+        checkout_transport.hook = lambda method, payload, message_id: TelegramResult(
+            message_id=message_id, outcome='ambiguous')
+        before = len(checkout_transport.calls)
+        check.assertEqual(checkout_roots.render(customer, old, chat, panel('Paid', 'checkout')), 'invalidated')
+        check.assertEqual([method for method, _ in checkout_transport.calls[before:]], ['deleteMessage'])
+        check.assertIsNone(checkout_roots.current_for_chat(customer, chat))
+        checkout_transport.hook = None
+        check.assertEqual(checkout_roots.establish(customer, chat, panel('Home')), 'established')
+        passed.append('deleted_checkout_root_is_fenced_clear_on_failed_replacement')
         return {'root_protocol_checks': passed}
     finally:
         with connection.cursor() as cursor:

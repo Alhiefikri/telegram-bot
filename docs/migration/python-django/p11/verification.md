@@ -587,3 +587,208 @@ resource observations, scoped review and SHA256 checksums are retained in
 private payloads, secrets, filesystem evidence paths and host boot IDs are not
 published. Backend synthetic ACKs do not prove device-visible latency or
 production compatibility.
+
+## H1 review fixes: isolated verification
+
+The tested working tree is based on `362670fa851810123647ffaad6be38772603ff35`
+and includes uncommitted review fixes. The source identity below is a SHA256
+over sorted relative paths, each followed by a NUL and the SHA256 digest of
+its bytes: `ebae69e3a1072100b2d33113fe98ffb413c64105dd54effd1fc98dcd4501e5b3`.
+The 18 paths are `candidate/lhie_candidate/checkout/navigation.py`;
+`candidate/lhie_candidate/navigation/{ingress,presentation,processor}.py`;
+`candidate/lhie_candidate/payments/{lifecycle,relay}.py`;
+`candidate/lhie_candidate/workers/{contract,payment,services,wakeup}.py`;
+`candidate/smoke_checkout_navigation.py`;
+`candidate/tests/{test_navigation_checkout,test_sakurupiah_adapter,test_workers}.py`;
+`tests/migration_harness/test_p11_compare.py`;
+`tools/migration_benchmark/compare.py`; and
+`tools/migration_harness/{boundary,test_p08_boundary}.py`.
+
+| Check | Observed |
+| --- | --- |
+| Candidate worker, ingress, checkout presentation and Sakurupiah adapter regressions | 44 passed |
+| P11 comparator and P08 boundary regressions | 12 and 1 passed |
+| Isolated checkout/navigation smoke | Passed with real PostgreSQL 16 and Redis, fake provider and Telegram transport. A blocked payment with 30 later same-chat updates did not prevent another chat from completing; after release, bounded sweeps processed 25 then five in order. QRIS created one invoice, replay retained it, receipt completed without duplicate delivery, Balance debited once, same-key race produced one Order/Payment, and six denied writes remained denied. |
+| Isolated worker supervisor mixed-load smoke | Passed using the real supervisor and fake relay. Navigation, backlog and receipt completed while a provider call was blocked for 4.055 seconds; maximum observed runtime connections was four. |
+
+The two integration smokes used fresh synthetic repository migrations and
+fixtures in a separate Docker `--network none` namespace, with current candidate
+source mounted read-only over the existing pinned dependency image. The checkout
+smoke called `smoke_checkout_navigation.run()` with startup error redaction
+disabled only inside that synthetic diagnostic process; the supervisor smoke
+ran `smoke_workers.py mixed`. Neither used the already-running P01 stack.
+No live Testing Bot, sandbox provider, production data, CI/CD or real payment
+was used. No paired benchmark was rerun. The retained #722 samples, Owner `fix`
+decision, unratified budgets and outstanding external qualification are unchanged.
+
+### Subsequent H1 safety review
+
+The working tree remains based on `362670fa851810123647ffaad6be38772603ff35`.
+The final test identity is SHA256
+`54a9dba484cac6163e4a1616b2c88ed47399290a380e44899c2acea242d899e1`,
+computed with the same sorted-path/NUL/content-digest scheme above over these
+21 changed or added sources:
+
+- `candidate/lhie_candidate/checkout/navigation.py`;
+- `candidate/lhie_candidate/navigation/{ingress,presentation,processor}.py`;
+- `candidate/lhie_candidate/payments/{lifecycle,relay}.py`;
+- `candidate/lhie_candidate/workers/{consumer,contract,payment,services,wakeup}.py`;
+- `candidate/smoke_checkout_navigation.py`;
+- `candidate/tests/{test_checkout_fee_snapshot,test_navigation_checkout,test_payment_sweep_timeout,test_sakurupiah_adapter,test_workers}.py`;
+- `tests/migration_harness/test_p11_compare.py`;
+- `tools/migration_benchmark/compare.py`; and
+- `tools/migration_harness/{boundary,test_p08_boundary}.py`.
+
+The review fixed aggregate payment-sweep timeouts, stale payment-worker banners,
+provider I/O under the chat advisory lock, loss of a customer-paid fee on an
+uncertain status check, and threshold-adjacent or floating-point gate verdicts.
+Earlier processing updates still fence later same-chat work; after provider I/O,
+the worker revalidates the update claim, Customer, root generation and session.
+The navigation inbox remains the durable owner and abandoned work is not blindly
+resent. The comparator's display-precision uncertainty guard is documented in
+[the P11 README](README.md#verdict-rules); it changes no Owner-approved target.
+
+| Check | Observed |
+| --- | --- |
+| Candidate payment-sweep, fee-snapshot, worker, ingress, checkout and provider regressions | 52 passed |
+| Comparator and offline P08 boundary regressions | 13 passed |
+| Isolated PostgreSQL checkout/navigation smoke | Passed: provider preflight ran without holding the chat advisory lock; earlier processing fenced later same-chat work while another chat completed. The test also exercised a changed banner, stale root, abandoned claim, lost wakeup, same-Payment replay, one QRIS invoice, paid receipt and six denied writes. |
+| Isolated worker supervisor mixed-load smoke | Passed: navigation and receipt completed during a 4.052-second fake provider call; observed runtime connections peaked at four. |
+
+Both integration smokes used fresh synthetic repository migrations, PostgreSQL 16,
+Redis and fake transports in a separate Docker `--network none` namespace. The
+current source was mounted read-only over the existing candidate dependency image.
+The checkout smoke invoked `smoke_checkout_navigation.run()` with startup
+redaction disabled only in that synthetic diagnostic process; the worker smoke
+ran `smoke_workers.py mixed`. No actual Testing Bot, sandbox provider, production
+data, CI/CD or real money was used, and no paired performance campaign was rerun.
+
+For the historical #722 identity only, the retained private Django accounting
+file records 96 probe resource records, 207 samples and four sensor failures.
+Its maximum recorded candidate cgroup memory peak was 269.04 MiB against the
+1,216 MiB candidate limit; all 96 inspected container states reported no OOM
+and zero restarts. The local `run.json`, `accounting.jsonl` and `resources.jsonl`
+checksums matched their retained manifests for both implementations. These are
+individual historical idle-workload observations on the local host, not a
+simultaneous whole-stack peak, representative workload, production headroom or
+measurement of this changed worker revision.
+
+### Authorized sandbox preflight
+
+On 2026-11-02, an operator authorized one private Testing Bot sandbox checkout
+and receipt, with no real money, production changes, additional cost or CI. A
+read-only channel-list preflight used the previously attested sandbox scope in a
+separate firewall-restricted Docker boundary with no published ports. Telegram
+bot identity verification passed. The local relay refused the provider lookup:
+DNS resolved and TCP connected, but the provider TLS handshake timed out after
+15 seconds. No provider HTTP response or invoice was obtained. The temporary
+container and network were removed; the existing P01 stack was not stopped.
+
+The Testing Bot webhook's observable URL, connection limit and update filter
+matched the private restoration record. Telegram does not expose its webhook
+secret or whether its current address was explicitly pinned, so those cannot be
+verified from `getWebhookInfo`. They require operator attestation before a
+webhook switch. The preflight did not mutate the webhook, send a message, create
+an invoice, exercise the interactive purchase or establish current provider
+limits. Historical successful sandbox observations are not current evidence.
+
+The operator subsequently attested that the saved secret remains current and
+the webhook uses unpinned DNS. The operator also authorized a temporary pause
+and restoration of the existing local P01 stack and its shared image tag; those
+actions have not been performed. A separate firewall-restricted TLS diagnostic
+connected to Telegram in 1.022 seconds, while the sandbox host's TLS handshake
+timed out after 8.578 seconds under the same policy. A further targeted TLS 1.2
+diagnostic connected once in 4.194 seconds with the default TCP segment size,
+while a smaller-segment attempt timed out after 8.615 seconds. These observations
+are unstable and do not establish the cause or a reliable workaround. An
+independent public web fetch reached the provider's landing page; it does not
+prove sandbox API access from this host. The diagnostic containers and networks
+were removed. Before any future switch, recheck observable webhook settings and
+obtain approval for the exact current callback, return URL and expanded
+receipt/create scope. No interactive sandbox checkout or receipt has yet been
+performed.
+
+### H1 interactive-scope safeguards
+
+The follow-up requires a newly attested receipt capability and one-create cap,
+the actual running relay's scope proof, QRIS-only financial ingress, restoration
+attestations and preservation of the existing Telegram update subscription.
+These protections do not themselves constitute a live usability or payment
+result. The source identity is
+`e618aacc6786457c4f47220e3dd0c3d785f9fd96e07559d3a1ff0eb3cca9618b`,
+computed using the sorted-path/NUL/content-digest scheme above over:
+
+- `candidate/interactive_navigation.py` and `candidate/tests/test_interactive_ack.py`;
+- `tests/migration_harness/{test_interactive_navigation,test_p08_relay,test_p09_relay}.py`;
+- `tools/migration_harness/{boundary,harness,interactive_navigation}.py`.
+
+| Check | Observed |
+| --- | --- |
+| P08/P09 relay, admission and boundary regressions | 26 passed |
+| Testing Bot polling and restoration regressions | 11 passed |
+| Candidate callback ACK and QRIS-only admission regressions | 13 passed |
+| Isolated actual relay identity and reservation | In Docker `--network none`, the current relay and harness sources validated a synthetic scope, opened the private state as root, dropped to the relay UID, reserved the first attempt and refused a second attempt from a new container using the same state. The synthetic state was then removed. |
+
+The relay test did not contact Telegram or the payment provider. The running
+P01 stack and shared image tag were not changed; the P01 lifecycle guard must
+not be bypassed.
+
+### Testing Bot checkout and synthetic receipt
+
+On 2026-11-02 the operator approved a single Rp500 sandbox create attempt for
+the existing private Testing Bot chat. A new disposable database contained one
+synthetic product and one clearly labeled synthetic credential. The capped relay
+created one sandbox invoice. The owner reached checkout in the Testing Bot and
+reported that the QR image was absent and two identically labeled website buttons
+were shown. The owner marked that same sandbox invoice successful; no real money
+or second invoice was used.
+
+The bounded polling session ended and restored the prior observable webhook
+before the success was consumed. A subsequent explicit check of the same
+Payment used the provider status and matching history to commit `paid` and
+`completed`. The receipt worker recorded one sent credential effect and zero
+unknown credential effects; the owner confirmed seeing the synthetic receipt.
+This is not evidence that the provider callback was received or automatically
+processed. The original P01 containers were restarted, its volumes were not
+reset, and the disposable invoice and single-attempt marker were retained.
+
+The reported image and duplicate-button defects remain findings for that tested
+revision. The later fix must be verified separately; this run does not establish
+paired PHP/Django payment latency, representative headroom or ratified payment
+budgets. The one successful sandbox status check does not make the observed
+provider timeouts conclusive.
+
+### QR checkout retest
+
+The operator separately approved one more sandbox create attempt, restricted to
+the same private Testing Bot chat and exactly Rp500. The operator reported that
+the corrected checkout displayed the QR image and only one website button. The
+second invoice was not authorized for scanning, payment or success marking, and
+its payment status was not independently checked. Its single-attempt marker and
+isolated database were retained. The prior observable Testing Bot webhook was
+restored, the isolated test stack stopped, and the original P01 containers
+restarted without resetting their volumes.
+
+The tested candidate image ID was
+`sha256:a95443896a82b4ffbd2028d47725ba3baa6f844ace2db3a53cf724be766e16c2`;
+the restricted boundary image ID was
+`sha256:55dfc87a3ffe20f1ebd8cf731faab0b6a56ebd026525380d448ac4541ac3d94f`.
+The final navigation-root, checkout, ingress and interactive ACK regression run
+passed 50 tests. It covers photo and text transitions, explicit Telegram photo
+rejection, ambiguous failures and recovery, hosted-link selection, and the
+admitted order-navigation callbacks.
+
+This is a visual sandbox result, not proof of automatic provider callback
+delivery, paired payment latency or production readiness. QR media is restricted
+to the observed Sakurupiah PNG asset path; a provider path change requires review.
+The boundary in that image forwarded `link_preview_options` without inspecting
+its nested URL. A compromised admitted client could request a Telegram-side
+preview outside the QR URL allowlist; no such fetch or exploit was tested.
+
+After the retest, the source was changed to disable Telegram link previews for
+both text and navigation relays and reject caller-supplied preview options. A
+loopback smoke exercised the real HTTP handler with a synthetic Telegram transport:
+both text routes sent previews-disabled requests, and an explicit override was
+rejected before transport. The relay/admission regression run passed 62 tests.
+This later boundary change was not included in the visually tested image above
+and was not exercised against Telegram.

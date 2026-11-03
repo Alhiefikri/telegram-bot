@@ -17,7 +17,6 @@ spending gates.
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -25,7 +24,9 @@ from django.db import transaction
 
 from lhie_candidate.domain.money import require_integer
 from lhie_candidate.payments.lifecycle import SakurupiahLifecycle
-from lhie_candidate.payments.sakurupiah import ProviderUnavailable
+from lhie_candidate.payments.sakurupiah_urls import (
+    validate_sakurupiah_checkout_url, validate_sakurupiah_qr_image_url,
+)
 
 from .db import Database
 from .errors import CheckoutError
@@ -90,30 +91,10 @@ def _deadline(value):
     return value.astimezone(JAKARTA).replace(tzinfo=None) if value.tzinfo else value
 
 
-def _secure_url(value):
-    """Only the provider-owned HTTPS presentation URLs already accepted by P08."""
-    if not isinstance(value, str) or not value or len(value) > 2048 or value.strip() != value:
-        return None
-    if any(ord(char) <= 32 or ord(char) >= 127 or char == '\\' for char in value):
-        return None
-    try:
-        parts = urlsplit(value)
-    except ValueError:
-        return None
-    if (parts.scheme != 'https' or parts.hostname != 'sakurupiah.id'
-            or parts.netloc != 'sakurupiah.id' or parts.fragment
-            or parts.username is not None or parts.password is not None or parts.port is not None):
-        return None
-    return value
 
 
 def sandbox_request(payment):
-    """Reviewed local/sandbox request identity; never a production target.
-
-    The P08 relay owns provider credentials and the fixed sandbox URLs. These
-    callback/return values only satisfy the sandbox contract; authoritative
-    settlement is always the checked provider status, never a webhook alone.
-    """
+    """Non-secret placeholders; the admitted relay supplies its own targets."""
     return {
         'phone': '08000000000',
         'callback_url': 'https://sakurupiah.id/callback/local-candidate',
@@ -289,6 +270,8 @@ class NavigationCheckout:
         payment_id = str(payment['id'])
         actual_rail = 'balance' if payment['provider'] == 'store_balance' else 'qris'
         if order['payment_status'] == 'paid':
+            if actual_rail == 'qris':
+                return self._payment_view(self._payment(payment_id), state='paid', replayed=True)
             return CheckoutView('paid', order_id=str(order['id']), payment_id=payment_id,
                                 invoice_number=order['invoice_number'],
                                 amount=order['total_amount'], total=order['total_amount'],
@@ -324,6 +307,8 @@ class NavigationCheckout:
                                 payment_id=result.payment_id,
                                 invoice_number=result.invoice_number,
                                 amount=result.amount, rail=rail)
+        if payment['status'] == 'paid' and rail == 'qris':
+            return self._payment_view(payment, state='paid', replayed=replayed)
         if payment['status'] == 'paid':
             return CheckoutView('paid', order_id=result.order_id, payment_id=result.payment_id,
                                 invoice_number=result.invoice_number, amount=result.amount,
@@ -350,16 +335,12 @@ class NavigationCheckout:
                                         invoice_number=result.invoice_number,
                                         amount=result.amount, rail=rail)
                 lifecycle = self.lifecycle.create(result.payment_id, **args)
-        except (ProviderUnavailable, CheckoutError, ValueError, TypeError):
-            return CheckoutView('provider_unavailable', order_id=result.order_id,
-                                payment_id=result.payment_id,
-                                invoice_number=result.invoice_number,
-                                amount=result.amount, rail=rail)
         except Exception:
-            return CheckoutView('provider_unavailable', order_id=result.order_id,
-                                payment_id=result.payment_id,
-                                invoice_number=result.invoice_number,
-                                amount=result.amount, rail=rail)
+            return self._payment_view(payment, state='provider_unavailable', replayed=replayed)
+        if lifecycle.state == 'paid':
+            return self._payment_view(self._payment(result.payment_id), state='paid', replayed=replayed)
+        if lifecycle.state in _RECOVERY or lifecycle.state == 'pending':
+            return self._payment_view(payment, state='pending', replayed=replayed)
         return _lifecycle_view(
             lifecycle, order_id=result.order_id, payment_id=result.payment_id,
             invoice_number=result.invoice_number, amount=result.amount,
@@ -379,9 +360,9 @@ class NavigationCheckout:
         if payment is None:
             return CheckoutView('stale')
         if payment['status'] == 'paid':
-            return _payment_view(payment, state='paid', replayed=True)
+            return self._payment_view(payment, state='paid', replayed=True)
         if self.lifecycle is None or payment['provider'] != 'sakurupiah':
-            return _payment_view(payment, state='provider_unavailable')
+            return self._payment_view(payment, state='provider_unavailable')
         if not self._root_matches(
                 root, customer_id=customer_id, chat_id=chat_id, message_id=message_id):
             return CheckoutView('stale')
@@ -400,13 +381,29 @@ class NavigationCheckout:
             else:
                 result = self.lifecycle.refresh(str(payment_id))
         except Exception:
-            return _payment_view(payment, state='pending')
+            return self._payment_view(payment, state='pending')
+        if result.state == 'paid':
+            return self._payment_view(self._payment(payment_id, customer_id=customer_id),
+                                      state='paid', replayed=True)
         if result.state not in ('paid',) and result.state in _RECOVERY:
-            return _payment_view(payment, state='pending')
+            return self._payment_view(payment, state='pending')
         return _lifecycle_view(
             result, order_id=str(payment['order_id']), payment_id=str(payment['id']),
             invoice_number=payment['invoice_number'], amount=payment['amount'],
             replayed=True, rail='qris')
+
+    def _payment_view(self, payment, *, state, replayed=False):
+        fee = None
+        try:
+            presentation = self.lifecycle.encrypter.decrypt_json(payment['provider_presentation'])
+            provider_fee = payment['provider_fee']
+            if (type(presentation) is dict and presentation.get('customer_pays_fee') is True
+                    and type(provider_fee) is int and provider_fee >= 0
+                    and payment['provider_total_payment'] == payment['amount'] + provider_fee):
+                fee = provider_fee
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+        return _payment_view(payment, state=state, replayed=replayed, fee=fee)
 
 
 def _checkout_state(code):
@@ -441,8 +438,10 @@ def _presentation_values(presentation):
     if (presentation.get('qris_payload') is not None
             or presentation.get('mode') not in ('qris_image', 'hosted')):
         return None, None, None
-    qris_url = _secure_url(presentation.get('qris_image_url'))
-    checkout_url = _secure_url(presentation.get('checkout_url'))
+    qr = presentation.get('qris_image_url')
+    qris_url = qr if validate_sakurupiah_qr_image_url(qr) else None
+    hosted = presentation.get('checkout_url')
+    checkout_url = hosted if validate_sakurupiah_checkout_url(hosted) else None
     if presentation.get('mode') == 'qris_image' and qris_url is None:
         return None, None, None
     if presentation.get('mode') == 'hosted' and checkout_url is None:
@@ -474,15 +473,16 @@ def _lifecycle_view(result, *, order_id, payment_id, invoice_number, amount,
             mapped = 'provider_unavailable'
     return CheckoutView(
         mapped, order_id=order_id, payment_id=payment_id, invoice_number=invoice_number,
-        amount=amount, expires_at=expires, qris_url=qris_url,
+        amount=amount, fee=result.fee if result.customer_pays_fee else None,
+        total=result.total, expires_at=expires, qris_url=qris_url,
         checkout_url=checkout_url, replayed=replayed, rail=rail)
 
 
-def _payment_view(payment, *, state, replayed=False):
+def _payment_view(payment, *, state, replayed=False, fee=None):
     return CheckoutView(
         state, order_id=str(payment['order_id']), payment_id=str(payment['id']),
         invoice_number=payment['invoice_number'], amount=payment['amount'],
-        fee=payment['provider_fee'] if type(payment['provider_fee']) is int else None,
+        fee=fee,
         total=(payment['provider_total_payment']
-               if type(payment['provider_total_payment']) is int else payment['amount']),
+               if type(payment['provider_total_payment']) is int else None),
         replayed=replayed, rail='qris')

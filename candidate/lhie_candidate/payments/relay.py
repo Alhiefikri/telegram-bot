@@ -16,6 +16,9 @@ class SandboxRelay:
     def post(self, url, *, fields, timeout, max_response_bytes):
         if url not in _OPERATIONS or not 0 < timeout <= 5 or max_response_bytes != 1048576:
             raise ValueError('Sandbox request denied')
+        if _OPERATIONS[url] == 'create':
+            fields = {key: value for key, value in fields.items()
+                      if key not in ('phone', 'callback_url', 'return_url')}
         body = json.dumps({'operation': _OPERATIONS[url], 'fields': fields}, separators=(',', ':')).encode()
         if len(body) > 16384:
             raise ValueError('Sandbox request denied')

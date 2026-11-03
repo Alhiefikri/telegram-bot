@@ -5,13 +5,33 @@ import re
 from django.db import connection
 from .customers import resolve_customer
 
+_PAYMENT_CALLBACK = ("(COALESCE(payload #>> '{callback_query,data}', '') LIKE 'detail:pay:%%' "
+                     "OR COALESCE(payload #>> '{callback_query,data}', '') LIKE 'checkout:check:%%')")
+
+
+def payment_callback(payload):
+    callback = payload.get("callback_query")
+    data = callback.get("data") if isinstance(callback, dict) else None
+    return isinstance(data, str) and data.startswith(("detail:pay:", "checkout:check:"))
+
+
+def _family_filter(family):
+    if family == "payment":
+        return " AND " + _PAYMENT_CALLBACK
+    if family == "interaction":
+        return " AND NOT " + _PAYMENT_CALLBACK
+    if family is None:
+        return ""
+    raise ValueError("invalid navigation family")
+
 
 class NavigationProcessor:
-    def __init__(self, repository, presenter, roots, transport):
+    def __init__(self, repository, presenter, roots, transport, *, family=None):
         self.repository = repository
         self.presenter = presenter
         self.roots = roots
         self.transport = transport
+        self.family_filter = _family_filter(family)
 
     def process(self, update_id):
         if connection.in_atomic_block or not connection.get_autocommit():
@@ -20,7 +40,7 @@ class NavigationProcessor:
             # The CASE prevents a lock from being taken for an already-settled row.
             cursor.execute("SELECT chat_id,state,"
                            "CASE WHEN state='pending' THEN pg_try_advisory_lock(chat_id) END "
-                           "FROM django_candidate.navigation_updates WHERE update_id=%s", [update_id])
+                           "FROM django_candidate.navigation_updates WHERE update_id=%s" + self.family_filter, [update_id])
             row = cursor.fetchone()
             if row is None or row[1] != "pending":
                 return "duplicate"
@@ -32,7 +52,7 @@ class NavigationProcessor:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT "
                                "EXISTS (SELECT 1 FROM django_candidate.navigation_updates "
-                               "WHERE chat_id=%s AND update_id<%s AND state='pending'),"
+                               "WHERE chat_id=%s AND update_id<%s AND state IN ('pending','processing')),"
                                "EXISTS (SELECT 1 FROM django_candidate.navigation_updates "
                                "WHERE chat_id=%s AND update_id>%s "
                                "AND state IN ('processing','processed','unknown'))",
@@ -46,7 +66,7 @@ class NavigationProcessor:
                                    "WHERE update_id=%s AND state='pending'", [update_id])
                     return "superseded"
                 cursor.execute("UPDATE django_candidate.navigation_updates SET state='processing',claimed_at=clock_timestamp() "
-                               "WHERE update_id=%s AND state='pending' RETURNING payload", [update_id])
+                               "WHERE update_id=%s AND state='pending' RETURNING payload,claimed_at", [update_id])
                 claimed = cursor.fetchone()
             if claimed is None:
                 return "duplicate"
@@ -54,22 +74,23 @@ class NavigationProcessor:
             if isinstance(payload, str):
                 payload = json.loads(payload)
             try:
-                outcome = self._navigate(payload)
+                outcome = self._navigate(payload, update_id, claimed[1])
             except Exception:
-                self._finish(update_id, "unknown", "handler_failure")
+                self._finish(update_id, claimed[1], "unknown", "handler_failure")
                 raise
-            self._finish(update_id, "unknown" if outcome == "ambiguous" else "processed", outcome)
+            self._finish(update_id, claimed[1], "unknown" if outcome == "ambiguous" else "processed", outcome)
             return outcome
         finally:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT pg_advisory_unlock(%s)", [chat_id])
 
-    def _finish(self, update_id, state, outcome):
+    def _finish(self, update_id, claimed_at, state, outcome):
         with connection.cursor() as cursor:
             cursor.execute("UPDATE django_candidate.navigation_updates SET state=%s,outcome=%s,completed_at=clock_timestamp() "
-                           "WHERE update_id=%s AND state='processing'", [state, outcome, update_id])
+                           "WHERE update_id=%s AND state='processing' AND claimed_at=%s",
+                           [state, outcome, update_id, claimed_at])
 
-    def _navigate(self, payload):
+    def _navigate(self, payload, update_id, claimed_at):
         callback = payload.get("callback_query")
         source = callback or payload["message"]
         message = source["message"] if callback else source
@@ -108,6 +129,7 @@ class NavigationProcessor:
         state = row[0] if row else {}
         if isinstance(state, str):
             state = json.loads(state)
+        original_state = json.dumps(state, sort_keys=True)
         surface = None
         if callback:
             data = receipt_action or callback["data"]
@@ -126,9 +148,60 @@ class NavigationProcessor:
                     customer, source.get("text", ""), root=root, chat_id=str(chat["id"]))
             else:
                 return "unsupported"
+        if callback and data.startswith("detail:pay:"):
+            from .presentation import _CHECKOUT_PAY, locale
+            match = _CHECKOUT_PAY.fullmatch(data)
+            selection = state.get("selection") or {}
+            if (not match or selection.get("mode") != "browsing"
+                    or selection.get("product_id") != int(match[2])
+                    or selection.get("interaction_token") != match[3]
+                    or selection.get("locale") != locale(customer)):
+                return self._feedback(customer, callback, "stale")
+        elif callback and data.startswith("checkout:check:"):
+            from uuid import UUID
+            from .presentation import _CHECKOUT_CHECK
+            match = _CHECKOUT_CHECK.fullmatch(data)
+            try:
+                payment_id = UUID(match[1]) if match else None
+            except ValueError:
+                payment_id = None
+            if payment_id is None:
+                return self._feedback(customer, callback, "stale")
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT EXISTS (SELECT 1 FROM public.payments p "
+                               "JOIN public.orders o ON o.id=p.order_id "
+                               "WHERE p.id=%s AND o.customer_id=%s)",
+                               [payment_id, customer["id"]])
+                if not cursor.fetchone()[0]:
+                    return self._feedback(customer, callback, "stale")
         if surface is None:
-            surface = self.presenter.route(customer, data, state,
-                                           root=root, chat_id=str(chat["id"]))
+            if callback and payment_callback(payload):
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_unlock(%s)", [chat["id"]])
+                try:
+                    surface = self.presenter.route(customer, data, state,
+                                                   root=root, chat_id=str(chat["id"]))
+                finally:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SELECT pg_advisory_lock(%s)", [chat["id"]])
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT EXISTS (SELECT 1 FROM django_candidate.navigation_updates "
+                        "WHERE update_id=%s AND state='processing' AND claimed_at=%s), "
+                        "(SELECT state FROM django_candidate.navigation_sessions WHERE customer_id=%s)",
+                        [update_id, claimed_at, customer["id"]])
+                    owned, current_state = cursor.fetchone()
+                if isinstance(current_state, str):
+                    current_state = json.loads(current_state)
+                current_root = self.roots.current_for_chat(customer, str(chat["id"]))
+                if (not owned or current_root is None or root is None
+                        or current_root.message_id != root.message_id
+                        or current_root.generation != root.generation
+                        or json.dumps(current_state or {}, sort_keys=True) != original_state):
+                    return "superseded"
+            else:
+                surface = self.presenter.route(customer, data, state,
+                                               root=root, chat_id=str(chat["id"]))
         if surface is None:
             if callback and self.presenter.callback_handled:
                 return self._feedback(customer, callback, "acknowledged")
@@ -137,6 +210,10 @@ class NavigationProcessor:
         if surface.screen == "home":
             self.roots.banner_reference = surface.options.get("photo_url")
             self.roots.banner_version = surface.options.get("asset_version")
+        else:
+            banner = self.repository.banner_asset(self.roots.bot_asset_scope) or {}
+            self.roots.banner_reference = banner.get("file_id")
+            self.roots.banner_version = banner.get("version")
         if root is None or fresh_root:
             outcome = self.roots.establish(customer, str(chat["id"]), surface)
         else:
@@ -150,6 +227,12 @@ class NavigationProcessor:
         return self._feedback(customer, callback, outcome) if callback else outcome
 
     def _feedback(self, customer, callback, outcome):
+        if callback and outcome == "invalidated":
+            self.transport.execute("sendMessage", {
+                "chat_id": callback["message"]["chat"]["id"],
+                "text": self.presenter.t(customer, "callback.navigation_stale"),
+            })
+            return outcome
         notice = None
         if callback and outcome in ("stale", "superseded", "ambiguous"):
             key = "callback.navigation_recovery" if outcome == "ambiguous" else "callback.navigation_stale"
@@ -166,11 +249,26 @@ class NavigationProcessor:
     def drain(self, limit=25):
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("invalid work limit")
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT update_id FROM django_candidate.navigation_updates WHERE state='pending' "
-                           "ORDER BY update_id LIMIT %s", [limit])
-            identities = [row[0] for row in cursor.fetchall()]
-        return [self.process(identity) for identity in identities]
+        outcomes = []
+        attempted = []
+        while len(outcomes) < limit:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT updates.update_id FROM django_candidate.navigation_updates updates "
+                    "WHERE updates.state='pending' " + self.family_filter +
+                    " AND NOT (updates.update_id=ANY(%s))"
+                    " AND NOT EXISTS (SELECT 1 FROM django_candidate.navigation_updates earlier "
+                    "WHERE earlier.chat_id=updates.chat_id AND "
+                    "(earlier.state='processing' OR "
+                    "(earlier.state='pending' AND earlier.update_id<updates.update_id))) "
+                    "ORDER BY updates.update_id LIMIT %s", [attempted, limit - len(outcomes)])
+                identities = [row[0] for row in cursor.fetchall()]
+            if not identities:
+                break
+            for identity in identities:
+                attempted.append(identity)
+                outcomes.append(self.process(identity))
+        return outcomes
 
     def recover(self, limit=25, *, stale_seconds=60):
         """Resolve an abandoned claim without replaying an unknown Telegram ACK."""
@@ -183,7 +281,8 @@ class NavigationProcessor:
                 "WITH stale AS ("
                 "SELECT update_id FROM django_candidate.navigation_updates "
                 "WHERE state='processing' AND claimed_at < clock_timestamp() - make_interval(secs => %s) "
-                "ORDER BY update_id LIMIT %s FOR UPDATE SKIP LOCKED"
+                "AND pg_try_advisory_xact_lock(chat_id) "
+                + self.family_filter + " ORDER BY update_id LIMIT %s FOR UPDATE SKIP LOCKED"
                 ") UPDATE django_candidate.navigation_updates AS updates "
                 "SET state='unknown',outcome='worker_lost',completed_at=clock_timestamp() "
                 "FROM stale WHERE updates.update_id=stale.update_id AND updates.state='processing' "

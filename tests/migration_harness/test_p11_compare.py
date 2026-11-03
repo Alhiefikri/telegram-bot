@@ -1,4 +1,5 @@
 import copy
+from decimal import Decimal
 import importlib.util
 import json
 from pathlib import Path
@@ -90,25 +91,60 @@ class PairedComparisonTest(unittest.TestCase):
         table = {scenario: (10.0, 20.0) for scenario in PROTOCOL['navigation']}
         table['orders'] = (10.0, 20.0)
         table['balance'] = (10.0, 20.0)
-        django_table = {scenario: (6.0, 14.0) for scenario in PROTOCOL['navigation']}
+        django_table = {scenario: (6.0, 13.8) for scenario in PROTOCOL['navigation']}
         protocol = copy.deepcopy(PROTOCOL)
         protocol['candidate_unimplemented_scenarios'] = []
         report = self.build(self.all_cells('laravel', table),
                             self.all_cells('django', django_table), protocol=protocol)
         self.assertEqual(report['summary']['paired_cases'], 24)
         self.assertEqual(report['summary']['pass'], 24)
-        self.assertEqual(report['verdict']['decision'], 'continue')
+        self.assertEqual(report['verdict']['decision'], 'fix')
+        self.assertFalse(report['verdict']['owner_decision'])
+        self.assertIn('paired_payment_stage_evidence_missing', report['verdict']['reasons'])
+        self.assertIn('representative_background_evidence_missing', report['verdict']['reasons'])
+        self.assertEqual(report['verdict']['missing_evidence']['paired_payment_scenarios'],
+                         ['checkout', 'paid_delivery'])
+        self.assertEqual(report['verdict']['missing_evidence']['paired_payment_boundaries'],
+                         list(compare.PAYMENT_BOUNDARIES))
+        self.assertIn('not evaluated', report['verdict']['missing_evidence']['representative_background'])
         for case in report['cases']:
             self.assertEqual(case['ratio']['p50'], 0.6)
-            self.assertEqual(case['ratio']['p95'], 0.7)
+            self.assertEqual(case['ratio']['p95'], 0.69)
             self.assertEqual(case['verdict'], 'pass')
         # A failed balance-like pair cannot hide behind faster cases.
-        django_table['balance'] = (9.0, 14.0)
+        django_table['balance'] = (9.0, 13.8)
         report = self.build(self.all_cells('laravel', table),
                             self.all_cells('django', django_table), protocol=protocol)
         self.assertEqual(report['summary']['fail'], 3)
         self.assertEqual(report['summary']['pass'], 21)
         self.assertEqual(report['verdict']['decision'], 'fix')
+
+    def test_ratios_near_target_are_inconclusive_at_report_precision(self):
+        for baseline, p50, p95, verdict, reasons in (
+            (3.0, 2.1, 2.1, 'inconclusive', ['p50_near_target', 'p95_near_target']),
+            (100.0, 70.0, 70.0, 'inconclusive', ['p50_near_target', 'p95_near_target']),
+            (100.0, 70.004, 69.0, 'inconclusive', ['p50_near_target']),
+            (100.0, 69.0, 70.004, 'inconclusive', ['p95_near_target']),
+            (100.0, 69.0, 69.0, 'pass', []),
+            (100.0, 71.0, 69.0, 'fail', ['p50_above_target']),
+            (100.0, 70.0, 71.0, 'fail', ['p95_above_target']),
+        ):
+            with self.subTest(baseline=baseline, p50=p50, p95=p95):
+                php = {scenario: (baseline, baseline) for scenario in PROTOCOL['navigation']}
+                candidate = {scenario: (69.0, 69.0) for scenario in PROTOCOL['navigation']}
+                candidate['balance'] = (p50, p95)
+                report = self.build(self.all_cells('laravel', php),
+                                    self.all_cells('django', candidate))
+                result = next(item for item in report['cases'] if item['scenario'] == 'balance')
+                self.assertEqual(result['verdict'], verdict)
+                self.assertEqual(result['reasons'], reasons)
+                self.assertEqual(result['ratio']['p50'], float(Decimal(str(p50)) / Decimal(str(baseline))))
+                if baseline == 3.0:
+                    self.assertEqual(result['ratio']['p50'], 0.7)
+                self.assertEqual(report['verdict']['decision'], 'fix')
+                self.assertFalse(report['verdict']['owner_decision'])
+                if verdict == 'inconclusive':
+                    self.assertIn('inconclusive_evidence', report['verdict']['reasons'])
 
     def test_declared_candidate_gaps_are_not_implemented_not_fabricated(self):
         table = {scenario: (10.0, 20.0) for scenario in PROTOCOL['navigation']}
@@ -158,17 +194,24 @@ class PairedComparisonTest(unittest.TestCase):
         protocol = copy.deepcopy(PROTOCOL)
         protocol['candidate_unimplemented_scenarios'] = []
         report = self.build(self.all_cells('laravel', table),
-                            self.all_cells('django', {s: (5.0, 10.0)
+                            self.all_cells('django', {s: (7.0, 14.0)
                                                       for s in PROTOCOL['navigation']}),
                             protocol=protocol, authority=1)
         self.assertEqual(report['verdict']['decision'], 'stop')
         self.assertIn('authority_violation', report['verdict']['reasons'])
+        self.assertIn('inconclusive_evidence', report['verdict']['reasons'])
+        self.assertFalse(report['verdict']['owner_decision'])
+        self.assertIn('paired_payment_stage_evidence_missing', report['verdict']['reasons'])
         report = self.build(self.all_cells('laravel', table),
-                            self.all_cells('django', {s: (5.0, 10.0)
+                            self.all_cells('django', {s: (7.0, 14.0)
                                                       for s in PROTOCOL['navigation']}),
                             protocol=protocol,
                             security=[{'severity': 'high', 'status': 'open'}])
         self.assertEqual(report['verdict']['decision'], 'stop')
+        self.assertFalse(report['verdict']['owner_decision'])
+        self.assertIn('unresolved_critical_or_high_security_finding', report['verdict']['reasons'])
+        self.assertIn('inconclusive_evidence', report['verdict']['reasons'])
+        self.assertIn('representative_background_evidence_missing', report['verdict']['reasons'])
 
     def test_reused_php_baseline_allows_only_non_measurement_tooling_delta(self):
         table = {scenario: (10.0, 20.0) for scenario in PROTOCOL['navigation']}
@@ -184,7 +227,7 @@ class PairedComparisonTest(unittest.TestCase):
         self.assertEqual(report['identity']['source_delta'],
                          ['tools/migration_benchmark/runner.py'])
         self.assertEqual(report['identity']['php_measurement_path_delta'], [])
-        self.assertEqual(report['verdict']['decision'], 'continue')
+        self.assertEqual(report['verdict']['decision'], 'fix')
         with self.assertRaises(compare.Mismatch):
             self.build(self.all_cells('laravel', table),
                        self.all_cells('django', {s: (5.0, 10.0)

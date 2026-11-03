@@ -43,6 +43,15 @@ owner of receipt effects, payment events, navigation updates and money state.
   observation stays outside money transactions and revalidates under lock.
   Navigation keeps its per-chat advisory lock, pending-order check and
   no-blind-replay rule. No second ledger or outbox is created.
+- The payment worker also processes admitted checkout and payment-check
+  navigation callbacks from the existing navigation inbox. It claims and
+  validates the update under the per-chat advisory lock, releases the lock for
+  provider I/O, then reacquires it and revalidates the claim, Customer, root
+  generation and navigation session before rendering. Earlier processing
+  updates fence later same-chat work. Fair bounded sweeps skip blocked chats.
+- Payment sweeps interleave navigation, provider hints and recovery. Each
+  operation gets its own timeout; a 60-second scheduling budget stops new work
+  without interrupting an operation already in flight.
 - Keep the timeout/retry envelope compatible with the Laravel topology: job
   timeout 60 s, `retry_after`-aligned receipt lease 180 s, three receipt
   attempts, and a 75 s graceful-shutdown window. A SIGTERM stops pickup,

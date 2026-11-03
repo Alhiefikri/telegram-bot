@@ -122,6 +122,11 @@ log channel. HTTP body size, SMTP message size/line count and I/O time are bound
   adds only the documented sandbox POST operations and authenticated callback;
   it does not activate production or authorize an external smoke.
 
+Text and navigation relays disable Telegram link previews. They reject caller
+preview options, so message text or a nested preview URL cannot ask Telegram to
+fetch an arbitrary preview. This does not disable links that a user explicitly
+opens or the separately scoped QR photo URL.
+
 Live modes require `approval` with exactly `gate` and `scope_sha256`.
 Use `H0-approved-test-targets-only` for the original text-only or sandbox scope,
 or `P06-approved-navigation-targets-only` for explicitly approved navigation in

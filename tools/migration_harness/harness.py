@@ -34,7 +34,13 @@ class Refused(Exception):
 
 
 def validate(config):
-    if not isinstance(config, dict) or set(config) not in (FIELDS, FIELDS | P08_FIELDS):
+    if (not isinstance(config, dict) or not FIELDS <= set(config)
+            or set(config) - FIELDS not in (set(), P08_FIELDS, P08_FIELDS | {"p08_create_limit"},
+                                             P08_FIELDS | {"p08_receipt_delivery"},
+                                             P08_FIELDS | {"p08_create_limit", "p08_receipt_delivery"},
+                                             P08_FIELDS | {"p08_create_limit", "p08_create_amount"},
+                                             P08_FIELDS | {"p08_create_limit", "p08_create_amount",
+                                                           "p08_receipt_delivery"})):
         raise Refused("configuration fields do not match the P01 contract")
     if config["version"] != 1 or config["stack"] not in ("laravel", "candidate"):
         raise Refused("unsupported stack or contract")
@@ -60,6 +66,18 @@ def validate(config):
         raise Refused("P08 targets require callback approval")
     if config["mode"] == "p08-sandbox-testing-bot" and callback is None:
         raise Refused("dual-target mode requires P08 callback approval")
+    if "p08_create_limit" in config and (type(config["p08_create_limit"]) is not int
+                                          or config["p08_create_limit"] != 1
+                                          or config["mode"] != "p08-sandbox-testing-bot"):
+        raise Refused("create limit requires explicitly attested dual mode")
+    if "p08_create_amount" in config and (type(config["p08_create_amount"]) is not int
+                                           or config["p08_create_amount"] <= 0
+                                           or "p08_create_limit" not in config
+                                           or config["mode"] != "p08-sandbox-testing-bot"):
+        raise Refused("create amount requires explicitly attested capped dual mode")
+    if "p08_receipt_delivery" in config and (config["p08_receipt_delivery"] is not True
+                                              or config["mode"] != "p08-sandbox-testing-bot"):
+        raise Refused("receipt delivery requires explicitly attested dual mode")
     if config["mode"] == "fake":
         if any(config[key] for key in ("bot_token", "bot_id", "bot_username", "sandbox_status_url",
                                        "sandbox_token", "approval")):
@@ -174,6 +192,27 @@ def run(args, capture=False):
     return result.stdout if capture else None
 
 
+def boundary_build_digest():
+    digest = hashlib.sha256()
+    for name in ("Dockerfile", "boundary.py", "harness.py"):
+        digest.update(name.encode() + b"\0")
+        digest.update(hashlib.sha256((TOOLS / name).read_bytes()).digest())
+    return digest.hexdigest()
+
+
+def compatible_boundary_image():
+    try:
+        image = json.loads(run(["docker", "image", "inspect", IMAGE], True))[0]
+        identity = image["Id"]
+        label = (image["Config"].get("Labels") or {}).get("lhie.p01.h1-source-sha256")
+        if (re.fullmatch(r"sha256:[a-f0-9]{64}", identity) is None
+                or label != boundary_build_digest() or BOUNDARY_SOURCE is not None):
+            raise ValueError()
+        return identity
+    except (KeyError, IndexError, TypeError, ValueError):
+        raise Refused("H1 requires a locally built matching boundary image") from None
+
+
 def docker_admission():
     if any(os.environ.get(k) for k in ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS_VERIFY")):
         raise Refused("Docker endpoint overrides are not admitted")
@@ -204,6 +243,10 @@ def compose(config, directory):
     if config.get("p08_callback") is not None:
         boundary["ports"].append("127.0.0.1:18803:8026")
         boundary["volumes"].append(f"{directory / 'p08-internal-key'}:/run/harness/p08-internal-key:ro")
+    if config.get("p08_create_limit") == 1:
+        boundary["volumes"].append(f"{directory / 'p08-create-state'}:/run/harness/p08-create-state")
+    if "p08_create_limit" in config or "p08_receipt_delivery" in config:
+        boundary["volumes"].append(f"{TOOLS / 'harness.py'}:/opt/harness/harness.py:ro")
     db = service(.5, 640, image="postgres:16-alpine", user="70:70", **dependent,
         environment={"POSTGRES_USER": "harness", "POSTGRES_PASSWORD": "harness", "POSTGRES_DB": "disposable"},
         volumes=["database:/var/lib/postgresql/data"], tmpfs=["/var/run/postgresql:uid=70,gid=70,size=8m", "/tmp:size=8m"],
@@ -416,6 +459,18 @@ def candidate_admission(config, directory, *, workers=False):
     key.chmod(0o600)
 
 
+def prepare_p08_create_state(directory):
+    state = directory / "p08-create-state"
+    try:
+        state.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    info = state.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise Refused("P08 create state directory must be private and owned by the operator")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "validate", "build", "start", "stop", "reset", "manifest", "p08-draft"])
@@ -447,6 +502,11 @@ def main():
             print("Created unapproved P08 draft; active configuration unchanged")
             return
         config = validate(json.loads((directory / "config.json").read_text()))
+        if "p08_create_limit" in config or "p08_receipt_delivery" in config:
+            info = (directory / "config.json").lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600):
+                raise Refused("capped P01 configuration must be private and owned by the operator")
         if config["stack"] != args.stack:
             raise Refused("stack identity mismatch")
         if args.command == "validate":
@@ -454,9 +514,12 @@ def main():
             return
         docker_admission()
         spec = compose(config, directory)
+        if args.command == "start" and ("p08_create_limit" in config or "p08_receipt_delivery" in config):
+            spec["services"]["boundary"]["image"] = compatible_boundary_image()
         (directory / "compose.json").write_text(json.dumps(spec, indent=2))
         if args.command == "build":
-            run(["docker", "build", "-t", IMAGE, str(TOOLS)])
+            run(["docker", "build", "--label", "lhie.p01.h1-source-sha256=" + boundary_build_digest(),
+                 "-t", IMAGE, str(TOOLS)])
             if args.stack == "candidate":
                 run(["docker", "build", "-t", "lhie-p05-candidate:1", str(ROOT / "candidate")])
             if args.stack == "laravel":
@@ -477,6 +540,8 @@ def main():
                 (directory / "quarantine").touch()
             if args.stack == "candidate" and not args.quarantine:
                 candidate_admission(config, directory)
+            if config.get("p08_create_limit") == 1:
+                prepare_p08_create_state(directory)
             run(compose_cmd(directory, "up", "-d", "--wait", "--wait-timeout", "90",
                             *( ["boundary", "database", "redis"] if args.quarantine else [])))
             print(manifest(config, directory, "start-quarantine" if args.quarantine else "start"))

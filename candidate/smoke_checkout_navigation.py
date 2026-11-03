@@ -24,7 +24,7 @@ from lhie_candidate.payments.sakurupiah import (
 
 OPT_IN = 'disposable-local-only'
 FEE = 200
-QRIS = 'https://sakurupiah.id/qr/synthetic-navigation.png'
+QRIS = 'https://sakurupiah.id/assets/qr/synthetic-navigation.png'
 
 
 def _admin():
@@ -52,11 +52,32 @@ class FakeProvider:
         self.creates = 0
         self.checks = 0
         self.lock = threading.Lock()
+        self.block_preflight = False
+        self.preflight_entered = threading.Event()
+        self.release_preflight = threading.Event()
+        self.block_status = False
+        self.status_entered = threading.Event()
+        self.release_status = threading.Event()
+
+    @staticmethod
+    def _outside_locks():
+        from django.db import connection
+        assert connection.get_autocommit() and not connection.in_atomic_block
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM pg_locks WHERE pid=pg_backend_pid() "
+                           "AND locktype='advisory' AND granted")
+            assert cursor.fetchone()[0] == 0, 'Provider I/O held an advisory lock'
 
     def list_channels(self):
+        self._outside_locks()
+        if self.block_preflight:
+            self.preflight_entered.set()
+            if not self.release_preflight.wait(15):
+                raise RuntimeError('Synthetic preflight was not released')
         return (Channel('QRIS', True, 1, 10_000_000_000),)
 
     def create(self, request):
+        self._outside_locks()
         with self.lock:
             self.creates += 1
         return ProviderOutcome(
@@ -66,6 +87,11 @@ class FakeProvider:
             QRIS)
 
     def status(self, identity, provider_ref, *, provider_total):
+        self._outside_locks()
+        if self.block_status:
+            self.status_entered.set()
+            if not self.release_status.wait(15):
+                raise RuntimeError('Synthetic status was not released')
         with self.lock:
             self.checks += 1
         return ProviderOutcome(identity, self.state, provider_ref)
@@ -77,8 +103,10 @@ class FakeProvider:
 class RootTransport:
     def __init__(self):
         self.message_id = 900
+        self.calls = []
 
     def execute(self, method, payload):
+        self.calls.append((method, dict(payload)))
         from lhie_candidate.navigation.types import TelegramResult
         if method in ('sendMessage', 'sendPhoto', 'sendAnimation'):
             self.message_id += 1
@@ -206,34 +234,197 @@ def _balance_flow(admin, roots, presenter, checkout, customer, chat_id, product_
     return {'order_id': str(order[0]), 'checkout_ready_ms': elapsed, **receipt}
 
 
-def _qris_flow(admin, roots, presenter, checkout, provider, customer, chat_id, product_id):
+def _qris_flow(admin, roots, presenter, checkout, provider, customer, chat_id, product_id,
+               other_customer):
+    from django.db import connection, connections
+    from unittest.mock import patch
+    from lhie_candidate.navigation.ingress import UpdateInbox
+    from lhie_candidate.navigation.processor import NavigationProcessor
+    from lhie_candidate.navigation.presentation import CatalogPresenter
+
     state = {}
     root, detail, state = _establish(roots, presenter, customer, chat_id, product_id, state)
+    admin.execute("UPDATE public.storefront_settings SET telegram_welcome_banner_path=%s "
+                  "WHERE singleton_key='storefront'", ('synthetic/navigation-banner',))
+    admin.execute("INSERT INTO django_candidate.navigation_assets (bot_scope,source_path,file_id,version) "
+                  "VALUES ('synthetic',%s,%s,1) ON CONFLICT (bot_scope,source_path) "
+                  "DO UPDATE SET file_id=EXCLUDED.file_id,version=EXCLUDED.version",
+                  ('synthetic/navigation-banner', 'old-banner'))
+    roots.banner_reference, roots.banner_version = 'old-banner', 1
     token = state['selection']['interaction_token']
     pay_callback = _callback(detail, 'detail:pay:qris:')
+    with connection.cursor() as cursor:
+        cursor.execute("INSERT INTO django_candidate.navigation_sessions (customer_id,state) VALUES (%s,%s::jsonb) "
+                       "ON CONFLICT (customer_id) DO UPDATE SET state=EXCLUDED.state",
+                       [customer['id'], json.dumps(state)])
+    base = time.time_ns() // 1000
+    actor = {'id': int(chat_id), 'is_bot': False, 'first_name': 'Synthetic'}
+    pay = {'update_id': base, 'callback_query': {'id': 'synthetic-pay', 'from': actor,
+           'message': {'message_id': root.message_id, 'chat': {'id': int(chat_id), 'type': 'private'}},
+           'data': pay_callback}}
+    def message(identity, sender, text):
+        return {'update_id': identity, 'message': {'message_id': identity % 1000000 + 1,
+                'chat': {'id': sender, 'type': 'private'},
+                'from': {'id': sender, 'is_bot': False, 'first_name': 'Synthetic'}, 'text': text}}
+    inbox = UpdateInbox()
+    with patch('lhie_candidate.workers.wakeup.enqueue', return_value=False):
+        inbox.receive(pay)
+        for offset in range(1, 31):
+            inbox.receive(message(base + offset, int(chat_id), '/unsupported'))
+        inbox.receive(message(base + 31, other_customer['telegram_id'], '/start'))
+    payment_processor = NavigationProcessor(presenter.repository, presenter, roots, roots.transport,
+                                            family='payment')
+    interaction_roots = type(roots)(RootTransport(), bot_asset_scope=roots.bot_asset_scope)
+    interaction = NavigationProcessor(presenter.repository,
+        CatalogPresenter(presenter.repository, signing_key=checkout.key),
+        interaction_roots, interaction_roots.transport, family='interaction')
+    captured = {}
+    original_route = presenter.route
+    def capture(*args, **kwargs):
+        surface = original_route(*args, **kwargs)
+        captured['surface'] = surface
+        if args[1] == pay_callback and surface is not None:
+            captured['replay'] = checkout.checkout(
+                customer, kwargs['root'], product_id=product_id, quantity=1,
+                token=token, rail='qris')
+        return surface
+    presenter.route = capture
+    provider.block_preflight = True
+    def process_payment():
+        try:
+            captured['outcomes'] = payment_processor.drain()
+        except Exception as error:
+            captured['error'] = error
+        finally:
+            connections.close_all()
     started = time.monotonic_ns()
-    surface = presenter.route(customer, pay_callback, state, root=root, chat_id=chat_id)
+    worker = threading.Thread(target=process_payment)
+    worker.start()
+    try:
+        assert provider.preflight_entered.wait(10), f'Payment preflight did not start: {captured}'
+        assert interaction.process(base + 1) == 'waiting'
+        assert admin.execute("SELECT pg_try_advisory_lock(%s)", (int(chat_id),)).fetchone()[0]
+        admin.execute("SELECT pg_advisory_unlock(%s)", (int(chat_id),))
+        admin.execute("UPDATE django_candidate.navigation_assets SET file_id=%s,version=2 "
+                      "WHERE bot_scope='synthetic' AND source_path=%s",
+                      ('fresh-banner', 'synthetic/navigation-banner'))
+        interaction.drain(25)
+        rows = admin.execute(
+            "SELECT update_id,state FROM django_candidate.navigation_updates "
+            "WHERE update_id BETWEEN %s AND %s ORDER BY update_id",
+            (base + 1, base + 31)).fetchall()
+        assert len(rows) == 31 and all(state == 'pending' for _, state in rows[:30]), rows
+        assert rows[30] == (base + 31, 'processed'), rows
+    finally:
+        provider.release_preflight.set()
+        worker.join(20)
+        presenter.route = original_route
+        provider.block_preflight = False
+    assert not worker.is_alive() and 'error' not in captured, captured
+    assert any(method == 'sendPhoto' and payload.get('photo') == 'fresh-banner'
+               for method, payload in roots.transport.calls), roots.transport.calls
+    assert len(captured['outcomes']) == 1 and captured['outcomes'][0] in ('applied', 'replaced'), captured
+    assert interaction.drain(25) == ['unsupported'] * 25
+    backlog = admin.execute(
+        "SELECT update_id,state FROM django_candidate.navigation_updates "
+        "WHERE update_id BETWEEN %s AND %s ORDER BY update_id",
+        (base + 1, base + 30)).fetchall()
+    assert [state for _, state in backlog] == ['processed'] * 25 + ['pending'] * 5, backlog
+    assert interaction.drain(25) == ['unsupported'] * 5
+    surface = captured['surface']
     checkout_ms = (time.monotonic_ns() - started) / 1_000_000
     assert surface is not None and 'QRIS berhasil dibuat' in surface.caption
+    assert 'Rp 200' in surface.caption
     order = admin.execute('''SELECT o.id,p.id,p.merchant_ref,p.provider_reference,p.provider_presentation
         FROM public.orders o JOIN public.payments p ON p.order_id=o.id
         WHERE o.customer_id=%s''', (customer['id'],)).fetchone()
     assert order is not None and order[3] is not None
     order_id, payment_id = str(order[0]), str(order[1])
     assert provider.creates == 1
-    # The same accepted selection/root replays the canonical Order and cannot
-    # create a second provider invoice.
-    replay = checkout.checkout(customer, root, product_id=product_id, quantity=1,
-                               token=token, rail='qris')
+    # The replay runs before a product-to-checkout transition replaces the root.
+    replay = captured['replay']
     assert replay.order_id == order_id, replay
     assert provider.creates == 1
-    outcome = roots.render(customer, root, chat_id, surface)
-    assert outcome in ('applied', 'replaced'), outcome
+    assert replay.total == replay.amount + FEE and replay.fee == FEE
+    with patch.object(provider, 'status', side_effect=RuntimeError('synthetic failure')):
+        pending = checkout.check(customer, roots.current_for_chat(customer, chat_id),
+                                 payment_id=payment_id)
+    assert pending.state == 'pending' and pending.fee == FEE
+    assert pending.total == pending.amount + FEE
+    root = roots.current_for_chat(customer, chat_id)
+    check_callback = _callback(surface, 'checkout:check:')
+    pay['update_id'] = base + 32
+    pay['callback_query']['id'] = 'synthetic-stale-check'
+    pay['callback_query']['message']['message_id'] = root.message_id
+    pay['callback_query']['data'] = check_callback
+    with patch('lhie_candidate.workers.wakeup.enqueue', return_value=False):
+        inbox.receive(pay)
+    provider.block_status = True
+    captured.pop('outcomes', None)
+    calls_before = len(roots.transport.calls)
+    worker = threading.Thread(target=process_payment)
+    worker.start()
+    try:
+        assert provider.status_entered.wait(10), captured
+        admin.execute("UPDATE django_candidate.navigation_roots SET generation=generation+1 "
+                      "WHERE bot_asset_scope=%s AND customer_id=%s AND chat_id=%s",
+                      (roots.bot_asset_scope, customer['id'], chat_id))
+    finally:
+        provider.release_status.set()
+        worker.join(20)
+        provider.block_status = False
+    assert not worker.is_alive() and 'error' not in captured, captured
+    assert captured['outcomes'] == ['superseded'], captured
+    assert len(roots.transport.calls) == calls_before
+    assert provider.creates == 1
+    pay['update_id'] = base + 33
+    pay['callback_query']['id'] = 'synthetic-lost-worker'
+    with patch('lhie_candidate.workers.wakeup.enqueue', return_value=False):
+        inbox.receive(pay)
+        inbox.receive(message(base + 34, int(chat_id), '/unsupported'))
+    provider.status_entered.clear()
+    provider.release_status.clear()
+    provider.block_status = True
+    captured.pop('outcomes', None)
+    calls_before = len(roots.transport.calls)
+    worker = threading.Thread(target=process_payment)
+    worker.start()
+    try:
+        assert provider.status_entered.wait(10), captured
+        assert interaction.process(base + 34) == 'waiting'
+        admin.execute("UPDATE django_candidate.navigation_updates "
+                      "SET claimed_at=clock_timestamp()-interval '2 minutes' WHERE update_id=%s",
+                      (base + 33,))
+        assert payment_processor.recover(stale_seconds=1) == 1
+        assert interaction.process(base + 34) == 'unsupported'
+    finally:
+        provider.release_status.set()
+        worker.join(20)
+        provider.block_status = False
+    assert not worker.is_alive() and 'error' not in captured, captured
+    assert captured['outcomes'] == ['superseded'], captured
+    assert len(roots.transport.calls) == calls_before
+    assert admin.execute("SELECT state,outcome FROM django_candidate.navigation_updates "
+                         "WHERE update_id=%s", (base + 33,)).fetchone() == ('unknown', 'worker_lost')
+    assert provider.creates == 1
     root = roots.current_for_chat(customer, chat_id)
     provider.state = OutcomeState.SUCCESS
     check_callback = _callback(surface, 'checkout:check:')
-    surface, root, observed_ms = _render(
-        roots, presenter, customer, chat_id, state, check_callback, root)
+    pay['update_id'] = base + 35
+    pay['callback_query']['id'] = 'synthetic-check'
+    pay['callback_query']['message']['message_id'] = root.message_id
+    pay['callback_query']['data'] = check_callback
+    with patch('lhie_candidate.workers.wakeup.enqueue', return_value=False):
+        inbox.receive(pay)
+    presenter.route = capture
+    started = time.monotonic_ns()
+    try:
+        assert payment_processor.drain() == ['applied']
+    finally:
+        presenter.route = original_route
+    observed_ms = (time.monotonic_ns() - started) / 1_000_000
+    surface = captured['surface']
+    root = roots.current_for_chat(customer, chat_id)
     assert 'Pembayaran sudah diterima' in surface.caption
     committed_started = time.monotonic_ns()
     row = admin.execute('''SELECT order_status,payment_status FROM public.orders o
@@ -316,11 +507,11 @@ def run():
     presenter = CatalogPresenter(repository, signing_key=application_key(), checkout=checkout)
 
     qris = fixtures['navigation_qris']
-    qris_customer = repository.customer(qris['telegram_id'])
-    qris_result = _qris_flow(admin, roots, presenter, checkout, provider, qris_customer,
-                             str(qris['telegram_id']), qris['product_id'])
     balance = fixtures['navigation_balance']
+    qris_customer = repository.customer(qris['telegram_id'])
     balance_customer = repository.customer(balance['telegram_id'])
+    qris_result = _qris_flow(admin, roots, presenter, checkout, provider, qris_customer,
+                             str(qris['telegram_id']), qris['product_id'], balance_customer)
     balance_result = _balance_flow(admin, roots, presenter, checkout, balance_customer,
                                    str(balance['telegram_id']), balance['product_id'])
     race = fixtures['navigation_race']

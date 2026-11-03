@@ -8,8 +8,8 @@ whose protocol, dataset contract, dataset logical checksums or limits differ.
 Each navigation case is judged independently from successful ``screen_ack``
 p50/p95; scenario or user counts are never averaged. Declared candidate gaps
 (checkout and paid delivery in the P11-fix revision) stay ``not_implemented``;
-missing or non-exploratory evidence is ``inconclusive``; a case fails only when a
-quality-qualified Django distribution is slower than 70% of its PHP pair.
+missing or non-exploratory evidence is ``inconclusive``; threshold-adjacent
+measurements are inconclusive at the retained report's display precision.
 
 Payment-stage numbers come from retained PHP-only diagnostic smoke evidence.
 The budget proposal is marked unratified and is never derived from Django
@@ -17,6 +17,7 @@ payment results, because that implementation has no payment surface yet.
 """
 
 import argparse
+from decimal import Decimal
 import gzip
 import json
 import math
@@ -27,6 +28,8 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 DIMENSIONS = ("dataset", "profile", "scenario", "users", "traffic", "temperature", "background")
 TARGET = {"p50_ratio_max": 0.70, "p95_ratio_max": 0.70}
+DISPLAY_HALF_UNIT_MS = Decimal("0.005")
+RATIO_TARGET = Decimal("0.70")
 PAYMENT_BOUNDARIES = ("checkout_ready", "paid_observed", "paid_committed", "receipt_queued",
                       "receipt_pickup", "credential_ack", "group_complete")
 RETAINED_PAYMENT_EVIDENCE = (ROOT / "docs/migration/python-django/p04/evidence/"
@@ -124,7 +127,20 @@ def database(cell):
 def ratio(value, baseline):
     if value is None or baseline is None or baseline <= 0:
         return None
-    return round(value / baseline, 4)
+    return float(Decimal(str(value)) / Decimal(str(baseline)))
+
+
+def target_relation(value, baseline):
+    value, baseline = Decimal(str(value)), Decimal(str(baseline))
+    low = value - DISPLAY_HALF_UNIT_MS
+    high = value + DISPLAY_HALF_UNIT_MS
+    baseline_low = baseline - DISPLAY_HALF_UNIT_MS
+    baseline_high = baseline + DISPLAY_HALF_UNIT_MS
+    if low > RATIO_TARGET * baseline_high:
+        return "above"
+    if baseline_low > 0 and high < RATIO_TARGET * baseline_low:
+        return "below"
+    return "near"
 
 
 def case(cell_key, php, django, unimplemented):
@@ -187,13 +203,16 @@ def case(cell_key, php, django, unimplemented):
         result["verdict"] = "inconclusive"
         result["reasons"] = ["missing_screen_distribution"]
         return result
-    breaches = []
-    if p50 > TARGET["p50_ratio_max"]:
-        breaches.append("p50_above_target")
-    if p95 > TARGET["p95_ratio_max"]:
-        breaches.append("p95_above_target")
-    result["verdict"] = "fail" if breaches else "pass"
-    result["reasons"] = breaches
+    relations = {
+        name: target_relation(django_screen[f"{name}_ms"], php_screen[f"{name}_ms"])
+        for name in ("p50", "p95")
+    }
+    breaches = [f"{name}_above_target" for name, relation in relations.items()
+                if relation == "above"]
+    near = [f"{name}_near_target" for name, relation in relations.items()
+            if relation == "near"]
+    result["verdict"] = "fail" if breaches else "inconclusive" if near else "pass"
+    result["reasons"] = breaches if breaches else near
     return result
 
 
@@ -316,13 +335,15 @@ def build(php_directory, django_directory, findings_path, *, php_baseline_reused
         reasons.append("inconclusive_evidence")
     if counts["not_implemented"] or len(cases) < expected:
         reasons.append("candidate_feature_absent")
+    # This comparator evaluates idle navigation only, not paired payment stages
+    # or representative-background workloads.
+    reasons.extend(("paired_payment_stage_evidence_missing",
+                    "representative_background_evidence_missing"))
     if reasons and any(value in reasons for value in
                        ("authority_violation", "unresolved_critical_or_high_security_finding")):
         decision = "stop"
-    elif reasons:
-        decision = "fix"
     else:
-        decision = "continue"
+        decision = "fix"
     return {
         "schema_version": 1,
         "issue": 692,
@@ -363,6 +384,11 @@ def build(php_directory, django_directory, findings_path, *, php_baseline_reused
         "verdict": {
             "decision": decision,
             "reasons": reasons,
+            "missing_evidence": {
+                "paired_payment_scenarios": ["checkout", "paid_delivery"],
+                "paired_payment_boundaries": list(PAYMENT_BOUNDARIES),
+                "representative_background": "not evaluated by this idle-navigation comparator",
+            },
             "owner_decision": False,
             "note": "This is measured evidence for H1, not the owner's continue/fix/stop decision.",
         },

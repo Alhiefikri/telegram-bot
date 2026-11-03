@@ -585,6 +585,7 @@
   "payment.sakurupiah.expiry_warning": "Do not pay an old QR after the order expires or is cancelled. If you already paid, contact support with the invoice number and proof of payment.",
   "payment.sakurupiah.scan": "Scan this QRIS directly in Telegram. Pay only from the QR image above.",
   "payment.sakurupiah.hosted": "Open the QRIS payment page using the website button below.",
+  "payment.sakurupiah.open_qr": "Open the QRIS image using the Open QRIS button below.",
   "payment.sakurupiah.retry.expired_title": "QRIS expired",
   "payment.sakurupiah.retry.expired_body": "This QRIS can no longer be paid. Do not pay it. Create a new order if you still want to buy.",
   "payment.sakurupiah.retry.creating_lead": "Preparing QRIS payment",

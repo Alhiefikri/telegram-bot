@@ -1,5 +1,6 @@
 """Namespace firewall, bounded HTTP relay and discard-only SMTP sink. No payload logs."""
 import http.client
+import fcntl
 import base64
 import hashlib
 import hmac
@@ -201,7 +202,8 @@ def telegram_request(config, body):
         raise ValueError("invalid text")
     if config["mode"] not in ("testing-bot", "p08-sandbox-testing-bot"):
         return {"ok": True, "fake": True}
-    result = upstream("https://api.telegram.org/bot" + config["bot_token"] + "/sendMessage", body)
+    payload = {**body, "link_preview_options": {"is_disabled": True}}
+    result = upstream("https://api.telegram.org/bot" + config["bot_token"] + "/sendMessage", payload)
     return {"ok": result.get("ok") is True}  # Never echo upstream customer/secret content.
 
 
@@ -212,8 +214,17 @@ NAVIGATION_METHODS = {
 }
 
 
+def p08_photo_url(config, value):
+    return (config["mode"] == "p08-sandbox-testing-bot"
+            and (config.get("approval") or {}).get("gate") == "P08-approved-dual-targets-only"
+            and isinstance(value, str) and len(value) <= 2048
+            and re.fullmatch(
+                r"https://sakurupiah\.id/assets/(?:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*/)*"
+                r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.png", value) is not None)
+
+
 def navigation_request(config, body, next_message_id):
-    """Only admitted private test chats; never accepts tokens, endpoints or uploads."""
+    """Only admitted private test chats; no arbitrary endpoints or uploads."""
     if (config["mode"] == "testing-bot"
             and (config.get("approval") or {}).get("gate") != "P06-approved-navigation-targets-only"):
         raise ValueError("explicit navigation target approval required")
@@ -227,7 +238,6 @@ def navigation_request(config, body, next_message_id):
     method, payload = body["method"], body["payload"]
     allowed = {"chat_id", "message_id", "text", "caption", "parse_mode", "entities",
                "caption_entities", "reply_markup", "photo", "animation", "media",
-               "disable_web_page_preview", "link_preview_options",
                "show_caption_above_media", "callback_query_id", "show_alert"}
     if not set(payload) <= allowed:
         raise ValueError("unsupported navigation options")
@@ -237,6 +247,8 @@ def navigation_request(config, body, next_message_id):
     if type(chat_id) is not int or chat_id not in config["safe_chat_ids"]:
         raise ValueError("chat not admitted")
     payload = {**payload, "chat_id": chat_id}
+    if method in ("sendMessage", "editMessageText"):
+        payload["link_preview_options"] = {"is_disabled": True}
     if method == "answerCallbackQuery":
         if (not isinstance(payload.get("callback_query_id"), str)
                 or not 1 <= len(payload["callback_query_id"]) <= 256
@@ -249,13 +261,17 @@ def navigation_request(config, body, next_message_id):
     for field in ("photo", "animation"):
         if field in payload:
             value = payload[field]
-            if not isinstance(value, str) or not value or not all(c.isalnum() or c in "_-" for c in value):
+            if (not isinstance(value, str) or not value
+                    or (not all(c.isalnum() or c in "_-" for c in value)
+                        and not (method == "sendPhoto" and field == "photo" and p08_photo_url(config, value)))):
                 raise ValueError("only test-bot file references are supported")
     if "media" in payload:
         media = payload["media"]
         if (not isinstance(media, dict) or media.get("type") not in ("photo", "animation")
-                or not isinstance(media.get("media"), str)
-                or not all(c.isalnum() or c in "_-" for c in media["media"])):
+                or not isinstance(media.get("media"), str) or not media["media"]
+                or (not all(c.isalnum() or c in "_-" for c in media["media"])
+                    and not (method == "editMessageMedia" and media["type"] == "photo"
+                             and p08_photo_url(config, media["media"])))):
             raise ValueError("only test-bot media references are supported")
     markup = payload.get("reply_markup", {})
     if not isinstance(markup, dict) or set(markup) - {"inline_keyboard", "remove_keyboard"}:
@@ -329,8 +345,11 @@ def receipt_response(response):
 
 def receipt_request(config, body, next_message_id):
     """Receipt uploads are ephemeral and restricted to explicitly admitted targets."""
-    approved = (config.get("mode") == "testing-bot"
-                and (config.get("approval") or {}).get("gate") == "P09-approved-receipt-targets-only")
+    mode = config.get("mode")
+    gate = (config.get("approval") or {}).get("gate")
+    approved = ((mode == "testing-bot" and gate == "P09-approved-receipt-targets-only")
+                or (mode == "p08-sandbox-testing-bot" and gate == "P08-approved-dual-targets-only"
+                    and config.get("p08_receipt_delivery") is True))
     if config.get("mode") != "fake" and not approved:
         return {"ok": False, "error_code": 403}
     if (not isinstance(body, dict) or set(body) != {"method", "payload"}
@@ -464,6 +483,10 @@ def fake_p08_request(body):
     if operation not in _P08_ENDPOINTS or not isinstance(fields, dict):
         raise ValueError("sandbox operation denied")
     _, expected = _P08_ENDPOINTS[operation]
+    if operation == "create" and set(fields) == expected - {"phone", "callback_url", "return_url"}:
+        fields = {**fields, "phone": "08000000000",
+                  "callback_url": "https://synthetic.invalid/callback",
+                  "return_url": "https://synthetic.invalid/return"}
     if set(fields) != expected or any(type(value) is not str or not value or len(value.encode()) > 2048
                                       for value in fields.values()):
         raise ValueError("sandbox fields denied")
@@ -483,8 +506,8 @@ def fake_p08_request(body):
                 "trx_id": "synthetic-" + reference, "merchant_ref": reference,
                 "payment_kode": fields["method"], "amount": fields["amount"],
                 "total": fields["amount"], "fee": "0", "expired": "2099-01-01 00:00:00",
-                "qr": "https://sakurupiah.id/synthetic-qr",
-                "checkout_url": "https://sakurupiah.id/synthetic-checkout",
+                "qr": "https://sakurupiah.id/assets/synthetic-qr.png",
+                "checkout_url": "https://sakurupiah.id/sanbox-payout.php?token=synthetic",
                 "status": "pending",
             })
             return {"status": "200", "data": [dict(row)]}
@@ -511,6 +534,65 @@ def fake_p08_request(body):
             return {"status": "200", "data": [{**row, "status": state, "payment_status": state}]}
     raise ValueError("sandbox operation denied")
 
+_P08_CREATE_STATE = None
+_P08_CREATE_LOCK = threading.Lock()
+
+
+def open_p08_create_state(path):
+    directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(directory)
+        if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700:
+            raise ValueError("sandbox create state denied")
+        descriptor = os.open("attempt", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             0o600, dir_fd=directory)
+        try:
+            info = os.fstat(descriptor)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600):
+                raise ValueError("sandbox create state denied")
+            os.fsync(descriptor)
+            os.fsync(directory)
+            return descriptor
+        except BaseException:
+            os.close(descriptor)
+            raise
+    finally:
+        os.close(directory)
+
+
+def reserve_p08_create():
+    if _P08_CREATE_STATE is None:
+        raise ValueError("sandbox create state unavailable")
+    with _P08_CREATE_LOCK:
+        fcntl.flock(_P08_CREATE_STATE, fcntl.LOCK_EX)
+        try:
+            if os.fstat(_P08_CREATE_STATE).st_size != 0:
+                raise ValueError("sandbox create attempt already used")
+            if os.pwrite(_P08_CREATE_STATE, b"1", 0) != 1:
+                raise ValueError("sandbox create state unavailable")
+            os.fsync(_P08_CREATE_STATE)
+        finally:
+            fcntl.flock(_P08_CREATE_STATE, fcntl.LOCK_UN)
+
+
+def initialize_h1(config, state_path):
+    if "p08_create_limit" not in config and "p08_receipt_delivery" not in config:
+        return None, None
+    from harness import validate
+    validate(config)
+    descriptor = None
+    if "p08_create_limit" in config:
+        descriptor = open_p08_create_state(state_path)
+    proof = None
+    if (descriptor is not None and config.get("p08_receipt_delivery") is True
+            and "p08_create_amount" in config):
+        proof = {"version": "p01-h1-relay-v1", "scope_sha256": config["approval"]["scope_sha256"],
+                 "p08_create_limit": 1, "p08_create_amount": config["p08_create_amount"],
+                 "p08_receipt_delivery": True}
+    return descriptor, proof
+
+
 
 def p08_request(config, body):
     if (config.get("mode") not in ("sandbox", "p08-sandbox-testing-bot")
@@ -522,6 +604,9 @@ def p08_request(config, body):
         raise ValueError("sandbox operation denied")
     path, expected = _P08_ENDPOINTS[operation]
     fields = body["fields"]
+    if operation == "create" and set(fields) == expected - {"phone", "callback_url", "return_url"}:
+        fields = {**fields, "phone": config["p08_phone"],
+                  "callback_url": config["p08_callback_url"], "return_url": config["p08_return_url"]}
     if (set(fields) != expected or any(type(v) is not str or not v or len(v.encode()) > 2048
                                        for v in fields.values())):
         raise ValueError("sandbox fields denied")
@@ -545,6 +630,14 @@ def p08_request(config, body):
     if operation == "create":
         message = api_id + fields["method"] + fields["merchant_ref"] + fields["amount"]
         form["signature"] = hmac.new(api_key.encode(), message.encode(), hashlib.sha256).hexdigest()
+    if operation == "create" and "p08_create_limit" in config:
+        if type(config["p08_create_limit"]) is not int or config["p08_create_limit"] != 1:
+            raise ValueError("sandbox create limit denied")
+        if "p08_create_amount" in config:
+            amount = config["p08_create_amount"]
+            if type(amount) is not int or amount <= 0 or int(fields["amount"]) != amount:
+                raise ValueError("sandbox create amount denied")
+        reserve_p08_create()
     addresses = socket.getaddrinfo("sakurupiah.id", 443, family=socket.AF_INET, type=socket.SOCK_STREAM)
     if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
         raise ValueError("sandbox destination denied")
@@ -688,7 +781,13 @@ class SMTP(socketserver.StreamRequestHandler):
 
 
 def main():
+    try:
+        os.unlink("/tmp/h1-proof.json")
+    except FileNotFoundError:
+        pass
     config = json.load(open("/run/harness/config.json"))
+    global _P08_CREATE_STATE
+    _P08_CREATE_STATE, h1_proof = initialize_h1(config, "/run/harness/p08-create-state")
     callback = config.get("p08_callback") == {"gate": "P08-approved-sandbox-callback-only"}
     internal_key = ""
     if callback:
@@ -716,6 +815,10 @@ def main():
         threading.Thread(target=callbacks.serve_forever, daemon=True).start()
     server = BoundedThreadingHTTPServer(("127.0.0.1", 8025), handler(config))
     server.timeout = 5
+    if h1_proof is not None:
+        descriptor = os.open("/tmp/h1-proof.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(h1_proof, stream, sort_keys=True)
     with open("/tmp/harness-ready", "w") as ready:
         ready.write("firewall and transports ready\n")
     server.serve_forever()

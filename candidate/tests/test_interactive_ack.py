@@ -16,7 +16,7 @@ spec.loader.exec_module(runner)
 
 
 def callback(query='query'):
-    return {'callback_query': {'id': query, 'message': {'chat': {'id': 1}}}}
+    return {'callback_query': {'id': query, 'data': 'katalog', 'message': {'chat': {'id': 1}}}}
 
 
 class BlockingRelay:
@@ -225,3 +225,93 @@ class InteractiveAckTests(unittest.TestCase):
         self.assertEqual([line['status'] for line in lines], ['ready', 'processed', 'processed'])
         self.assertEqual([line['empty_ack'] for line in lines[1:]], ['queued', 'queued'])
         self.assertEqual([line['telegram'] for line in lines[1:]], [[], []])
+
+    def test_integrated_stream_only_admits_updates_to_worker_inbox(self):
+        received = []
+        answers = []
+        def receive(payload):
+            received.append(payload)
+            response = ({'method': 'answerCallbackQuery', 'callback_query_id': 'query'}
+                        if 'callback_query' in payload else {'ok': True})
+            return SimpleNamespace(response=response, duplicate=True)
+        inbox = SimpleNamespace(receive=receive)
+        ack_worker = SimpleNamespace(submit=lambda payload: answers.append(payload) or True)
+        payloads = [{'update_id': 1, **callback()}, {'update_id': 2, 'message': {'text': '/start'}}]
+        source = io.TextIOWrapper(io.BytesIO(b''.join(
+            (json.dumps(payload) + '\n').encode() for payload in payloads)))
+        output = io.StringIO()
+        with patch.object(runner.sys, 'stdin', source), redirect_stdout(output):
+            runner.run_worker_stream(ValueError, inbox, ack_worker)
+        self.assertEqual(received, payloads)
+        self.assertEqual(answers, [{'chat_id': 1, 'callback_query_id': 'query'}])
+        self.assertEqual([json.loads(line) for line in output.getvalue().splitlines()],
+                         [{'status': 'ready'}, {'status': 'admitted'}, {'status': 'admitted'}])
+
+    def test_integrated_stream_stops_on_invalid_admission(self):
+        received = []
+        def receive(payload):
+            received.append(payload)
+            raise ValueError('private detail')
+        source = io.TextIOWrapper(io.BytesIO(b'{"message":{"text":"/start"}}\n{}\n'))
+        output = io.StringIO()
+        ack_worker = SimpleNamespace(submit=lambda payload: self.fail('rejected update answered'))
+        with patch.object(runner.sys, 'stdin', source), redirect_stdout(output):
+            runner.run_worker_stream(ValueError, SimpleNamespace(receive=receive), ack_worker)
+        self.assertEqual(received, [{'message': {'text': '/start'}}])
+        self.assertEqual([json.loads(line) for line in output.getvalue().splitlines()],
+                         [{'status': 'ready'}, {'status': 'rejected'}])
+
+    def test_integrated_admission_sends_callback_answer_through_bounded_relay(self):
+        relay = BlockingRelay()
+        relay.release.set()
+        ack_worker = runner.EmptyAckWorker(relay)
+        admitted = []
+        def receive(payload):
+            admitted.append(payload)
+            return SimpleNamespace(response={'method': 'answerCallbackQuery',
+                                             'callback_query_id': payload['callback_query']['id']})
+        source = io.TextIOWrapper(io.BytesIO((json.dumps({'update_id': 1, **callback()}) + '\n').encode()))
+        output = io.StringIO()
+        try:
+            with patch.object(runner.sys, 'stdin', source), redirect_stdout(output):
+                runner.run_worker_stream(ValueError, SimpleNamespace(receive=receive), ack_worker)
+        finally:
+            drained = ack_worker.close()
+        self.assertTrue(drained)
+        self.assertEqual(len(admitted), 1)
+        self.assertEqual(relay.calls, [('answerCallbackQuery', {'chat_id': 1, 'callback_query_id': 'query'})])
+        self.assertEqual(ack_worker.snapshot(), {'success': 1, 'unconfirmed': 0})
+        self.assertNotIn('query', output.getvalue())
+
+    def test_integrated_scope_blocks_financial_and_service_events_before_inbox(self):
+        for payload in (
+            {'message': {'text': '/deposit 1000'}},
+            {'message': {'text': '/start', 'pinned_message': {}}},
+            {'message': {'text': '/start', 'new_chat_members': []}},
+            {'message': {'new_chat_members': []}},
+            {'callback_query': {'message': {'new_chat_members': []}, 'data': 'katalog'}},
+            {'callback_query': {'message': {}, 'data': 'balance:add'}},
+            {'callback_query': {'message': {}, 'data': 'detail:pay:balance:1:token'}},
+            {'callback_query': {'message': {}, 'data': 'detail:pay:binance:1:token'}},
+        ):
+            with self.subTest(payload=payload):
+                source = io.TextIOWrapper(io.BytesIO((json.dumps(payload) + '\n').encode()))
+                output = io.StringIO()
+                inbox = SimpleNamespace(receive=lambda value: self.fail('rejected update admitted'))
+                ack = SimpleNamespace(submit=lambda value: self.fail('rejected update answered'))
+                with patch.object(runner.sys, 'stdin', source), redirect_stdout(output):
+                    runner.run_worker_stream(ValueError, inbox, ack)
+                self.assertEqual([json.loads(line)['status'] for line in output.getvalue().splitlines()],
+                                 ['ready', 'rejected'])
+
+    def test_integrated_scope_accepts_qris_navigation_and_check(self):
+        callbacks = ('katalog', 'category:1', 'family:options:vSigned:o0123456789abcdef',
+                     'family:select:vSigned', 'product:1:o0123456789abcdef', 'menu:orders',
+                     'orders:open', 'orders:older:20261102232100:00000000-0000-0000-0000-000000000001',
+                     'detail:qty:+:1:0123456789abcdef',
+                     'detail:pay:qris:1:0123456789abcdef',
+                     'checkout:check:00000000-0000-0000-0000-000000000001')
+        for data in callbacks:
+            with self.subTest(data=data):
+                self.assertTrue(runner.integrated_update_allowed(
+                    {'callback_query': {'message': {}, 'data': data}}))

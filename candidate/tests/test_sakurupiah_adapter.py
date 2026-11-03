@@ -121,3 +121,27 @@ class SakurupiahAdapterTests(TestCase):
         for amount in (True, 1.0, 0, -1):
             with self.subTest(amount=amount), self.assertRaises(ValueError):
                 InvoiceIdentity("ref", amount, "QRIS")
+
+
+class SandboxRelayTests(TestCase):
+    def test_create_sends_no_caller_targets_to_the_boundary(self):
+        import base64
+        from unittest.mock import Mock, patch
+        from lhie_candidate.payments.relay import SandboxRelay
+
+        response = Mock(status=200)
+        response.read.return_value = json.dumps(
+            {'status': 200, 'body': base64.b64encode(b'{}').decode()}).encode()
+        connection = Mock()
+        connection.getresponse.return_value = response
+        fields = {'method': 'QRIS', 'amount': '10000', 'merchant_fee': '2',
+                  'merchant_ref': 'ref', 'phone': 'private-phone',
+                  'callback_url': 'https://private.invalid/callback',
+                  'return_url': 'https://private.invalid/return'}
+        with patch('lhie_candidate.payments.relay.http.client.HTTPConnection',
+                   return_value=connection):
+            SandboxRelay().post('https://sakurupiah.id/api-sanbox/create.php',
+                                fields=fields, timeout=5, max_response_bytes=1048576)
+        body = json.loads(connection.request.call_args.args[2])
+        self.assertEqual(body['fields'], {key: fields[key] for key in
+                         ('method', 'amount', 'merchant_fee', 'merchant_ref')})

@@ -399,6 +399,34 @@ internal callback secret is separate from both provider and bot credentials.
 Do not put credentials, test numbers, callback secrets or full URLs in Git,
 shell history, logs or issue comments.
 
+For the separately authorized H1 navigation-to-receipt smoke, the operator must
+attest a new scope containing `p08_create_limit: 1`, a positive integer
+`p08_create_amount` in rupiah, and `p08_receipt_delivery: true`. The relay
+rejects any create whose amount differs before reserving the attempt or reaching
+the network. Existing P08 dual approval alone does not permit receipt uploads.
+The relay persists the single create **attempt** before network I/O, including
+ambiguous failures, and does not reset it on container restart or disposable-volume
+reset. Do not delete the private create state to retry an ambiguous attempt. A
+new attempt requires a separate operator authorization.
+
+The integrated polling driver requires the running boundary's private startup
+proof to match the approved scope and verifies that the application shares that
+boundary's network namespace. The boundary image must match the locally built
+source identity; an older or mismatched image is refused. The driver accepts
+only the Testing Bot's approved private chat, `/start`, bounded catalog/quantity
+navigation, QRIS selection and payment check. Balance, deposit and unrelated
+service updates are refused before durable admission. It requires separately
+managed workers and a restorable existing webhook. The operator must attest that
+the private restoration record contains the **current** webhook secret and
+that the previous webhook did not pin an IP address; Telegram does not expose
+either fact. The driver compares observable webhook settings and restores them
+after polling, but cannot independently verify the secret.
+
+Building the shared P01 boundary tag affects future recreations even when the
+existing container keeps its image ID. The P01 lifecycle guard refuses another
+disposable stack while one is active. Do not replace that tag, stop the existing
+stack, or bypass the guard without separate operator authorization.
+
 `harness.py p08-draft candidate` can prepare a private, **unapproved** sandbox
 draft without changing the active configuration. Supply only the two existing
 `SAKURUPIAH_SANDBOX_API_ID` and `SAKURUPIAH_SANDBOX_API_KEY` variables in its
