@@ -19,6 +19,8 @@ class Database:
             attempted = parameters[0]
             return [{"update_id": identity} for identity in self.navigation
                     if identity not in attempted][:1]
+        if "o.expires_at" in sql:
+            return []
         if "payment_events e" in sql:
             return [{"id": 10}]
         return [{"id": 20}]

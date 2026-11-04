@@ -67,6 +67,29 @@ FUNDING_UPDATE = {
 }
 
 
+LIFECYCLE_INSERT = {
+    'audit_logs': set('user_id action subject_type subject_id new_values created_at'.split()),
+    'provider_cancellation_attempts': set('order_id payment_id provider state finished_at created_at updated_at'.split()),
+    'order_refunds': set('id order_id payment_id customer_id amount currency state external_reference external_reference_hash actor_user_id confirmed_at created_at updated_at'.split()),
+    'customer_usdt_balance_entries': set('customer_usdt_balance_account_id account_sequence kind amount_micro balance_after_micro source_type source_id idempotency_key request_fingerprint original_entry_id refund_order_id created_at'.split()),
+    'customer_usdt_balance_accounting_events': set('customer_usdt_balance_entry_id currency amount_micro debit_account credit_account source_fingerprint created_at'.split()),
+}
+LIFECYCLE_UPDATE = {
+    'orders': {'checkout_key'},
+    'manual_fulfillment_reviews': set('state resolution_reason actor_user_id resolved_at refund_provider_reference refund_provider_result refund_requested_at updated_at'.split()),
+    'supplier_fulfillments': set('state next_attempt_at reserved_cost_micros reserved_quantity refunded_quantity last_error updated_at'.split()),
+    'supplier_purchases': {'state', 'updated_at'},
+    'suppliers': {'reserved_balance_micros', 'version', 'updated_at'},
+    'supplier_catalog_items': {'reserved_quantity', 'updated_at'},
+    'payment_bsc_details': {'verification_status', 'last_verified_at'},
+    'customer_usdt_balance_accounts': {'balance_micro', 'version', 'last_entry_id', 'updated_at'},
+    'order_refunds': set('state confirmed_at updated_at external_reference external_reference_hash actor_user_id'.split()),
+    'warranty_claims': {'settlement_state', 'updated_at'},
+    'supplier_account_units': {'updated_at'},
+    'order_items': {'updated_at'},
+}
+
+
 def _merge(*mappings):
     merged = {}
     for mapping in mappings:
@@ -96,6 +119,10 @@ def verify_public_writes(cursor):
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, FUNDING_INSERT)
         allowed_update = _merge(allowed_update, FUNDING_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.audit_logs','action','INSERT')")
+    if cursor.fetchone()[0]:
+        allowed_insert = _merge(allowed_insert, LIFECYCLE_INSERT)
+        allowed_update = _merge(allowed_update, LIFECYCLE_UPDATE)
     cursor.execute('''SELECT c.relname FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p')

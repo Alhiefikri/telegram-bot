@@ -20,7 +20,8 @@ from ..checkout.db import Database
 EFFECT_TYPE = 'receipt.credentials'
 ACTION_TYPE = 'receipt.order_actions'
 TXT_TYPE = 'receipt.txt_download'
-RECEIPT_TYPES = (EFFECT_TYPE, ACTION_TYPE, TXT_TYPE)
+REFUND_TYPE = 'usdt.refund_receipt'
+RECEIPT_TYPES = (EFFECT_TYPE, ACTION_TYPE, TXT_TYPE, REFUND_TYPE)
 QUEUE = 'telegram-receipts'
 PHOTO_TEMPLATE = 'receipt-photo-caption-v1'
 TEXT_TEMPLATE = 'receipt-text-fallback-v1'
@@ -194,6 +195,9 @@ class ReceiptProtocol:
     def _ready(self, row, at):
         if row['state'] not in ('pending', 'failed') or row['attempts'] >= 3:
             return False
+        if row['effect_type'] == REFUND_TYPE and self.db.one(
+                "SELECT id FROM public.customer_usdt_funding_pauses WHERE scope='delivery' LIMIT 1"):
+            return False
         if (row['effect_type'] == EFFECT_TYPE and row['template_version'] == PHOTO_TEMPLATE
                 and row['sequence'] == 1 and row['state'] == 'failed'):
             return False
@@ -287,7 +291,8 @@ class ReceiptProtocol:
             terminal = code in _NON_RETRYABLE or row['attempts'] >= 3
             delay = retry_after_seconds if retry_after_seconds is not None else (5 if row['attempts'] <= 1 else 30 if row['attempts'] == 2 else 120)
             exhausted = {EFFECT_TYPE: 'receipt_attempts_exhausted', ACTION_TYPE: 'receipt_actions_attempts_exhausted',
-                         TXT_TYPE: 'receipt_txt_download_attempts_exhausted'}[row['effect_type']]
+                         TXT_TYPE: 'receipt_txt_download_attempts_exhausted',
+                         REFUND_TYPE: 'usdt_refund_receipt_attempts_exhausted'}[row['effect_type']]
             stored_code = code if code in _NON_RETRYABLE or row['attempts'] < 3 else exhausted
             return self.db.one('''UPDATE public.telegram_outbound_effects SET state = 'failed',
                 lease_until = NULL, claim_token = NULL, sent_at = NULL, failed_at = %s,
@@ -347,6 +352,8 @@ class ReceiptProtocol:
         self._require_postgres()
         return self.db.rows('''SELECT e.id FROM public.telegram_outbound_effects e
             WHERE e.effect_type=ANY(%s) AND e.state IN ('pending','failed') AND e.attempts<3
+              AND (e.effect_type<>'usdt.refund_receipt' OR NOT EXISTS (
+                  SELECT 1 FROM public.customer_usdt_funding_pauses WHERE scope='delivery'))
               AND (e.next_attempt_at IS NULL OR e.next_attempt_at<=%s)
               AND (e.last_error_code IS NULL OR NOT (e.last_error_code=ANY(%s)))
               AND NOT COALESCE((e.effect_type=%s AND e.template_version=%s AND e.sequence=1 AND e.state='failed'),false)

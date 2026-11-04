@@ -130,51 +130,14 @@ class StoreBalanceLedger:
         return account
 
     def refund_order(self, customer_id, order_id):
-        """Post the remaining full refund; do not cancel or transition the Order."""
-        account = self.lock_for_purchase(customer_id)
-        order, payment, amount = self._snapshot(customer_id, order_id)
-        source_id = str(order["id"])
-        if not self._refund_state(order, payment):
-            raise CheckoutError("balance_refund_state_invalid")
-        self._assert_refundable(source_id)
-        debit = self._find_entry(
-            account, "purchase_debit", amount, source_id, f"order:{source_id}:debit",
-        )
-        if debit is None:
-            raise CheckoutError("balance_refund_original_debit_missing")
-        refunds = self.db.rows(
-            """SELECT * FROM public.store_balance_entries
-               WHERE kind = 'refund_credit'
-                 AND ((source_type = 'order' AND source_id = %s) OR refund_order_id = %s)
-               ORDER BY id""",
-            (source_id, source_id),
-        )
-        partial_total = 0
-        total = 0
-        latest_partial = None
-        for entry in refunds:
-            if entry["customer_balance_account_id"] != account["id"]:
-                raise CheckoutError("balance_identity_conflict")
-            entry_amount = require_integer(entry["amount"], minimum=1)
-            total += entry_amount
-            if entry["refund_order_id"] is not None:
-                if (str(entry["refund_order_id"]) != source_id
-                        or entry["source_type"] != "order_refund"):
-                    raise CheckoutError("balance_identity_conflict")
-                partial_total += entry_amount
-                latest_partial = entry
-        if total > amount or partial_total > amount:
-            raise CheckoutError("balance_refund_exceeds_original")
-        remaining = amount - partial_total
-        key = f"order:{source_id}:refund"
-        existing = self._find_entry(account, "refund_credit", remaining, source_id, key)
-        if existing is not None:
-            return existing
-        if remaining == 0:
-            if latest_partial is None:
-                raise CheckoutError("balance_refund_original_debit_missing")
-            return latest_partial
-        return self._post(account, "refund_credit", remaining, source_id, key)
+        """Post the original IDR debit remainder through the refund authority."""
+        from .refunds import OrderRefunds
+
+        account = dict(self.lock_for_purchase(customer_id),
+                       customer_id=customer_id, provider="store_balance")
+        order, payment, _ = self._snapshot(customer_id, order_id)
+        return OrderRefunds(self.db.using).apply_locked(
+            order, payment, account=account).entry
 
     def _snapshot(self, customer_id, order_id):
         if not isinstance(order_id, (str, UUID)):
@@ -215,16 +178,12 @@ class StoreBalanceLedger:
                     and order["order_status"] in ("cancelled", "completed"))
         return paid or refunded
 
-    def _assert_refundable(self, order_id):
-        # Supplier/warranty release authority is not part of the local experiment.
-        # Refuse those Orders rather than inventing a second lifecycle owner.
-        if self.db.one("SELECT id FROM public.supplier_fulfillments WHERE order_id=%s LIMIT 1", (order_id,)):
-            raise CheckoutError("supplier_refund_requires_lifecycle")
 
     def _find_entry(self, account, kind, amount, source_id, key):
         return self._find_source_entry(account, kind, amount, "order", source_id, key)
 
-    def _find_source_entry(self, account, kind, amount, source_type, source_id, key):
+    def _find_source_entry(self, account, kind, amount, source_type, source_id, key,
+                           refund_order_id=None):
         entries = self.db.rows(
             """SELECT * FROM public.store_balance_entries
                WHERE (customer_balance_account_id = %s AND idempotency_key = %s)
@@ -240,13 +199,14 @@ class StoreBalanceLedger:
         if (entry["customer_balance_account_id"] != account["id"]
                 or entry["kind"] != kind or entry["amount"] != amount
                 or entry["source_type"] != source_type or entry["source_id"] != source_id
-                or entry["refund_order_id"] is not None):
+                or str(entry["refund_order_id"] or "") != str(refund_order_id or "")):
             raise CheckoutError("balance_identity_conflict")
         require_integer(entry["amount"], minimum=1)
         require_integer(entry["balance_after"])
         return entry
 
-    def _post(self, account, kind, amount, source_id, key, source_type="order"):
+    def _post(self, account, kind, amount, source_id, key, source_type="order",
+              refund_order_id=None):
         amount = require_integer(amount, minimum=1)
         balance = require_integer(account["balance"])
         if kind == "purchase_debit":
@@ -261,12 +221,14 @@ class StoreBalanceLedger:
             """INSERT INTO public.store_balance_entries
                    (customer_balance_account_id, kind, amount, balance_after,
                     source_type, source_id, idempotency_key, created_at, refund_order_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta', NULL)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta', %s)
                ON CONFLICT DO NOTHING RETURNING *""",
-            (account["id"], kind, amount, balance_after, source_type, source_id, key),
+            (account["id"], kind, amount, balance_after, source_type, source_id, key,
+             refund_order_id),
         )
         if entry is None:
-            existing = self._find_source_entry(account, kind, amount, source_type, source_id, key)
+            existing = self._find_source_entry(account, kind, amount, source_type, source_id, key,
+                                               refund_order_id=refund_order_id)
             if existing is None:
                 raise CheckoutError("balance_identity_conflict")
             return existing

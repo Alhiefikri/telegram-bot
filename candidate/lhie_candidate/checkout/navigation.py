@@ -169,7 +169,9 @@ class NavigationCheckout:
             params.append(customer_id)
         return self.db.one(
             'SELECT ' + ','.join('p.' + name for name in _PAYMENT_COLUMNS)
-            + ',o.invoice_number,o.order_status,o.payment_status,o.total_amount,o.customer_id '
+            + ',o.invoice_number,o.order_status,o.payment_status,o.total_amount,o.customer_id,'
+            "EXISTS (SELECT 1 FROM public.manual_fulfillment_reviews r WHERE r.order_id=o.id "
+            "AND r.state IN ('pending','refund_uncertain')) AS needs_review "
             'FROM public.payments p JOIN public.orders o ON o.id=p.order_id ' + where,
             tuple(params))
 
@@ -307,6 +309,8 @@ class NavigationCheckout:
                                 payment_id=result.payment_id,
                                 invoice_number=result.invoice_number,
                                 amount=result.amount, rail=rail)
+        if payment.get('needs_review'):
+            return self._payment_view(payment, state='review', replayed=replayed)
         if payment['status'] == 'paid' and rail == 'qris':
             return self._payment_view(payment, state='paid', replayed=replayed)
         if payment['status'] == 'paid':
@@ -359,6 +363,8 @@ class NavigationCheckout:
             payment = None
         if payment is None:
             return CheckoutView('stale')
+        if payment.get('needs_review'):
+            return self._payment_view(payment, state='review', replayed=True)
         if payment['status'] == 'paid':
             return self._payment_view(payment, state='paid', replayed=True)
         if self.lifecycle is None or payment['provider'] != 'sakurupiah':

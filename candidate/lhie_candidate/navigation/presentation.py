@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 
+from lhie_candidate.checkout.projection import OrderLifecycleProjection
 from lhie_candidate.domain.money import Currency, Money
 from lhie_candidate.funding.policy import is_preset_callback, preset_callback
 from lhie_candidate.payments.sakurupiah_urls import (
@@ -190,11 +191,12 @@ class CatalogPresenter:
                 self._button(customer,'menu.home','menu:home',slot='menu.home')]
 
     def _order_status(self, customer, order):
-        if order['payment_status'] == 'paid' and (
-                order['order_status'] == 'completed' or order.get('receipt_sent')):
+        status = OrderLifecycleProjection.from_rows(order).history_status(
+            receipt_sent=order.get('receipt_sent', False))
+        if status == 'delivered':
             return self.t(customer,'order.history.delivered')
-        key = _ORDER_STATUS_KEYS.get(order['order_status'])
-        return self.t(customer,key) if key else order['order_status']
+        key = _ORDER_STATUS_KEYS.get(status)
+        return self.t(customer,key) if key else status
 
     @staticmethod
     def _order_cursor(direction, order):

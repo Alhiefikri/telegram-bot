@@ -97,4 +97,36 @@ foreach (['navigation_qris', 'navigation_balance', 'navigation_race'] as $name) 
     ];
 }
 $fixtures['key'] = hash_hmac('sha256', 'telegram-direct-checkout|42|700042|700042|99|checkout:choice', str_repeat('a', 64));
+$customerId = $fixtures['python']['customer_id'];
+$orderId = '69400000-0000-4000-8000-000000000001';
+$paymentId = '69400000-0000-4000-8000-000000000002';
+$fixtures['p12_fingerprints'] = [
+    'purchase' => (new App\Services\UsdtBalance\UsdtPurchase($customerId,
+        App\Services\UsdtBalance\UsdtMicroAmount::fromUnits(101), $orderId, $paymentId))->fingerprint(),
+    'refund' => (new App\Services\UsdtBalance\UsdtRefund($customerId,
+        App\Services\UsdtBalance\UsdtMicroAmount::fromUnits(51), $orderId, $orderId, 42, $paymentId, true))->fingerprint(),
+];
+$writer = app(App\Services\MoneyReceipts\ExternalMoneyReceiptWriter::class);
+$payment = new App\Models\Payment(['order_id' => $orderId,
+    'provider' => 'manual', 'method' => 'BINANCE_PAY_ID', 'amount' => 101, 'currency' => 'USDT',
+    'binance_receiver_type' => 'pay_id', 'binance_receiver_value' => '69400001']);
+$payment->id = $paymentId;
+$bscPayment = new App\Models\Payment;
+$bscPayment->id = '69400000-0000-4000-8000-000000000003';
+$receipts = [
+    'binance' => $writer->receiptForBinancePayment($payment, 'p12-provider-transaction', 'USDT', 101),
+    'bsc' => $writer->receiptForBscPayment($bscPayment, 56, '0x'.str_repeat('a', 64), 2,
+        '0x'.str_repeat('b', 40), '101000000000000', 18),
+];
+foreach ($receipts as $rail => $receipt) {
+    $fixtures['p12_receipts'][$rail] = [
+        'canonical_key' => $receipt->canonicalKey(), 'fingerprint' => $receipt->fingerprint(),
+        'provider' => $receipt->identity->provider(), 'identity_kind' => $receipt->identity->kind(),
+        'account_namespace' => $receipt->identity->accountNamespace(), 'reference' => $receipt->identity->reference(),
+        'chain_id' => $receipt->identity->chainId(), 'tx_hash' => $receipt->identity->txHash(),
+        'log_index' => $receipt->identity->logIndex(), 'beneficiary' => $receipt->beneficiary,
+        'currency' => $receipt->currency, 'amount_units' => $receipt->amountUnits, 'decimals' => $receipt->decimals,
+        'target_type' => $receipt->target->type->value, 'target_id' => $receipt->target->targetId,
+    ];
+}
 echo json_encode($fixtures, JSON_THROW_ON_ERROR);

@@ -105,7 +105,7 @@ class ReceiptSource:
             FROM public.payments WHERE order_id=%s ORDER BY created_at DESC,id DESC LIMIT 1''', (order_id,))
         if not payment or payment['status'] != 'paid' or payment['paid_at'] is None:
             raise ReceiptUnavailable()
-        if self.db.one("SELECT id FROM public.manual_fulfillment_reviews WHERE order_id=%s AND reason='late_payment' AND state IN ('pending','refund_uncertain') LIMIT 1", (order_id,)):
+        if self.db.one("SELECT id FROM public.manual_fulfillment_reviews WHERE order_id=%s AND state IN ('pending','refund_uncertain') LIMIT 1", (order_id,)):
             raise ReceiptUnavailable()
         if self.db.one("SELECT id FROM public.supplier_fulfillments WHERE order_id=%s AND state <> 'delivered' LIMIT 1", (order_id,)):
             raise ReceiptUnavailable()
@@ -129,13 +129,33 @@ class ReceiptSource:
         allocated = self.db.rows('''SELECT s.id,s.order_item_id,s.product_id,s.retired_at,s.credential_format,
             s.secret,s.credential_payload FROM public.product_stock_items s
             JOIN public.order_items i ON i.id=s.order_item_id WHERE i.order_id=%s ORDER BY i.id,s.id''', (order_id,))
-        if not allocated or any(s['retired_at'] is not None for s in allocated):
+        allocation_signature = tuple(tuple(row.values()) for row in allocated)
+        refunded = self.db.rows('''SELECT f.order_item_id,r.missing_quantity AS quantity,
+                NULL::bigint AS stock_id FROM public.order_refunds r
+            JOIN public.supplier_fulfillments f ON f.id=r.supplier_fulfillment_id AND f.order_id=r.order_id
+            WHERE r.order_id=%s AND r.payment_id=%s AND r.customer_id=%s AND r.currency=%s
+              AND r.state='confirmed' AND f.refunded_quantity=r.missing_quantity
+            UNION ALL SELECT u.order_item_id,1 AS quantity,u.product_stock_item_id AS stock_id
+            FROM public.order_refunds r JOIN public.supplier_account_units u
+              ON u.id=r.supplier_account_unit_id AND u.order_id=r.order_id
+            WHERE r.order_id=%s AND r.payment_id=%s AND r.customer_id=%s AND r.currency=%s
+              AND r.state='confirmed' AND r.warranty_claim_id IS NOT NULL''',
+            (order_id, payment['id'], order['customer_id'], payment['currency'],
+             order_id, payment['id'], order['customer_id'], payment['currency']))
+        retired_ids = {row['stock_id'] for row in refunded if row['stock_id'] is not None}
+        if any((row['retired_at'] is not None) != (row['id'] in retired_ids) for row in allocated):
+            raise ReceiptUnavailable()
+        allocated = [row for row in allocated if row['retired_at'] is None]
+        if not allocated:
             raise ReceiptUnavailable()
         groups = []
         try:
             for item in items:
                 rows = [row for row in allocated if row['order_item_id'] == item['id']]
                 if any(row['product_id'] != item['product_id'] for row in rows):
+                    raise ReceiptUnavailable()
+                returned = sum(row['quantity'] for row in refunded if row['order_item_id'] == item['id'])
+                if not 0 <= returned <= item['quantity'] or len(rows) != item['quantity'] - returned:
                     raise ReceiptUnavailable()
                 if not rows:
                     continue
@@ -188,7 +208,7 @@ class ReceiptSource:
                  'unit_price': i['usdt_unit_price'] if payment['currency'] == 'USDT' else i['unit_price'],
                  'subtotal': i['usdt_subtotal'] if payment['currency'] == 'USDT' else i['subtotal']} for i in items],
             'groups': groups, 'allocated_count': len(allocated),
-            '_allocation_signature': tuple(tuple(row.values()) for row in allocated),
+            '_allocation_signature': allocation_signature,
             'amount_paid': (Money(Currency.USDT, amount).format_decimal() + ' USDT' if payment['currency'] == 'USDT'
                             else 'Rp ' + f'{amount:,}'.replace(',', '.')),
             'payment_method': method, 'paid_at': paid_label,

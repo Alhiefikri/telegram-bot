@@ -280,7 +280,8 @@ lifecycle prerequisite, not a Customer refund endpoint: it locks account before
 Order/Payment, verifies the original paid/refunded IDR source and debit, subtracts
 registered partial refunds, and posts at most the remaining original amount under
 `order:{id}:refund`. It does not change lifecycle statuses or release resources.
-Supplier-backed refunds fail closed pending the supplier/lifecycle port.
+P12 extends this authority to registered historical supplier entitlements and
+original-currency refunds through `OrderLifecycle`; supplier acquisition remains P18.
 Historical source claims replay without rewriting their original idempotency key.
 No arbitrary credit, parallel ledger, automatic projection repair or funding
 activation is exposed.
@@ -334,9 +335,10 @@ Docker rebuild could not fetch dependencies, so the smoke used the existing
 dependency image and current read-only source. Disposable P07 containers and
 volumes were reset after the proof.
 
-Sandbox/Testing Bot checkout, receipt delivery and full lifecycle/supplier/warranty
-work remain P08/P09/P12/P18. Actual production history/schema coverage remains HD
-after H1. This port grants no production, real-money, deployment or CI/CD authority.
+Bot checkout, receipt delivery and lifecycle/supplier/warranty work belong to
+P08/P09/P12/P18 rather than the P07 proof. Actual production history/schema
+coverage remains HD after H1. This port grants no production, real-money,
+deployment or CI/CD authority.
 
 Context7 consulted Django 5.2
 [atomic error boundaries](https://docs.djangoproject.com/en/5.2/topics/db/transactions/)
@@ -477,9 +479,9 @@ webhook mutation or CI operation was used. Sanitized run evidence is in
 Status responses may omit the amount, so matching history remains mandatory.
 The single live run does not qualify rate limits, outages, duplicate provider
 callbacks, retries or expiry behavior. Raw EMV QR payloads are rejected; only
-exact-host HTTPS image or hosted presentations are supported. Provider expiry
-is observed but does not release the Order or reservation; full expiry and
-cancellation ownership is P12.
+exact-host HTTPS image or hosted presentations are supported. P12 now routes
+authoritative provider expiry and due expiry/cancellation through the shared
+`OrderLifecycle`; the earlier live observation does not qualify this later port.
 
 Local verification uses `python3 tools/migration_harness/smoke_qris.py` and the
 focused `tests.test_sakurupiah_adapter`, `tests.test_p08_callback`,
@@ -567,3 +569,108 @@ and [row locks](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#sele
 and PostgreSQL 16 [explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html).
 The [Telegram Bot API](https://core.telegram.org/bots/api#sending-files)
 specifies multipart uploads and response semantics.
+
+## P12: shared Order lifecycle and retained refunds (#694)
+
+Implemented on `migration/p12-order-lifecycle-694`, based on
+`migration/python-django-experiment`. Blockers #688 and #693 were closed before
+implementation; H1's Owner decision permits continued local work, not production
+or provider activation.
+
+`checkout/lifecycle.py::OrderLifecycle` owns outer synchronous PostgreSQL
+transactions for paid, pending expiry/cancellation, manual completion/rejection,
+full/registered partial refunds and Manual Fulfillment Review resolution.
+`CheckoutService` and `SakurupiahLifecycle` use this owner instead of independent
+paid-state writes. Only deadlock/serialization failures retry, at most five local
+attempts; provider observation and Telegram delivery stay outside those closures.
+Public methods receive trusted authenticated identities from their adapters:
+Customer cancellation rechecks the exact Order owner, manual operations recheck
+the canonical role capability, and review/refund operations require Owner/Admin.
+These methods are not new HTTP endpoints or a replacement for P19 authentication.
+
+Recovery takes Customer shared lock, the original currency account for wallet
+refunds, Order, all Payments ordered by ID, then Product and retained Supplier/SKU
+resources before fulfillment/purchase, review, entitlement and credential rows.
+`FulfillmentResources` includes immutable source snapshots, current mappings and
+historical purchases in its ordered resource union. Uncertain purchases,
+replacement/confirmation work and active leases block refund/release; a foreign
+current-purchase pointer rolls back rather than cancelling another obligation.
+Released holds retain their Supplier and original currency. New acquisition,
+supplier transport, entitlement creation and provider-specific recovery remain P18.
+
+Authoritative late money preserves a cancelled/expired Order, marks its Payment
+paid and records one `late_payment` review. It neither records a sale nor allocates
+or sends credentials. Owner fulfillment consumes available stock once; uncertain
+external refunds retain their review and original transfer identity until explicit
+confirmation. Expiry respects submitted manual proof, Binance grace and the
+snapshotted BSC confirmation evidence. The existing payment worker repairs due
+expiry in bounded, rotating pages after a lost wakeup. Provider cancellation
+attempts remain durable on their original rail; their network executors belong to
+the rail ports, not this transaction owner.
+
+`checkout/refunds.py::OrderRefunds` consumes existing approved warranty/missing-unit
+entitlements. IDR credits use `StoreBalanceLedger`; USDT refunds append to the
+existing USDT ledger/accounting tables with the original debit fingerprint,
+linked entry and cumulative cap. Full refunds credit only the remainder.
+Externally funded refunds record exact original-currency transfer evidence, never
+credit either wallet or execute a transfer. Pending/uncertain partials block full
+remainder completion. Historical externally refunded Payments without
+`OrderRefund` rows replay without manufacturing new evidence.
+
+An IDR Order with a historical Binance/BSC USDT Payment keeps both snapshots.
+Receipt validation uses the original receiver namespace or chain log/parent
+claim and raw token precision, not an assumed QRIS beneficiary or an FX
+conversion. Pakasir retains its historical completed projection; other rails use
+their existing local-credential/review rules. History reads persisted status
+through `OrderLifecycleProjection` without reinterpreting the old provider.
+
+Refunded credentials stay allocated and retired. Credential reads validate the
+remaining live quantity against confirmed missing-unit/warranty refunds, so a
+healthy retained account remains accessible while unaccounted missing or retired
+credentials fail closed. The full allocation signature still fences rendering.
+One `usdt.refund_receipt` effect per credit commits with the refund, retaining
+Laravel's effect identity, locale text and original invoice. The existing
+`ReceiptProtocol` owns claims, bounded retries and lost-ACK `unknown` state.
+The delivery pause defers this effect without blocking money recovery or
+consuming an attempt. Maintenance/spending/restore barriers still govern new
+checkout, not original-funds recovery.
+
+### P12 verification and reuse
+
+```sh
+python3 tools/migration_harness/smoke_checkout.py --lifecycle
+python3 tools/migration_harness/smoke_qris.py --integrated
+(cd candidate && .venv/bin/python -m unittest \
+  tests.test_order_projection tests.test_checkout_pricing \
+  tests.test_navigation_checkout tests.test_checkout_fee_snapshot \
+  tests.test_payment_sweep_timeout tests.test_workers \
+  tests.test_sakurupiah_adapter tests.test_catalog_presentation \
+  tests.test_receipt_render tests.test_receipt_transport)
+```
+
+This extends the existing P01/P03/P07 runner; it is not a second harness or report.
+It uses the fake-only `lhie-p12-` namespace and records the shared private manifest
+at `.local/migration-p12/verification.json`, including source/schema/image
+digests. The observed run used Python 3.13.18, Django 5.2.18 and PostgreSQL 16.15
+under `candidate_runtime`, with the current source mounted read-only over the
+existing pinned P09 dependency image.
+
+Observed: changed lifecycle E2E; synchronized paid-versus-cancel/expiry/refund;
+two-worker original-IDR refund replay; final-audit rollback; due-expiry recovery;
+partial plus remainder IDR/USDT accounting; retained healthy credential reads;
+foreign-owner/entitlement/cap rejection; exact historical Supplier hold release;
+PHP-generated Binance/BSC receipt and USDT fingerprint compatibility; and one
+successful refund receipt plus an ambiguous ACK that was not resent. The focused
+projection/checkout/navigation/worker/provider/receipt regression set passed
+111 tests.
+The existing integrated P08 callback/payment/receipt smoke also passed replay and
+identity rejection, terminal release/late review, ordered credential delivery,
+ambiguous delivery and bounded lost-wakeup recovery after the lifecycle cutover.
+The PostgreSQL cases live in `candidate/tests/test_order_lifecycle_postgres.py`
+and `test_order_refunds.py`; `test_order_projection.py` covers historical status
+precedence and existing localized presentation.
+
+These are synthetic database, provider and Telegram fixtures. They do not
+qualify live custody/funding, actual historical data/keys, production performance,
+new UI/auth adapters, deployment or CI/CD. The existing P07/P09 proofs remain
+the shared owners of unrelated checkout and delivery scenarios.

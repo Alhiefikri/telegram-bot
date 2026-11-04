@@ -201,6 +201,100 @@ class InventoryLedger:
         if changed != expected:
             raise CheckoutError("inventory_invariant")
 
+    def has_sales(self, order_id):
+        self.db.require_transaction()
+        _, items, _, proofs, _ = self._state(order_id, local_only=False)
+        return self._transition_proofs(items, proofs, "sale")
+
+    def lifecycle_sales(self, order_id):
+        """Consume reservations even when a historical Order needs credential review."""
+        self.db.require_transaction()
+        _, items, products, proofs, _ = self._state(order_id, local_only=False)
+        if self._transition_proofs(items, proofs, "sale"):
+            return
+        if any(kind == "release" for _, kind in proofs):
+            raise CheckoutError("invalid_order_transition")
+        for item in items:
+            self._require_reservation(item, proofs)
+            local = item["quantity"] if item["local_quantity"] is None else item["local_quantity"]
+            product = products[item["product_id"]]
+            if product["stock"] < local or product["reserved_stock"] < local:
+                raise CheckoutError("inventory_invariant")
+            self._change_product(product["id"], -local, -local)
+            self._movement(order_id, product["id"], "sale", -item["quantity"], "Order sale",
+                           stock_before=product["stock"],
+                           became_unavailable=product["stock"] == local)
+
+    def lifecycle_release(self, order_id):
+        self.db.require_transaction()
+        _, items, products, proofs, allocations = self._state(order_id, local_only=False)
+        if any(kind == "sale" for _, kind in proofs):
+            raise CheckoutError("invalid_order_transition")
+        if self._transition_proofs(items, proofs, "release"):
+            return
+        for item in items:
+            self._require_reservation(item, proofs)
+            local = item["quantity"] if item["local_quantity"] is None else item["local_quantity"]
+            product = products[item["product_id"]]
+            if product["reserved_stock"] < local:
+                raise CheckoutError("inventory_invariant")
+            # Retired/exposed units keep their allocation, including in historical data.
+            self.db.execute("""UPDATE public.product_stock_items SET order_item_id=NULL,
+                updated_at=CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta'
+                WHERE order_item_id=%s AND supplier_purchase_id IS NULL AND retired_at IS NULL""",
+                (item["id"],))
+            self._change_product(product["id"], 0, -local)
+            self._movement(order_id, product["id"], "release", -item["quantity"],
+                           "Order reservation release")
+
+    def fulfill_review(self, order_id):
+        """Owner-authorized allocation; a released reservation is never decremented twice."""
+        self.db.require_transaction()
+        _, items, products, proofs, allocations = self._state(order_id, local_only=False)
+        if any(item["supplier_quantity"] for item in items):
+            raise CheckoutError("supplier_fulfillment_requires_resolution")
+        sold = self._transition_proofs(items, proofs, "sale")
+        released = self._transition_proofs(items, proofs, "release")
+        if not sold and not released:
+            raise CheckoutError("inventory_invariant")
+        for item in items:
+            self._require_reservation(item, proofs)
+            product = products[item["product_id"]]
+            current = allocations[item["id"]]
+            self._assert_credentials(current, product["id"])
+            if any(row["retired_at"] is not None for row in current) or len(current) > item["quantity"]:
+                raise CheckoutError("inventory_invariant")
+            missing = item["quantity"] - len(current)
+            if released and not sold:
+                if not product["public_visible"] or product["stock"] - product["reserved_stock"] < item["quantity"]:
+                    raise CheckoutError("insufficient_stock")
+            if missing:
+                available = self.db.rows(f"""SELECT {_STOCK_COLUMNS} FROM public.product_stock_items
+                    WHERE product_id=%s AND order_item_id IS NULL AND retired_at IS NULL
+                      AND supplier_purchase_id IS NULL AND supplier_unit_index IS NULL
+                    ORDER BY id LIMIT %s FOR UPDATE""", (product["id"], missing))
+                if len(available) != missing:
+                    raise CheckoutError("insufficient_stock")
+                self._assert_credentials(available, product["id"])
+                self.db.execute("""UPDATE public.product_stock_items SET order_item_id=%s,
+                    updated_at=CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta' WHERE id=ANY(%s)""",
+                    (item["id"], [row["id"] for row in available]))
+            if not sold:
+                self._change_product(product["id"], -item["quantity"], 0)
+                self._movement(order_id, product["id"], "sale", -item["quantity"],
+                               "Late payment manual fulfillment", stock_before=product["stock"],
+                               became_unavailable=product["stock"] == item["quantity"])
+
+    def retire_order(self, order_id):
+        self.db.require_transaction()
+        _, items, _, proofs, _ = self._state(order_id, local_only=False)
+        if not self._transition_proofs(items, proofs, "sale"):
+            raise CheckoutError("inventory_invariant")
+        self.db.execute("""UPDATE public.product_stock_items SET
+            retired_at=CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta',
+            retired_reason='refunded_after_delivery',updated_at=CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta'
+            WHERE order_item_id=ANY(%s) AND retired_at IS NULL""", ([item["id"] for item in items],))
+
     def _products(self, product_ids: list[int]) -> dict[int, dict]:
         rows = self.db.rows("""
             SELECT p.*,(p.is_active AND p.deleted_at IS NULL AND
@@ -218,7 +312,7 @@ class InventoryLedger:
                 raise CheckoutError("inventory_invariant")
         return products
 
-    def _state(self, order_id):
+    def _state(self, order_id, *, local_only=True):
         order = self.db.one("""
             SELECT id,order_status,payment_status FROM public.orders WHERE id=%s FOR UPDATE
         """, (order_id,))
@@ -233,7 +327,9 @@ class InventoryLedger:
             require_integer(item["product_id"], minimum=1)
             quantity = require_integer(item["quantity"], minimum=1)
             local = quantity if item["local_quantity"] is None else item["local_quantity"]
-            if local != quantity or type(local) is not int or item["supplier_quantity"] != 0:
+            supplier = require_integer(item["supplier_quantity"])
+            if (type(local) is not int or local < 0 or local + supplier != quantity
+                    or (local_only and (local != quantity or supplier != 0))):
                 raise CheckoutError("inventory_invariant")
             product_ids.append(item["product_id"])
         if not items or len(set(product_ids)) != len(items):

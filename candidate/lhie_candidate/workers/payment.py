@@ -22,7 +22,7 @@ class PaymentHandler:
         self.processor = processor
         self.spec = queue_spec("payment")
         self._sweep_start = 0
-        self._payment_cursors = {"hints": None, "ambiguous": None}
+        self._payment_cursors = {"hints": None, "ambiguous": None, "expiry": None}
 
     def _payment_for_event(self, event_id):
         rows = self.db.rows(
@@ -82,6 +82,18 @@ class PaymentHandler:
                      WHERE r.order_id=o.id AND r.state IN ('pending','refund_uncertain'))""",
             (_now() - timedelta(seconds=10),), limit)
 
+    def _due_payments(self, limit):
+        return self._payment_page(
+            "expiry",
+            """SELECT p.id FROM public.payments p JOIN public.orders o ON o.id=p.order_id
+               WHERE o.order_status='pending_payment' AND o.payment_status='pending'
+                 AND p.status='pending' AND o.expires_at<=%s""", (_now(),), limit)
+
+    def _expire_due(self, payment_id):
+        order = self.db.one('SELECT order_id FROM public.payments WHERE id=%s', (payment_id,))
+        if order is not None:
+            return self.lifecycle.orders.apply_pending_expiry(str(order['order_id']))
+
     def _next_navigation(self, attempted):
         rows = self.db.rows(
             "SELECT updates.update_id FROM django_candidate.navigation_updates updates "
@@ -99,7 +111,7 @@ class PaymentHandler:
         return self.sweep_bounded(limit, lambda function, *args: function(*args), lambda: False)
 
     def sweep_bounded(self, limit, bounded, stopped):
-        result = {"hints": 0, "ambiguous": 0, "failures": 0}
+        result = {"hints": 0, "ambiguous": 0, "expiry": 0, "failures": 0}
         if self.processor:
             result.update(navigation=0, recovered=0)
 
@@ -139,6 +151,7 @@ class PaymentHandler:
             iter(navigation()),
             iter(payments("hints", self._pending_hint_payments, self.lifecycle.consume_callbacks)),
             iter(payments("ambiguous", self._ambiguous_payments, self.lifecycle.recover)),
+            iter(payments("expiry", self._due_payments, self._expire_due)),
         ]
         start = self._sweep_start
         self._sweep_start = (start + 1) % len(phases)

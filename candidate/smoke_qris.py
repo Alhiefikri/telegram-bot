@@ -32,7 +32,6 @@ def run():
     configure_django()
     from django.db import connections, transaction
     from lhie_candidate.checkout.db import Database
-    from lhie_candidate.checkout.inventory import InventoryLedger
     from lhie_candidate.checkout.sakurupiah import SakurupiahPreparation
     from lhie_candidate.checkout.service import CheckoutRequest, CheckoutService
     from lhie_candidate.compat.crypto import LaravelEncrypter
@@ -271,17 +270,14 @@ def run():
             candidates.sort(key=lambda item: item[0])
             _, earlier_fixture, earlier, earlier_ref, earlier_trx = candidates[0]
             _, late_fixture, late, late_ref, late_trx = candidates[1]
-            with transaction.atomic():
-                InventoryLedger().release(late.order_id)
-                db.execute("UPDATE public.payments SET status='expired' WHERE id=%s", (late.payment_id,))
-                db.execute("UPDATE public.orders SET order_status='expired',payment_status='expired' WHERE id=%s", (late.order_id,))
+            lifecycle.orders.apply_payment_expired(late.payment_id)
             sandbox.rows[late_ref]['status'] = 'berhasil'
             assert callback.send(event(earlier_ref, earlier_trx)) == 200
             assert callback.send(event(late_ref, late_trx)) == 200
             for _ in range(3):
                 assert payment_worker.sweep(1)['failures'] == 0
             assert economics(earlier_fixture, earlier) == ('pending_payment', 'pending', 'pending', 4, 1, 1, 0, 0)
-            assert economics(late_fixture, late) == ('expired', 'expired', 'expired', 4, 0, 0, 1, 1)
+            assert economics(late_fixture, late) == ('expired', 'paid', 'paid', 4, 0, 0, 1, 1)
             assert admin.execute("SELECT count(*) FROM public.manual_fulfillment_reviews WHERE payment_id=%s AND reason='late_payment'",
                                  (late.payment_id,)).fetchone() == (1,)
             assert admin.execute("SELECT count(*) FROM public.telegram_outbound_effects WHERE source_id=%s",
@@ -326,17 +322,16 @@ def run():
                     break
                 time.sleep(0.01)
             assert blocked, 'settlement did not contend on a real PostgreSQL lock'
-            InventoryLedger().release(race.order_id)
-            db.execute("UPDATE public.payments SET status='expired' WHERE id=%s", (race.payment_id,))
-            db.execute("UPDATE public.orders SET order_status='expired',payment_status='expired' WHERE id=%s", (race.order_id,))
+            locked_order, _, locked_payments = lifecycle._locked(race.payment_id)
+            lifecycle.orders._release_locked(locked_order, locked_payments, status='expired')
         worker.join(timeout=5)
         outcome = results.get(timeout=5)
         results.close()
         assert worker.exitcode == 0 and outcome == 'review', outcome
-        assert economics(race_fixture, race) == ('expired', 'expired', 'expired', 4, 0, 0, 1, 1)
+        assert economics(race_fixture, race) == ('expired', 'paid', 'paid', 4, 0, 0, 1, 1)
         assert callback.send(event(race_ref, race_trx)) == 200
         assert lifecycle.consume_callbacks(race.payment_id).state == 'review'
-        assert economics(race_fixture, race) == ('expired', 'expired', 'expired', 4, 0, 0, 1, 1)
+        assert economics(race_fixture, race) == ('expired', 'paid', 'paid', 4, 0, 0, 1, 1)
         assert admin.execute('SELECT count(*) FROM public.manual_fulfillment_reviews WHERE payment_id=%s',
                              (race.payment_id,)).fetchone() == (1,)
         inflight_fixture, inflight = begin('rollback')
@@ -348,10 +343,7 @@ def run():
         creator.start()
         try:
             assert sandbox.create_received.wait(timeout=5), 'create request did not reach synthetic provider'
-            with transaction.atomic():
-                InventoryLedger().release(inflight.order_id)
-                db.execute("UPDATE public.payments SET status='failed' WHERE id=%s", (inflight.payment_id,))
-                db.execute("UPDATE public.orders SET order_status='cancelled',payment_status='failed' WHERE id=%s", (inflight.order_id,))
+            lifecycle.orders.apply_pending_cancellation(inflight.order_id, customer_id=inflight_fixture['customer_id'])
         finally:
             sandbox.release_create.set()
             creator.join(timeout=7)
@@ -364,7 +356,7 @@ def run():
         assert lifecycle.classify(inflight.payment_id).presentation is None
         sandbox.rows[inflight_ref]['status'] = 'berhasil'
         assert lifecycle.refresh(inflight.payment_id).state == 'review'
-        assert economics(inflight_fixture, inflight) == ('cancelled', 'failed', 'failed', 4, 0, 0, 1, 1)
+        assert economics(inflight_fixture, inflight) == ('cancelled', 'paid', 'paid', 4, 0, 0, 1, 1)
         return {'status': 'passed', 'dataset': 'synthetic-p08-qris',
                 'scope': ['P07 checkout and idempotent invoice snapshot', 'ambiguous create fails closed',
                           'authenticated callback replay and identity mismatch', 'provider-confirmed settlement and receipt',

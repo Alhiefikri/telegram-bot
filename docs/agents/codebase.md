@@ -60,8 +60,9 @@ is introduced. Explicit column grants retain immutable history and read-only
 spending/restore/maintenance settings. `tools/migration_harness/smoke_checkout.py`
 reuses P01/P03 in a separate fake-only disposable prefix, compares PHP economics
 and exercises real multiprocess PostgreSQL wallet/last-stock/replay and rollback
-boundaries. Later consumers reuse this shared proof; payment sandbox, delivery and
-full refund/supplier/warranty lifecycle remain P08/P09/P12/P18.
+boundaries. Later consumers reuse this shared proof. P12 below now owns shared
+lifecycle/refund transitions; provider expansion and supplier acquisition remain
+P13/P14/P18.
 
 P08 [sandbox payment slice](../migration/python-django/p05/README.md#p08-sakurupiah-sandbox-payment-slice-689)
 adds an explicitly attested Sakurupiah-only relay, provider-authenticated callback
@@ -101,6 +102,22 @@ Redis-stopped recovery drills inside P01 isolation and writes
 evidence; a fake slow sandbox is harness-only. No notification/broadcast/
 supplier family is ported or allowed onto these workers; full scheduler,
 retention, metrics and Python-only operations remain P26.
+
+P12 [Order lifecycle and retained refunds](../migration/python-django/p05/README.md#p12-shared-order-lifecycle-and-retained-refunds-694)
+owns `checkout/lifecycle.py`, `fulfillment.py` and `refunds.py`. Checkout and the
+Sakurupiah adapter share paid transitions; the payment worker recovers due expiry.
+Late money remains terminal/reviewable until an authorized decision. Refunds keep
+the original IDR/USDT debit, external transfer evidence, cumulative cap and retired
+credential identity. Confirmed partials reduce only the live delivery entitlement,
+so healthy retained credentials remain readable. `payments/claimed_order.py`
+validates QRIS, Binance receiver and BSC log/parent receipt representations without
+changing historical snapshots. USDT refund effects use the existing receipt claim,
+pause and unknown-delivery protocol. `smoke_checkout.py --lifecycle` records the
+shared source-bound PostgreSQL proof at `.local/migration-p12/verification.json`;
+the integrated P08 callback/payment/receipt smoke and 111 focused regressions
+passed locally. Supplier acquisition, live rails, authentication/UI adapters and
+actual data qualification keep their downstream owners; no production or CI/CD
+operation is implied.
 
 P11 [experiment gate](../migration/python-django/p11/README.md) owns
 `tools/migration_benchmark/protocol_p11.json`, `candidate_probe.py` and

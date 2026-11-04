@@ -6,9 +6,7 @@ from zoneinfo import ZoneInfo
 from django.db import connections, transaction
 
 from ..checkout.db import Database
-from ..checkout.errors import CheckoutError
-from ..checkout.inventory import InventoryLedger
-from ..receipt.jobs import wake_after_commit
+from ..checkout.lifecycle import OrderLifecycle
 from .receipts import claim_provider_reference
 from .sakurupiah import CreateRequest, InvoiceIdentity, OutcomeState
 from .sakurupiah_urls import validate_sakurupiah_checkout_url, validate_sakurupiah_qr_image_url
@@ -72,7 +70,7 @@ class SakurupiahLifecycle:
         self.encrypter = encrypter
         self.using = using
         self.db = Database(using)
-        self.inventory = InventoryLedger(using)
+        self.orders = OrderLifecycle(using=using, encrypter=encrypter, clock=_now)
 
     def _outside(self):
         if any(c.in_atomic_block or not c.get_autocommit()
@@ -82,18 +80,7 @@ class SakurupiahLifecycle:
             raise RuntimeError('Lifecycle requires PostgreSQL')
 
     def _locked(self, payment_id):
-        initial = self.db.one('SELECT order_id FROM public.payments WHERE id=%s', (payment_id,))
-        if initial is None:
-            raise ValueError('Payment not found')
-        order = self.db.one('''SELECT id,expires_at,total_amount,currency,order_status,payment_status
-            FROM public.orders WHERE id=%s FOR UPDATE''', (initial['order_id'],))
-        payments = self.db.rows('''SELECT id,order_id,provider,method,currency,amount,merchant_ref,
-            sakurupiah_channel,expired_at,status,provider_reference,provider_total_payment,provider_fee,
-            provider_expires_at,provider_presentation,provider_create_state,provider_payment_method
-            FROM public.payments WHERE order_id=%s ORDER BY id FOR UPDATE''', (initial['order_id'],))
-        payment = next((p for p in payments if str(p['id']) == str(payment_id)), None)
-        if order is None or payment is None:
-            raise ValueError('Payment not found')
+        order, payment, payments, _ = self.orders.lock_payment(payment_id)
         if (payment['provider'], payment['method'], payment['currency']) != ('sakurupiah', 'QRIS', 'IDR'):
             raise ValueError('Invalid payment rail')
         return order, payment, payments
@@ -112,10 +99,10 @@ class SakurupiahLifecycle:
                 payment['provider_presentation'], payment['provider_create_state'])
 
     def _result(self, order, payment):
-        if payment['status'] == 'paid':
-            return LifecycleResult('paid')
         if self.db.one("SELECT id FROM public.manual_fulfillment_reviews WHERE order_id=%s AND state IN ('pending','refund_uncertain')", (order['id'],)):
             return LifecycleResult('review')
+        if payment['status'] == 'paid':
+            return LifecycleResult('paid')
         if payment['status'] in ('expired', 'failed', 'refunded'):
             return LifecycleResult(payment['status'])
         if order['order_status'] != 'pending_payment' or order['payment_status'] != 'pending':
@@ -285,27 +272,23 @@ class SakurupiahLifecycle:
             if outcome.state is OutcomeState.EXPIRED:
                 self.db.execute("UPDATE public.payments SET provider_create_state='provider_expired',updated_at=%s WHERE id=%s",
                                 (_now(), payment_id))
+                if order['order_status'] == 'pending_payment':
+                    self.orders._release_locked(order, payments, status='expired')
                 self._mark_hint(hint, 'expired')
                 return LifecycleResult('provider_expired')
             self._mark_hint(hint, 'pending')
             return self._result(order, payment)
 
     def _review(self, order, payment, reason):
-        self.db.execute('''INSERT INTO public.manual_fulfillment_reviews
-            (order_id,payment_id,amount,currency,reason,state,provider_reference,created_at,updated_at)
-            VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s) ON CONFLICT (payment_id) DO NOTHING''',
-            (order['id'], payment['id'], payment['provider_total_payment'] or payment['amount'],
-             payment['currency'], reason, payment['provider_reference'], _now(), _now()))
+        self.orders.review_locked(order, payment, reason)
         return LifecycleResult('review')
 
     def _settle(self, order, payment, payments):
         if payment['amount'] != order['total_amount'] or order['currency'] != payment['currency']:
             return self._review(order, payment, 'receipt_conflict')
-        late = (order['order_status'] != 'pending_payment' or order['payment_status'] != 'pending'
-                or payment['status'] != 'pending'
-                or any(p['id'] != payment['id'] and p['status'] == 'paid' for p in payments)
-                or min(_deadline(order['expires_at']), _deadline(payment['expired_at']), _deadline(payment['provider_expires_at'])) <= _now())
-        review = self.db.one("SELECT id FROM public.manual_fulfillment_reviews WHERE order_id=%s AND state IN ('pending','refund_uncertain')", (order['id'],))
+        overdue = (order['order_status'] == 'pending_payment'
+                   and min(_deadline(order['expires_at']), _deadline(payment['expired_at']),
+                           _deadline(payment['provider_expires_at'])) <= _now())
         ref = payment['provider_reference'].strip()
         claim = claim_provider_reference(
             self.db, provider='sakurupiah', reference=ref,
@@ -315,19 +298,7 @@ class SakurupiahLifecycle:
         )
         if claim.held:
             return self._review(order, payment, 'receipt_conflict')
-        if late:
-            return self._review(order, payment, 'late_payment')
-        if review:
-            return LifecycleResult('review')
-        savepoint = transaction.savepoint(using=self.using)
-        try:
-            self.inventory.record_sales(str(order['id']))
-        except CheckoutError:
-            transaction.savepoint_rollback(savepoint, using=self.using)
-            return self._review(order, payment, 'local_credentials_missing')
-        transaction.savepoint_commit(savepoint, using=self.using)
-        now = _now()
-        self.db.execute("UPDATE public.payments SET status='paid',paid_at=%s,updated_at=%s WHERE id=%s", (now, now, payment['id']))
-        self.db.execute("UPDATE public.orders SET payment_status='paid',order_status='completed',updated_at=%s WHERE id=%s", (now, order['id']))
-        wake_after_commit('order', str(order['id']), using=self.using)
-        return LifecycleResult('paid')
+        if overdue:
+            self.orders._release_locked(order, payments, status='expired')
+        result = self.orders.paid_locked(order, payment, payments)
+        return LifecycleResult('review' if result.review_id is not None else 'paid')

@@ -11,7 +11,7 @@ from django.db import connections, transaction
 
 from .jobs import decode_job, wake_after_commit
 from .protocol import (ACTION_TYPE, EFFECT_TYPE, PHOTO_TEMPLATE, QUEUE, TEXT_TEMPLATE,
-                       TXT_TYPE, ReceiptProtocol, _now, receipt_group_key)
+                       REFUND_TYPE, TXT_TYPE, ReceiptProtocol, _now, receipt_group_key)
 from .historical import normalize_unit, render_legacy, render_product_detail
 from .render import render_action_panel, render_receipt, render_txt
 from .source import ReceiptUnavailable
@@ -147,11 +147,14 @@ class ReceiptService:
         if effect is None:
             return 'not_ready'
         token = effect['claim_token']
-        if effect['source_type'] != 'App\\Models\\Order' or effect['target_type'] != 'customer':
+        if effect['effect_type'] != REFUND_TYPE and (
+                effect['source_type'] != 'App\\Models\\Order' or effect['target_type'] != 'customer'):
             self.protocol.finalize_failed(effect_id, token, 'receipt_not_eligible')
             return 'ineligible'
         try:
-            if effect['effect_type'] == ACTION_TYPE:
+            if effect['effect_type'] == REFUND_TYPE:
+                source = None
+            elif effect['effect_type'] == ACTION_TYPE:
                 source, _ = self.source.authorize(effect['source_id'], effect['telegram_chat_id'])
             else:
                 source = self.source.load(effect['source_id'], effect['telegram_chat_id'], locale=effect['locale'],
@@ -164,7 +167,10 @@ class ReceiptService:
             return 'render_failed'
         try:
             metadata = _metadata(effect)
-            if effect['effect_type'] == ACTION_TYPE:
+            if effect['effect_type'] == REFUND_TYPE:
+                from ..checkout.refund_receipt import refund_payload
+                payload = refund_payload(self.db, effect)
+            elif effect['effect_type'] == ACTION_TYPE:
                 if not self.protocol.is_receipt_group_complete(metadata.get('receipt_group_key')) or source['telegram_receipt_sent_at'] is None:
                     raise ValueError('Receipt incomplete')
                 unit = render_action_panel(effect['source_id'], effect['locale'], metadata['txt_available'],
@@ -352,7 +358,7 @@ class ReceiptService:
             WHERE o.payment_status='paid' AND o.order_status IN ('processing','completed')
               AND o.telegram_receipt_sent_at IS NULL AND c.telegram_id IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM public.manual_fulfillment_reviews r
-                  WHERE r.order_id=o.id AND r.reason='late_payment' AND r.state IN ('pending','refund_uncertain'))
+                  WHERE r.order_id=o.id AND r.state IN ('pending','refund_uncertain'))
               AND NOT EXISTS (SELECT 1 FROM public.supplier_fulfillments f
                   WHERE f.order_id=o.id AND f.state <> 'delivered')
               AND NOT EXISTS (SELECT 1 FROM public.supplier_manual_handoffs h

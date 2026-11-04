@@ -43,7 +43,8 @@ def _reference_segment(reference):
 
 
 def claim_provider_reference(db, *, provider, reference, beneficiary, currency, amount,
-                             target_type, target_id, evidence=None, now=None, using='default'):
+                             target_type, target_id, evidence=None, now=None, using='default',
+                             account_namespace='default'):
     """Claim ``(provider, provider_reference)`` for exactly one money target.
 
     Returns ``claimed`` for a new or matching replay, ``conflict`` when another
@@ -53,14 +54,16 @@ def claim_provider_reference(db, *, provider, reference, beneficiary, currency, 
     db.require_transaction()
     provider = provider.strip().lower()
     reference = reference.strip()
-    if (provider not in ('sakurupiah',) or not reference
-            or type(amount) is not int or amount < 1 or currency != 'IDR'
+    if (not ((provider == 'sakurupiah' and account_namespace == 'default' and currency == 'IDR')
+             or (provider == 'manual' and account_namespace == 'owner_attestation'
+                 and currency in ('IDR', 'USDT') and target_type == 'order_payment'))
+            or not reference or type(amount) is not int or amount < 1
             or target_type not in ('order_payment', 'balance_top_up')
             or not str(target_id).strip()):
         raise ValueError('Invalid receipt claim identity')
     now = now or datetime.now(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None)
     segment = _reference_segment(reference)
-    key = f'v1|provider_reference|{provider}|default|{segment}'
+    key = f'v1|provider_reference|{provider}|{account_namespace}|{segment}'
     payload = {'version': 1, 'identity': key, 'beneficiary': beneficiary,
                'currency': currency, 'amount_units': str(amount), 'decimals': 0,
                'target_type': target_type, 'target_id': str(target_id)}
@@ -71,9 +74,9 @@ def claim_provider_reference(db, *, provider, reference, beneficiary, currency, 
     db.execute('''INSERT INTO public.external_money_receipts
         (canonical_key,provider,identity_kind,account_namespace,reference,beneficiary,currency,amount_units,
          decimals,status,target_type,target_id,fingerprint,evidence_payload,claimed_at,created_at,updated_at)
-        VALUES (%s,%s,'provider_reference','default',%s,%s,%s,%s,0,'claimed',%s,%s,%s,%s,%s,%s,%s)
+        VALUES (%s,%s,'provider_reference',%s,%s,%s,%s,%s,0,'claimed',%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (canonical_key) DO NOTHING''',
-        (key, provider, segment, beneficiary, currency, amount, target_type, str(target_id),
+        (key, provider, account_namespace, segment, beneficiary, currency, amount, target_type, str(target_id),
          fingerprint, json.dumps(evidence or {'provider': provider, 'identity': 'provider_reference'}),
          now, now, now))
     receipt = db.one('''SELECT id,fingerprint,status,target_type,target_id
@@ -92,3 +95,12 @@ def claim_provider_reference(db, *, provider, reference, beneficiary, currency, 
         return ReceiptClaim('conflict')
     transaction.savepoint_commit(savepoint, using=using)
     return ReceiptClaim('claimed', receipt['id'])
+
+
+def claim_owner_attestation(db, *, payment, now=None, using='default'):
+    return claim_provider_reference(
+        db, provider='manual', account_namespace='owner_attestation',
+        reference=payment['merchant_ref'], beneficiary='order:' + str(payment['order_id']),
+        currency=payment['currency'], amount=payment['amount'], target_type='order_payment',
+        target_id=str(payment['id']), evidence={'provider': 'manual', 'identity': 'owner_attestation'},
+        now=now, using=using)
