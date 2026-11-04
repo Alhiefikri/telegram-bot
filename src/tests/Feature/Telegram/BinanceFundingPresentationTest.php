@@ -18,6 +18,7 @@ use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramMenuIntents;
 use App\Services\Telegram\TelegramUsdtBalanceIntents;
 use App\Services\Telegram\TelegramUsdtFundingActions;
+use App\Services\Telegram\TelegramUsdtFundingPresenter;
 use App\Services\Telegram\TelegramUsdtFundingSession;
 use App\Services\Telegram\UsdtTopUpOutbound;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
@@ -88,6 +89,33 @@ final class BinanceFundingPresentationTest extends TestCase
         $this->assertSame(1, CustomerUsdtTopUp::count());
         $this->assertSame(0, CustomerUsdtBalanceEntry::count());
         Http::assertNothingSent();
+    }
+
+    public function test_expired_open_target_shows_original_receiver_without_inviting_a_new_payment(): void
+    {
+        $target = $this->open('1');
+        config(['services.binance.pay_id' => '87654321']);
+        $this->travel(16)->minutes();
+        DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)
+            ->update(['lease_until' => now()->addMinute(), 'version' => DB::raw('version + 1')]);
+
+        $result = app(TelegramUsdtFundingActions::class)->openConfirmedIntent(
+            '771050', '771050', 'private', 100, '2', CustomerUsdtFundingRail::BinancePay,
+        );
+        $this->assertSame('active_target', $result->outcome);
+        $surface = app(TelegramUsdtFundingPresenter::class)->surfaceFor(
+            $this->customer, CustomerUsdtFundingRail::BinancePay, $result,
+        );
+        $copy = $this->visible($surface->caption);
+
+        $this->assertStringContainsString($target->reference, $copy);
+        $this->assertStringContainsString("Binance Pay ID\n12345678", $copy);
+        $this->assertStringNotContainsString('87654321', $copy);
+        $this->assertStringContainsString('Do not send a new payment', $copy);
+        $this->assertStringNotContainsString('wait for its deadline', $copy);
+        $this->assertStringNotContainsString('Send exactly', $copy);
+        $this->assertStringContainsString('usdt:close:'.$target->id, json_encode($surface->keyboard, JSON_THROW_ON_ERROR));
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
     }
 
     public function test_order_id_paste_renders_checking_placeholder_before_the_settled_status_with_one_credit(): void
@@ -318,6 +346,11 @@ final class BinanceFundingPresentationTest extends TestCase
         $this->assertStringContainsString("Binance UID\n11223344", $this->visible($status->caption));
         $this->assertStringContainsString('<code>11223344</code>', $status->caption);
         $this->assertStringNotContainsString('99887766', $status->caption);
+        $this->travel(16)->minutes();
+        $expired = $this->statusSurface($target);
+        $this->assertStringContainsString("Binance UID\n11223344", $this->visible($expired->caption));
+        $this->assertStringNotContainsString('99887766', $expired->caption);
+        $this->assertStringContainsString('Do not send a new payment', $this->visible($expired->caption));
         $this->assertSame(0, CustomerUsdtBalanceEntry::count());
     }
 

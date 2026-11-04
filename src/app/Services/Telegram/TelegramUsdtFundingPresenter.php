@@ -81,7 +81,6 @@ final class TelegramUsdtFundingPresenter
                     'requested' => $this->locale->translate($customer, $this->railLabelKey($rail)),
                     'active' => $this->locale->translate($customer, $this->railLabelKey($activeRail)),
                     'amount' => UsdtMicroAmount::formatUnits((int) $target->amount_micro),
-                    'deadline' => $this->locale->formatDate($customer, $target->expires_at),
                 ],
             );
         }

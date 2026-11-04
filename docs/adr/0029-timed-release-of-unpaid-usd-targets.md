@@ -13,15 +13,18 @@ in practice needed an operator to intervene.
 
 ## Decision
 
-- After the payment deadline plus a grace window, a confirmed target with no
-  economic resolution and no in-flight settlement lease is released.
+- New Binance Pay and BEP20 top-ups have a 15-minute payment window. Confirmed
+  historical targets retain their original snapshotted deadlines. A target with
+  no economic resolution and no in-flight settlement lease is eligible for
+  release as soon as its deadline passes.
 - The release writes one immutable resolution row of the new closed kind
   `expired_unpaid` and the typed reservation release in the same transaction.
   It records no ledger entry and moves no money.
-- The sweep (`usdt-funding:release-expired --limit=25 --grace-minutes=60`, every
-  ten minutes) skips a target when a resolution already exists, when settlement
-  work holds an active lease, or when either work row is already terminal. A
-  concurrent settlement or review always wins.
+- The sweep (`usdt-funding:release-expired --limit=25`, every minute) skips a
+  target when a resolution already exists, when settlement work holds an active
+  lease, or when either work row is already terminal. A Customer who opens a new
+  amount also triggers release of an eligible expired target without waiting for
+  the sweep. A concurrent settlement or review always wins.
 - Credit terms for late money are unchanged: every settlement path sees the
   existing resolution and routes the transfer to manual review instead of
   crediting a released reservation.
@@ -41,12 +44,13 @@ in practice needed an operator to intervene.
 
 ## Consequences
 
-- Abandoning an unpaid target no longer blocks the next USD top-up; the slot is
-  free after the grace window.
+- Abandoning an unpaid target no longer blocks the next USD top-up after its
+  deadline, subject to the settlement and review protections above.
 - The PostgreSQL resolution-kind constraint widens to include
   `expired_unpaid`; SQLite lanes enforce the same closed set in code.
 - Unpaid releases are visible in the resolution log (kind, timestamp) without
   adding an audit table.
-- The grace window is currently a scheduler option, not an Admin-editable
-  setting. Tuning it from the Dashboard remains a follow-up if the Owner wants
-  to change the default without a deploy.
+- The sweep defaults to zero additional grace; its optional `--grace-minutes`
+  argument remains available for manual operations. Released transfers need
+  operator handling; the Binance review flow currently requires an unresolved
+  target and cannot directly credit an already released one.

@@ -28,6 +28,12 @@ The October 8 rework changes Tambah Saldo into a currency chooser: IDR opens the
 
 Every amount on these screens is exact integer micro-USDT through `UsdtMicroAmount::formatUnits()`; no screen converts USDT to IDR or reads a shared balance cache.
 
+For an unresolved Binance target past its deadline, the status shows the Pay ID or UID snapshotted on that target for reference, not the current configured receiver. It warns against sending a new payment to the expired invoice: a Customer who already paid can submit the Binance Order ID for verification; a Customer who has not paid can cancel the open target and start again. Cancellation and expiry do not credit funds, and late payment remains subject to verification and the target's resolution state.
+
+PostgreSQL requires both the top-up resolution and reservation state checks to accept `cancelled_by_customer` and `expired_unpaid`. Migration `2026_11_04_000001` repairs the reservation check for existing installations; it does not alter historical targets or credit balances. A private `/start` or the invoice cancel button closes an eligible unpaid target. New Binance Pay and BEP20 top-ups expire after 15 minutes; the scheduled sweep runs every minute without additional grace, and a new amount request releases an eligible expired target without waiting for the sweep. Existing confirmed targets retain their deadline. A worker lease or manual review can prevent release. A transfer discovered after release is not automatically credited, and the Binance review flow cannot directly credit a released target; support must handle it separately. Rollback is refused once either new release kind exists.
+
+When `/start` cannot cancel because the target is processing, under review or the operation fails, the bot warns the Customer instead of implying the target was closed.
+
 ## 3. Ownership, privacy and recovery
 
 - All USDT screens are private-chat only (`allowsNonPrivateChat() === false`, `/usdt` is a private-only command). Group callbacks are answered with `privacy.callback` and group `/usdt` with `privacy.message`, matching the existing Store Balance rule.

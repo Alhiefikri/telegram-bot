@@ -263,9 +263,22 @@ final class TelegramUsdtBalanceIntents
                 $lines[] = $this->locale->translate($customer, 'balance.usdt.status.deadline', [
                     'deadline' => $this->locale->formatDate($customer, $status->deadline),
                 ]);
+                if ($isBinance && $status->state === UsdtTopUpStatus::STATE_EXPIRED_UNRESOLVED) {
+                    $receiver = (string) (! empty($snapshot['receiver_pay_id'])
+                        ? $snapshot['receiver_pay_id'] : ($snapshot['receiver_uid'] ?? ''));
+                    if ($receiver !== '') {
+                        $lines[] = '';
+                        $lines[] = $this->locale->translate($customer, ! empty($snapshot['receiver_pay_id'])
+                            ? 'balance.usdt.status.pay_id_title' : 'balance.usdt.status.uid_title');
+                        $lines[] = $this->copyableValue($receiver, $copyable);
+                    }
+                }
             }
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'balance.usdt.status.'.$status->state.'_note');
+            if ($isBinance && $status->state === UsdtTopUpStatus::STATE_EXPIRED_UNRESOLVED) {
+                $lines[] = $this->locale->translate($customer, 'balance.usdt.status.expired_binance_help');
+            }
         }
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'balance.usdt.status.state', [

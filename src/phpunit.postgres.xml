@@ -35,6 +35,8 @@
             <file>tests/Feature/ExternalMoneyReceiptWriterPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtFundingIntentPostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtFundingPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/UsdtFundingExpiryReleaseTest.php</file>
+            <file>tests/Feature/Telegram/UsdtBalanceMenuTest.php</file>
             <file>tests/Feature/CustomerUsdtBalancePostgresConcurrencyTest.php</file>
             <file>tests/Feature/UsdtBalanceCheckoutPostgresConcurrencyTest.php</file>
             <file>tests/Feature/CustomerApiCredentialsPostgresTest.php</file>

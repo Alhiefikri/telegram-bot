@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Enums\CustomerUsdtFundingReservationOutcome;
+use App\Exceptions\CustomerUsdtFundingReservationConflict;
 use App\Models\Customer;
 use App\Services\UsdtFunding\CustomerUsdtFundingRelease;
 use App\Services\UsdtFunding\CustomerUsdtFundingReservationService;
@@ -13,11 +14,10 @@ use Throwable;
 /**
  * Timed release of confirmed USDT funding targets that never settled.
  *
- * The single active-target slot is deliberately held while money is possible,
- * but an unpaid target used to hold it forever. After the payment window plus a
- * grace period, a target with no economic resolution and no in-flight
- * settlement lease is released together with an immutable `expired_unpaid`
- * resolution. The release moves no money: a transfer that arrives later can
+ * Once the payment deadline passes, a target with no economic resolution and
+ * no in-flight settlement lease can be released with an immutable
+ * `expired_unpaid` resolution. An optional command grace delays this release.
+ * The release moves no money: a transfer that arrives later can
  * never be credited against the released reservation and instead follows the
  * existing manual-review path.
  */
@@ -25,7 +25,7 @@ final class ReleaseExpiredUsdtFunding extends Command
 {
     protected $signature = 'usdt-funding:release-expired
         {--limit=25 : Maximum reservations to release (1-100).}
-        {--grace-minutes=60 : Minutes after the payment deadline before a target may be released (1-1440).}
+        {--grace-minutes=0 : Minutes after the payment deadline before a target may be released (0-1440).}
         {--json : Print the sanitized result as JSON.}';
 
     protected $description = 'Release expired unpaid USDT funding targets so the Customer can start a new top-up without moving money.';
@@ -39,8 +39,8 @@ final class ReleaseExpiredUsdtFunding extends Command
             return self::FAILURE;
         }
         $grace = filter_var($this->option('grace-minutes'), FILTER_VALIDATE_INT);
-        if ($grace === false || $grace < 1 || $grace > 1440) {
-            $this->error('Grace minutes must be an integer between 1 and 1440.');
+        if ($grace === false || $grace < 0 || $grace > 1440) {
+            $this->error('Grace minutes must be an integer between 0 and 1440.');
 
             return self::FAILURE;
         }
@@ -48,7 +48,7 @@ final class ReleaseExpiredUsdtFunding extends Command
         $rows = DB::table('customer_usdt_funding_reservations as reservations')
             ->join('customer_usdt_top_ups as targets', 'targets.reservation_id', '=', 'reservations.id')
             ->leftJoin('customer_usdt_top_up_settlement_work as work', 'work.top_up_id', '=', 'targets.id')
-            ->where('reservations.state', 'expired_unresolved')
+            ->whereIn('reservations.state', ['reserved', 'expired_unresolved'])
             ->where('reservations.expires_at', '<=', now()->subMinutes($grace))
             ->where(fn ($query) => $query->whereNull('work.lease_until')->orWhere('work.lease_until', '<=', now()))
             ->whereNotExists(fn ($query) => $query->select(DB::raw(1))
@@ -79,8 +79,12 @@ final class ReleaseExpiredUsdtFunding extends Command
                         'usdt-funding:release-expired',
                     ),
                 );
-            } catch (Throwable) {
-                // A concurrent settlement, review or slot release always wins.
+            } catch (CustomerUsdtFundingReservationConflict) {
+                $skipped++;
+
+                continue;
+            } catch (Throwable $exception) {
+                report($exception);
                 $skipped++;
 
                 continue;

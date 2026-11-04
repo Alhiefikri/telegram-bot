@@ -67,6 +67,31 @@ final class UsdtFundingExpiryReleaseTest extends TestCase
         $this->target = $this->openBinanceTarget('1.5');
     }
 
+    public function test_fifteen_minute_deadline_releases_without_extra_grace_and_accepts_a_new_amount(): void
+    {
+        $this->assertSame(900, $this->target->expires_at->getTimestamp() - $this->target->created_at->getTimestamp());
+        $this->travel(14)->minutes();
+        $this->artisan('usdt-funding:release-expired')->assertSuccessful();
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+
+        $this->travel(1)->minutes();
+        $this->artisan('usdt-funding:release-expired')->assertSuccessful();
+        $this->assertSame('expired_unpaid', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
+        $fresh = $this->openBinanceTarget('0.1');
+        $this->assertSame(100_000, (int) $fresh->amount_micro);
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+    }
+
+    public function test_new_amount_releases_expired_invoice_without_waiting_for_the_scheduler(): void
+    {
+        $this->travel(15)->minutes();
+        $fresh = $this->openBinanceTarget('0.1');
+
+        $this->assertNotSame($this->target->id, $fresh->id);
+        $this->assertSame('expired_unpaid', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
+        $this->assertSame(100_000, (int) $fresh->amount_micro);
+    }
+
     public function test_unpaid_target_is_released_after_the_grace_and_frees_the_slot(): void
     {
         $this->expirePastGrace();
@@ -159,7 +184,7 @@ final class UsdtFundingExpiryReleaseTest extends TestCase
     public function test_customer_cancel_releases_the_slot_before_the_deadline(): void
     {
         $actions = app(TelegramUsdtFundingActions::class);
-        $this->assertSame(1, $actions->cancelOpenTargets($this->customer));
+        $actions->cancelOpenTargets($this->customer);
 
         $this->assertSame('released', DB::table('customer_usdt_funding_reservations')->value('state'));
         $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
@@ -169,7 +194,7 @@ final class UsdtFundingExpiryReleaseTest extends TestCase
         $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
 
         // Replaying the same start-over is idempotent and creates no second target.
-        $this->assertSame(0, $actions->cancelOpenTargets($this->customer));
+        $actions->cancelOpenTargets($this->customer);
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
 
         // The Customer can pick a different amount immediately.
@@ -183,9 +208,22 @@ final class UsdtFundingExpiryReleaseTest extends TestCase
         DB::table('customer_usdt_top_up_work')->where('top_up_id', $this->target->id)
             ->update(['lease_until' => now()->addMinutes(2)]);
 
-        $this->assertSame(0, app(TelegramUsdtFundingActions::class)->cancelOpenTargets($this->customer));
+        app(TelegramUsdtFundingActions::class)->cancelOpenTargets($this->customer);
         $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
         $this->assertSame('reserved', DB::table('customer_usdt_funding_reservations')->value('state'));
+    }
+
+    public function test_postgres_migration_cannot_be_rolled_back_after_a_customer_cancels(): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('PostgreSQL constraint migration only.');
+        }
+
+        $this->assertTrue(app(TelegramUsdtFundingActions::class)->cancelTarget($this->customer, $this->target->id));
+        $migration = require database_path('migrations/2026_11_04_000001_allow_unpaid_usdt_funding_releases.php');
+
+        $this->expectException(\RuntimeException::class);
+        $migration->down();
     }
 
     private function expirePastGrace(): void

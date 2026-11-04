@@ -53,7 +53,6 @@ request being ignored.
   is audited and versioned like every other USDT funding policy change.
 - The chooser, amount list and confirmation copy are localized (id/en/ms) and
   the new method buttons own distinct editable icon slots.
-- An open target still occupies the single active-funding slot until settlement
-  or a typed release resolution; an abandoned unpaid target blocks a new USD
-  top-up until the existing rail/owner resolution path resolves it. That
-  lifecycle is unchanged by this decision and remains tracked separately.
+- An open target occupies the single active-funding slot until settlement or a
+  typed release. [ADR-0029](0029-timed-release-of-unpaid-usd-targets.md)
+  describes cancellation and deadline-based release, including review safeguards.

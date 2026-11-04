@@ -124,6 +124,31 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         return [['0.3'], ['0,3']];
     }
 
+    #[DataProvider('smallFundingAmounts')]
+    public function test_small_amounts_are_available_on_both_usdt_rails(string $rail, string $amount, int $micro): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $this->tap('small-custom', 'balance:usd:'.$rail.':x', $root);
+        $this->sendText($amount);
+
+        $target = CustomerUsdtTopUp::query()->sole();
+        $this->assertSame($micro, (int) $target->amount_micro);
+        $this->assertSame(900, $target->expires_at->getTimestamp() - $target->created_at->getTimestamp());
+        $this->assertStringContainsString('Kirim tepat: '.$amount.' USDT', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
+        $this->assertNoMoney();
+    }
+
+    public static function smallFundingAmounts(): array
+    {
+        return [
+            ['binance_pay', '0.1', 100_000],
+            ['bsc', '0.1', 100_000],
+            ['binance_pay', '0.000001', 1],
+            ['bsc', '0.000001', 1],
+        ];
+    }
+
     public function test_invalid_amounts_keep_prompt_usable_even_after_replacement(): void
     {
         $this->enableBinance();
@@ -524,7 +549,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
         $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
         $this->assertStringContainsString('Kirim tepat: 1 USDT', $copy);
-        $this->assertStringContainsString('Masih ada top-up berjalan; selesaikan atau tunggu batas waktunya.', $copy);
         $this->assertStringNotContainsString('5 USDT', $copy);
         $this->assertStringNotContainsString('5 USD', $copy);
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
@@ -570,7 +594,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
 
         $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
         $this->assertStringContainsString('Kirim tepat: 1 USDT', $copy);
-        $this->assertStringContainsString('Masih ada top-up berjalan; selesaikan atau tunggu batas waktunya.', $copy);
         $this->assertStringNotContainsString('3 USDT', $copy);
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
         $this->assertSame($open->id, CustomerUsdtTopUp::query()->sole()->id);
@@ -997,7 +1020,6 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->sendText('/usdt@lhiestore_bot 2');
         $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
         $this->assertStringContainsString('Kirim tepat: 1.5 USDT', $copy);
-        $this->assertStringContainsString('Masih ada top-up berjalan; selesaikan atau tunggu batas waktunya.', $copy);
         $this->assertStringNotContainsString('Kirim tepat: 2 USDT', $copy);
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
         $this->assertSame($target->id, CustomerUsdtTopUp::query()->sole()->id);
@@ -1126,6 +1148,40 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Kirim tepat: 5 USDT', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
         $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->whereNull('resolved_at')->count());
         $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertNoMoney();
+    }
+
+    public function test_start_cancels_bep20_target_and_asks_for_a_new_amount(): void
+    {
+        $old = $this->openSharedTarget('1');
+        $this->sendText('/start');
+        $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
+
+        $root = TelegramNavigationRoot::query()->sole();
+        $this->tap('bsc-again', 'balance:usd:bsc', $root);
+        $this->tap('bsc-custom-again', 'balance:usd:bsc:x', $root);
+        $this->assertSame(TelegramNavigationScreen::UsdtFundingAmount, $root->fresh()->screen);
+        $this->sendText('0.1');
+
+        $fresh = CustomerUsdtTopUp::query()->where('id', '!=', $old->id)->sole();
+        $this->assertSame(100_000, (int) $fresh->amount_micro);
+        $this->assertNoMoney();
+    }
+
+    public function test_start_warns_when_an_in_flight_top_up_cannot_be_cancelled(): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $target = $this->openBinanceTarget($root, '1 USD');
+        DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)
+            ->update(['lease_until' => now()->addMinutes(2), 'version' => DB::raw('version + 1')]);
+
+        $this->sendText('/start');
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_contains((string) ($request['text'] ?? ''), 'Top-up sebelumnya belum bisa dibatalkan.'));
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->whereNull('resolved_at')->count());
         $this->assertNoMoney();
     }
 

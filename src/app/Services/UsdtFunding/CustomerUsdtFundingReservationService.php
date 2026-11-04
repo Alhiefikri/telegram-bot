@@ -427,11 +427,9 @@ final class CustomerUsdtFundingReservationService
     }
 
     /**
-     * Free the exposure slot of a confirmed target whose payment window and
-     * grace elapsed without settlement. The caller owns the rail check that
-     * decides "nothing settled"; this transaction re-verifies the durable state
-     * and records the immutable `expired_unpaid` resolution together with the
-     * slot release.
+     * Free the slot of a confirmed target past its payment deadline. The caller
+     * applies any additional delay; this transaction rechecks the deadline and
+     * durable state before recording the resolution and releasing the slot.
      */
     public function releaseExpiredUnpaid(
         Customer $customer,
@@ -485,12 +483,12 @@ final class CustomerUsdtFundingReservationService
 
                 throw new CustomerUsdtFundingReservationConflict('Reservasi sudah diselesaikan oleh efek ekonomi lain.');
             }
-            $allowedStates = $requireExpired
-                ? [CustomerUsdtFundingReservationState::ExpiredUnresolved]
-                : [CustomerUsdtFundingReservationState::Reserved, CustomerUsdtFundingReservationState::ExpiredUnresolved];
-            if (! in_array($reservation->state, $allowedStates, true)) {
+            if (! in_array($reservation->state, [
+                CustomerUsdtFundingReservationState::Reserved,
+                CustomerUsdtFundingReservationState::ExpiredUnresolved,
+            ], true) || ($requireExpired && $reservation->expires_at->isFuture())) {
                 throw new CustomerUsdtFundingReservationConflict($requireExpired
-                    ? 'Reservasi belum berstatus kedaluwarsa.'
+                    ? 'Reservasi belum melewati batas pembayaran.'
                     : 'Reservasi tidak dapat dibatalkan pada status ini.');
             }
 

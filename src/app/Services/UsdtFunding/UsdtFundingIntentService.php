@@ -21,6 +21,8 @@ use Illuminate\Support\Str;
 /** Confirmation owns DB facts only. No rail, RPC, provider or Telegram calls. */
 final class UsdtFundingIntentService
 {
+    private const PAYMENT_TTL_SECONDS = 15 * 60;
+
     public function __construct(
         private readonly CustomerUsdtFundingGate $gate,
         private readonly CustomerUsdtFundingReservationService $reservations,
@@ -94,7 +96,7 @@ final class UsdtFundingIntentService
                     'token_decimals' => (int) $shared->token_decimals,
                     'minimum_confirmations' => $settings->bscMinConfirmations(),
                     'requires_finalized_block' => true,
-                    'payment_ttl_seconds' => $settings->bscPaymentTtlMinutes() * 60,
+                    'payment_ttl_seconds' => self::PAYMENT_TTL_SECONDS,
                 ];
             } elseif ($rail === CustomerUsdtFundingRail::BscUsdt) {
                 $receiver = CustomerUsdtDepositReceiver::query()->where('customer_id', $customer->id)
@@ -113,7 +115,7 @@ final class UsdtFundingIntentService
                     'token_contract' => $snapshot->tokenContract, 'token_decimals' => $snapshot->tokenDecimals,
                     'custody_namespace' => $snapshot->custodyNamespace,
                     'minimum_confirmations' => $settings->bscMinConfirmations(), 'requires_finalized_block' => true,
-                    'payment_ttl_seconds' => $settings->bscPaymentTtlMinutes() * 60,
+                    'payment_ttl_seconds' => self::PAYMENT_TTL_SECONDS,
                 ];
             } else {
                 $payId = trim((string) config('services.binance.pay_id'));
@@ -124,7 +126,7 @@ final class UsdtFundingIntentService
                 $terms = [
                     'receiver_pay_id' => $payId !== '' ? $payId : null,
                     'receiver_uid' => $uid !== '' ? $uid : null,
-                    'payment_ttl_seconds' => $settings->binancePaymentTtlMinutes() * 60,
+                    'payment_ttl_seconds' => self::PAYMENT_TTL_SECONDS,
                 ];
             }
             if ($amountMicro < 1 || $feeMicro > PHP_INT_MAX - $amountMicro) {
@@ -212,6 +214,11 @@ final class UsdtFundingIntentService
 
                 return new UsdtFundingIntentResult('stale_terms', $intent);
             }
+            if ((int) ($intent->payment_snapshot['payment_ttl_seconds'] ?? 0) !== self::PAYMENT_TTL_SECONDS) {
+                $this->transition($intent, 'superseded');
+
+                return new UsdtFundingIntentResult('stale_terms', $intent);
+            }
             if ($rail === CustomerUsdtFundingRail::BscShared) {
                 $shared = $this->sharedReceivers->active();
                 $snapshot = is_array($intent->payment_snapshot) ? $intent->payment_snapshot : [];
@@ -221,8 +228,7 @@ final class UsdtFundingIntentService
                     || (int) ($snapshot['chain_id'] ?? 0) !== (int) $shared->chain_id
                     || (string) ($snapshot['token_contract'] ?? '') !== (string) $shared->token_contract
                     || (int) ($snapshot['token_decimals'] ?? 0) !== (int) $shared->token_decimals
-                    || (int) ($snapshot['minimum_confirmations'] ?? 0) !== $settings->bscMinConfirmations()
-                    || (int) ($snapshot['payment_ttl_seconds'] ?? 0) !== $settings->bscPaymentTtlMinutes() * 60) {
+                    || (int) ($snapshot['minimum_confirmations'] ?? 0) !== $settings->bscMinConfirmations()) {
                     $this->transition($intent, 'superseded');
 
                     return new UsdtFundingIntentResult('stale_terms', $intent);
@@ -231,7 +237,6 @@ final class UsdtFundingIntentService
                 $receiver = CustomerUsdtDepositReceiver::query()->whereKey($intent->receiver_id)->lockForUpdate()->first();
                 if ($receiver === null || ! $receiver->isReadyForAssignment()
                     || $settings->bscMinConfirmations() !== $intent->payment_snapshot['minimum_confirmations']
-                    || $settings->bscPaymentTtlMinutes() * 60 !== $intent->payment_snapshot['payment_ttl_seconds']
                     || DB::table('usdt_bsc_scan_checkpoints')->where('receiver_id', $intent->receiver_id)->whereNotNull('review_reason')->exists()) {
                     $this->transition($intent, 'superseded');
 

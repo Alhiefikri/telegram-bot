@@ -94,9 +94,9 @@ class TelegramMessageRouter
             $this->catalogQueries->forget($customer);
             $this->startIntents->forget($customer);
             if ($isPrivateChat) {
-                // Starting over is the Customer's cancel: an unpaid USD target
-                // must never force the amount that was chosen before.
-                $this->usdtTargets->cancelOpenTargets($customer);
+                if (! $this->usdtTargets->cancelOpenTargets($customer)) {
+                    $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.usdt.notice.restart_cancel_unavailable'));
+                }
             }
             $startIntent = $this->startIntent($text);
             if ($startIntent !== null) {

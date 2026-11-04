@@ -4,6 +4,8 @@ namespace App\Services\Telegram;
 
 use App\Enums\CustomerUsdtFundingRail;
 use App\Enums\CustomerUsdtFundingReservationOutcome;
+use App\Enums\CustomerUsdtFundingReservationState;
+use App\Exceptions\CustomerUsdtFundingReservationConflict;
 use App\Models\Customer;
 use App\Models\CustomerUsdtTopUp;
 use App\Models\TelegramNavigationRoot;
@@ -27,16 +29,12 @@ final class TelegramUsdtFundingActions
         private readonly CustomerUsdtFundingReservationService $reservations,
     ) {}
 
-    /**
-     * Starting over cancels one unpaid USD target. A Customer who picked the
-     * wrong amount must never be locked into it; releasing the slot moves no
-     * money and late transfers still reach manual review.
-     */
-    public function cancelOpenTargets(Customer $customer): int
+    /** Return false when an open target could not be cancelled safely. */
+    public function cancelOpenTargets(Customer $customer): bool
     {
         $active = $this->reservations->activeForCustomer($customer);
         if ($active === null || $active->reservation->sourceType !== 'customer_usdt_top_up') {
-            return 0;
+            return true;
         }
 
         try {
@@ -48,11 +46,15 @@ final class TelegramUsdtFundingActions
                     'customer:'.$customer->getKey(),
                 ),
             );
-        } catch (Throwable) {
-            return 0;
+        } catch (CustomerUsdtFundingReservationConflict) {
+            return false;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return false;
         }
 
-        return in_array($result->outcome, [CustomerUsdtFundingReservationOutcome::Released, CustomerUsdtFundingReservationOutcome::Replayed], true) ? 1 : 0;
+        return in_array($result->outcome, [CustomerUsdtFundingReservationOutcome::Released, CustomerUsdtFundingReservationOutcome::Replayed], true);
     }
 
     /** Cancel one unpaid target from its own instruction surface. */
@@ -75,7 +77,11 @@ final class TelegramUsdtFundingActions
                     'customer:'.$customer->getKey(),
                 ),
             );
-        } catch (Throwable) {
+        } catch (CustomerUsdtFundingReservationConflict) {
+            return false;
+        } catch (Throwable $exception) {
+            report($exception);
+
             return false;
         }
 
@@ -107,6 +113,23 @@ final class TelegramUsdtFundingActions
             $money = UsdtMicroAmount::fromDecimalString(self::normalizeDecimalInput($amount));
         } catch (\InvalidArgumentException) {
             return new UsdtFundingIntentResult('invalid_amount');
+        }
+
+        $active = $this->reservations->activeForCustomer($context['customer']);
+        if ($active !== null && $active->reservation->sourceType === 'customer_usdt_top_up'
+            && $active->reservation->state === CustomerUsdtFundingReservationState::ExpiredUnresolved) {
+            try {
+                $this->reservations->releaseExpiredUnpaid(
+                    $context['customer'],
+                    $active->reservation->reservationId,
+                    CustomerUsdtFundingRelease::expiredUnpaid(
+                        'expiry-on-open:'.$active->reservation->sourceId,
+                        'customer:'.$context['customer']->getKey(),
+                    ),
+                );
+            } catch (CustomerUsdtFundingReservationConflict) {
+                // An active settlement or review keeps ownership of the target.
+            }
         }
 
         $opened = $this->intents->open($context['customer'], $chatId, $context['root']->id, $messageId, $money, $rail);
