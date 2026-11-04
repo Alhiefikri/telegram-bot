@@ -136,6 +136,7 @@ class CanbosoSupplierTest extends TestCase
 
     public function test_rate_limit_respects_six_hour_penalty_without_second_http_request(): void
     {
+        $this->freezeTime();
         Http::fake(fn () => Http::response(['success' => false], 429, ['Retry-After' => '21600']));
         $client = app(SupplierClient::class);
         $result = $client->purchase($this->supplier(), $this->item(), 1, 'checkout-1');
