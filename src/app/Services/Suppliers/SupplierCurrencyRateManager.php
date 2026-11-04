@@ -183,8 +183,6 @@ final class SupplierCurrencyRateManager
                         continue;
                     }
                     $supplier->exchange_rate_idr = $target;
-                    $supplier->sync_token = null;
-                    $supplier->last_error = null;
                     $supplier->version = (int) $supplier->version + 1;
                     $supplier->save();
                 }

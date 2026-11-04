@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
 use App\Http\Controllers\Controller;
@@ -18,6 +19,7 @@ use App\Models\SupplierPurchase;
 use App\Services\Admin\AdminProductWorkspaceData;
 use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\Admin\SupplierOperationConfirmation;
+use App\Services\AuditLogger;
 use App\Services\Suppliers\ProductSupplierManager;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierCurrencyRateManager;
@@ -86,6 +88,25 @@ final class AdminSupplierController extends Controller
         $applied = $sync->sync($supplier);
 
         return $this->saved($applied ? 'Katalog dan saldo disinkronkan.' : $dashboard->syncFailureMessage($supplier->refresh()));
+    }
+
+    public function forceSync(SupplierAdminRequest $request, Supplier $supplier, SupplierCatalogSync $sync, AdminSupplierDashboardData $dashboard, AuditLogger $audit)
+    {
+        $actor = $request->attributes->get('adminUser');
+        abort_unless($actor?->role === UserRole::Owner, 403);
+
+        $version = $request->integer('version');
+        $audit->log('supplier.sync_forced', $supplier, null, ['version' => $version], $actor, $request->ip());
+        $applied = $sync->sync($supplier, force: true, expectedVersion: $version);
+        if ($applied) {
+            return $this->saved('Katalog dan saldo disinkronkan.');
+        }
+        $supplier->refresh();
+        if ($supplier->version !== $version && ! ($supplier->sync_token !== null && $supplier->sync_lease_expires_at?->isFuture())) {
+            return $this->saved('Koneksi supplier berubah. Muat ulang halaman sebelum mencoba lagi.');
+        }
+
+        return $this->saved($dashboard->syncFailureMessage($supplier));
     }
 
     public function catalog(Request $request, Supplier $supplier)

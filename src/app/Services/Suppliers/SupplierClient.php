@@ -6,6 +6,8 @@ use App\Enums\SupplierProvider;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
 use Carbon\CarbonImmutable;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
@@ -468,8 +470,8 @@ final class SupplierClient
                     $this->request($supplier, $pool->as($id), $timeout)->get($provider->baseUrl().'/products/'.rawurlencode($id));
                 }
             }, concurrency: self::DETAIL_CONCURRENCY);
-        } catch (Throwable) {
-            throw new SupplierUnavailable(hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
+        } catch (Throwable $exception) {
+            throw new SupplierUnavailable($this->syncTransportError($exception, $deadline));
         }
         foreach ($responses as $response) {
             if ($response instanceof Response) {
@@ -480,7 +482,7 @@ final class SupplierClient
         foreach ($ids as $id) {
             $response = $responses[$id] ?? null;
             if (! $response instanceof Response) {
-                throw new SupplierUnavailable(hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
+                throw new SupplierUnavailable($this->syncTransportError($response instanceof Throwable ? $response : null, $deadline));
             }
             if (! $response->successful()) {
                 throw new SupplierUnavailable($this->httpCode($response->status()),
@@ -515,9 +517,9 @@ final class SupplierClient
         try {
             $response = $this->request($supplier, Http::acceptJson(), $timeout, $headers)
                 ->send($method, $provider->baseUrl().$path, $options);
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
             // Even an oversized response can follow a successful purchase.
-            throw new SupplierUnavailable($deadline !== null && hrtime(true) >= $deadline ? 'snapshot_timeout' : 'transport');
+            throw new SupplierUnavailable($deadline !== null ? $this->syncTransportError($exception, $deadline) : 'transport');
         }
         try {
             $this->observeRateLimit($provider, $response);
@@ -530,6 +532,21 @@ final class SupplierClient
         }
 
         return $response;
+    }
+
+    private function syncTransportError(?Throwable $exception, int $deadline): string
+    {
+        if (hrtime(true) >= $deadline) {
+            return 'snapshot_timeout';
+        }
+        for ($cause = $exception; $cause !== null; $cause = $cause->getPrevious()) {
+            if (($cause instanceof ConnectException || $cause instanceof RequestException)
+                && ($cause->getHandlerContext()['errno'] ?? null) === 28) {
+                return 'request_timeout';
+            }
+        }
+
+        return 'transport';
     }
 
     private function request(Supplier $supplier, PendingRequest $request, float $timeout, array $headers = []): PendingRequest

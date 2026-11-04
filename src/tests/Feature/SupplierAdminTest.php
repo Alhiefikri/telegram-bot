@@ -222,14 +222,151 @@ final class SupplierAdminTest extends TestCase
         $this->owner();
         $supplier = $this->supplier(['balance_micros' => 7000000]);
         Http::fake(fn () => Http::response(['error' => self::KEY], 401));
-        $this->post(route('admin.suppliers.sync', $supplier))->assertRedirect()
-            ->assertSessionHas('status', 'API key ditolak oleh supplier. Periksa key dan pastikan akses API aktif.');
+        $this->post(route('admin.suppliers.sync', $supplier))->assertRedirect()->assertSessionHas('status');
         $this->assertSame('authentication', $supplier->fresh()->last_error);
+        $this->assertStringContainsString($supplier->fresh()->sync_next_attempt_at->toIso8601String(), session('status'));
         $this->assertSame(7000000, $supplier->fresh()->balance_micros);
         $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()
             ->assertSee('API key ditolak oleh supplier.')->assertDontSee(self::KEY);
         $this->assertStringNotContainsString(self::KEY, json_encode(session()->all()));
         Http::assertSentCount(1);
+    }
+
+    public function test_owner_can_force_one_supplier_during_backoff_and_the_attempt_is_audited(): void
+    {
+        $this->freezeTime();
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $this->actingAs($actor);
+        $retry = now()->startOfSecond()->addMinutes(20);
+        $supplier = $this->supplier(['sync_failures' => 1, 'sync_next_attempt_at' => $retry, 'last_error' => 'transport']);
+        $other = $this->supplier(['sync_failures' => 1, 'sync_next_attempt_at' => $retry, 'last_error' => 'transport']);
+        Http::fake(fn () => Http::response(['error' => self::KEY], 401));
+
+        $this->post(route('admin.suppliers.sync', $supplier))->assertRedirect();
+        Http::assertNothingSent();
+        $this->post(route('admin.suppliers.sync.force', $supplier), ['version' => 1])->assertRedirect()->assertSessionHas('status');
+
+        Http::assertSentCount(1);
+        $this->assertSame('authentication', $supplier->fresh()->last_error);
+        $this->assertSame('transport', $other->fresh()->last_error);
+        $this->assertTrue($retry->equalTo($other->fresh()->sync_next_attempt_at));
+        $audit = AuditLog::query()->where('action', 'supplier.sync_forced')->sole();
+        $this->assertSame($actor->id, $audit->user_id);
+        $this->assertSame((string) $supplier->id, $audit->subject_id);
+        $this->assertNotNull($audit->created_at);
+        $this->assertStringNotContainsString(self::KEY, $audit->toJson());
+    }
+
+    public function test_force_sync_rejects_an_active_lease_without_changing_it(): void
+    {
+        $this->freezeTime();
+        $this->owner();
+        $expiry = now()->startOfSecond()->addMinute();
+        $token = (string) Str::uuid();
+        $supplier = $this->supplier(['sync_token' => $token, 'sync_lease_expires_at' => $expiry, 'version' => 7, 'sync_failures' => 1, 'sync_next_attempt_at' => now()->addMinutes(10)]);
+        Http::fake();
+
+        $this->post(route('admin.suppliers.sync.force', $supplier), ['version' => 7])->assertRedirect()
+            ->assertSessionHas('status', 'Sinkron katalog masih berjalan. Tunggu sampai selesai sebelum mencoba lagi.');
+
+        $fresh = $supplier->fresh();
+        $this->assertSame($token, $fresh->sync_token);
+        $this->assertSame(7, $fresh->version);
+        $this->assertTrue($expiry->equalTo($fresh->sync_lease_expires_at));
+        Http::assertNothingSent();
+        $this->assertDatabaseHas('audit_logs', ['action' => 'supplier.sync_forced', 'subject_id' => (string) $supplier->id]);
+    }
+
+    public function test_force_sync_requires_current_supplier_version(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['version' => 3, 'sync_failures' => 1, 'sync_next_attempt_at' => now()->addMinutes(10)]);
+        Http::fake();
+
+        $this->postJson(route('admin.suppliers.sync.force', $supplier))->assertUnprocessable()->assertJsonValidationErrors('version');
+        $this->post(route('admin.suppliers.sync.force', $supplier), ['version' => 2])->assertRedirect()
+            ->assertSessionHas('status', 'Koneksi supplier berubah. Muat ulang halaman sebelum mencoba lagi.');
+        $this->assertSame(3, $supplier->fresh()->version);
+        $this->assertNull($supplier->fresh()->sync_token);
+        Http::assertNothingSent();
+    }
+
+    public function test_force_sync_still_respects_provider_cooldown(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        Http::fake(fn () => Http::response([], 429, ['Retry-After' => '900']));
+
+        $this->post(route('admin.suppliers.sync', $supplier))->assertRedirect();
+        $this->post(route('admin.suppliers.sync.force', $supplier), ['version' => 1])->assertRedirect()->assertSessionHas('status');
+
+        Http::assertSentCount(1);
+        $this->assertSame('rate_limited', $supplier->fresh()->last_error);
+    }
+
+    public function test_force_sync_does_not_contact_provider_if_audit_fails(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier();
+        Http::fake();
+        $this->mock(AuditLogger::class)->shouldReceive('log')->once()->andThrow(new \RuntimeException('audit unavailable'));
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->post(route('admin.suppliers.sync.force', $supplier), ['version' => 1]);
+            $this->fail('Force sync must not run without an audit record.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('audit unavailable', $exception->getMessage());
+        }
+        Http::assertNothingSent();
+        $this->assertNull($supplier->fresh()->sync_token);
+    }
+
+    public function test_force_sync_is_owner_only_and_hidden_from_admin(): void
+    {
+        $supplier = $this->supplier();
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+        Http::fake();
+
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertDontSee('Paksa sinkron supplier ini');
+        $this->post(route('admin.suppliers.sync.force', $supplier), ['version' => 1])->assertForbidden();
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'supplier.sync_forced']);
+        Http::assertNothingSent();
+
+        $this->owner();
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()->assertSee('Paksa sinkron supplier ini');
+    }
+
+    public function test_force_sync_uses_the_existing_request_throttle(): void
+    {
+        $this->owner();
+        $supplier = $this->supplier(['sync_token' => (string) Str::uuid(), 'sync_lease_expires_at' => now()->addMinute()]);
+        Http::fake();
+        for ($i = 0; $i < 10; $i++) {
+            $this->post(route('admin.suppliers.sync.force', $supplier), ['version' => 1])->assertRedirect();
+        }
+        $this->post(route('admin.suppliers.sync.force', $supplier), ['version' => 1])->assertStatus(429);
+        $this->assertSame(10, AuditLog::where('action', 'supplier.sync_forced')->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_supplier_dashboard_shows_retry_and_distinct_safe_failure_reasons(): void
+    {
+        $this->owner();
+        $retry = now()->addMinutes(10);
+        $transport = $this->supplier(['last_error' => 'transport', 'sync_next_attempt_at' => $retry]);
+        $timeout = $this->supplier(['last_error' => 'snapshot_timeout']);
+        $requestTimeout = $this->supplier(['last_error' => 'request_timeout']);
+        $cleared = $this->supplier(['last_error' => null, 'sync_failures' => 1, 'sync_next_attempt_at' => $retry]);
+        $dashboard = app(AdminSupplierDashboardData::class);
+        $connections = $dashboard->forTab()['connections']->getCollection()->keyBy('id');
+
+        $this->assertStringContainsString('Koneksi ke supplier gagal', $connections[$transport->id]['sync_error']);
+        $this->assertStringContainsString('Batas waktu sinkronisasi', $connections[$timeout->id]['sync_error']);
+        $this->assertStringContainsString('Waktu tunggu koneksi atau respons supplier habis', $connections[$requestTimeout->id]['sync_error']);
+        $this->assertSame($retry->toIso8601String(), $connections[$cleared->id]['next_attempt_at']);
+        $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()
+            ->assertSee('Percobaan otomatis berikutnya')->assertSee($retry->toIso8601String());
     }
 
     public function test_supplier_dashboard_product_read_filters_before_bounded_pagination_and_keeps_mapping_facts(): void
@@ -942,6 +1079,9 @@ final class SupplierAdminTest extends TestCase
         });
         $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $this->connectionInput())->assertStatus(419);
         $this->assertSame(0, Supplier::query()->count());
+        $supplier = $this->supplier();
+        $this->post(route('admin.suppliers.sync.force', $supplier))->assertStatus(419);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'supplier.sync_forced']);
     }
 
     public function test_detach_deletes_only_mapping_and_normalizes_remaining_ranks_with_safe_audit(): void

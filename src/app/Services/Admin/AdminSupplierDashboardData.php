@@ -64,6 +64,7 @@ final class AdminSupplierDashboardData
                 'low_balance' => $available !== null && $available <= (int) $supplier->low_balance_threshold_micros,
                 'synced_at' => $supplier->synced_at?->toIso8601String(),
                 'expires_at' => $supplier->sync_expires_at?->toIso8601String(),
+                'next_attempt_at' => $supplier->is_active ? $supplier->sync_next_attempt_at?->toIso8601String() : null,
                 'balance_observed_at' => $supplier->balance_observed_at?->toIso8601String(),
                 'balance_uncertain' => $supplier->balance_micros === null
                     || $supplier->balance_observed_at?->lte(now()->subSeconds(SupplierCatalogSync::FRESHNESS_SECONDS)) !== false,
@@ -74,7 +75,7 @@ final class AdminSupplierDashboardData
                 'pending_payment_hold_release_at' => $pendingPaymentReleaseAt === null
                     ? null
                     : CarbonImmutable::parse($pendingPaymentReleaseAt)->timezone(config('app.timezone'))->toIso8601String(),
-                'sync_error' => $supplier->last_error !== null ? $this->syncFailureMessage($supplier) : null,
+                'sync_error' => $supplier->last_error !== null ? $this->syncFailureMessage($supplier, includeNextAttempt: false) : null,
             ];
         }));
 
@@ -160,7 +161,7 @@ final class AdminSupplierDashboardData
         }, SupplierExchangeRate::RATE_KEYS);
     }
 
-    public function syncFailureMessage(Supplier $supplier): string
+    public function syncFailureMessage(Supplier $supplier, bool $includeNextAttempt = true): string
     {
         if (! $supplier->is_active) {
             return 'Aktifkan supplier terlebih dahulu, lalu sinkronkan katalog.';
@@ -169,11 +170,13 @@ final class AdminSupplierDashboardData
             return 'Sinkron katalog masih berjalan. Tunggu sampai selesai sebelum mencoba lagi.';
         }
 
-        return match ($supplier->last_error) {
+        $message = match ($supplier->last_error) {
             'authentication', 'invalid_key' => 'API key ditolak oleh supplier. Periksa key dan pastikan akses API aktif.',
             'credential_unreadable' => 'API key tersimpan tidak dapat dibaca (misalnya APP_KEY aplikasi berubah atau database berasal dari environment lain). Masukkan ulang API key lewat Edit koneksi.',
             'rate_limited' => 'Batas permintaan ke supplier sedang tercapai. Tunggu beberapa menit sebelum sinkron lagi.',
-            'transport', 'snapshot_timeout' => 'Supplier belum merespons tepat waktu. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
+            'transport' => 'Koneksi ke supplier gagal. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
+            'request_timeout' => 'Waktu tunggu koneksi atau respons supplier habis. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
+            'snapshot_timeout' => 'Batas waktu sinkronisasi katalog terlampaui. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
             'invalid_payload' => 'Format data supplier belum dapat dibaca. Katalog sebelumnya tetap disimpan.',
             'catalog_limit' => 'Katalog supplier melebihi batas pembacaan sekali sinkron. Data belum diperbarui.',
             'currency_mismatch' => 'Mata uang dari supplier tidak sesuai dengan koneksi. Periksa mata uang akun supplier.',
@@ -182,5 +185,11 @@ final class AdminSupplierDashboardData
             'upstream', 'redirect', 'request_failed' => 'Layanan supplier sedang bermasalah. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
             default => 'Sinkron belum diterapkan. Muat ulang halaman dan periksa pengaturan supplier sebelum mencoba lagi.',
         };
+
+        if ($includeNextAttempt && $supplier->sync_next_attempt_at !== null) {
+            $message .= ' Percobaan otomatis berikutnya: '.$supplier->sync_next_attempt_at->timezone(config('app.timezone'))->toIso8601String().'.';
+        }
+
+        return $message;
     }
 }

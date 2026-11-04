@@ -30,7 +30,7 @@ final class SupplierHealthService
     /** Allow one scheduler tick plus the bounded sync run before a pending retry is overdue. */
     private const SYNC_RETRY_GRACE_SECONDS = 120;
 
-    private const TRANSIENT_ERRORS = ['rate_limited', 'transport'];
+    private const TRANSIENT_ERRORS = ['rate_limited', 'transport', 'request_timeout'];
 
     private const ERRORS = [
         'authentication' => 'Autentikasi gagal. Verifikasi akses akun supplier.',
@@ -41,6 +41,7 @@ final class SupplierHealthService
         'duplicate_account' => 'Akun supplier terhubung ke lebih dari satu koneksi. Hentikan pembelian dan rapikan konfigurasi.',
         'rate_limited' => 'Batas request tercapai. Tunggu lalu sinkronkan kembali.',
         'transport' => 'Koneksi supplier terganggu. Tunggu lalu sinkronkan kembali.',
+        'request_timeout' => 'Waktu tunggu koneksi supplier habis. Tunggu lalu sinkronkan kembali.',
     ];
 
     public function __construct(

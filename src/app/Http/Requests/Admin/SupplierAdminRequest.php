@@ -42,6 +42,9 @@ final class SupplierAdminRequest extends FormRequest
         $action = $this->route()->getActionMethod();
 
         return match ($action) {
+            'forceSync' => [
+                'version' => ['required', 'integer', 'min:1'],
+            ],
             'store', 'update' => [
                 'name' => ['required', 'string', 'max:120', 'not_regex:/[\x00-\x1F\x7F]/'],
                 'provider' => ['required', Rule::enum(SupplierProvider::class)],

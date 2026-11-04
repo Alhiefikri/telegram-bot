@@ -18,20 +18,21 @@ final class SupplierCatalogSync
 
     public function __construct(private readonly SupplierClient $client, private readonly SupplierAvailability $availability) {}
 
-    public function sync(Supplier $supplier): bool
+    public function sync(Supplier $supplier, bool $force = false, ?int $expectedVersion = null): bool
     {
         $connection = Supplier::query()->find($supplier->id);
         if ($connection === null || ! $connection->is_active
-            || ($connection->sync_failures > 0 && $connection->sync_next_attempt_at?->isFuture())) {
+            || ($expectedVersion !== null && $connection->version !== $expectedVersion)
+            || (! $force && $connection->sync_failures > 0 && $connection->sync_next_attempt_at?->isFuture())) {
             return false;
         }
         $token = (string) Str::uuid();
         $version = $connection->version;
         // A durable lease suppresses concurrent scheduler/manual reads without
         // holding a financial transaction across provider HTTP.
-        if (Supplier::query()->whereKey($connection->id)->where('version', $version)
-            ->where(fn ($query) => $query->where('sync_failures', 0)
-                ->orWhereNull('sync_next_attempt_at')->orWhere('sync_next_attempt_at', '<=', now()))
+        if (Supplier::query()->whereKey($connection->id)->where('version', $version)->where('is_active', true)
+            ->when(! $force, fn ($query) => $query->where(fn ($query) => $query->where('sync_failures', 0)
+                ->orWhereNull('sync_next_attempt_at')->orWhere('sync_next_attempt_at', '<=', now())))
             ->where(fn ($query) => $query->whereNull('sync_token')->orWhere('sync_lease_expires_at', '<=', now()))
             ->update(['sync_token' => $token, 'sync_attempted_at' => now(), 'sync_lease_expires_at' => now()->addMinute()]) !== 1) {
             return false;

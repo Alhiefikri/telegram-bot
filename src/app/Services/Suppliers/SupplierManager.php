@@ -78,8 +78,11 @@ final class SupplierManager
                 $connection->synced_at = null;
                 $connection->sync_expires_at = null;
             }
-            $connection->sync_token = null;
-            $connection->last_error = null;
+            if (array_intersect($changed, ['credential', 'provider', 'currency'])) {
+                $connection->sync_failures = 0;
+                $connection->sync_next_attempt_at = null;
+                $connection->last_error = null;
+            }
             $connection->version = $created ? 1 : (int) $connection->version + 1;
             $connection->save();
             if (! $rateOnly) {
