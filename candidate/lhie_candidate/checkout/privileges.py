@@ -90,6 +90,28 @@ LIFECYCLE_UPDATE = {
 }
 
 
+AUTH_INSERT = {
+    'customers': set('email email_verified_at first_name auth_version enrollment_version created_at updated_at'.split()),
+    'customer_auth_tokens': set('customer_id email purpose token_hash challenge_hash session_binding_hash proposed_password_hash auth_version enrollment_version attempts expires_at consumed_at created_at updated_at'.split()),
+    'customer_login_links': set('email token_hash expires_at used_at requested_ip created_at updated_at'.split()),
+    'customer_auth_mail_works': set('auth_token_id login_link_id payload status attempts expires_at next_attempt_at sent_at last_error_code created_at updated_at'.split()),
+    'customer_google_auth_claims': set('operation customer_id auth_version authenticated_at state_hash session_binding_hash configuration_fingerprint expires_at created_at updated_at'.split()),
+    'customer_telegram_auth_claims': set('operation customer_id auth_version authenticated_at session_binding_hash capability_hash expires_at created_at updated_at'.split()),
+    'customer_identities': set('customer_id provider provider_subject provider_email last_used_at created_at updated_at'.split()),
+    'audit_logs': set('action subject_type subject_id new_values ip_address created_at'.split()),
+}
+AUTH_UPDATE = {
+    'customers': set('email email_verified_at password password_scheme auth_version enrollment_version telegram_id updated_at'.split()),
+    'customer_auth_tokens': {'attempts', 'consumed_at', 'updated_at'},
+    'customer_login_links': {'used_at', 'updated_at'},
+    'customer_auth_mail_works': set('payload status attempts next_attempt_at sent_at last_error_code updated_at'.split()),
+    'customer_google_auth_claims': {'consumed_at', 'updated_at'},
+    'customer_telegram_auth_claims': set('actor_id proof_customer_id proof_auth_version confirmation_hash prepared_at confirmed_at consumed_at failure updated_at'.split()),
+    'customer_identities': {'last_used_at', 'provider_email', 'updated_at'},
+    'orders': {'customer_id', 'updated_at'},
+}
+
+
 def _merge(*mappings):
     merged = {}
     for mapping in mappings:
@@ -123,10 +145,16 @@ def verify_public_writes(cursor):
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, LIFECYCLE_INSERT)
         allowed_update = _merge(allowed_update, LIFECYCLE_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.customer_auth_tokens','token_hash','INSERT')")
+    auth = cursor.fetchone()[0]
+    if auth:
+        allowed_insert = _merge(allowed_insert, AUTH_INSERT)
+        allowed_update = _merge(allowed_update, AUTH_UPDATE)
     cursor.execute('''SELECT c.relname FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p')
-        AND has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER')''')
+        AND (has_table_privilege(current_user,c.oid,'INSERT,UPDATE,TRUNCATE,TRIGGER')
+        OR (has_table_privilege(current_user,c.oid,'DELETE') AND NOT (%s AND c.relname='customer_identities')))''', (auth,))
     if cursor.fetchone() is not None:
         return False
     cursor.execute('''SELECT c.relname,a.attname,

@@ -172,5 +172,28 @@ class ReceiptRelayTests(unittest.TestCase):
         self.assertEqual(reply, {'ok': False, 'error_code': 400, 'emoji_rejected': True})
 
 
+class BotIdentityRelayTests(unittest.TestCase):
+    def test_fake_and_unverified_identity_never_supply_a_bot_username(self):
+        with patch.object(boundary, 'upstream', side_effect=AssertionError('network reached')):
+            self.assertEqual(boundary.verified_bot_identity(harness.default('candidate')), {'ok': False})
+        config = {**harness.default('candidate'), 'mode': 'testing-bot',
+                  'bot_id': 123, 'bot_username': 'LhieStoreTestBot', 'bot_token': 'synthetic-secret'}
+        for bot in ({'id': 999, 'username': 'LhieStoreTestBot', 'is_bot': True},
+                    {'id': 123, 'username': 'DifferentBot', 'is_bot': True},
+                    {'id': 123, 'username': 'LhieStoreTestBot', 'is_bot': 1}):
+            with patch.object(boundary, 'upstream', return_value={'ok': True, 'result': bot}):
+                with self.assertRaises(ValueError):
+                    boundary.verified_bot_identity(config)
+
+    def test_only_verified_attested_identity_is_returned_without_credentials(self):
+        config = {**harness.default('candidate'), 'mode': 'testing-bot',
+                  'bot_id': 123, 'bot_username': 'LhieStoreTestBot', 'bot_token': 'synthetic-secret'}
+        bot = {'id': 123, 'username': 'LhieStoreTestBot', 'is_bot': True}
+        with patch.object(boundary, 'upstream', return_value={'ok': True, 'result': bot}):
+            result = boundary.verified_bot_identity(config)
+        self.assertEqual(result, {'ok': True, 'result': bot})
+        self.assertNotIn('synthetic-secret', json.dumps(result))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import include, path
 
 from . import http
 from .navigation.webhook import receive
@@ -6,6 +6,7 @@ from .payments.callback import receive as receive_sakurupiah
 
 
 urlpatterns = [
+    path("", include("lhie_candidate.auth.urls")),
     path("health", http.health),
     path("ready", http.ready),
     path("webhook/telegram", receive),

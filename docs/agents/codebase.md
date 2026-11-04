@@ -119,6 +119,23 @@ passed locally. Supplier acquisition, live rails, authentication/UI adapters and
 actual data qualification keep their downstream owners; no production or CI/CD
 operation is implied.
 
+P19 [authentication and ownership compatibility](../migration/python-django/p05/README.md#p19-authentication-identity-linking-and-ownership-compatibility-695)
+owns `candidate/lhie_candidate/auth/`: Customer password/verification/OTP/reset/
+magic-link authority, canonical Google/Telegram claims, independent admin guards,
+hashed server-side browser sessions, encrypted auth-mail work and explicit
+invoice/Recovery Key guest claiming. It reuses existing public auth/identity/mail
+tables and P03 codecs; additive session metadata and column grants require explicit
+disposable provisioning. Reserved Telegram auth updates are encrypted and handled
+before Customer resolution; verified Testing Bot identity comes from P01's
+read-only `getMe` boundary, never a separate username ENV. `auth_mail.py --once`
+provides bounded local-sink recovery without activating a notification worker.
+`smoke_checkout.py --auth` records the single source-bound PostgreSQL/HTTP/SMTP
+proof at `.local/migration-p19/verification.json`, including one-winner
+consumption/registration/link/claim races and unchanged financial/stock history.
+The runbook states the H2 reauthentication policy, native-form same-origin CSRF
+exception, provider defaults and HD/live-qualification limits. Full storefront/
+dashboard presentation and automatic notification operations retain P21/P22/P25/P26.
+
 P11 [experiment gate](../migration/python-django/p11/README.md) owns
 `tools/migration_benchmark/protocol_p11.json`, `candidate_probe.py` and
 `compare.py`. `runner.py --protocol p11 --implementation django` runs the

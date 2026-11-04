@@ -674,3 +674,137 @@ These are synthetic database, provider and Telegram fixtures. They do not
 qualify live custody/funding, actual historical data/keys, production performance,
 new UI/auth adapters, deployment or CI/CD. The existing P07/P09 proofs remain
 the shared owners of unrelated checkout and delivery scenarios.
+
+## P19: authentication, identity linking and ownership compatibility (#695)
+
+`candidate/lhie_candidate/auth/` ports the existing Customer authentication
+owners without reusing admin `users`, Django's default User, or a second
+identity/challenge/mail ledger. Work is on `migration/p19-authentication-695`,
+from integration revision `d7f4d45c`; blockers #693, #685 and #683 were closed.
+H1's continue decision permits this local implementation, not production access.
+
+`AuthService` owns pending registration, purpose/version-bound verification,
+password login, first-password enrollment, Telegram email enrollment, OTP,
+reset/revocation and retained magic links. It reuses P03's explicit
+`sha384-v1`/raw bcrypt/Argon verification and Laravel encrypted JSON codec.
+New Customer password writes use Laravel-readable bcrypt over the versioned
+SHA-384 input; existing raw passwords rehash only after successful proof.
+Admin verification uses the raw legacy hasher, never the Customer prehash.
+Neither authentication nor linking moves money, receivers or Orders.
+
+Google authorization-code state commits as consumed before provider I/O.
+The fixed-endpoint adapter requires a verified subject/email, exact HTTPS
+callback and configuration/browser binding; email collision requires explicit
+fresh linking. Unlink requires another verified login method and preserves the
+original freshness timestamp. The HTTP factory is unavailable by default;
+disposable provider injection is not live Google qualification.
+
+Telegram deep links use the P01 boundary's verified `getMe` identity, not a
+separate username setting or ENV. `/telegram/identity` only reads the already
+attested Testing Bot, caches success for one hour and failure for 30 seconds,
+and returns no credentials. Fake mode supplies no bot identity. Reserved
+`wa_`/`wa_confirm:` ingress is encrypted in the existing navigation inbox,
+intercepted before Customer resolution, and erased after terminal processing.
+Private actor preparation, one-use confirmation and originating-browser
+consumption remain separate. Unknown actors are not auto-registered; canonical
+Telegram conflicts never merge Customers. Telegram unlink remains unavailable.
+
+### Guards, provisioning and H2 session policy
+
+Explicitly provision `auth/schema.sql` and `auth/grants.sql` only in the admitted
+disposable database, alongside the existing navigation/checkout grants.
+Startup installs neither legacy tables nor auth metadata. Readiness admits the
+reviewed auth column writes and identity deletion only; other public table-wide
+writes remain denied. Short Customer-write transactions use the existing
+transaction-local legacy trigger search path; the connection's default search
+path remains `django_candidate`.
+
+`django_candidate.browser_sessions` stores hashed random selectors and bounded
+server-side metadata. Secure, HttpOnly, SameSite=Lax cookies support the Google
+return without sharing Customer/admin authority. Authentication destroys the old
+session selector and rotates CSRF state. Every protected Customer request checks
+the current authentication version and applicable nullable-email provider proof;
+admin requests independently recheck `users`, role, allowlist and password binding.
+Admin limits retain five identity failures and ten IP failures per 60 seconds;
+successful admin login clears its identity bucket without erasing IP failures.
+Customer limits retain their existing separate bounds. Redis admission uses
+atomic HMAC-keyed reservations and fails closed; OTP attempts remain durable.
+
+The candidate policy proposed for H2 is explicit reauthentication for **both**
+old PHP guards. PHP cookies/session payloads are never imported, deserialized or
+accepted as candidate authority. Old browser-bound OTP/Google/Telegram proofs
+must restart. Unexpired unbound verification/reset/magic capabilities remain
+compatible; no startup sweep silently revokes them. Recovery Key hashes and
+signed links remain unchanged. Old guest browser grants require invoice/key
+re-entry, not a new key. Candidate reset revokes other Customer sessions and
+outstanding Customer grants while preserving admin sessions and guest recovery.
+H2 must approve this policy and reconcile actual hash/key coverage, the existing
+admin allowlist and legacy application origin before cutover. No dual auth
+writer or automatic production activation is authorized.
+
+HTTP routes are contract adapters and bounded owned-Order metadata readers;
+P21/P22 still own full storefront/dashboard presentation and credential pages.
+Invoice/key recovery grants exactly 30 minutes. Paid guest claiming locks both
+Customers in ascending order before the Order, rechecks existing ownership and
+all account-identity evidence, and writes no Customer ID into an admin audit FK.
+Laravel signed links retain exact raw-query MAC/expiry checks, with an explicit
+trusted `CANDIDATE_LEGACY_APP_URL` setting for the old origin.
+
+Confirmation GETs never consume capabilities. Their native POST forms use
+`Referrer-Policy: same-origin`: Chromium otherwise sends `Origin: null` from a
+`no-referrer` document and Django correctly rejects it. No referrer crosses
+origins; owned-resource/JSON responses retain `no-referrer`. CSRF stays
+session-bound and rejects foreign Origin and foreign/stale tokens.
+
+### Mail and bounded recovery
+
+`MailWork` writes the existing encrypted `customer_auth_mail_works` atomically
+with its grant. A 120-second attempt-fenced lease keeps SMTP outside locks.
+Retries reuse the same grant, cap at five attempts, and erase terminal payloads;
+a stale successful sender cannot overwrite a newer attempt's retry state.
+`python auth_mail.py --once` performs a bounded 100-work recovery in the admitted
+namespace. Its transport is only P01's discard sink at `127.0.0.1:1025`, never
+a logging or production mailer. Automatic notification scheduling/retention
+keeps its P25/P26 owner; no worker family or scheduler is activated here.
+
+### P19 verification and limits
+
+```sh
+python3 tools/migration_harness/smoke_checkout.py --auth
+(cd candidate && .venv/bin/python -m unittest \
+  tests.test_auth_core tests.test_auth_providers tests.test_auth_http \
+  tests.test_http tests.test_navigation_ingress -v)
+python3 -m unittest discover -s tests/migration_harness -p test_p09_relay.py -v
+```
+
+This extends the existing P01/P03/P07 runner, not a second harness/report.
+The single private manifest is `.local/migration-p19/verification.json` with
+source, PHP-owner, migration and image digests. Observed: Python 3.13.18,
+Django 5.2.18 and PostgreSQL 16.15; real WSGI, Redis, SMTP sink and synchronized
+PostgreSQL consumption/registration/subject-link/guest-claim races passed.
+Already-admitted registration contenders bypass only the cache limiter fixture
+to compete at the database uniqueness boundary. Financial, inventory, Payment
+and Order-item snapshots stayed byte-identical. PHP-generated raw/sha384 hashes,
+Recovery Key and signed invoice worked without reset or regeneration. Fresh
+P03 bidirectional identity vectors also passed on the host.
+
+The 45 focused candidate regressions and nine relay regressions passed.
+The PostgreSQL smoke caught raw JSON-text session decoding; its retained
+regression now proves authenticated reload and CSRF/logout behavior. A separate
+synthetic browser fixture exercised the actual confirmation renderer at 390px
+and 1280px, fragment autofill/scrubbing, visible keyboard focus, native submission,
+invalid-token denial and no-JavaScript magic-link submission. No overflow was
+observed; native black/white text measured 21:1. This browser fixture used
+synthetic in-memory session/core boundaries, not live account/provider proof;
+the positive auth/link/recovery-to-owned-read proof is the PostgreSQL/HTTP smoke.
+Full visual parity and real-device qualification remain P21/P27.
+
+Runtime source was mounted read-only over the existing locked P09 dependency
+image. The fresh boundary build could not fetch Alpine packages with networking
+disabled; the exercised P19 boundary instead overlays current source on the
+cached P09 firewall runtime. Its exact image identity is in the manifest.
+This is not a clean-image-build or performance qualification.
+
+No production data/secrets, real Google/Telegram identities, customer mail,
+provider activation, deployment or CI/CD was used. HD owns actual historical
+data/key qualification; H2/H3 retain readiness, execution and retirement authority.

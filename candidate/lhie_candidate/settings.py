@@ -14,6 +14,8 @@ INSTALLED_APPS = ["django.contrib.staticfiles"]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "lhie_candidate.http.PayloadSafeMiddleware",
+    "lhie_candidate.auth.sessions.SessionMiddleware",
+    "lhie_candidate.auth.sessions.CsrfMiddleware",
 ]
 DATABASES = {
     "default": {
@@ -61,13 +63,15 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 16384
 FILE_UPLOAD_MAX_MEMORY_SIZE = 16384
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 32
 DATA_UPLOAD_MAX_NUMBER_FILES = 0
-SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
+SESSION_COOKIE_NAME = "candidate_browser"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = True
-SESSION_COOKIE_SAMESITE = "Strict"
+SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SECURE = True
-CSRF_COOKIE_SAMESITE = "Strict"
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_FAILURE_VIEW = "lhie_candidate.auth.http.csrf_failure"
+CSRF_USE_SESSIONS = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "no-referrer"
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"

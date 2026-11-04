@@ -31,13 +31,14 @@ def cli(*args):
 def main():
     receipt = sys.argv[1:] == ['--receipt']
     lifecycle = sys.argv[1:] == ['--lifecycle']
-    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle']):
-        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle]')
+    auth = sys.argv[1:] == ['--auth']
+    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth']):
+        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth]')
     os.umask(0o077)
-    scope = 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
+    scope = 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
     harness.STATE = ROOT / '.local' / scope / 'lifecycle'
-    harness.PREFIX = 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
-    harness.IMAGE = 'lhie-p09-boundary:local' if receipt or lifecycle else 'lhie-p01-boundary:1'
+    harness.PREFIX = 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
+    harness.IMAGE = 'lhie-p19-boundary:local' if auth else 'lhie-p09-boundary:local' if receipt or lifecycle else 'lhie-p01-boundary:1'
     if not (harness.STATE / 'candidate/config.json').exists():
         cli('init','candidate')
     config = harness.validate(json.loads((harness.STATE / 'candidate/config.json').read_text()))
@@ -55,7 +56,7 @@ def main():
         database = container('candidate','database')
         php(boundary,'php artisan migrate --force --no-interaction')
         fixture = (ROOT / 'tools/migration_harness/checkout_fixture.php').read_text().removeprefix('<?php')
-        fixtures = json.loads(php(boundary,'php -r ' + shlex.quote(fixture)))
+        fixtures = json.loads(php(boundary, ('P19_AUTH_SMOKE=1 ' if auth else '') + 'php -r ' + shlex.quote(fixture)))
         if receipt:
             customer_id = int(fixtures['python']['customer_id'])
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
@@ -67,10 +68,13 @@ def main():
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
         if receipt or lifecycle:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
+        if auth:
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/schema.sql').read_text()
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/grants.sql').read_text()
         docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable','-c',schema)
         directory = harness.STATE / 'candidate'
         oracle_key = directory / 'p09-oracle-key'
-        if receipt or lifecycle:
+        if receipt or lifecycle or auth:
             oracle_key.write_text('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n')
             oracle_key.chmod(0o600)
         command = ['docker','run','--rm','-i','--network','container:'+boundary,
@@ -80,13 +84,14 @@ def main():
             '--mount',f'type=bind,src={ROOT / "candidate"},dst=/opt/candidate,readonly',
             '--mount',f'type=bind,src={directory / "candidate.json"},dst=/run/harness/candidate.json,readonly',
             '--mount',f'type=bind,src={directory / "django-key"},dst=/run/harness/django-key,readonly',
-            '--mount',f'type=bind,src={oracle_key if receipt or lifecycle else directory / "app-key"},dst=/run/harness/app-key,readonly',
+            '--mount',f'type=bind,src={oracle_key if receipt or lifecycle or auth else directory / "app-key"},dst=/run/harness/app-key,readonly',
             '--mount',f'type=bind,src={output},dst=/evidence',
             '--env','P07_CHECKOUT_SMOKE=disposable-local-only',
             '--env',f'P07_RECEIPT_SMOKE={"1" if receipt else "0"}',
-            '--env',f'P12_LIFECYCLE_SMOKE={"1" if lifecycle else "0"}','--entrypoint','python',
-            'lhie-p09-candidate:local' if receipt or lifecycle else 'lhie-p05-candidate:1','smoke_checkout.py']
-        probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=180)
+            '--env',f'P12_LIFECYCLE_SMOKE={"1" if lifecycle else "0"}',
+            '--env',f'P19_AUTH_SMOKE={"1" if auth else "0"}','--entrypoint','python',
+            'lhie-p09-candidate:local' if receipt or lifecycle or auth else 'lhie-p05-candidate:1','smoke_checkout.py']
+        probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=240)
         if probe.returncode:
             if receipt:
                 diagnostic = [json.loads(line) for line in probe.stderr.splitlines() if line.startswith('{')]
@@ -115,12 +120,21 @@ def main():
                 'candidate/lhie_candidate/receipt/source.py', 'candidate/lhie_candidate/receipt/service.py',
                 'candidate/lhie_candidate/receipt/protocol.py', 'candidate/lhie_candidate/payments/claimed_order.py',
                 'candidate/lhie_candidate/navigation/presentation.py'))
+        if auth:
+            sources.extend(sorted((ROOT / 'candidate/lhie_candidate/auth').glob('*')))
+            sources.extend(ROOT / name for name in (
+                'candidate/tests/test_auth_postgres.py', 'candidate/lhie_candidate/settings.py',
+                'candidate/lhie_candidate/urls.py', 'candidate/lhie_candidate/http.py',
+                'candidate/lhie_candidate/navigation/ingress.py', 'candidate/lhie_candidate/navigation/processor.py',
+                'candidate/auth_mail.py', 'tools/migration_harness/boundary.py',
+                'candidate/tests/test_auth_core.py', 'candidate/tests/test_auth_http.py',
+                'candidate/tests/test_auth_providers.py', 'tests/migration_harness/test_p09_relay.py'))
         observed['source_sha256'] = {str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest()
                                       for path in sources if path.is_file()}
         observed['base_revision'] = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-        observed['dependency_image'] = docker('image','inspect','lhie-p09-candidate:local' if receipt or lifecycle else 'lhie-p05-candidate:1','--format','{{.Id}}')
-        if receipt:
-            observed['boundary_image'] = docker('image','inspect','lhie-p09-boundary:local','--format','{{.Id}}')
+        observed['dependency_image'] = docker('image','inspect','lhie-p09-candidate:local' if receipt or lifecycle or auth else 'lhie-p05-candidate:1','--format','{{.Id}}')
+        if receipt or auth:
+            observed['boundary_image'] = docker('image','inspect',harness.IMAGE,'--format','{{.Id}}')
         migration_digest = hashlib.sha256()
         for path in sorted((ROOT / 'src/database/migrations').glob('*.php')):
             migration_digest.update(str(path.relative_to(ROOT)).encode() + b'\0' + path.read_bytes() + b'\0')
@@ -143,6 +157,18 @@ def main():
                     'src/app/Services/Telegram/TelegramOutboundEffectService.php',
                     'src/app/Services/Telegram/TelegramReceiptNotifier.php',
                     'src/app/Services/Telegram/ReceiptDeliveryPipeline.php')})
+        if auth:
+            observed['legacy_owner_sha256'].update({name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                for name in ('src/app/Services/Customer/CustomerPasswordAuthenticationService.php',
+                    'src/app/Services/Customer/CustomerEmailOtpService.php',
+                    'src/app/Services/Customer/CustomerAuthenticationService.php',
+                    'src/app/Services/Customer/CustomerGoogleAuthenticationService.php',
+                    'src/app/Services/Customer/CustomerTelegramAuthenticationService.php',
+                    'src/app/Services/Customer/CustomerAuthMailDeliveryService.php',
+                    'src/app/Services/Customer/CustomerOrderClaimService.php',
+                    'src/app/Services/Telegram/TelegramBotIdentity.php',
+                    'src/app/Storefront/StorefrontOrderAccess.php',
+                    'src/app/Http/Controllers/Admin/AdminLoginController.php')})
         observed['postgres_version'] = docker('exec',database,'postgres','--version')
         observed['harness_manifest'] = str(Path(manifest).relative_to(ROOT))
         observed['limits'] = ['Synthetic local data/test keys only; no production schema/history qualification',
@@ -159,6 +185,11 @@ def main():
                 'Provider observations use the existing Unix-socket fixture, not live provider qualification',
                 'P18 acquisition/network recovery and P19/P23/P24 authentication/UI adapters retain their ticket ownership',
                 'No production, Telegram sends, provider activation, deployment or CI/CD operations']
+        if auth:
+            observed['limits'] = ['Synthetic disposable PostgreSQL/Redis, PHP-generated hashes/Recovery Key/signed link, local SMTP sink',
+                'No real Google/Telegram identities, mail recipients, historical key qualification or production activation',
+                'Explicit additive browser session metadata; old PHP cookies require relogin at H2, never deserialized',
+                'No production, deployment, provider activation or CI/CD operations']
         (output / 'verification.json').write_text(json.dumps(observed,indent=2)+'\n')
         (output / 'probe-failure.txt').unlink(missing_ok=True)
         (output / 'probe-failure.stderr').unlink(missing_ok=True)
