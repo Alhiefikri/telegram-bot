@@ -8,9 +8,12 @@ use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\CustomerUsdtDepositReceiver;
 use App\Models\CustomerUsdtFundingReservation;
 use App\Models\CustomerUsdtTopUp;
+use App\Models\ManualPaymentSetting;
 use App\Models\UsdtBscRailInvoice;
 use App\Models\UsdtSharedTopUpReceiver;
 use App\Services\Bsc\BscFinalReceiptInspection;
+use App\Services\Bsc\BscInvoiceAttribution;
+use App\Services\Bsc\BscTokenAmount;
 use App\Services\Bsc\BscTransactionInput;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptClaims;
 use App\Services\MoneyReceipts\MoneyReceiptIdentity;
@@ -41,6 +44,8 @@ final class UsdtTopUpSettlement
         private readonly ExternalMoneyReceiptClaims $receipts,
         private readonly CustomerUsdtFundingReservationService $reservations,
         private readonly UsdtTopUpOutbound $outbound,
+        private readonly BscInvoiceAttribution $attribution,
+        private readonly BscTokenAmount $amounts,
     ) {}
 
     /** Trusted channel adapter supplies the authenticated Customer, never a client-selected owner. */
@@ -182,6 +187,9 @@ final class UsdtTopUpSettlement
             // Compatible funding graph: Customer -> currency account -> immutable
             // target/receiver -> work -> reservation/resolution -> receipt.
             $customer = Customer::query()->whereKey($target->customer_id)->lockForUpdate()->firstOrFail();
+            if ($isShared && ManualPaymentSetting::query()->orderByDesc('is_active')->orderBy('id')->lockForUpdate()->first() === null) {
+                return;
+            }
             $this->ledger->lockForTransaction($customer);
             CustomerUsdtTopUp::query()->whereKey($target->id)->lockForUpdate()->firstOrFail();
             $receiver = $isShared ? null
@@ -271,6 +279,28 @@ final class UsdtTopUpSettlement
                 $expectedExpires = (int) $invoice->expires_at_epoch;
                 $expectedMinConfirmations = (int) $invoice->minimum_confirmations;
             }
+            if (($inspection->verified() || $inspection->reason === 'canonical_final_amount_mismatch') && $inspection->evidence !== null) {
+                $evidence = $inspection->evidence;
+                if ($isShared && (DB::table('customer_usdt_top_up_inbox')->where('tx_hash', $evidence->txHash)
+                    ->where('top_up_id', '<>', $target->id)->exists()
+                    || ($evidence->blockTimestamp !== null && $this->attribution->hasConflict(
+                        $expectedReceiver, $expectedContract, $evidence->amountUnits,
+                        $this->amounts->expectedTokenUnits((int) $target->payable_micro, $expectedDecimals),
+                        $expectedDecimals, $evidence->blockTimestamp, topUpIntentId: (string) $target->intent_id,
+                    )))) {
+                    $inspection = new BscFinalReceiptInspection('review', 'shared_attribution_ambiguous', $evidence);
+                } elseif ($inspection->reason === 'canonical_final_amount_mismatch') {
+                    try {
+                        $actual = UsdtMicroAmount::fromRawTokenUnits($evidence->amountUnits, $expectedDecimals)->units();
+                        $expected = (int) $target->payable_micro;
+                        if (abs($actual - $expected) <= 100_000 && $actual > (int) $target->fee_micro) {
+                            $inspection = new BscFinalReceiptInspection('verified', 'canonical_final_within_tolerance', $evidence);
+                        }
+                    } catch (InvalidArgumentException) {
+                        $inspection = new BscFinalReceiptInspection('review', 'amount_not_representable', $evidence);
+                    }
+                }
+            }
             $evidenceVersion = (int) $work->evidence_version + 1;
             $evidenceId = DB::table('customer_usdt_top_up_evidence')->insertGetId([
                 'top_up_id' => $target->id, 'inbox_id' => $claim['inbox']->id, 'version' => $evidenceVersion,
@@ -282,7 +312,8 @@ final class UsdtTopUpSettlement
             if (($inspection->verified() || $inspection->reason === 'canonical_final_amount_mismatch') && $inspection->evidence !== null) {
                 $evidence = $inspection->evidence;
                 $amount = UsdtMicroAmount::fromRawTokenUnits($evidence->amountUnits, $expectedDecimals);
-                if (($inspection->verified() && $amount->units() !== (int) $target->payable_micro) || $evidence->txHash !== $claim['inbox']->tx_hash
+                if (($inspection->verified() && (abs($amount->units() - (int) $target->payable_micro) > 100_000
+                    || $amount->units() <= (int) $target->fee_micro)) || $evidence->txHash !== $claim['inbox']->tx_hash
                     || $evidence->tokenContract !== $expectedContract || $evidence->receiverAddress !== $expectedReceiver
                     || $evidence->blockTimestamp === null || $evidence->blockTimestamp->getTimestamp() < $expectedStarts
                     || $evidence->blockHash === null || ($evidence->confirmations ?? 0) < $expectedMinConfirmations) {
@@ -303,7 +334,7 @@ final class UsdtTopUpSettlement
                         $error = $inspection->reason;
                     } elseif (! in_array($state, self::TERMINAL, true) && $reservation->resolved_at === null) {
                         $entry = $this->ledger->creditVerifiedTopUp($customer,
-                            new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits($target->amount_micro),
+                            new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits($amount->units() - (int) $target->fee_micro),
                                 $target->id, (string) $receiptId, (string) $evidenceId), 'usdt-top-up:'.$target->id);
                         $entry = CustomerUsdtBalanceEntry::query()->findOrFail($entry->entryId);
                         $late = $target->expires_at->isPast() || $evidence->blockTimestamp->getTimestamp() > $expectedExpires;
@@ -318,7 +349,7 @@ final class UsdtTopUpSettlement
                         }
                         $this->reservations->markSettled($customer, $target->reservation_id, $entry->id, $target->id);
                         AuditLog::create(['action' => 'usdt_top_up.settled', 'subject_type' => CustomerUsdtTopUp::class,
-                            'subject_id' => $target->id, 'new_values' => ['currency' => 'USDT', 'amount_micro' => (string) $target->amount_micro,
+                            'subject_id' => $target->id, 'new_values' => ['currency' => 'USDT', 'amount_micro' => (string) $entry->amount_micro,
                                 'entry_id' => $entry->id, 'receipt_id' => $receiptId, 'late' => $late]]);
                         $this->outbound->recordReceipt($target, $entry, $late);
                         $state = 'settled';

@@ -153,7 +153,7 @@ final class UsdtTopUpReviewPostgresConcurrencyTest extends TestCase
         $target = $intents->claim($customer, '951002', (int) $root->id, (int) $root->message_id,
             (string) $opened->intent->nonce, 'confirm')->topUp;
         $rpc = app(BscVerificationRpcClientInterface::class);
-        $log = $rpc->log(amount: '990000000000000000', receiver: $address);
+        $log = $rpc->log(amount: '800000000000000000', receiver: $address);
         $log['transactionHash'] = $hash;
         $rpc->receipt['transactionHash'] = $hash;
         $rpc->receipt['logs'] = [$log];
@@ -173,7 +173,7 @@ final class UsdtTopUpReviewPostgresConcurrencyTest extends TestCase
         $this->assertWorkersSucceeded($results);
         $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $target->id)->count());
         $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
-        $this->assertSame(990000, (int) DB::table('customer_usdt_balance_accounts')->where('customer_id', $customer->id)->value('balance_micro'));
+        $this->assertSame(800000, (int) DB::table('customer_usdt_balance_accounts')->where('customer_id', $customer->id)->value('balance_micro'));
         $this->assertSame(1, DB::table('external_money_receipts')->where('tx_hash', $hash)->count());
     }
 

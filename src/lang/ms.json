@@ -248,7 +248,7 @@
   "balance.usdt.receipt.credit": "Dikreditkan ke baki USDT: :amount USDT",
   "balance.usdt.receipt.reference": "Resit: :reference",
   "balance.usdt.receipt.late": "Bayaran lewat disahkan; tambah baki asal dikreditkan sekali.",
-  "balance.usdt.receipt.revised": "Hasil semakan: kredit asal :original USDT; kredit diluluskan :approved USDT. Invois asal tidak diubah.",
+  "balance.usdt.receipt.revised": "Kredit asal :original USDT; kredit masuk :approved USDT. Invois asal tidak diubah.",
   "balance.topup.receipt.support": "Simpan resit ini. Perlukan bantuan? Buka Sokongan.",
   "balance.compensation.title": "✅ Pampasan baki telah selesai",
   "balance.compensation.credit": "Baki ditambah: :amount",

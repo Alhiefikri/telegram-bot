@@ -248,7 +248,7 @@
   "balance.usdt.receipt.credit": "Dikreditkan ke saldo USDT: :amount USDT",
   "balance.usdt.receipt.reference": "Tanda terima: :reference",
   "balance.usdt.receipt.late": "Pembayaran terlambat terverifikasi; top-up asli dikreditkan satu kali.",
-  "balance.usdt.receipt.revised": "Hasil review: kredit awal :original USDT; kredit disetujui :approved USDT. Invoice asli tidak diubah.",
+  "balance.usdt.receipt.revised": "Kredit awal :original USDT; kredit masuk :approved USDT. Invoice asli tidak diubah.",
   "balance.topup.receipt.support": "Simpan bukti ini. Butuh bantuan? Buka Support.",
   "balance.compensation.title": "✅ Kompensasi saldo telah diproses",
   "balance.compensation.credit": "Saldo ditambahkan: :amount",

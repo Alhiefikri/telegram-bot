@@ -28,3 +28,13 @@ Owner-requested checkout policy replaces the 72-hour all-status amount reservati
 Discovery excludes matching logs whose authoritative block timestamp precedes the new Payment's creation before counting candidate transfers. Missing block facts fail pending through the existing RPC-error path. Receipt validation, confirmation thresholds, canonical block checks and global receipt/parent claims remain authoritative.
 
 Tradeoff: shared-address amount reuse cannot identify a closed invoice's delayed transfer when it lands inside a newer same-amount invoice's window. Creation-time filtering excludes earlier transfers, not this indistinguishable late-money case. Dedicated invoice receivers would remove that attribution ambiguity; this change does not introduce them.
+
+## BSC amount tolerance
+
+An unambiguous BSC checkout transfer is eligible when its actual token amount
+is within 0.1 USDT of the invoice, inclusive. Exact matches take precedence;
+competing checkout or shared top-up invoices, or multiple matching transfers,
+remain in manual review. The actual on-chain amount is retained in the receipt
+and payment evidence. Receiver, token, block, confirmation, deadline and
+one-time receipt claim checks remain in force. This tolerance does not apply
+to Binance Pay.

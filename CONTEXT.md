@@ -177,7 +177,7 @@ A confirmed USD funding target that the Customer closed before any payment settl
 _Avoid_: refund, expired target
 
 **BSC Payment Verification**:
-The process of checking a USDT BEP20 transfer on BNB Smart Chain against the immutable receiver, token contract, expected amount, payment window, and confirmation policy of a pending Payment. A transaction hash is evidence to look up, not proof accepted without on-chain validation.
+The process of checking a USDT BEP20 transfer on BNB Smart Chain against the immutable receiver, token contract, expected amount, payment window, and confirmation policy of a pending Payment. An unambiguous amount within 0.1 USDT of the invoice is eligible, including both boundaries. A transaction hash is evidence to look up, not proof accepted without on-chain validation.
 _Avoid_: BSC screenshot verification, explorer-page verification, Binance Pay verification
 
 **BSC Receiving Address**:
@@ -275,7 +275,7 @@ A Customer-owned expiring confirmation binding exact micro-USDT credit, applicat
 _Avoid_: USDT invoice, deposit receipt, available funds
 
 **USDT Top-up**:
-A confirmed Customer funding target with an immutable identity, currency, amount, fee, receiver/token/network/finality and payment deadline snapshot, one U3 active-target reservation and durable preparation/settlement work. U6 confirmation replay returns the same target; U5 preparation retains its reference and never switches receivers. U7 accepts authenticated lookup hints into a durable inbox, verifies authoritative chain evidence outside transactions and consumes one receipt under DB lease/version fencing. Exact final late money can settle the original source once; expiry retains unresolved exposure, while settled, compensated and externally returned sources never reopen. Receipt delivery failure cannot change money. Production funding authorization remains a separate gate.
+A confirmed Customer funding target with an immutable identity, currency, amount, fee, receiver/token/network/finality and payment deadline snapshot, one U3 active-target reservation and durable preparation/settlement work. U6 confirmation replay returns the same target; U5 preparation retains its reference and never switches receivers. U7 accepts authenticated lookup hints into a durable inbox, verifies authoritative chain evidence outside transactions and consumes one receipt under DB lease/version fencing. An unambiguous final BSC transfer within 0.1 USDT of the payable amount can settle once, including late money; the credited balance is the actual received amount less the snapshotted fee. Expiry retains unresolved exposure, while settled, compensated and externally returned sources never reopen. Receipt delivery failure cannot change money. Production funding authorization remains a separate gate.
 _Avoid_: Order Payment, automatic currency conversion
 
 **USDT Exception Resolution**:

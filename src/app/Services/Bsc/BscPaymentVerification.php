@@ -8,12 +8,14 @@ use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Models\BscPaymentTransferEvidence;
 use App\Models\ExternalMoneyReceiptReservation;
+use App\Models\InventoryMovement;
 use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\PaymentEvent;
+use App\Models\Product;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
@@ -545,9 +547,8 @@ final class BscPaymentVerification
                 expectedAmountUnits: (string) $detail->expected_token_units,
                 submittedHash: $hash,
             );
+            $inspection = $this->withTolerantMatches($inspection, $detail);
             if ($inspection->exactTransfers === []) {
-                $evidence = $inspection->transfers[0] ?? null;
-
                 return $this->flagForManualReview(
                     payment: $payment,
                     detail: $detail,
@@ -555,15 +556,13 @@ final class BscPaymentVerification
                     outcome: BscVerificationOutcome::ManualReview,
                     detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
                     reason: ManualFulfillmentReview::REASON_BSC_MISMATCH,
-                    hash: $hash,
-                    evidence: $evidence,
+                    hash: null,
+                    evidence: null,
                     metadata: ['reason' => 'late_transfer_did_not_match_payment'],
                 );
             }
 
             if (count($inspection->exactTransfers) !== 1) {
-                $evidence = $inspection->exactTransfers[0];
-
                 return $this->flagForManualReview(
                     payment: $payment,
                     detail: $detail,
@@ -571,8 +570,8 @@ final class BscPaymentVerification
                     outcome: BscVerificationOutcome::ManualReview,
                     detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
                     reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
-                    hash: $hash,
-                    evidence: $evidence,
+                    hash: null,
+                    evidence: null,
                     metadata: ['reason' => 'late_transfer_multiple_matching_logs'],
                 );
             }
@@ -647,6 +646,19 @@ final class BscPaymentVerification
             $evidence = $evidence
                 ->withBlockHash($blockHash ?? $receiptBlockHash ?? $evidence->blockHash)
                 ->withChainFacts($blockTimestamp, $latestNumber - $blockNumber + 1);
+            if ($this->attributionConflict($payment, $detail, $evidence)) {
+                return $this->flagForManualReview(
+                    payment: $payment,
+                    detail: $detail,
+                    submissionVersion: $submissionVersion,
+                    outcome: BscVerificationOutcome::ManualReview,
+                    detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                    reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                    hash: null,
+                    evidence: null,
+                    metadata: ['reason' => 'transfer_matches_another_invoice'],
+                );
+            }
 
             return $this->recordLatePayment($payment, $evidence, $submissionVersion);
         } catch (BscRpcException $exception) {
@@ -700,6 +712,7 @@ final class BscPaymentVerification
             expectedAmountUnits: (string) $detail->expected_token_units,
             submittedHash: $hash,
         );
+        $inspection = $this->withTolerantMatches($inspection, $detail);
 
         if (! $inspection->successfulReceipt()) {
             return $this->flagForManualReview(
@@ -753,6 +766,28 @@ final class BscPaymentVerification
                     metadata: ['reason' => 'transaction_already_used'],
                 );
             }
+            if ($evidence->tokenContract === strtolower((string) $detail->token_contract)
+                && $evidence->receiverAddress === strtolower((string) $detail->receiver_address)) {
+                $block = $this->rpc->blockByNumber($evidence->blockNumber);
+                $timestamp = $this->blockTimestamp($block['timestamp'] ?? null);
+                if ($timestamp === null || $this->blockNumber($block['number'] ?? null) !== $evidence->blockNumber) {
+                    throw new BscRpcException('BSC RPC returned incomplete transfer-block facts.');
+                }
+                $timedEvidence = $evidence->withChainFacts($timestamp, 0);
+                if ($this->attributionConflict($payment, $detail, $timedEvidence)) {
+                    return $this->flagForManualReview(
+                        payment: $payment,
+                        detail: $detail,
+                        submissionVersion: $submissionVersion,
+                        outcome: BscVerificationOutcome::ManualReview,
+                        detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                        reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                        hash: null,
+                        evidence: null,
+                        metadata: ['reason' => 'transfer_matches_another_invoice'],
+                    );
+                }
+            }
 
             return $this->flagForManualReview(
                 payment: $payment,
@@ -768,8 +803,6 @@ final class BscPaymentVerification
         }
 
         if (count($inspection->exactTransfers) !== 1) {
-            $evidence = $inspection->exactTransfers[0];
-
             return $this->flagForManualReview(
                 payment: $payment,
                 detail: $detail,
@@ -777,8 +810,8 @@ final class BscPaymentVerification
                 outcome: BscVerificationOutcome::ManualReview,
                 detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
                 reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
-                hash: $hash,
-                evidence: $evidence,
+                hash: null,
+                evidence: null,
                 metadata: [
                     'reason' => 'multiple_matching_transfer_logs',
                     'matching_log_count' => count($inspection->exactTransfers),
@@ -881,6 +914,40 @@ final class BscPaymentVerification
                 ],
             );
         }
+        if ($this->evidenceBelongsToAnotherPayment($payment, $evidence)) {
+            $this->receipts->reservePayment(
+                $payment,
+                ExternalMoneyReceiptReservation::REASON_REGISTRY_CONFLICT,
+                ['tx_hash' => $evidence->txHash, 'reason' => 'legacy_evidence_owner'],
+            );
+
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::TransactionAlreadyUsed,
+                detailStatus: PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
+                reason: ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                hash: $evidence->txHash,
+                evidence: $evidence,
+                metadata: ['reason' => 'transaction_already_used'],
+            );
+        }
+
+        if ($this->attributionConflict($payment, $detail, $evidence)) {
+            return $this->flagForManualReview(
+                payment: $payment,
+                detail: $detail,
+                submissionVersion: $submissionVersion,
+                outcome: BscVerificationOutcome::ManualReview,
+                detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                hash: null,
+                evidence: null,
+                metadata: ['reason' => 'transfer_matches_another_invoice'],
+            );
+        }
+
         $graceUntil = $detail->verification_grace_until;
         if ($graceUntil === null && $blockTimestamp->timestamp <= $deadline->timestamp) {
             $graceUntil = $deadline->copy()->addMinutes($this->confirmationGraceMinutes($detail));
@@ -913,7 +980,9 @@ final class BscPaymentVerification
             );
         }
 
-        $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion);
+        if ($evidence->amountUnits === (string) $detail->expected_token_units) {
+            $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion);
+        }
 
         if (($evidence->confirmations ?? 0) < $this->minimumConfirmations($detail)) {
             $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion, $evidence->txHash, [
@@ -988,6 +1057,19 @@ final class BscPaymentVerification
 
                 if ((int) $lockedDetail->tx_submission_version !== $submissionVersion) {
                     return BscVerificationOutcome::StaleSubmission;
+                }
+                $setting = ManualPaymentSetting::query()->where('is_active', true)->oldest('id')->lockForUpdate()->first()
+                    ?? ManualPaymentSetting::query()->oldest('id')->lockForUpdate()->first();
+                if (($setting === null && $evidence->amountUnits !== (string) $lockedDetail->expected_token_units)
+                    || $this->attributionConflict($locked, $lockedDetail, $evidence)) {
+                    $lockedDetail->update([
+                        'verification_status' => PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                        'last_verified_at' => now(),
+                        'evidence_payload' => ['reason' => 'transfer_matches_another_invoice'],
+                    ]);
+                    $this->ensureManualFulfillmentReview($locked, ManualFulfillmentReview::REASON_BSC_AMBIGUOUS, $evidence->txHash);
+
+                    return BscVerificationOutcome::ManualReview;
                 }
 
                 $existing = BscPaymentTransferEvidence::query()
@@ -1218,6 +1300,24 @@ final class BscPaymentVerification
 
                     return BscVerificationOutcome::OrderNotPending;
                 }
+                $items = $order->orderItems()->orderBy('product_id')->lockForUpdate()->get();
+                InventoryMovement::query()->where('order_id', $order->id)->lockForUpdate()->get();
+                Product::withTrashed()->whereIn('id', $items->pluck('product_id'))->orderBy('id')
+                    ->lock(DB::getDriverName() === 'pgsql' ? 'for no key update' : true)->get();
+                $setting = ManualPaymentSetting::query()->where('is_active', true)->oldest('id')->lockForUpdate()->first()
+                    ?? ManualPaymentSetting::query()->oldest('id')->lockForUpdate()->first();
+                if (($setting === null && $evidence->amountUnits !== (string) $lockedDetail->expected_token_units)
+                    || $this->attributionConflict($locked, $lockedDetail, $evidence)) {
+                    $lockedDetail->update([
+                        'verification_status' => PaymentBscDetail::STATUS_MANUAL_REVIEW,
+                        'last_verified_at' => now(),
+                        'evidence_payload' => ['reason' => 'transfer_matches_another_invoice'],
+                    ]);
+                    $this->ensureManualFulfillmentReview($locked, ManualFulfillmentReview::REASON_BSC_AMBIGUOUS, $evidence->txHash);
+
+                    return BscVerificationOutcome::ManualReview;
+                }
+
                 $existing = BscPaymentTransferEvidence::query()
                     ->where('tx_hash', $evidence->txHash)
                     ->lockForUpdate()
@@ -1377,7 +1477,12 @@ final class BscPaymentVerification
         // clock-skew window must not compete with this invoice's deposit.
         $blockTimestamps = [];
         $exactTransfers = [];
-        foreach ($inspection->exactTransfers as $transfer) {
+        foreach ($inspection->transfers as $transfer) {
+            if ($transfer->tokenContract !== strtolower((string) $detail->token_contract)
+                || $transfer->receiverAddress !== strtolower((string) $detail->receiver_address)
+                || ! BscInvoiceAttribution::matches($transfer->amountUnits, (string) $detail->expected_token_units, (int) $detail->token_decimals)) {
+                continue;
+            }
             if (! isset($blockTimestamps[$transfer->blockNumber])) {
                 $block = $this->rpc->blockByNumber($transfer->blockNumber);
                 $timestamp = $this->blockTimestamp($block['timestamp'] ?? null);
@@ -1391,7 +1496,39 @@ final class BscPaymentVerification
             }
         }
 
-        return new BscTransferInspection($inspection->receiptState, $inspection->transfers, $exactTransfers);
+        return $this->withTolerantMatches(new BscTransferInspection($inspection->receiptState, $exactTransfers, []), $detail);
+    }
+
+    private function withTolerantMatches(BscTransferInspection $inspection, PaymentBscDetail $detail): BscTransferInspection
+    {
+        if ($inspection->exactTransfers !== []) {
+            return $inspection;
+        }
+
+        $matches = array_values(array_filter($inspection->transfers, static fn (BscTransferEvidence $transfer): bool => hash_equals(strtolower((string) $detail->token_contract), $transfer->tokenContract)
+            && hash_equals(strtolower((string) $detail->receiver_address), $transfer->receiverAddress)
+            && BscInvoiceAttribution::matches($transfer->amountUnits, (string) $detail->expected_token_units, (int) $detail->token_decimals)
+        ));
+        $exact = array_values(array_filter($matches, static fn (BscTransferEvidence $transfer): bool => $transfer->amountUnits === (string) $detail->expected_token_units
+        ));
+        if ($exact !== []) {
+            $matches = $exact;
+        }
+
+        return new BscTransferInspection($inspection->receiptState, $inspection->transfers, $matches);
+    }
+
+    private function attributionConflict(Payment $payment, PaymentBscDetail $detail, BscTransferEvidence $evidence): bool
+    {
+        return app(BscInvoiceAttribution::class)->hasConflict(
+            $evidence->receiverAddress,
+            $evidence->tokenContract,
+            $evidence->amountUnits,
+            (string) $detail->expected_token_units,
+            (int) $detail->token_decimals,
+            $evidence->blockTimestamp,
+            paymentId: (string) $payment->id,
+        );
     }
 
     private function ambiguousAmountUniqueTransfer(
@@ -1400,8 +1537,6 @@ final class BscPaymentVerification
         int $submissionVersion,
         BscTransferInspection $inspection,
     ): BscVerificationResult {
-        $evidence = $inspection->exactTransfers[0] ?? null;
-
         return $this->flagForManualReview(
             payment: $payment,
             detail: $detail,
@@ -1409,8 +1544,8 @@ final class BscPaymentVerification
             outcome: BscVerificationOutcome::ManualReview,
             detailStatus: PaymentBscDetail::STATUS_MANUAL_REVIEW,
             reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
-            hash: $evidence?->txHash,
-            evidence: $evidence,
+            hash: null,
+            evidence: null,
             metadata: [
                 'reason' => 'amount_unique_multiple_matching_transfers',
                 'match_count' => count($inspection->exactTransfers),

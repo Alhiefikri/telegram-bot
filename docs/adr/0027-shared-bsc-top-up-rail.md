@@ -38,8 +38,13 @@ Add a new `bsc_shared` rail:
   transaction hash or a BscScan transaction link. The hash/link is only a
   lookup hint.
 - The settlement verifies one successful USDT BEP20 Transfer to the snapshot
-  address, the exact payable amount, the frozen invoice window, canonical
-  block facts, minimum confirmations and finalized-block rules.
+  address, the frozen invoice window, canonical block facts, minimum
+  confirmations and finalized-block rules. An unambiguous transfer within
+  0.1 USDT of the payable amount is accepted, including both boundaries.
+  The Customer receives the actual exactly representable transfer amount
+  minus the snapshotted application fee, not the original invoice amount.
+  Transfers outside this range and amounts that do not cover the fee require
+  review.
 - The global external-money receipt registry claims the `(chain, tx hash, log
   index)` identity once. A second target submitting the same transfer is
   routed to manual review, never credited twice.
@@ -50,9 +55,10 @@ Add a new `bsc_shared` rail:
 
 - The rail does not prove that the Customer owns the sending wallet. The
   first Customer to submit a public transaction hash could claim a transfer
-  made by someone else. Unique payable amounts, the short payment window,
-  one-time receipt claim and manual review reduce but do not eliminate this
-  risk. High-value or anomalous payments must be reviewed.
+  made by someone else. Unique payable amounts, conflict checks, the short
+  payment window and one-time receipt claim reduce but do not eliminate this
+  risk. The Owner approved the increased attribution risk of the 0.1 USDT
+  tolerance. High-value or anomalous payments must be reviewed.
 - One shared address concentrates custody. The application stores only the
   public address and no key material; the Owner remains responsible for
   custody, monitoring and withdrawals.

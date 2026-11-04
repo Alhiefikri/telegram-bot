@@ -265,6 +265,102 @@ class BscPaymentVerificationTest extends TestCase
         $this->assertSame($hash, $payment->fresh()->bscDetail->current_tx_hash);
     }
 
+    public function test_hash_checkout_accepts_lower_tolerance_boundary_with_exact_evidence(): void
+    {
+        $payment = $this->payment();
+        $hash = '0x'.str_repeat('1', 64);
+        $this->configureReceipt($payment, $hash, amountUnits: '900000000000000000');
+
+        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+
+        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
+        $this->assertSame('900000000000000000', $result->evidence->amountUnits);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+    }
+
+    public function test_scanner_accepts_upper_tolerance_boundary(): void
+    {
+        $payment = $this->payment();
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $hash = '0x'.str_repeat('2', 64);
+        $this->configureReceipt($payment, $hash, amountUnits: '1100000000000000000');
+        $receipt = $this->rpc->receipts[$hash];
+        $log = $receipt['logs'][0];
+        $log['transactionHash'] = $hash;
+        $log['blockNumber'] = $receipt['blockNumber'];
+        $this->rpc->logs = [$log];
+
+        $result = app(BscPaymentVerification::class)->verify($payment->fresh());
+
+        $this->assertSame(BscVerificationOutcome::Confirmed, $result->outcome);
+        $this->assertSame('1100000000000000000', $result->evidence->amountUnits);
+    }
+
+    public function test_fuzzy_hash_cannot_take_another_checkout_exact_transfer(): void
+    {
+        $first = $this->payment();
+        $second = $this->payment('0x3333333333333333333333333333333333333333');
+        $second->bscDetail()->update([
+            'receiver_address' => $first->bscDetail->receiver_address,
+            'expected_token_units' => '1050000000000000000',
+        ]);
+        $hash = '0x'.str_repeat('3', 64);
+        $this->configureReceipt($first, $hash, amountUnits: '1050000000000000000');
+
+        $result = app(BscPaymentVerification::class)->verify($first, $hash);
+
+        $this->assertSame(BscVerificationOutcome::ManualReview, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $first->fresh()->status);
+        $this->assertDatabaseMissing('bsc_payment_transfer_evidence', ['tx_hash' => $hash]);
+    }
+
+    public function test_scanner_refuses_transfer_with_two_tolerant_invoice_candidates(): void
+    {
+        $first = $this->payment();
+        $first->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $second = $this->payment('0x3333333333333333333333333333333333333333');
+        $second->bscDetail()->update([
+            'receiver_address' => $first->bscDetail->receiver_address,
+            'expected_token_units' => '1080000000000000000',
+        ]);
+        $hash = '0x'.str_repeat('6', 64);
+        $this->configureReceipt($first, $hash, amountUnits: '1040000000000000000');
+        $receipt = $this->rpc->receipts[$hash];
+        $log = $receipt['logs'][0];
+        $log['transactionHash'] = $hash;
+        $log['blockNumber'] = $receipt['blockNumber'];
+        $this->rpc->logs = [$log];
+
+        $result = app(BscPaymentVerification::class)->verify($first->fresh());
+
+        $this->assertSame(BscVerificationOutcome::ManualReview, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $first->fresh()->status);
+        $this->assertDatabaseMissing('bsc_payment_transfer_evidence', ['tx_hash' => $hash]);
+    }
+
+    public function test_scanner_refuses_multiple_tolerant_transfers(): void
+    {
+        $payment = $this->payment();
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $firstHash = '0x'.str_repeat('4', 64);
+        $secondHash = '0x'.str_repeat('5', 64);
+        $this->configureReceipt($payment, $firstHash, amountUnits: '950000000000000000');
+        $this->configureReceipt($payment, $secondHash, amountUnits: '1050000000000000000');
+        foreach ([$firstHash, $secondHash] as $hash) {
+            $receipt = $this->rpc->receipts[$hash];
+            $log = $receipt['logs'][0];
+            $log['transactionHash'] = $hash;
+            $log['blockNumber'] = $receipt['blockNumber'];
+            $this->rpc->logs[] = $log;
+        }
+
+        $result = app(BscPaymentVerification::class)->verify($payment->fresh());
+
+        $this->assertSame(BscVerificationOutcome::ManualReview, $result->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertDatabaseMissing('bsc_payment_transfer_evidence', ['tx_hash' => $firstHash]);
+    }
+
     public function test_reused_amount_ignores_a_transfer_from_before_the_new_invoice(): void
     {
         $this->freezeTime();
@@ -368,7 +464,7 @@ class BscPaymentVerificationTest extends TestCase
     {
         $payment = $this->payment();
         $hash = '0x'.str_repeat('b', 64);
-        $this->configureReceipt($payment, $hash, amountUnits: '1000000000000000001', latestBlock: 102);
+        $this->configureReceipt($payment, $hash, amountUnits: '1100000000000000001', latestBlock: 102);
 
         $result = app(BscPaymentVerification::class)->verify($payment, $hash);
 
@@ -694,7 +790,7 @@ class BscPaymentVerificationTest extends TestCase
         Queue::fake();
         $payment = $this->payment();
         $hash = '0x'.str_repeat('b', 64);
-        $this->configureReceipt($payment, $hash, amountUnits: '1000000000000000001', latestBlock: 102);
+        $this->configureReceipt($payment, $hash, amountUnits: '1100000000000000001', latestBlock: 102);
         app(BscPaymentVerification::class)->verify($payment, $hash);
         $review = $payment->manualFulfillmentReview()->firstOrFail();
 
@@ -718,7 +814,7 @@ class BscPaymentVerificationTest extends TestCase
 
         $refundPayment = $this->payment();
         $refundHash = '0x'.str_repeat('d', 64);
-        $this->configureReceipt($refundPayment, $refundHash, amountUnits: '1000000000000000001', latestBlock: 102);
+        $this->configureReceipt($refundPayment, $refundHash, amountUnits: '1100000000000000001', latestBlock: 102);
         app(BscPaymentVerification::class)->verify($refundPayment, $refundHash);
         $refunded = $resolution->resolve(
             $refundPayment->manualFulfillmentReview()->firstOrFail(),
@@ -731,7 +827,7 @@ class BscPaymentVerificationTest extends TestCase
 
         $rejectPayment = $this->payment('0x4444444444444444444444444444444444444444');
         $rejectHash = '0x'.str_repeat('e', 64);
-        $this->configureReceipt($rejectPayment, $rejectHash, amountUnits: '1000000000000000001', latestBlock: 102);
+        $this->configureReceipt($rejectPayment, $rejectHash, amountUnits: '1100000000000000001', latestBlock: 102);
         app(BscPaymentVerification::class)->verify($rejectPayment, $rejectHash);
         $rejected = $resolution->resolve(
             $rejectPayment->manualFulfillmentReview()->firstOrFail(),

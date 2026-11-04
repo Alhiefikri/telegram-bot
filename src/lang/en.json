@@ -248,7 +248,7 @@
   "balance.usdt.receipt.credit": "Credited to USDT balance: :amount USDT",
   "balance.usdt.receipt.reference": "Receipt: :reference",
   "balance.usdt.receipt.late": "Late payment verified; the original top-up was credited once.",
-  "balance.usdt.receipt.revised": "Reviewed resolution: original requested credit :original USDT; approved credit :approved USDT. The original invoice is unchanged.",
+  "balance.usdt.receipt.revised": "Originally requested credit: :original USDT; credited: :approved USDT. The original invoice is unchanged.",
   "balance.topup.receipt.support": "Keep this receipt. Need help? Open Support.",
   "balance.compensation.title": "✅ Store Balance compensation completed",
   "balance.compensation.credit": "Balance added: :amount",

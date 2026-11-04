@@ -35,9 +35,9 @@ use InvalidArgumentException;
  * - Expiry never releases a slot: holdExpired() (and every read that locks the
  *   row) moves due rows to expired_unresolved, which still occupies the slot
  *   until the money is genuinely resolved.
- * - markSettled() resolves a reservation only together with a real funding
- *   ledger entry whose source claim, Customer and exact amount match, so a
- *   pending reservation becomes liability atomically with the posting.
+ * - markSettled() resolves a reservation only with a funding entry owned by the
+ *   Customer. A changed BSC amount additionally requires the linked verified
+ *   receipt and settlement evidence.
  * - release() requires a typed CustomerUsdtFundingRelease resolution; there is
  *   no generic cancel that could drop exposure while money is still possible.
  */
@@ -263,8 +263,11 @@ final class CustomerUsdtFundingReservationService
                 ->where('source_type', 'customer_usdt_top_up')
                 ->where('source_id', $topUpReference)
                 ->where('kind', UsdtBalanceEntryKind::FundingCredit->value)
-                ->where('amount_micro', $reservation->amount_micro)
                 ->first();
+            if ($entry !== null && (int) $entry->amount_micro !== (int) $reservation->amount_micro
+                && ! $this->matchesToleratedBscSettlement($customer, $reservation, $entry, $topUpReference)) {
+                $entry = null;
+            }
             if ($entry === null) {
                 throw new CustomerUsdtFundingReservationConflict(
                     'Reservasi hanya dapat diselesaikan oleh entry kredit funding dengan amount dan source top-up yang sama.',
@@ -307,6 +310,47 @@ final class CustomerUsdtFundingReservationService
                 $this->snapshot($reservation),
             );
         }, 5);
+    }
+
+    private function matchesToleratedBscSettlement(
+        Customer $customer,
+        CustomerUsdtFundingReservation $reservation,
+        CustomerUsdtBalanceEntry $entry,
+        string $topUpId,
+    ): bool {
+        $target = CustomerUsdtTopUp::query()->whereKey($topUpId)
+            ->where('customer_id', $customer->id)->where('reservation_id', $reservation->id)
+            ->whereIn('rail', ['bsc_usdt', 'bsc_shared'])->first();
+        $resolution = DB::table('customer_usdt_top_up_resolutions')->where('top_up_id', $topUpId)
+            ->where('entry_id', $entry->id)->where('kind', 'settled')->first();
+        if ($target === null || $resolution === null || (int) $target->amount_micro !== (int) $reservation->amount_micro) {
+            return false;
+        }
+        $receipt = DB::table('external_money_receipts')->where('id', $resolution->receipt_id)
+            ->where('target_type', 'customer_usdt_top_up')->where('target_id', $topUpId)
+            ->where('beneficiary', 'customer:'.$customer->id)->where('currency', 'USDT')
+            ->where('status', 'claimed')->first();
+        $evidence = DB::table('customer_usdt_top_up_evidence')->where('id', $resolution->evidence_id)
+            ->where('top_up_id', $topUpId)->where('status', 'verified')
+            ->where('reason', 'canonical_final_within_tolerance')->first();
+        if ($receipt === null || $evidence === null) {
+            return false;
+        }
+        $payload = json_decode((string) $evidence->chain_evidence, true);
+        if (! is_array($payload) || ($payload['tx_hash'] ?? null) !== $receipt->tx_hash
+            || ($payload['amount_units'] ?? null) !== $receipt->amount_units
+            || (int) ($payload['log_index'] ?? -1) !== (int) $receipt->log_index) {
+            return false;
+        }
+        try {
+            $actual = UsdtMicroAmount::fromRawTokenUnits((string) $receipt->amount_units, (int) $receipt->decimals)->units();
+        } catch (InvalidArgumentException) {
+            return false;
+        }
+
+        return abs($actual - (int) $target->payable_micro) <= 100_000
+            && $actual > (int) $target->fee_micro
+            && (int) $entry->amount_micro === $actual - (int) $target->fee_micro;
     }
 
     /** Reviewed entry must already be atomically linked to an immutable resolution. */

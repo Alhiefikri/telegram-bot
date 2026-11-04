@@ -41,6 +41,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\BscUsdtRailRpcFixture;
 use Tests\TestCase;
 
@@ -120,6 +121,76 @@ final class SharedBscTopUpTest extends TestCase
         $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
         $settlement->check($target->id);
         $this->assertSame(1, DB::table('customer_usdt_balance_entries')->count());
+    }
+
+    #[DataProvider('toleranceAmounts')]
+    public function test_shared_tolerance_credits_actual_less_snapshotted_fee(string $raw, int $credit): void
+    {
+        CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 10000]);
+        $target = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: $raw)];
+        $settlement = app(UsdtTopUpSettlement::class);
+        $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
+        $settlement->check($target->id);
+        $this->assertSame($credit, (int) DB::table('customer_usdt_balance_entries')->value('amount_micro'));
+        $this->assertSame(10000, (int) DB::table('customer_usdt_top_up_fee_events')->value('amount_micro'));
+        $this->assertSame($raw, DB::table('external_money_receipts')->value('amount_units'));
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
+    }
+
+    public static function toleranceAmounts(): array
+    {
+        return [
+            'lower boundary' => ['910000000000000000', 900000],
+            'upper boundary' => ['1110000000000000000', 1100000],
+        ];
+    }
+
+    public function test_shared_fuzzy_payment_does_not_claim_a_competing_exact_invoice(): void
+    {
+        $first = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
+        $other = Customer::factory()->create(['telegram_id' => 961011]);
+        $root = $this->rootFor($other, 211);
+        $second = $this->confirm($other, $root, $this->preview($other, $root)->intent)->topUp;
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '1000001000000000000')];
+        $settlement = app(UsdtTopUpSettlement::class);
+        $settlement->submit($this->customer, $first->id, BscUsdtRailRpcFixture::TX);
+        $settlement->check($first->id);
+        $this->assertDatabaseCount('external_money_receipts', 0);
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+        $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $first->id)->value('state'));
+        $this->assertSame(1000001, (int) $second->payable_micro);
+    }
+
+    public function test_shared_fuzzy_hint_waits_for_finality(): void
+    {
+        $target = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '900000000000000000')];
+        $this->rpc->finalized = 99;
+        $settlement = app(UsdtTopUpSettlement::class);
+        $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
+        $settlement->check($target->id);
+        $this->assertDatabaseCount('external_money_receipts', 0);
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+        $this->rpc->finalized = 105;
+        $this->travel(1)->minutes();
+        $settlement->recover();
+        $this->assertSame(900000, (int) DB::table('customer_usdt_balance_entries')->value('amount_micro'));
+    }
+
+    public function test_shared_duplicate_submissions_are_not_automatically_attributed(): void
+    {
+        $first = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
+        $other = Customer::factory()->create(['telegram_id' => 961012]);
+        $root = $this->rootFor($other, 212);
+        $second = $this->confirm($other, $root, $this->preview($other, $root)->intent)->topUp;
+        $settlement = app(UsdtTopUpSettlement::class);
+        $settlement->submit($this->customer, $first->id, BscUsdtRailRpcFixture::TX);
+        $settlement->submit($other, $second->id, BscUsdtRailRpcFixture::TX);
+        $settlement->check($first->id);
+        $this->assertDatabaseCount('external_money_receipts', 0);
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+        $this->assertSame('shared_attribution_ambiguous', DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $first->id)->value('last_error'));
     }
 
     public function test_open_invoices_never_share_a_payable_amount(): void
@@ -253,7 +324,7 @@ final class SharedBscTopUpTest extends TestCase
     {
         CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 10000]);
         $target = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
-        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '990001000000000000')];
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '800001000000000000')];
         $settlement = app(UsdtTopUpSettlement::class);
         $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
         $this->assertTrue($settlement->check($target->id));
@@ -261,7 +332,7 @@ final class SharedBscTopUpTest extends TestCase
         $this->authenticateOwner();
         $review = app(UsdtTopUpReview::class);
         $preview = $review->requestShared($this->owner, $target->id, 'Matched exchange withdrawal records with Customer account.');
-        $this->assertSame(990001, (int) $preview->amount_micro);
+        $this->assertSame(800001, (int) $preview->amount_micro);
         $this->assertSame(BscUsdtRailRpcFixture::TX, $preview->transaction_hash);
         try {
             $review->confirm($this->owner, $preview->id, $preview->fingerprint, 1, 'wrong');
@@ -273,7 +344,7 @@ final class SharedBscTopUpTest extends TestCase
         $replay = $review->confirm($this->owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
         $this->assertSame($resolution->top_up_id, $replay->top_up_id);
         $this->assertSame((int) $receiptId, (int) $resolution->receipt_id);
-        $this->assertSame(980001, (int) DB::table('customer_usdt_balance_accounts')->where('customer_id', $this->customer->id)->value('balance_micro'));
+        $this->assertSame(790001, (int) DB::table('customer_usdt_balance_accounts')->where('customer_id', $this->customer->id)->value('balance_micro'));
         $this->assertDatabaseHas('customer_usdt_top_up_resolutions', ['top_up_id' => $target->id, 'kind' => 'settled']);
         $this->assertDatabaseCount('customer_usdt_balance_entries', 1);
         $this->assertDatabaseCount('external_money_receipts', 1);
@@ -296,13 +367,10 @@ final class SharedBscTopUpTest extends TestCase
         $settlement = app(UsdtTopUpSettlement::class);
         $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
         $this->assertTrue($settlement->check($target->id));
-        $this->authenticateOwner();
-        $review = app(UsdtTopUpReview::class);
-        $preview = $review->requestShared($this->owner, $target->id, 'Matched exchange withdrawal records with Customer account.');
-        $review->confirm($this->owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $this->assertDatabaseHas('customer_usdt_top_up_resolutions', ['top_up_id' => $target->id, 'kind' => 'settled']);
 
         $this->assertSame(1000001, (int) $target->fresh()->payable_micro);
-        $this->assertSame(990001, (int) $preview->amount_micro);
+        $this->assertSame('990001000000000000', DB::table('external_money_receipts')->value('amount_units'));
         $this->assertDatabaseHas('customer_usdt_balance_accounts', ['customer_id' => $this->customer->id, 'balance_micro' => 990001]);
         $this->assertDatabaseCount('customer_usdt_balance_entries', 1);
     }
@@ -313,7 +381,7 @@ final class SharedBscTopUpTest extends TestCase
         app('session')->forgetDrivers();
         CustomerUsdtFundingPolicy::current()->update(['application_fee_micro' => 10000]);
         $target = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
-        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '990001000000000000')];
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '800001000000000000')];
         $settlement = app(UsdtTopUpSettlement::class);
         $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
         $settlement->check($target->id);
@@ -330,15 +398,15 @@ final class SharedBscTopUpTest extends TestCase
         $response->assertRedirect();
         $preview = UsdtTopUpReviewRequest::query()->firstOrFail();
         $this->get($response->headers->get('Location'))->assertOk()
-            ->assertSee('0.990001 USDT')->assertSee('0.980001 USDT');
+            ->assertSee('0.800001 USDT')->assertSee('0.790001 USDT');
         $this->post(route('admin.store-balance.usdt-review.previews.confirm', $preview->id), [
             'fingerprint' => $preview->fingerprint, 'version' => $preview->version, 'password' => 'wrong',
         ])->assertSessionHasErrors('review');
         $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
         $this->post(route('admin.store-balance.usdt-review.previews.confirm', $preview->id), [
             'fingerprint' => $preview->fingerprint, 'version' => $preview->version, 'password' => 'owner-password',
-        ])->assertSessionHas('status', fn (string $message) => str_contains($message, '0.980001 USDT'));
-        $this->assertDatabaseHas('customer_usdt_balance_accounts', ['customer_id' => $this->customer->id, 'balance_micro' => 980001]);
+        ])->assertSessionHas('status', fn (string $message) => str_contains($message, '0.790001 USDT'));
+        $this->assertDatabaseHas('customer_usdt_balance_accounts', ['customer_id' => $this->customer->id, 'balance_micro' => 790001]);
     }
 
     public function test_shared_review_refuses_unsubmitted_and_cross_target_ambiguous_hashes(): void
@@ -347,12 +415,12 @@ final class SharedBscTopUpTest extends TestCase
         $this->authenticateOwner();
         $review = app(UsdtTopUpReview::class);
         try {
-            $review->request($this->owner, $target->id, 'settled', '0.99', BscUsdtRailRpcFixture::TX, 'Owner assertion');
+            $review->request($this->owner, $target->id, 'settled', '0.8', BscUsdtRailRpcFixture::TX, 'Owner assertion');
             $this->fail('Unsubmitted transaction accepted');
         } catch (DomainException) {
             $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
         }
-        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '990000000000000000')];
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '800000000000000000')];
         $settlement = app(UsdtTopUpSettlement::class);
         $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
         $settlement->check($target->id);
@@ -371,7 +439,7 @@ final class SharedBscTopUpTest extends TestCase
     public function test_shared_review_rechecks_finality_and_fences_competing_previews(): void
     {
         $target = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
-        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '990000000000000000')];
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '800000000000000000')];
         $settlement = app(UsdtTopUpSettlement::class);
         $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
         $settlement->check($target->id);
@@ -399,10 +467,10 @@ final class SharedBscTopUpTest extends TestCase
     public function test_review_cannot_reuse_receipt_claimed_by_transfer_recovery(): void
     {
         $target = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
-        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '990000000000000000')];
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '800000000000000000')];
         $receipt = new VerifiedMoneyReceipt(
             MoneyReceiptIdentity::bscLog(56, BscUsdtRailRpcFixture::TX, 0),
-            'customer:'.$this->customer->id, 'USDT', '990000000000000000', 18,
+            'customer:'.$this->customer->id, 'USDT', '800000000000000000', 18,
             new MoneyReceiptTarget(ExternalMoneyReceiptTargetType::CustomerUsdtRecovery, (string) Str::uuid()),
             ['receiver_address' => BscUsdtRailRpcFixture::ADDRESS],
             parentClaim: MoneyReceiptParentClaim::for(56, BscUsdtRailRpcFixture::TX),
@@ -461,7 +529,7 @@ final class SharedBscTopUpTest extends TestCase
     public function test_review_holds_when_actual_amount_matches_checkout_or_attribution_is_missing(): void
     {
         $target = $this->confirm($this->customer, $this->root, $this->preview($this->customer)->intent)->topUp;
-        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '990000000000000000')];
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '800000000000000000')];
         $settlement = app(UsdtTopUpSettlement::class);
         $settlement->submit($this->customer, $target->id, BscUsdtRailRpcFixture::TX);
         $settlement->check($target->id);
@@ -473,7 +541,7 @@ final class SharedBscTopUpTest extends TestCase
         } catch (DomainException) {
             $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
         }
-        Payment::factory()->create(['provider' => 'manual', 'method' => 'USDT_BEP20', 'currency' => 'USDT', 'amount' => 990000]);
+        Payment::factory()->create(['provider' => 'manual', 'method' => 'USDT_BEP20', 'currency' => 'USDT', 'amount' => 800000]);
         try {
             $review->requestShared($this->owner, $target->id, 'Matched exchange withdrawal records with Customer account.');
             $this->fail('Competing checkout accepted');

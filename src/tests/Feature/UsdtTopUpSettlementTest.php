@@ -64,6 +64,46 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
         $this->assertSame(0, DB::table('store_balance_entries')->count());
     }
 
+    #[DataProvider('toleranceDeposits')]
+    public function test_final_tolerance_credits_actual_amount_once(string $raw, int $micro): void
+    {
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: $raw)];
+        $this->settle();
+        $this->assertSame($micro, (int) DB::table('customer_usdt_balance_entries')->value('amount_micro'));
+        $this->assertSame($raw, DB::table('external_money_receipts')->value('amount_units'));
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
+        $this->assertSame('0', app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100)->unresolvedDepositMicro->toString());
+        $this->travel(2)->minutes();
+        $this->settle();
+        $this->assertSame(1, CustomerUsdtBalanceEntry::count());
+        $this->assertSame(1, TelegramOutboundEffect::count());
+    }
+
+    public static function toleranceDeposits(): array
+    {
+        return [
+            'lower boundary' => ['900000000000000000', 900000],
+            'upper boundary' => ['1100000000000000000', 1100000],
+        ];
+    }
+
+    #[DataProvider('outsideToleranceDeposits')]
+    public function test_just_outside_tolerance_remains_unresolved(string $raw): void
+    {
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: $raw)];
+        $this->settle();
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+        $this->assertSame('manual_review', DB::table('customer_usdt_top_up_settlement_work')->value('state'));
+    }
+
+    public static function outsideToleranceDeposits(): array
+    {
+        return [
+            'below' => ['899999000000000000'],
+            'above' => ['1100001000000000000'],
+        ];
+    }
+
     public function test_actual_transfer_after_deadline_settles_original_target_once(): void
     {
         $this->travel(20)->minutes();
@@ -149,7 +189,7 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
     #[DataProvider('unsafeMismatchedDeposits')]
     public function test_mismatched_amount_does_not_bypass_authenticity_or_finality(string $mutation): void
     {
-        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '1250000000000000000')];
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '900000000000000000')];
         switch ($mutation) {
             case 'wrong_token': $this->rpc->receipt['logs'][0]['address'] = '0x'.str_repeat('1', 40);
                 break;
@@ -309,14 +349,14 @@ class UsdtTopUpSettlementTest extends UsdtTopUpTestCase
         $this->rpc->timestamp = now()->timestamp + 5;
         $hash = '0x'.str_repeat('c', 64);
         $this->rpc->receipt['transactionHash'] = $hash;
-        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '1100000000000000000')];
+        $this->rpc->receipt['logs'] = [$this->rpc->log(amount: '1200000000000000000')];
         $this->rpc->receipt['logs'][0]['transactionHash'] = $hash;
         $this->settle($hash);
-        $this->assertSame(2_000_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
+        $this->assertSame(2_100_000, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
         $this->assertSame(100_000, (int) DB::table('customer_usdt_top_up_fee_events')->value('amount_micro'));
         $report = app(UsdtReceiptReconciliation::class)->inspect(null, null, null, 100);
         $this->assertSame([], $report->findings);
-        $custody = UsdtTreasuryAssetObservation::available('fixture_custody', '2100000', now());
+        $custody = UsdtTreasuryAssetObservation::available('fixture_custody', '2200000', now());
         $coverage = app(UsdtTreasuryReconciliation::class)
             ->inspect(null, $report->unresolvedDepositMicro, $report->overcreditedMicro, [$custody]);
         $this->assertSame('consistent', $coverage->verdict->value);
