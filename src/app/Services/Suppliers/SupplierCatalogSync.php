@@ -41,11 +41,13 @@ final class SupplierCatalogSync
             $snapshot = $this->client->snapshot($connection);
             if ($snapshot->currency !== $connection->currency) {
                 $this->fail($connection->id, $version, $token, 'currency_mismatch');
+                $this->releaseLease($connection->id, $token);
 
                 return false;
             }
         } catch (SupplierUnavailable $exception) {
             $this->fail($connection->id, $version, $token, $exception->errorCode, $exception->retryAfterSeconds);
+            $this->releaseLease($connection->id, $token);
 
             return false;
         }
@@ -152,15 +154,21 @@ final class SupplierCatalogSync
             }, 5);
         } catch (UniqueConstraintViolationException) {
             $this->fail($connection->id, $version, $token, 'duplicate_account');
+            $this->releaseLease($connection->id, $token);
 
             return false;
         }
         if (! $applied) {
-            Supplier::query()->whereKey($connection->id)->where('version', $version)->where('sync_token', $token)
-                ->update(['sync_token' => null, 'sync_lease_expires_at' => null]);
+            $this->releaseLease($connection->id, $token);
         }
 
         return $applied;
+    }
+
+    private function releaseLease(int $supplierId, string $token): void
+    {
+        Supplier::query()->whereKey($supplierId)->where('sync_token', $token)
+            ->update(['sync_token' => null, 'sync_lease_expires_at' => null]);
     }
 
     private function affectedProducts(int $supplierId): array

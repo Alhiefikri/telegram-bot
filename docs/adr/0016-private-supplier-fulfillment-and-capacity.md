@@ -16,6 +16,8 @@ An explicit Owner attestation may resolve an unknown supplier debit after the Ow
 
 Supplier synchronization remains a bounded read outside financial locks. Provider cooldowns still apply, and unresolved purchases on the same wallet can block a new balance observation. A failed sync must not be presented as a successful wallet refresh or roll back an independently committed reservation release.
 
+An in-flight synchronization keeps its lease while a configuration edit advances the supplier version. Once that request finishes, a stale result cannot publish or overwrite the new configuration, and it releases its lease only if the stored token still matches. A newer lease is never cleared by the old request.
+
 The consequence is intentionally conservative availability and occasional Manual Fulfillment Review rather than an unprovable exactly-once promise across third-party APIs. Store Balance refunds remain owned by OrderLifecycle/StoreBalanceLedger; externally funded customer payments require the existing confirmed external-refund path, not a silent conversion into Store Balance. Supplier delivery credentials retain order ownership and never return to the Available Product pool.
 
 See [implementation plan](../supplier-api-reseller-implementation-plan.md) for provider contracts, lock ordering, acceptance and verification scope. This extends rather than supersedes ADR-0002, ADR-0007, ADR-0008 and ADR-0014.

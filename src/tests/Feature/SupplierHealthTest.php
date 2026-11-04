@@ -316,15 +316,16 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
 
     public function test_forced_sync_does_not_replace_an_active_lease_or_sync_an_inactive_supplier(): void
     {
+        $lease = (string) Str::uuid();
         $supplier = $this->supplier([
             'sync_failures' => 1, 'sync_next_attempt_at' => now()->addMinutes(10),
-            'sync_token' => 'existing-lease', 'sync_lease_expires_at' => now()->addMinute(),
+            'sync_token' => $lease, 'sync_lease_expires_at' => now()->addMinute(),
         ]);
         Http::fake();
         $sync = app(SupplierCatalogSync::class);
 
         $this->assertFalse($sync->sync($supplier, true));
-        $this->assertSame('existing-lease', $supplier->fresh()->sync_token);
+        $this->assertSame($lease, $supplier->fresh()->sync_token);
         $supplier->forceFill(['is_active' => false, 'sync_token' => null, 'sync_lease_expires_at' => null])->save();
         $this->assertFalse($sync->sync($supplier, true));
         Http::assertNothingSent();
@@ -347,11 +348,12 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $supplier = $this->supplier(['sync_failures' => 1, 'sync_next_attempt_at' => now()->addMinutes(10)]);
         $version = $supplier->fresh()->version;
         $changed = false;
-        Http::fake(function ($request) use ($supplier, $version, &$changed) {
+        $lease = (string) Str::uuid();
+        Http::fake(function ($request) use ($supplier, $version, $lease, &$changed) {
             if (! $changed) {
                 $changed = true;
                 Supplier::query()->whereKey($supplier->id)->update([
-                    'version' => $version + 1, 'sync_token' => 'newer-lease',
+                    'version' => $version + 1, 'sync_token' => $lease,
                     'sync_lease_expires_at' => now()->addMinutes(2), 'balance_micros' => 7_000_000,
                 ]);
             }
@@ -362,7 +364,7 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $this->assertFalse(app(SupplierCatalogSync::class)->sync($supplier, true));
         $fresh = $supplier->fresh();
         $this->assertSame($version + 1, $fresh->version);
-        $this->assertSame('newer-lease', $fresh->sync_token);
+        $this->assertSame($lease, $fresh->sync_token);
         $this->assertSame(7_000_000, $fresh->balance_micros);
         $this->assertSame(1, $fresh->sync_failures);
     }
@@ -371,9 +373,10 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
     {
         $supplier = $this->supplier(['sync_failures' => 1, 'sync_next_attempt_at' => now()->addMinutes(10)]);
         $version = $supplier->fresh()->version;
-        Http::fake(function () use ($supplier, $version) {
+        $lease = (string) Str::uuid();
+        Http::fake(function () use ($supplier, $version, $lease) {
             Supplier::query()->whereKey($supplier->id)->update([
-                'version' => $version + 1, 'sync_token' => 'newer-lease',
+                'version' => $version + 1, 'sync_token' => $lease,
                 'sync_lease_expires_at' => now()->addMinutes(2), 'last_error' => 'newer-error',
             ]);
 
@@ -383,7 +386,28 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $this->assertFalse(app(SupplierCatalogSync::class)->sync($supplier, true));
         $fresh = $supplier->fresh();
         $this->assertSame($version + 1, $fresh->version);
-        $this->assertSame('newer-lease', $fresh->sync_token);
+        $this->assertSame($lease, $fresh->sync_token);
+        $this->assertSame('newer-error', $fresh->last_error);
+        $this->assertSame(1, $fresh->sync_failures);
+    }
+
+    public function test_failed_stale_sync_releases_its_own_lease_without_overwriting_new_configuration(): void
+    {
+        $supplier = $this->supplier(['sync_failures' => 1, 'sync_next_attempt_at' => now()->addMinutes(10)]);
+        $version = $supplier->fresh()->version;
+        Http::fake(function () use ($supplier, $version) {
+            Supplier::query()->whereKey($supplier->id)->update([
+                'version' => $version + 1, 'last_error' => 'newer-error',
+            ]);
+
+            return Http::response([], 503);
+        });
+
+        $this->assertFalse(app(SupplierCatalogSync::class)->sync($supplier, true));
+        $fresh = $supplier->fresh();
+        $this->assertSame($version + 1, $fresh->version);
+        $this->assertNull($fresh->sync_token);
+        $this->assertNull($fresh->sync_lease_expires_at);
         $this->assertSame('newer-error', $fresh->last_error);
         $this->assertSame(1, $fresh->sync_failures);
     }

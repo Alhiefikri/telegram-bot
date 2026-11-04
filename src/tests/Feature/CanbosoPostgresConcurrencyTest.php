@@ -296,6 +296,7 @@ final class CanbosoPostgresConcurrencyTest extends TestCase
         $this->assertNull($supplier->fresh()->synced_at);
         $this->assertNull($supplier->fresh()->sync_expires_at);
         $this->assertNull($supplier->fresh()->sync_token);
+        $this->assertNull($supplier->fresh()->sync_lease_expires_at);
         $this->assertSame('Synthetic Canboso account', $sku->fresh()->name);
         $this->assertSame(10, $sku->fresh()->stock);
         $this->assertSame(0, $sku->fresh()->reserved_quantity);
