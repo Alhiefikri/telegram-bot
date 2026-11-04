@@ -43,6 +43,11 @@ final class TelegramUsdtFundingSession
         Cache::put($this->hashKey($customer), $topUpId, now()->addMinutes(self::TTL_MINUTES));
     }
 
+    public function promptBinanceOrderId(Customer $customer, string $topUpId): void
+    {
+        Cache::put($this->hashKey($customer), $topUpId, now()->addMinutes(15));
+    }
+
     public function promptedTopUpId(Customer $customer): ?string
     {
         $topUpId = Cache::get($this->hashKey($customer));

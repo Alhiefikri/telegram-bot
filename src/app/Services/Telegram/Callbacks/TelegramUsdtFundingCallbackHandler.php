@@ -279,7 +279,7 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
 
         $status = $this->statuses->for($target->refresh());
         if ($status->acceptsCustomerLookup() || $status->balanceAfterMicro !== null) {
-            $this->hashSession->promptHash($customer, (string) $target->id);
+            $this->hashSession->promptBinanceOrderId($customer, (string) $target->id);
         } else {
             $this->hashSession->forget($customer);
         }
@@ -297,6 +297,26 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             $customer,
             $chatId,
             $this->usdt->historySurface($customer, $this->usdt->firstPage($customer), 'balance.usdt.notice.hash_session_expired'),
+        );
+
+        return true;
+    }
+
+    public function guideUnpromptedBinanceOrderId(Customer $customer, string $chatId, string $text): bool
+    {
+        $orderId = BinanceOrderId::normalize($text);
+        if ($orderId === null || preg_match('/[0-9]/', $orderId) !== 1
+            || ! CustomerUsdtTopUp::query()
+                ->where('customer_id', $customer->id)
+                ->where('rail', CustomerUsdtFundingRail::BinancePay->value)
+                ->exists()) {
+            return false;
+        }
+
+        $this->navigation->presentOrEstablish(
+            $customer,
+            $chatId,
+            $this->usdt->historySurface($customer, $this->usdt->firstPage($customer), 'balance.usdt.notice.order_session_expired'),
         );
 
         return true;
@@ -505,7 +525,11 @@ final class TelegramUsdtFundingCallbackHandler implements TelegramCallbackHandle
             }
             if (in_array($prefix, [self::HASH_PREFIX, self::ORDER_PREFIX], true)) {
                 if ($this->statuses->for($target)->acceptsCustomerLookup()) {
-                    $this->hashSession->promptHash($customer, (string) $target->id);
+                    if ($prefix === self::ORDER_PREFIX) {
+                        $this->hashSession->promptBinanceOrderId($customer, (string) $target->id);
+                    } else {
+                        $this->hashSession->promptHash($customer, (string) $target->id);
+                    }
                 } else {
                     $this->hashSession->forget($customer);
                     $notice = 'balance.usdt.notice.hash_closed';

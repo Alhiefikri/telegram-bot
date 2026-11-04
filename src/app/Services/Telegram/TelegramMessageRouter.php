@@ -390,6 +390,9 @@ class TelegramMessageRouter
         if ($isPrivateChat && $this->usdtFunding->guideUnpromptedHash($customer, $chatId, $text)) {
             return;
         }
+        if ($isPrivateChat && $this->usdtFunding->guideUnpromptedBinanceOrderId($customer, $chatId, $text)) {
+            return;
+        }
 
         $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'router.unknown_command'));
 

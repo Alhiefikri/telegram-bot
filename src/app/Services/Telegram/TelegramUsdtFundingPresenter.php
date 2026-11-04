@@ -33,7 +33,11 @@ final class TelegramUsdtFundingPresenter
     public function armLookup(Customer $customer, CustomerUsdtTopUp $target): void
     {
         if ($this->statuses->for($target)->acceptsCustomerLookup()) {
-            $this->session->promptHash($customer, (string) $target->id);
+            if ($this->railOf($target) === CustomerUsdtFundingRail::BinancePay) {
+                $this->session->promptBinanceOrderId($customer, (string) $target->id);
+            } else {
+                $this->session->promptHash($customer, (string) $target->id);
+            }
         }
     }
 

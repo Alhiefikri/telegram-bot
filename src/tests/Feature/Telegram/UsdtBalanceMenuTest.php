@@ -615,6 +615,52 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
     }
 
+    #[DataProvider('binancePromptSources')]
+    public function test_binance_order_id_is_accepted_after_fourteen_minutes(bool $tapPrompt): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $target = $this->openBinanceTarget($root, '1 USD');
+        if ($tapPrompt) {
+            $this->tap('binance-order-prompt', 'usdt:order:'.$target->id, $root->fresh());
+        }
+        $this->travel(14)->minutes();
+
+        $this->sendText('445011487581044736');
+
+        $this->assertSame($target->id, DB::table('customer_usdt_top_up_inbox')->value('top_up_id'));
+        $this->assertSame('445011487581044736', DB::table('customer_usdt_top_up_inbox')->value('provider_reference'));
+        $this->assertNoMoney();
+    }
+
+    public static function binancePromptSources(): array
+    {
+        return [[false], [true]];
+    }
+
+    public function test_expired_binance_prompt_guides_customer_back_to_the_invoice(): void
+    {
+        $this->enableBinance();
+        $root = $this->startRoot();
+        $target = $this->openBinanceTarget($root, '1 USD');
+        $this->travel(16)->minutes();
+
+        $this->sendText('445011487581044736');
+
+        $history = $this->lastCanonicalEdit(self::CHAT_ID);
+        $this->assertStringContainsString('Sesi input Binance Order ID tidak aktif', $this->editCopy($history));
+        $this->assertContains('usdt:status:'.$target->id, $this->callbacks($history));
+        $this->assertSame(0, DB::table('customer_usdt_top_up_inbox')->count());
+        $this->assertNoMoney();
+
+        $this->tap('open-binance-target', 'usdt:status:'.$target->id, $root->fresh());
+        $this->tap('reopen-binance-order', 'usdt:order:'.$target->id, $root->fresh());
+        $this->sendText('445011487581044736');
+        $this->assertSame($target->id, DB::table('customer_usdt_top_up_inbox')->value('top_up_id'));
+        $this->assertSame('445011487581044736', DB::table('customer_usdt_top_up_inbox')->value('provider_reference'));
+        $this->assertNoMoney();
+    }
+
     public function test_transaction_hash_hint_records_only_a_lookup(): void
     {
         $target = $this->openSharedTarget();

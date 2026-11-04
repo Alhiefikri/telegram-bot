@@ -160,6 +160,25 @@ final class BinanceFundingPresentationTest extends TestCase
         $this->assertSame(0, (int) DB::table('customer_usdt_balance_accounts')->value('balance_micro'));
     }
 
+    public function test_mismatched_binance_payment_is_not_credited_and_customer_is_told_to_seek_review(): void
+    {
+        $target = $this->open('0.3');
+        app(TelegramUsdtFundingSession::class)->promptHash($this->customer, $target->id);
+        $transaction = $this->transaction($target);
+        $transaction['amount'] = '0.2';
+        $this->fakeTransactionHistory([$transaction]);
+
+        $this->assertTrue(app(TelegramUsdtFundingCallbackHandler::class)->handleOrderIdInput(
+            $this->customer, '771050', '445011487581044736',
+        ));
+
+        $reply = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageText'))->sole()[0];
+        $this->assertStringContainsString('could not be matched', $reply['text']);
+        $this->assertStringContainsString('No balance has been added', $reply['text']);
+        $this->assertSame('manual_review', app(UsdtTopUpStatusReader::class)->for($target)->state);
+        $this->assertSame(0, CustomerUsdtBalanceEntry::count());
+    }
+
     public function test_invalid_order_id_replies_separately_without_consuming_a_lookup_and_allows_retry(): void
     {
         $target = $this->open('0.3');
