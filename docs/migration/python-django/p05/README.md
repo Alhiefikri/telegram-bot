@@ -808,3 +808,121 @@ This is not a clean-image-build or performance qualification.
 No production data/secrets, real Google/Telegram identities, customer mail,
 provider activation, deployment or CI/CD was used. HD owns actual historical
 data/key qualification; H2/H3 retain readiness, execution and retirement authority.
+
+## P13: QRIS rails and historical Pakasir (#696)
+
+`payments/routing.py` resolves new checkout from the current store setting and
+all subsequent operations from the persisted Payment provider. Allowed new
+providers remain Manual, KlikQRIS and Sakurupiah. Pakasir has no new-checkout
+preparation or create method. This follows current PHP `PaymentProvider` and the
+Admin switcher; P00's earlier KlikQRIS-retirement statement was incorrect.
+
+`payments/settings.py` owns optimistic provider/channel version changes and
+their audit records. Provider changes require Owner/Admin; Sakurupiah channel
+changes require Owner and a unique active supported provider channel. Readiness
+I/O precedes the setting transaction; checkout rechecks its preflight version.
+The optional `payments/settings_grants.sql` is explicit operator/disposable
+provisioning, never runtime startup or automatic activation.
+
+### Authority, recovery and presentation
+
+- Manual checkout freezes the database TTL and requires an admitted QR asset.
+  `/payment <invoice>` accepts a photo/caption or photo reply only for the
+  Customer's pending manual Payment. Duplicate proof cannot replace the first.
+  Proof holds the reservation and writes one pending admin-notification effect;
+  P12's authorized manual approval/rejection remains settlement authority.
+  The photo itself never proves paid money. P25 owns actual proof delivery.
+- KlikQRIS retains its encrypted signature, provider quote and QR evidence even
+  when cancellation commits during provider creation. Dispatched failure is
+  uncertain, not permission to create another invoice. Normal status dispatch
+  reserves a durable 20-second interval; paid hints bypass only that interval,
+  not 404/429 backoff. Missing/unknown status cannot declare unpaid money.
+- Sakurupiah recovers unknown create by the original merchant reference even
+  before a total/reference is committed. Retry uses the encrypted original
+  request on that same Payment. A success indication is retained until
+  authoritative history can confirm the immutable quote. Payment and merchant
+  single-flight/cooldown fencing uses PostgreSQL; Redis is an optional hint/cache.
+  This deliberately preserves P10 Redis-loss recovery instead of PHP's
+  cache-unavailable deferral. It is not a provider fallback or performance pass.
+- Historical Pakasir QRIS/HOSTED records keep their original identity and
+  presentation. Cancellation uses the existing attempt rows, a 120-second
+  abandoned-processing lease, at most three attempts, 30/120-second backoff, and
+  independent detail checks before/after cancellation. A paid race claims the
+  receipt and enters the shared late-payment review path, never unpaid success.
+- Every automatic rail uses the existing external-money receipt registry and
+  P12 Order/stock transitions. Callbacks are hints; authoritative observation
+  must confirm identity, currency and amount. Provider changes, transport
+  failure, expiry and cancellation cannot retarget an existing Payment.
+
+`payments/presentation.py` reads admitted public storage and the existing
+database QR-template settings. Missing Manual QR disables that rail. Native
+payloads validate exact IDR/CRC before rendering. Template composition preserves
+the detected QR matrix, whole-module scaling and quiet zone; unsuitable
+decoration retains the original image. Admitted source images are limited to 1600 pixels per side and
+5 MiB. Image retrieval is explicitly injected and accepts only trusted provider
+URLs; default composition performs no new remote image request.
+`qr-lhie.jpg` remains the original undecorated Manual asset. No icon, price,
+template or other presentation environment variable was introduced.
+
+### Environment and qualification inventory
+
+| Rail/environment | Callback authenticity and trusted targets | Qualification blocker |
+| --- | --- | --- |
+| Manual | Owned private-chat proof; admitted `qr-lhie.jpg`; explicit operator approval | Actual QR/receiver and file-ID mapping, operator acceptance and P25 notification delivery |
+| KlikQRIS sandbox | Persisted encrypted transaction signature; `/api/webhook/klikqris/sandbox`; fixed `klikqris.com/api/sandbox`; strict sandbox storage PNG paths | Authorized sandbox credentials, target attestation and actual Testing Bot/provider run unavailable |
+| KlikQRIS production | Separate credential/base/callback checks; `/api/webhook/klikqris`; explicit HTTPS host allowlists | Production configuration, credential custody, endpoint evidence and owner release approval unavailable |
+| Sakurupiah sandbox | Existing authenticated P08 relay; `/callback/sakurupiah`; fixed `sakurupiah.id/api-sanbox/`; strict QR assets and `sanbox-payout.php` | Earlier P08 evidence is not qualification of this changed revision; no new authorized external run |
+| Sakurupiah production | Both production keys; Bearer/create signature and raw-body HMAC; `/api/webhook/sakurupiah`; fixed `sakurupiah.id/api/`, QR assets and `payout.php` | Defaults disabled/unqualified; actual production credential/endpoint qualification and release approval unavailable |
+| Pakasir historical | Callback is unsigned by source contract; minimized hint requires independent authenticated detail; fixed `app.pakasir.com` detail/cancel/checkout URLs | Retained project/credentials, historical state coverage, serialized-job drain and owner retirement evidence unavailable |
+
+`payments/runtime.py` still defaults to the existing P08 sandbox relay. KlikQRIS,
+Pakasir and production Sakurupiah require explicitly injected adapters; none
+constructs a live HTTP client, enables egress, changes a webhook, or activates
+credentials here. The injected image boundary accepts generated image bytes in
+fake mode only; live Telegram/Testing Bot media admission is unchanged.
+Unavailable qualification blocks its HD/H2/H3/full-acceptance gate. Synthetic
+success is local protocol evidence, not an external-provider pass.
+
+### P13 verification
+
+Build the current hash-locked dependency image before either QRIS smoke:
+
+```sh
+docker build -t lhie-p13-candidate:local candidate
+python3 tools/migration_harness/smoke_qris.py --rails
+python3 tools/migration_harness/smoke_qris.py --integrated
+```
+
+Both modes extend the existing P01/P07/P08 runner. The rail proof's single
+private manifest is `.local/migration-p13/verification.json`, with source,
+base-revision, harness and dependency-image identities. It exercises actual
+PostgreSQL/Redis, bounded worker sweeps and Django callback routes against
+synthetic transports. The shared integrated mode retains the original
+create/callback/payment/receipt and real PostgreSQL lock races. Both commands
+passed locally. The rail path also exercised durable photo-caption proof
+intake, the actual Telegram checkout bridge, provider-switch replay, cancellation
+presentation, lost-wakeup sweeps and same-invoice recovery. The generated QR
+template was inspected and decoded; no Telegram client/device visual or live
+image-upload qualification is claimed.
+
+The initial 147 focused rail/presentation/navigation/worker regressions passed
+in Python 3.13.18/Django 5.2.18 with locked dependencies and networking disabled.
+Affected follow-up checks passed 87 payment/worker/HTTP tests, 28 Pakasir tests,
+21 checkout/presentation tests and 12 navigation-boundary tests. The boundary
+regression rejects generated-image uploads even with existing external-target
+approval. Runtime source was mounted read-only over the freshly built dependency
+image. The PostgreSQL proof caught second-precision provider deadlines and
+cancellation-lease fencing; its retained scenarios cover those failures.
+
+Focused contracts live in `tests.test_qris_selection`, `test_klikqris`,
+`test_sakurupiah_p13`, `test_sakurupiah_production`, `test_pakasir` and
+`test_qris_presentation`. Shared money/stock authority remains P07/P12 evidence,
+not a repeated per-provider matrix. The external image-admission regression is:
+
+```sh
+python3 -m unittest discover -s tests/migration_harness -p test_navigation_boundary.py -v
+```
+
+No production data/secrets, real provider calls, real-money tests, customer
+messages, provider activation, deployment or CI/CD operations were used.
+

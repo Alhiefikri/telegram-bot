@@ -28,15 +28,16 @@ CHECKOUT_UPDATE = {
 }
 
 P08_INSERT = {
-    'payment_events': set('provider event_type merchant_ref provider_reference provider_status raw_payload idempotency_key received_at last_received_at received_count'.split()),
+    'payment_events': set('payment_id provider event_type merchant_ref provider_reference provider_status raw_payload idempotency_key received_at last_received_at received_count'.split()),
     'external_money_receipts': set('canonical_key provider identity_kind account_namespace reference beneficiary currency amount_units decimals status target_type target_id fingerprint evidence_payload claimed_at created_at updated_at'.split()),
     'external_money_receipt_aliases': set('external_money_receipt_id alias_key alias_type created_at'.split()),
     'manual_fulfillment_reviews': set('order_id payment_id amount currency reason state provider_reference created_at updated_at'.split()),
 }
 P08_UPDATE = {
-    'payment_events': {'last_received_at', 'received_count', 'processed_at'},
+    'payment_events': {'payment_id', 'last_received_at', 'received_count', 'processed_at'},
     'external_money_receipts': {'updated_at'},
-    'payments': set('provider_reference provider_total_payment provider_fee provider_expires_at provider_payment_method provider_presentation provider_create_state provider_create_attempted_at provider_create_last_error updated_at'.split()),
+    'payments': set('provider_reference provider_total_payment provider_fee provider_expires_at provider_payment_method provider_presentation provider_create_state provider_create_attempted_at provider_create_last_error provider_payload provider_qris_url provider_created_at klikqris_transaction_signature klikqris_status_failure_count klikqris_status_next_check_at klikqris_status_last_error payment_proof_file_id payment_proof_submitted_at payment_proof_admin_chat_id updated_at'.split()),
+    'provider_cancellation_attempts': set('state attempt_count provider_response last_error started_at finished_at updated_at'.split()),
 }
 
 P09_INSERT = {
@@ -145,6 +146,10 @@ def verify_public_writes(cursor):
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, LIFECYCLE_INSERT)
         allowed_update = _merge(allowed_update, LIFECYCLE_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.manual_payment_settings','payment_mode','UPDATE')")
+    if cursor.fetchone()[0]:
+        allowed_update = _merge(allowed_update, {'manual_payment_settings':
+            {'payment_mode', 'payment_provider_version', 'is_active', 'sakurupiah_channel', 'updated_at'}})
     cursor.execute("SELECT has_column_privilege(current_user,'public.customer_auth_tokens','token_hash','INSERT')")
     auth = cursor.fetchone()[0]
     if auth:

@@ -208,7 +208,8 @@ class NavigationRoots:
     @staticmethod
     def _options(surface):
         return {key: value for key, value in surface.options.items()
-                if key not in ('photo_url', 'asset_version', 'text_fallback')}
+                if key not in ('photo_url', 'photo_bytes', 'payment_provider', 'payment_environment',
+                               'payment_hosts', 'asset_version', 'text_fallback')}
 
     def _payload(self, root, surface):
         return {**self._options(surface), 'chat_id': root.chat_id,
@@ -223,8 +224,15 @@ class NavigationRoots:
         if media_reference is not None:
             reference = media_reference
         if surface.screen == 'checkout':
+            photo = surface.options.get('photo_bytes')
+            if type(photo) is bytes and 0 < len(photo) <= 5 * 1024 * 1024 and fits_caption(surface):
+                return 'photo', photo
+            from lhie_candidate.checkout.navigation import _qr_image_url
             photo = surface.options.get('photo_url')
-            return ('photo', photo) if validate_sakurupiah_qr_image_url(photo) and fits_caption(surface) else ('text', None)
+            safe = _qr_image_url(photo, surface.options.get('payment_provider', 'sakurupiah'),
+                                 surface.options.get('payment_environment', 'sandbox'),
+                                 surface.options.get('payment_hosts', ()))
+            return ('photo', photo) if safe and fits_caption(surface) else ('text', None)
         if surface.screen == 'product':
             return ('photo', surface.options['photo_url']) if surface.options.get('photo_url') and fits_caption(surface) else ('text', None)
         return (kind, reference) if reference and fits_caption(surface) else ('text', None)

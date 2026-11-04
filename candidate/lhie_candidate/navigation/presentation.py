@@ -623,11 +623,33 @@ class CatalogPresenter:
     def _checkout_surface(self, customer, view, *, product=None, quantity=None):
         lines = []
         rows = []
+        from lhie_candidate.checkout.navigation import _qr_image_url, _checkout_url
+        provider = getattr(view, 'provider', 'sakurupiah')
+        environment, hosts = getattr(view, 'provider_environment', 'sandbox'), getattr(view, 'provider_hosts', ())
+        photo = getattr(view, 'photo_bytes', None) if view.state == 'pending' else None
         qris_url = (view.qris_url if view.state == 'pending'
-                    and validate_sakurupiah_qr_image_url(view.qris_url) else None)
+                    and _qr_image_url(view.qris_url, provider, environment, hosts) else None)
         checkout_url = (view.checkout_url if view.state == 'pending'
-                        and validate_sakurupiah_checkout_url(view.checkout_url) else None)
+                        and _checkout_url(view.checkout_url, provider, environment) else None)
         if view.state == 'pending':
+            if provider == 'manual':
+                lines = [
+                    self.t_html(customer, 'payment.checkout_created'),
+                    self.t_html(customer, 'payment.invoice', invoice=view.invoice_number or ''),
+                    self.t_html(customer, 'payment.total', amount='Rp ' + number(int(view.amount or 0))),
+                    self.t_html(customer, 'payment.pay_via', method=self.t(customer, 'payment.method.manual')),
+                    '', self.t_html(customer, 'payment.manual.scan_qr_short'),
+                ]
+                if view.expires_at is not None:
+                    lines.append(self.t_html(customer, 'payment.manual.deadline_short',
+                                             date=self._funding_date(customer, view.expires_at)))
+                rows = [[self._legacy_button(customer, 'payment.action.paid', f'manual:paid:{view.order_id}')],
+                        [self._legacy_button(customer, 'payment.action.cancel', f'buyer:cancel-pending:{view.order_id}')],
+                        self._navigation_row(customer)]
+                surface = self._surface(customer, '\n'.join(lines), rows, screen='checkout')
+                if photo and fits_caption(surface):
+                    surface.options['photo_bytes'] = photo
+                return surface
             lines = [self.t_html(customer, 'payment.sakurupiah.checkout_created'),
                      '━━━━━━━━━━━━━━',
                      self.t_html(customer, 'payment.invoice', invoice=view.invoice_number or '')]
@@ -645,10 +667,11 @@ class CatalogPresenter:
             if view.expires_at is not None:
                 lines.append(self.t_html(customer, 'payment.qris_deadline',
                                          date=self._funding_date(customer, view.expires_at)))
-            if qris_url or checkout_url:
-                instruction = 'payment.sakurupiah.scan' if qris_url else 'payment.sakurupiah.hosted'
+            if qris_url or checkout_url or photo:
+                key = provider if provider in ('klikqris', 'sakurupiah') else 'sakurupiah'
+                instruction = 'payment.' + key + '.scan' if qris_url or photo else 'payment.sakurupiah.hosted'
                 lines += ['', self.t_html(customer, instruction),
-                          self.t_html(customer, 'payment.sakurupiah.exact_amount')]
+                          self.t_html(customer, 'payment.' + key + '.exact_amount')]
             else:
                 lines += ['', self.t_html(customer, 'payment.sakurupiah.retry.creating_body')]
             if checkout_url:
@@ -671,14 +694,21 @@ class CatalogPresenter:
                                          amount='Rp ' + number(int(view.total))))
             rows = [[self._button(customer, 'checkout.orders_button', 'menu:orders',
                                   slot='menu.orders')], self._navigation_row(customer)]
-        elif view.state == 'expired':
-            lines = [self.t_html(customer, 'payment.sakurupiah.retry.expired_title'),
-                     self.t_html(customer, 'payment.sakurupiah.retry.expired_body')]
+        elif view.state in ('expired', 'cancelled'):
+            lines = ([self.t_html(customer, 'payment.cancel.success')] if view.state == 'cancelled'
+                     else [self.t_html(customer, 'payment.sakurupiah.retry.expired_title'),
+                           self.t_html(customer, 'payment.sakurupiah.retry.expired_body')])
             rows = [[self._button(customer, 'checkout.browse_button', 'katalog',
                                   slot='menu.products')],
                     [self._button(customer, 'checkout.orders_button', 'menu:orders',
                                   slot='menu.orders')],
                     self._navigation_row(customer)]
+        elif view.state == 'manual_proof':
+            lines = [self.t_html(customer, 'payment.manual.proof_title'), '━━━━━━━━━━━━━━',
+                     self.t_html(customer, 'payment.invoice', invoice=view.invoice_number or ''),
+                     self.t_html(customer, 'payment.total', amount='Rp ' + number(int(view.amount or 0))),
+                     '', self.t_html(customer, 'payment.manual.proof_prompt'), '/payment']
+            rows = [self._navigation_row(customer)]
         elif view.state == 'review':
             lines = [self.t_html(customer, 'order.guidance.manual_review')]
             if view.invoice_number:
@@ -719,11 +749,15 @@ class CatalogPresenter:
             rows = [[self._button(customer, 'checkout.browse_button', 'katalog',
                                   slot='menu.products')], self._navigation_row(customer)]
         surface = self._surface(customer, '\n'.join(lines), rows, screen='checkout')
+        surface.options['payment_provider'] = provider
+        surface.options['payment_environment'], surface.options['payment_hosts'] = environment, hosts
+        if photo and fits_caption(surface):
+            surface.options['photo_bytes'] = photo
         if qris_url:
             fallback_key = 'payment.sakurupiah.hosted' if checkout_url else 'payment.sakurupiah.open_qr'
             fallback_lines = list(lines)
-            fallback_lines[fallback_lines.index(self.t_html(customer, 'payment.sakurupiah.scan'))] = (
-                self.t_html(customer, fallback_key))
+            scan = self.t_html(customer, 'payment.' + ('klikqris' if provider == 'klikqris' else 'sakurupiah') + '.scan')
+            fallback_lines[fallback_lines.index(scan)] = self.t_html(customer, fallback_key)
             fallback = '\n'.join(fallback_lines)
             if fits_caption(surface):
                 surface.options['photo_url'] = qris_url
@@ -1448,6 +1482,14 @@ class CatalogPresenter:
         match = _CHECKOUT_CHECK.fullmatch(data)
         if match:
             return self._check_payment(customer, match[1], root)
+        match = re.fullmatch(r'manual:paid:([0-9a-fA-F-]{36})', data)
+        if match and self.checkout is not None:
+            self.callback_handled = True
+            return self._checkout_surface(customer, self.checkout.manual_prompt(customer, root, order_id=match[1]))
+        match = re.fullmatch(r'buyer:cancel-pending:([0-9a-fA-F-]{36})', data)
+        if match and self.checkout is not None:
+            self.callback_handled = True
+            return self._checkout_surface(customer, self.checkout.cancel(customer, root, order_id=match[1]))
         if data in ('katalog','catalog','catalog:refresh'):
             state.clear()
             return self.catalog(customer,state=state)

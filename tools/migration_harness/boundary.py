@@ -258,6 +258,19 @@ def navigation_request(config, body, next_message_id):
     if method.startswith("edit") or method == "deleteMessage":
         if type(payload.get("message_id")) is not int or payload["message_id"] < 1:
             raise ValueError("invalid message identity")
+    payment_image = None
+    if method == 'sendPhoto' and type(payload.get('photo')) is dict:
+        encoded = payload['photo']
+        if set(encoded) != {'payment_image'} or type(encoded['payment_image']) is not str:
+            raise ValueError('invalid payment image')
+        # P13 local proof only. Existing external approvals do not grant new media sends.
+        if config['mode'] != 'fake':
+            raise ValueError('payment image upload is not externally qualified')
+        payment_image = base64.b64decode(encoded['payment_image'], validate=True)
+        if (not 0 < len(payment_image) <= 5 * 1024 * 1024
+                or not (payment_image.startswith(b'\x89PNG\r\n\x1a\n') or payment_image.startswith(b'\xff\xd8\xff'))):
+            raise ValueError('invalid payment image')
+        payload['photo'] = 'synthetic_payment_image'
     for field in ("photo", "animation"):
         if field in payload:
             value = payload[field]
@@ -716,7 +729,8 @@ def handler(config):
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 16384 or self.headers.get("Transfer-Encoding"):
+                maximum = 7 * 1024 * 1024 + 65536 if self.path == '/telegram/navigation' else 16384
+                if not 0 < length <= maximum or self.headers.get("Transfer-Encoding"):
                     raise ValueError("invalid request")
                 body = json.loads(self.rfile.read(length))
                 if self.path == "/telegram" and isinstance(body, dict):
