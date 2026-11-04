@@ -196,6 +196,9 @@ final class BalanceOperationsAlertService
         $counts = ['opened' => 0, 'updated' => 0, 'resolved' => 0, 'notified' => 0, 'delivery_pending' => 0];
         $effects = [];
         $now = now();
+        // Keep the existing diagnostic lifecycle, but retire Telegram notices
+        // for this key, including condition changes and resolution messages.
+        $notify = $signal['key'] !== self::ALERT_SETTLEMENT_BACKLOG;
 
         $episode = BalanceOperationsAlertEpisode::query()->where('alert_key', $signal['key'])->first();
 
@@ -241,7 +244,7 @@ final class BalanceOperationsAlertService
                 }
             }
 
-            if ($shouldNotify) {
+            if ($shouldNotify && $notify) {
                 [$notified, $effect] = $this->materialize(
                     $episode,
                     $this->openMessage($signal['severity'], $signal['summary']),
@@ -262,12 +265,14 @@ final class BalanceOperationsAlertService
             ])->save();
             $counts['resolved']++;
 
-            [$notified, $effect] = $this->materialize($episode, $this->resolvedMessage($episode), true);
-            $counts['notified'] += $notified;
-            if ($effect === null) {
-                $counts['delivery_pending']++;
-            } else {
-                $effects[] = $effect;
+            if ($notify) {
+                [$notified, $effect] = $this->materialize($episode, $this->resolvedMessage($episode), true);
+                $counts['notified'] += $notified;
+                if ($effect === null) {
+                    $counts['delivery_pending']++;
+                } else {
+                    $effects[] = $effect;
+                }
             }
         }
 

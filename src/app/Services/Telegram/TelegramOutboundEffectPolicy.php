@@ -62,6 +62,7 @@ final class TelegramOutboundEffectPolicy
         'balance_top_up_receipt_missing',
         'usdt_receipt_missing',
         'balance_operations_alert_missing',
+        'balance_operations_alert_disabled',
         'balance_top_up_not_paid',
         'balance_owner_compensation_missing',
         'balance_owner_compensation_not_eligible',

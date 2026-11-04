@@ -41,6 +41,15 @@ final class BalanceOperationsAlertDelivery
 
         try {
             $metadata = is_array($claimed->outcome_metadata) ? $claimed->outcome_metadata : [];
+            // Old queue wakeups and outbound recovery may still find notices
+            // materialized before this alert was retired. Preserve their rows
+            // and finish them without transport or further automatic retries.
+            if (($metadata['alert_key'] ?? null) === BalanceOperationsAlertService::ALERT_SETTLEMENT_BACKLOG) {
+                $this->ledger->finalizeNotDeliverable((string) $claimed->id, $claimed->claim_token, 'balance_operations_alert_disabled');
+
+                return;
+            }
+
             $message = $metadata['message'] ?? null;
             if (! is_string($message) || trim($message) === '') {
                 $this->ledger->finalizeNotDeliverable((string) $claimed->id, $claimed->claim_token, 'balance_operations_alert_missing');
