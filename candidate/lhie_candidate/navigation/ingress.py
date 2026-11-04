@@ -130,12 +130,16 @@ class Admission:
 
 class UpdateInbox:
     def receive(self, payload):
+        from ..auth.telegram_ingress import seal
+        original = payload
         payload = minimize(payload)
         update_id = payload["update_id"]
         if payload.get("ignored_service_event"):
             return Admission(update_id, False, {"ok": True})
         source = payload.get("callback_query", payload.get("message"))
         message = source.get("message", source)
+        callback = "callback_query" in payload
+        payload = seal(payload, original)
         with connection.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO django_candidate.navigation_updates (update_id,chat_id,payload) "
@@ -150,5 +154,5 @@ class UpdateInbox:
             wakeup.enqueue("payment.navigation" if payment_callback(payload) else "navigation.update",
                            update_id)
         acknowledgement = ({"method": "answerCallbackQuery", "callback_query_id": source["id"]}
-                           if "callback_query" in payload else {"ok": True})
+                           if callback else {"ok": True})
         return Admission(update_id, duplicate, acknowledgement)

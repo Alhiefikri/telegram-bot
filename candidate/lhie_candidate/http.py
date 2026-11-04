@@ -2,6 +2,7 @@ from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 
 from .readiness import verify_dependencies
+from .auth.sessions import handles as handles_auth
 
 
 def response(status, code):
@@ -17,7 +18,9 @@ class PayloadSafeMiddleware(MiddlewareMixin):
         except Exception:
             return response(400, "bad_request")
         if request.method not in ("GET", "HEAD") and not (
-            request.method == "POST" and request.path in ("/webhook/telegram", "/callback/sakurupiah")
+            request.method == "POST" and (
+                request.path in ("/webhook/telegram", "/callback/sakurupiah") or handles_auth(request.path)
+            )
         ):
             result = response(405, "method_not_allowed")
             result["Allow"] = "GET, HEAD"

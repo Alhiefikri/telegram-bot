@@ -160,7 +160,7 @@ def verify_bot(config):
     result = upstream("https://api.telegram.org/bot" + token + "/getMe")
     bot = result.get("result", {})
     if (result.get("ok") is not True or bot.get("id") != config["bot_id"]
-            or bot.get("username") != config["bot_username"] or not bot.get("is_bot")):
+            or bot.get("username") != config["bot_username"] or bot.get("is_bot") is not True):
         raise ValueError("testing bot identity mismatch")
 
 
@@ -658,7 +658,16 @@ def p08_request(config, body):
         conn.close()
 
 
+def verified_bot_identity(config):
+    if config.get("mode") not in ("testing-bot", "p08-sandbox-testing-bot"):
+        return {"ok": False}
+    verify_bot(config)
+    return {"ok": True, "result": {"id": config["bot_id"], "username": config["bot_username"], "is_bot": True}}
+
+
 def handler(config):
+    identity_lock = threading.Lock()
+    identity_cache = {"expires": 0, "value": {"ok": False}}
     class Handler(BaseHTTPRequestHandler):
         next_message_id = 1000
         def setup(self):
@@ -669,6 +678,21 @@ def handler(config):
             pass
 
         def do_GET(self):
+            if self.path == "/telegram/identity":
+                with identity_lock:
+                    if identity_cache["expires"] <= time.monotonic():
+                        try:
+                            identity_cache["value"] = verified_bot_identity(config)
+                        except Exception:
+                            identity_cache["value"] = {"ok": False}
+                        identity_cache["expires"] = time.monotonic() + (3600 if identity_cache["value"]["ok"] else 30)
+                    result = identity_cache["value"]
+                self.send_response(200 if result["ok"] else 503)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+                return
             self.send_response(200 if self.path == "/health" else 403)
             self.end_headers()
 

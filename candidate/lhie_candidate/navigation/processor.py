@@ -26,12 +26,15 @@ def _family_filter(family):
 
 
 class NavigationProcessor:
-    def __init__(self, repository, presenter, roots, transport, *, family=None):
+    def __init__(self, repository, presenter, roots, transport, *, family=None,
+                 authentication=None, auth_encrypter=None):
         self.repository = repository
         self.presenter = presenter
         self.roots = roots
         self.transport = transport
         self.family_filter = _family_filter(family)
+        self.authentication = authentication
+        self.auth_encrypter = auth_encrypter
 
     def process(self, update_id):
         if connection.in_atomic_block or not connection.get_autocommit():
@@ -86,11 +89,17 @@ class NavigationProcessor:
 
     def _finish(self, update_id, claimed_at, state, outcome):
         with connection.cursor() as cursor:
-            cursor.execute("UPDATE django_candidate.navigation_updates SET state=%s,outcome=%s,completed_at=clock_timestamp() "
+            cursor.execute("UPDATE django_candidate.navigation_updates SET state=%s,outcome=%s,completed_at=clock_timestamp(), "
+                           "payload=CASE WHEN payload ? '_encrypted_web_auth' THEN "
+                           "(payload - '_encrypted_web_auth') || '{\"_web_auth_consumed\":true}'::jsonb ELSE payload END "
                            "WHERE update_id=%s AND state='processing' AND claimed_at=%s",
                            [state, outcome, update_id, claimed_at])
 
     def _navigate(self, payload, update_id, claimed_at):
+        from ..auth.telegram_ingress import handle
+        auth_outcome = handle(payload, self.transport, authentication=self.authentication, crypto=self.auth_encrypter)
+        if auth_outcome is not None:
+            return auth_outcome
         callback = payload.get("callback_query")
         source = callback or payload["message"]
         message = source["message"] if callback else source

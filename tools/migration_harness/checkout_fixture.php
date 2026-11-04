@@ -129,4 +129,30 @@ foreach ($receipts as $rail => $receipt) {
         'target_type' => $receipt->target->type->value, 'target_id' => $receipt->target->targetId,
     ];
 }
+if (getenv('P19_AUTH_SMOKE') === '1') {
+    config(['hashing.bcrypt.rounds' => 4]);
+    $password = 'Synthetic-Auth42!';
+    foreach (['raw', 'sha384-v1'] as $scheme) {
+        $customer = App\Models\Customer::factory()->create([
+            'telegram_id' => null, 'email' => 'p19-'.$scheme.'@example.invalid',
+            'email_verified_at' => now(),
+        ]);
+        $input = $scheme === 'raw' ? $password : base64_encode(hash('sha384', "customer-password-v1\0".$password, true));
+        $customer->forceFill(['password' => Illuminate\Support\Facades\Hash::make($input), 'password_scheme' => $scheme])->save();
+        $fixtures['auth'][$scheme] = ['id' => $customer->id, 'email' => $customer->email];
+    }
+    $admin = App\Models\User::factory()->create(['email' => 'p19-admin@example.invalid', 'role' => 'owner',
+        'password' => Illuminate\Support\Facades\Hash::make($password)]);
+    $guest = App\Models\Customer::factory()->create(['telegram_id' => null, 'email' => null, 'email_verified_at' => null]);
+    $guestOrder = app(App\Services\OrderCheckoutService::class)->checkout(cart($guest, product('p19-guest')),
+        App\Services\Checkout\CheckoutPaymentIntents::manualQris(), 'p19-guest-order');
+    $guestOrder = app(App\Services\OrderStateMachine::class)->completeManualOrder($guestOrder);
+    $recovery = app(App\Storefront\StorefrontOrderAccess::class)->issue($guestOrder);
+    $fixtures['auth']['guest'] = ['id' => $guest->id, 'order_id' => $guestOrder->id,
+        'invoice' => $guestOrder->invoice_number, 'key' => $recovery];
+    $fixtures['auth']['admin'] = ['id' => $admin->id, 'email' => $admin->email];
+    $fixtures['auth']['password'] = $password;
+    $fixtures['auth']['signed_url'] = Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show',
+        now()->addMinutes(15), ['order' => App\Models\Order::where('checkout_key', str_repeat('a', 64))->value('id')]);
+}
 echo json_encode($fixtures, JSON_THROW_ON_ERROR);
