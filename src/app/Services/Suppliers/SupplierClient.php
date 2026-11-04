@@ -8,12 +8,14 @@ use App\Models\SupplierCatalogItem;
 use Carbon\CarbonImmutable;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
@@ -464,6 +466,7 @@ final class SupplierClient
         if ($timeout <= 0) {
             throw new SupplierUnavailable('snapshot_timeout');
         }
+        $started = hrtime(true);
         try {
             $responses = Http::pool(function (Pool $pool) use ($supplier, $provider, $ids, $timeout): void {
                 foreach ($ids as $id) {
@@ -471,6 +474,7 @@ final class SupplierClient
                 }
             }, concurrency: self::DETAIL_CONCURRENCY);
         } catch (Throwable $exception) {
+            $this->logSnapshotFailure($supplier, $provider, $this->transportType($exception), $started, null, 1);
             throw new SupplierUnavailable($this->syncTransportError($exception, $deadline));
         }
         foreach ($responses as $response) {
@@ -478,11 +482,33 @@ final class SupplierClient
                 $this->observeRateLimit($provider, $response);
             }
         }
+        // Inspect every result before retrying: a sibling HTTP error rejects the snapshot.
+        $httpFailure = null;
+        foreach ($ids as $id) {
+            $response = $responses[$id] ?? null;
+            if (! $response instanceof Response) {
+                $this->logSnapshotFailure($supplier, $provider, $this->transportType($response instanceof Throwable ? $response : null), $started, null, 1);
+            } elseif (! $response->successful()) {
+                $this->logSnapshotFailure($supplier, $provider, $this->httpCode($response->status()), $started, $response->status(), 1);
+                if ($httpFailure === null || $response->status() === 429) {
+                    $httpFailure = $response;
+                }
+            }
+        }
+        if ($httpFailure !== null) {
+            throw new SupplierUnavailable($this->httpCode($httpFailure->status()),
+                $httpFailure->status() === 429 ? $this->retryAfterSeconds($provider, $httpFailure) : 0);
+        }
         $details = [];
         foreach ($ids as $id) {
             $response = $responses[$id] ?? null;
             if (! $response instanceof Response) {
-                throw new SupplierUnavailable($this->syncTransportError($response instanceof Throwable ? $response : null, $deadline));
+                $exception = $response instanceof Throwable ? $response : null;
+                if ($this->isConnectionFailure($exception) && $this->waitForSnapshotRetry($deadline, $provider)) {
+                    $response = $this->send($supplier, 'GET', '/products/'.rawurlencode($id), deadline: $deadline, retrySnapshot: false, attempt: 2);
+                } else {
+                    throw new SupplierUnavailable($this->syncTransportError($exception, $deadline));
+                }
             }
             if (! $response->successful()) {
                 throw new SupplierUnavailable($this->httpCode($response->status()),
@@ -498,28 +524,43 @@ final class SupplierClient
         return $details;
     }
 
-    private function send(Supplier $supplier, string $method, string $path, array $body = [], array $headers = [], ?int $deadline = null, bool $allowInactive = false): Response
+    private function send(Supplier $supplier, string $method, string $path, array $body = [], array $headers = [], ?int $deadline = null, bool $allowInactive = false, bool $retrySnapshot = true, int $attempt = 1): Response
     {
         $provider = $this->ready($supplier, $allowInactive);
-        $this->budget($supplier, $provider, $method === 'GET');
         // Synchronous bulk purchases need longer than reads, with room for exact-order hydration in the 120s worker.
         $requestTimeout = $method === 'POST' ? 90 : 12;
-        $timeout = $deadline === null ? $requestTimeout : min($requestTimeout, ($deadline - hrtime(true)) / 1_000_000_000);
-        if ($timeout <= 0) {
-            throw new SupplierUnavailable('snapshot_timeout');
-        }
         $options = $method === 'POST' ? ['json' => $body] : [];
         if ($provider === SupplierProvider::Canboso && $method === 'GET') {
             parse_str(parse_url($path, PHP_URL_QUERY) ?? '', $query);
             $path = explode('?', $path, 2)[0];
             $options = ['query' => ['key' => $supplier->api_key] + $query];
         }
-        try {
-            $response = $this->request($supplier, Http::acceptJson(), $timeout, $headers)
-                ->send($method, $provider->baseUrl().$path, $options);
-        } catch (Throwable $exception) {
-            // Even an oversized response can follow a successful purchase.
-            throw new SupplierUnavailable($deadline !== null ? $this->syncTransportError($exception, $deadline) : 'transport');
+        while (true) {
+            $this->budget($supplier, $provider, $method === 'GET');
+            $timeout = $deadline === null ? $requestTimeout : min($requestTimeout, ($deadline - hrtime(true)) / 1_000_000_000);
+            if ($timeout <= 0) {
+                throw new SupplierUnavailable('snapshot_timeout');
+            }
+            $started = hrtime(true);
+            try {
+                $response = $this->request($supplier, Http::acceptJson(), $timeout, $headers)
+                    ->send($method, $provider->baseUrl().$path, $options);
+            } catch (Throwable $exception) {
+                if ($deadline !== null && $method === 'GET') {
+                    $this->logSnapshotFailure($supplier, $provider, $this->transportType($exception), $started, null, $attempt);
+                    if ($retrySnapshot && $attempt === 1 && $this->isConnectionFailure($exception) && $this->waitForSnapshotRetry($deadline, $provider)) {
+                        $attempt++;
+
+                        continue;
+                    }
+                }
+                // Even an oversized response can follow a successful purchase.
+                throw new SupplierUnavailable($deadline !== null ? $this->syncTransportError($exception, $deadline) : 'transport');
+            }
+            break;
+        }
+        if ($deadline !== null && ! $response->successful()) {
+            $this->logSnapshotFailure($supplier, $provider, $this->httpCode($response->status()), $started, $response->status(), $attempt);
         }
         try {
             $this->observeRateLimit($provider, $response);
@@ -529,6 +570,9 @@ final class SupplierClient
                 throw new SupplierUnavailable('transport');
             }
             throw $exception;
+        }
+        if ($deadline !== null && hrtime(true) >= $deadline) {
+            throw new SupplierUnavailable('snapshot_timeout');
         }
 
         return $response;
@@ -547,6 +591,74 @@ final class SupplierClient
         }
 
         return 'transport';
+    }
+
+    private function isConnectionFailure(?Throwable $exception): bool
+    {
+        $connectionException = false;
+        for ($cause = $exception; $cause !== null; $cause = $cause->getPrevious()) {
+            if ($cause instanceof SupplierUnavailable) {
+                return false;
+            }
+            if ($cause instanceof ConnectException) {
+                return true;
+            }
+            if ($cause instanceof RequestException) {
+                return in_array($cause->getHandlerContext()['errno'] ?? null, [5, 6, 7, 28, 35, 52, 55, 56, 60], true);
+            }
+            $connectionException = $connectionException || $cause instanceof ConnectionException;
+        }
+
+        return $connectionException;
+    }
+
+    private function transportType(?Throwable $exception): string
+    {
+        for ($cause = $exception; $cause !== null; $cause = $cause->getPrevious()) {
+            if ($cause instanceof ConnectException || $cause instanceof RequestException) {
+                $context = $cause->getHandlerContext();
+
+                return match ($context['errno'] ?? null) {
+                    5, 6 => 'dns',
+                    7 => 'connect',
+                    28 => isset($context['connect_time']) ? ((float) $context['connect_time'] > 0 ? 'request_timeout' : 'connect_timeout') : 'timeout',
+                    35, 60 => 'tls',
+                    52 => 'connection_closed',
+                    55 => 'connection_send_error',
+                    56 => str_contains(strtolower($cause->getMessage()), 'connection reset by peer') ? 'connection_reset' : 'connection_receive_error',
+                    default => $this->isConnectionFailure($exception) ? 'connection_error' : 'transport_error',
+                };
+            }
+        }
+
+        return $this->isConnectionFailure($exception) ? 'connection_error' : 'transport_error';
+    }
+
+    private function waitForSnapshotRetry(int $deadline, SupplierProvider $provider): bool
+    {
+        $delay = random_int(50_000, 150_000);
+        if (in_array($provider, [SupplierProvider::Arrs, SupplierProvider::Warzone, SupplierProvider::NyStore], true)) {
+            $delay += 1_000_000;
+        }
+        if (hrtime(true) + $delay * 1_000 >= $deadline) {
+            return false;
+        }
+        usleep($delay);
+
+        return hrtime(true) < $deadline;
+    }
+
+    private function logSnapshotFailure(Supplier $supplier, SupplierProvider $provider, string $type, int $started, ?int $status, int $attempt): void
+    {
+        Log::warning('Supplier snapshot request failed', [
+            'supplier_id' => $supplier->id,
+            'provider' => $provider->value,
+            'host' => parse_url($provider->baseUrl(), PHP_URL_HOST),
+            'error_type' => $type,
+            'duration_ms' => (int) ((hrtime(true) - $started) / 1_000_000),
+            'http_status' => $status,
+            'attempt' => $attempt,
+        ]);
     }
 
     private function request(Supplier $supplier, PendingRequest $request, float $timeout, array $headers = []): PendingRequest

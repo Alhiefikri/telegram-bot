@@ -174,7 +174,7 @@ final class AdminSupplierDashboardData
             'authentication', 'invalid_key' => 'API key ditolak oleh supplier. Periksa key dan pastikan akses API aktif.',
             'credential_unreadable' => 'API key tersimpan tidak dapat dibaca (misalnya APP_KEY aplikasi berubah atau database berasal dari environment lain). Masukkan ulang API key lewat Edit koneksi.',
             'rate_limited' => 'Batas permintaan ke supplier sedang tercapai. Tunggu beberapa menit sebelum sinkron lagi.',
-            'transport' => 'Koneksi ke supplier gagal. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
+            'transport' => 'Koneksi dari server ke supplier gagal. Periksa jaringan lokal dan koneksi supplier. Katalog sebelumnya tetap disimpan.',
             'request_timeout' => 'Waktu tunggu koneksi atau respons supplier habis. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
             'snapshot_timeout' => 'Batas waktu sinkronisasi katalog terlampaui. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
             'invalid_payload' => 'Format data supplier belum dapat dibaca. Katalog sebelumnya tetap disimpan.',
@@ -182,7 +182,8 @@ final class AdminSupplierDashboardData
             'currency_mismatch' => 'Mata uang dari supplier tidak sesuai dengan koneksi. Periksa mata uang akun supplier.',
             'duplicate_account' => 'Akun supplier ini sudah terhubung pada koneksi lain.',
             'account_identity_mismatch' => 'API key mengarah ke akun yang berbeda. Periksa koneksi supplier.',
-            'upstream', 'redirect', 'request_failed' => 'Layanan supplier sedang bermasalah. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
+            'upstream' => 'Server supplier mengalami kesalahan. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
+            'redirect', 'request_failed' => 'Layanan supplier sedang bermasalah. Katalog sebelumnya tetap disimpan. Coba lagi nanti.',
             default => 'Sinkron belum diterapkan. Muat ulang halaman dan periksa pengaturan supplier sebelum mencoba lagi.',
         };
 

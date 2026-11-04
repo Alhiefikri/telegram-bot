@@ -357,13 +357,22 @@ final class SupplierAdminTest extends TestCase
         $transport = $this->supplier(['last_error' => 'transport', 'sync_next_attempt_at' => $retry]);
         $timeout = $this->supplier(['last_error' => 'snapshot_timeout']);
         $requestTimeout = $this->supplier(['last_error' => 'request_timeout']);
+        $rateLimited = $this->supplier(['last_error' => 'rate_limited']);
+        $upstream = $this->supplier(['last_error' => 'upstream']);
+        $unknown = $this->supplier(['last_error' => 'SECRET-PROVIDER-BODY']);
         $cleared = $this->supplier(['last_error' => null, 'sync_failures' => 1, 'sync_next_attempt_at' => $retry]);
         $dashboard = app(AdminSupplierDashboardData::class);
         $connections = $dashboard->forTab()['connections']->getCollection()->keyBy('id');
 
-        $this->assertStringContainsString('Koneksi ke supplier gagal', $connections[$transport->id]['sync_error']);
+        $this->assertStringContainsString('Koneksi dari server ke supplier gagal', $connections[$transport->id]['sync_error']);
         $this->assertStringContainsString('Batas waktu sinkronisasi', $connections[$timeout->id]['sync_error']);
         $this->assertStringContainsString('Waktu tunggu koneksi atau respons supplier habis', $connections[$requestTimeout->id]['sync_error']);
+        $this->assertStringContainsString('Batas permintaan ke supplier', $connections[$rateLimited->id]['sync_error']);
+        $this->assertStringContainsString('Server supplier mengalami kesalahan', $connections[$upstream->id]['sync_error']);
+        $this->assertStringNotContainsString('SECRET-PROVIDER-BODY', $connections[$unknown->id]['sync_error']);
+        foreach ([$transport, $timeout, $requestTimeout, $rateLimited, $upstream, $unknown] as $supplier) {
+            $this->assertStringNotContainsString(self::KEY, $connections[$supplier->id]['sync_error']);
+        }
         $this->assertSame($retry->toIso8601String(), $connections[$cleared->id]['next_attempt_at']);
         $this->get(route('admin.dashboard', ['tab' => 'suppliers']))->assertOk()
             ->assertSee('Percobaan otomatis berikutnya')->assertSee($retry->toIso8601String());

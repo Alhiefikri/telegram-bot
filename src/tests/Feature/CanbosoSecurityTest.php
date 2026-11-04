@@ -396,7 +396,7 @@ final class CanbosoSecurityTest extends NonTransactionalDatabaseTestCase
             $this->assertNull($exception->getPrevious());
             $this->assertSame('Supplier unavailable: transport.', $exception->getMessage());
         }
-        $this->assertSame(1, $calls);
+        $this->assertSame(2, $calls);
     }
 
     #[DataProvider('malformedCatalogs')]

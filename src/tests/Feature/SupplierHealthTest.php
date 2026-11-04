@@ -212,7 +212,27 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $supplier->forceFill(['last_error' => 'rate_limited', 'sync_failures' => 4])->save();
         $this->assertSame(0, $this->health()->materialize());
         $this->assertSame(1, $this->effects()->count());
-        $this->assertStringContainsString('Koneksi supplier terganggu', SupplierHealthEvent::sole()->message);
+        $this->assertStringContainsString('Koneksi dari server ke supplier gagal', SupplierHealthEvent::sole()->message);
+    }
+
+    #[DataProvider('newTransientErrors')]
+    public function test_snapshot_and_upstream_errors_wait_for_threshold_and_share_connection_episode(string $error, string $message): void
+    {
+        $supplier = $this->supplier(['last_error' => $error, 'sync_failures' => 1]);
+
+        $this->assertSame(0, $this->health()->materialize());
+        $supplier->forceFill(['sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD])->save();
+        $this->assertSame(1, $this->health()->materialize());
+        $this->assertStringContainsString($message, SupplierHealthEvent::sole()->message);
+        $supplier->forceFill(['last_error' => 'transport', 'sync_failures' => 4])->save();
+        $this->assertSame(0, $this->health()->materialize());
+        $this->assertSame(1, $this->effects()->count());
+    }
+
+    public static function newTransientErrors(): iterable
+    {
+        yield 'snapshot timeout' => ['snapshot_timeout', 'Batas waktu sinkronisasi katalog supplier terlampaui'];
+        yield 'upstream' => ['upstream', 'Layanan supplier mengalami kesalahan server'];
     }
 
     public function test_configuration_fault_remains_immediate_without_sustained_failure(): void
@@ -494,7 +514,7 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         $message = SupplierHealthEvent::sole()->message;
         $this->assertStringContainsString('Review/ambigu baru: 2 obligation', $message);
         $this->assertStringContainsString('Saldo tersedia <= ambang', $message);
-        $this->assertStringContainsString('Koneksi supplier terganggu', $message);
+        $this->assertStringContainsString('Koneksi dari server ke supplier gagal', $message);
         $this->assertStringContainsString('jangan beli ulang', $message);
         $this->assertSame(1, $this->effects()->count(), 'New conditions on the same connection share one scan message.');
     }
@@ -626,7 +646,10 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
         yield 'invalid key' => ['invalid_key', 'Verifikasi atau rotasi key'];
         yield 'encrypted credential unreadable' => ['credential_unreadable', 'APP_KEY/backup'];
         yield 'rate limiting' => ['rate_limited', 'Tunggu lalu sinkronkan'];
-        yield 'transport' => ['transport', 'Tunggu lalu sinkronkan'];
+        yield 'transport' => ['transport', 'Periksa jaringan lokal'];
+        yield 'request timeout' => ['request_timeout', 'Waktu tunggu koneksi atau respons supplier habis'];
+        yield 'snapshot timeout' => ['snapshot_timeout', 'Batas waktu sinkronisasi katalog supplier terlampaui'];
+        yield 'upstream error' => ['upstream', 'Layanan supplier mengalami kesalahan server'];
     }
 
     #[DataProvider('safeErrors')]
@@ -634,7 +657,7 @@ final class SupplierHealthTest extends NonTransactionalDatabaseTestCase
     {
         $supplier = $this->supplier([
             'name' => '<b>Private & "quoted"</b>', 'last_error' => $error,
-            'sync_failures' => in_array($error, ['rate_limited', 'transport'], true) ? SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD : 0,
+            'sync_failures' => SupplierHealthService::TRANSIENT_FAILURE_THRESHOLD,
             'balance_micros' => null, 'balance_observed_at' => null,
             'api_key' => 'SECRET-API-KEY', 'webhook_secret' => 'SECRET-WEBHOOK',
             'account_metadata' => ['raw_body' => 'SECRET-PROVIDER-BODY', 'Authorization' => 'SECRET-HEADER'],
