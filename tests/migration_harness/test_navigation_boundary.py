@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import sys
@@ -18,6 +19,26 @@ class NavigationBoundaryTests(unittest.TestCase):
                     {'text':'Unavailable','disabled':{},'style':'danger'}]]}}}, 1001)
         self.assertEqual(result, {'ok':True,'result':{'message_id':1001}})
         upstream.assert_not_called()
+
+    def test_generated_payment_images_are_fake_only_even_with_live_target_approval(self):
+        image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN2kAAAAASUVORK5CYII='
+        request = {'method': 'sendPhoto', 'payload': {
+            'chat_id': 1, 'photo': {'payment_image': image}, 'caption': 'Synthetic QR'}}
+        with patch('boundary.upstream') as upstream, patch('boundary.navigation_telegram.request') as relay:
+            self.assertEqual(navigation_request(default('candidate'), request, 1001),
+                             {'ok': True, 'result': {'message_id': 1001}})
+            for mode, gate in (('testing-bot', 'P06-approved-navigation-targets-only'),
+                               ('p08-sandbox-testing-bot', 'P08-approved-dual-targets-only')):
+                config = {**default('candidate'), 'mode': mode, 'bot_token': 'synthetic',
+                          'approval': {'gate': gate}}
+                with self.subTest(mode=mode), self.assertRaises(ValueError):
+                    navigation_request(config, request, 1001)
+            for encoded in ('not-base64', base64.b64encode(b'not an image').decode()):
+                with self.subTest(encoded=encoded), self.assertRaises(ValueError):
+                    navigation_request(default('candidate'), {'method': 'sendPhoto', 'payload': {
+                        'chat_id': 1, 'photo': {'payment_image': encoded}}}, 1001)
+            upstream.assert_not_called()
+            relay.assert_not_called()
 
     def test_navigation_never_enables_telegram_link_previews(self):
         config = {**default('candidate'), 'mode': 'p08-sandbox-testing-bot',

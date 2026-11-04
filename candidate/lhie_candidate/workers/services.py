@@ -44,16 +44,12 @@ def interaction_handler():
 
 def payment_handler():
     from ..checkout.db import Database
-    from ..compat.crypto import LaravelEncrypter
-    from ..payments.lifecycle import SakurupiahLifecycle
-    from ..payments.relay import SandboxRelay
-    from ..payments.sakurupiah import SakurupiahSandboxAdapter
     from ..runtime import application_key
     from .payment import PaymentHandler
 
     key = application_key()
-    lifecycle = SakurupiahLifecycle(SakurupiahSandboxAdapter(transport=SandboxRelay()),
-                                    LaravelEncrypter(key))
+    from ..payments.runtime import payment_services
+    lifecycle = payment_services()
     processor = _navigation_processor(lifecycle=lifecycle, key=key, family="payment")
     return PaymentHandler(lifecycle, Database(), processor=processor)
 

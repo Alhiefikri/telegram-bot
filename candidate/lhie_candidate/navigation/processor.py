@@ -143,6 +143,9 @@ class NavigationProcessor:
         if callback:
             data = receipt_action or callback["data"]
         else:
+            proof = source.get('text', source.get('caption', '')).strip()
+            if re.fullmatch(r'/payment(?:@[A-Za-z0-9_]+)?(?:\s+\S+)?', proof, re.I):
+                return self._manual_proof(customer, source, proof)
             command = source.get("text", "").strip().split("@", 1)[0].lower()
             if command in ("/start", "/menu", "☰ menu", "menu"):
                 data = "menu"
@@ -254,6 +257,28 @@ class NavigationProcessor:
                 "callback_query_id": callback["id"], "show_alert": True, "text": notice,
             })
         return outcome
+
+    def _manual_proof(self, customer, message, command):
+        from ..checkout.errors import CheckoutError
+        from ..payments.manual import ManualQrisLifecycle
+        from ..payments.presentation import QrPresentation
+        invoice = command.split(maxsplit=1)[1] if len(command.split(maxsplit=1)) == 2 else ''
+        photos = message.get('photo') or (message.get('reply_to_message') or {}).get('photo') or []
+        key = 'payment.proof.photo_required'
+        if photos:
+            photo = max(photos, key=lambda item: (item.get('width', 0) * item.get('height', 0), item.get('file_size', 0)))
+            try:
+                result = ManualQrisLifecycle(QrPresentation()).submit_proof(
+                    customer_id=customer['id'], invoice=invoice, photo_file_id=photo['file_id'])
+                key = {'accepted': 'payment.proof.forwarding', 'duplicate': 'payment.proof.duplicate',
+                       'expired': 'payment.proof.deadline_passed',
+                       'admin_unavailable': 'payment.proof.admin_unavailable'}[result]
+            except CheckoutError:
+                key = 'payment.proof.invoice_not_found'
+        result = self.transport.execute('sendMessage', {
+            'chat_id': str(message['chat']['id']),
+            'text': self.presenter.t(customer, key, invoice=invoice)})
+        return 'acknowledged' if result.outcome == 'success' else 'ambiguous'
 
     def drain(self, limit=25):
         if type(limit) is not int or not 1 <= limit <= 100:

@@ -144,7 +144,7 @@ class CheckoutService:
         if (preflight.provider, preflight.method) != (self.preparation.provider, self.preparation.method):
             raise CheckoutError('stale_preflight')
         if preflight.setting != setting:
-            if preflight.observation is not None:
+            if not is_balance:
                 raise CheckoutError('stale_preflight')
             preflight = replace(preflight, setting=setting)
         plan = self.preparation.prepare(pricing, setting, preflight, now)
@@ -226,10 +226,12 @@ class CheckoutService:
 
     def _setting(self, *, lock):
         suffix = ' FOR UPDATE' if lock else ''
-        setting = self.db.one('''SELECT id,is_active,payment_provider_version,payment_mode,sakurupiah_channel
-            FROM public.manual_payment_settings ORDER BY is_active DESC,id LIMIT 1''' + suffix)
+        setting = self.db.one('''SELECT id,is_active,payment_provider_version,payment_mode,sakurupiah_channel,
+            qris_payment_ttl_minutes FROM public.manual_payment_settings
+            WHERE is_active=true ORDER BY id LIMIT 1''' + suffix)
         return None if setting is None else PaymentSetting(setting['id'], setting['payment_provider_version'],
-            setting['is_active'], setting['payment_mode'], setting['sakurupiah_channel'])
+            setting['is_active'], setting['payment_mode'], setting['sakurupiah_channel'],
+            max(1, setting['qris_payment_ttl_minutes'] or 10))
 
 
 def _reference(prefix, now):

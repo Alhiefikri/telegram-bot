@@ -42,6 +42,9 @@ def run():
     from tests.test_checkout_postgres import admin_connection
 
     fixtures = json.load(sys.stdin)
+    if os.environ.get('P13_QRIS_RAILS') == '1':
+        from tests.test_qris_postgres import exercise_qris_rails
+        return exercise_qris_rails(fixtures)
     integrated = os.environ.get('P08_INTEGRATED_SMOKE') == '1'
     if integrated:
         fixtures['duplicate'] = fixtures['receipt_lost']
@@ -121,7 +124,7 @@ def run():
             except ConnectionResetError:
                 oversized = None
             assert oversized in (403, None)
-        assert admin.execute('SELECT count(*) FROM public.payment_events WHERE merchant_ref=%s', (ref,)).fetchone() == (0,)
+        assert admin.execute("SELECT count(*) FROM public.payment_events WHERE merchant_ref=%s AND event_type='callback'", (ref,)).fetchone() == (0,)
         assert callback.send(event(ref, trx + '-mismatch')) == 200
         assert lifecycle.consume_callbacks(result.payment_id).state == 'created'
         assert economics(fixture, result) == ('pending_payment', 'pending', 'pending', 4, 2 if integrated else 1, 2 if integrated else 1, 0, 0)
@@ -234,8 +237,9 @@ def run():
                              (conflict.payment_id, 'receipt_conflict')).fetchone() == (1,)
         assert unknown[0] and unknown[1:5] == (None, None, None, None)
         assert lifecycle.create(ambiguous.payment_id, **args).state == 'outcome_unknown'
-        assert lifecycle.recover(ambiguous.payment_id).state == 'recovery_unconfirmed'
-        assert payment(ambiguous.payment_id) == unknown
+        assert lifecycle.recover(ambiguous.payment_id).state == 'created'
+        recovered = payment(ambiguous.payment_id)
+        assert recovered[0] == unknown[0] and recovered[1] and recovered[2] == 15000
         assert economics(ambiguous_fixture, ambiguous) == ('pending_payment', 'pending', 'pending', 4, 1, 1, 0, 0)
         assert sum(path.endswith('/create.php') and fields['merchant_ref'] == unknown[0]
                    for path, fields in sandbox.calls) == 1

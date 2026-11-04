@@ -1,4 +1,5 @@
 """Navigation-only relay client. No token, provider endpoint or retry-on-timeout path."""
+import base64
 import copy
 import http.client
 import json
@@ -65,6 +66,11 @@ class RelayTransport:
         self.emoji_unavailable = False
 
     def _request(self, method, payload):
+        if type(payload.get('photo')) is bytes:
+            data = payload['photo']
+            if not 0 < len(data) <= 5 * 1024 * 1024:
+                return {'ok': False, 'error_code': 400}
+            payload = {**payload, 'photo': {'payment_image': base64.b64encode(data).decode('ascii')}}
         client = http.client.HTTPConnection("127.0.0.1", 8025, timeout=8)
         try:
             client.request("POST", "/telegram/navigation", json.dumps({"method": method, "payload": payload}),

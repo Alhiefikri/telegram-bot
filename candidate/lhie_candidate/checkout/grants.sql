@@ -21,7 +21,8 @@ GRANT SELECT (id,singleton_key) ON public.customer_usdt_funding_policies TO cand
 GRANT SELECT (id,scope) ON public.customer_usdt_funding_pauses TO candidate_runtime;
 GRANT SELECT (id,state) ON public.balance_restore_gates TO candidate_runtime;
 GRANT SELECT (id,singleton_key,is_active) ON public.checkout_maintenance_settings TO candidate_runtime;
-GRANT SELECT (id,is_active,payment_provider_version,payment_mode,sakurupiah_channel) ON public.manual_payment_settings TO candidate_runtime;
+GRANT SELECT (id,is_active,payment_provider_version,payment_mode,sakurupiah_channel,qris_payment_ttl_minutes)
+    ON public.manual_payment_settings TO candidate_runtime;
 GRANT SELECT (id,order_id) ON public.supplier_fulfillments TO candidate_runtime;
 
 GRANT INSERT (id,customer_id,cart_id,checkout_key,invoice_number,order_status,payment_status,total_amount,currency,

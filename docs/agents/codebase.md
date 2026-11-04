@@ -69,9 +69,9 @@ adds an explicitly attested Sakurupiah-only relay, provider-authenticated callba
 hints in existing Payment Events, immutable same-Payment create/recovery and
 authoritative status/history settlement using canonical receipt and inventory
 owners. `tools/migration_harness/smoke_qris.py` exercises the local synthetic
-path. The later #720 bridge connects the payment button locally; real
-target/credential verification and integrated Testing Bot/sandbox smoke remain
-open P08/H1 requirements.
+path. P08 and H1 are closed with owner approval to continue; that decision is
+not live-provider, production, performance or full-rewrite acceptance. P13 below
+records the remaining per-rail qualification blockers.
 
 P09 [receipt delivery](../migration/python-django/p05/README.md#p09-credential-receipts-and-outbound-effects-690)
 owns `candidate/lhie_candidate/receipt/`: authorized transient rendering,
@@ -118,6 +118,17 @@ the integrated P08 callback/payment/receipt smoke and 111 focused regressions
 passed locally. Supplier acquisition, live rails, authentication/UI adapters and
 actual data qualification keep their downstream owners; no production or CI/CD
 operation is implied.
+
+P13 [QRIS rails and historical Pakasir](../migration/python-django/p05/README.md#p13-qris-rails-and-historical-pakasir-696)
+owns `payments/routing.py`, `settings.py`, `manual.py`, `klikqris.py`, `pakasir.py`,
+`sakurupiah_production.py` and QR `presentation.py`. `checkout/navigation.py`
+selects the store's ready provider only for new invoices; existing Payments
+remain bound to their persisted rail. Manual proof enters the existing durable
+admin-effect ledger, with delivery still owned by P25. Automatic settlement
+reuses P12 lifecycle and global receipt claims; Pakasir remains historical-only.
+`smoke_qris.py --rails` extends P01/P07/P08 with a source-bound local proof in
+`.local/migration-p13/verification.json`. Production and new external adapters
+remain absent from default composition; fixture success does not qualify them.
 
 P19 [authentication and ownership compatibility](../migration/python-django/p05/README.md#p19-authentication-identity-linking-and-ownership-compatibility-695)
 owns `candidate/lhie_candidate/auth/`: Customer password/verification/OTP/reset/
@@ -182,12 +193,12 @@ The #720 follow-up owns the navigation-to-checkout bridge in
 `candidate/lhie_candidate/checkout/navigation.py`. It maps one admitted detail
 selection to one canonical Cart item under a Customer lock, derives the
 PHP-compatible detail checkout HMAC, and delegates price/stock/money to the
-existing P07 `CheckoutService`. The QRIS rail creates/observes one P08 sandbox
-Payment through `SakurupiahLifecycle` (no second invoice or provider retarget);
-the Balance rail stays on `StoreBalanceLedger` and the spending/restore gates.
+existing P07 `CheckoutService`. P13 now routes new QRIS checkout through
+`QrisPayments`; each existing Payment keeps its original lifecycle and invoice.
+The Balance rail stays on `StoreBalanceLedger` and the spending/restore gates.
 `checkout:check:<payment-id>` observes the same Payment and settlement wakes the
-P09 receipt ledger. New grants are Cart/CartItem inserts only; provider columns
-keep their P08 writer. `smoke_checkout_navigation.py` proves the fake-sandbox
+P09 receipt ledger. Explicit checkout/provider grants retain column-level money
+snapshot denial. `smoke_checkout_navigation.py` proves the fake-sandbox
 QRIS/Balance paths, replay, a two-thread same-key race, one receipt delivery and
 runtime column denial. Payment-stage samples remain local single attempts with
 `proposed_unratified` status; #722/H1 own the paired run and budget.
@@ -1621,7 +1632,7 @@ Dashboard tidak lagi memiliki tab Riwayat KlikQRIS atau Withdraw, dan tidak mela
 
 ### 5.1 Provider selection
 
-Pergantian provider melalui Pengaturan hanya menerima `manual` dan `sakurupiah`. KlikQRIS dan Pakasir tidak dapat dipilih untuk pergantian baru. `PaymentProvider::normalize()` serta adapter legacy tetap mengenali provider transaksi historis agar provenance tidak hilang. Switch tidak mengubah Payment yang sudah dibuat; readiness Sakurupiah dan optimistic version tetap diperiksa oleh `PaymentProviderSwitcher`.
+Pergantian provider melalui Pengaturan menerima `manual`, `klikqris`, dan `sakurupiah`, sesuai `PaymentProvider::allowed()` dan [ADR-0006](../adr/0006-klikqris-native-qris-and-pakasir-retirement.md). KlikQRIS dan Sakurupiah wajib lulus readiness sebelum dipilih; Pakasir hanya untuk transaksi historis. Switch dan perubahan channel/version tidak mengubah provider, reference, nominal, receiver, atau deadline Payment lama. P13 mempertahankan policy ini tanpa aktivasi provider; Python memakai `payments/settings.py` dan `payments/routing.py`.
 
 `CheckoutPaymentPreparationResolver` memetakan pasangan provider/method yang sudah dinormalisasi ke satu adapter preparation. `OrderCheckoutService` mengonsumsi adapter dan plan tanpa mengetahui aturan rail.
 

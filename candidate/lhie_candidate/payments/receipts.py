@@ -54,7 +54,7 @@ def claim_provider_reference(db, *, provider, reference, beneficiary, currency, 
     db.require_transaction()
     provider = provider.strip().lower()
     reference = reference.strip()
-    if (not ((provider == 'sakurupiah' and account_namespace == 'default' and currency == 'IDR')
+    if (not ((provider in ('sakurupiah', 'klikqris', 'pakasir') and account_namespace == 'default' and currency == 'IDR')
              or (provider == 'manual' and account_namespace == 'owner_attestation'
                  and currency in ('IDR', 'USDT') and target_type == 'order_payment'))
             or not reference or type(amount) is not int or amount < 1

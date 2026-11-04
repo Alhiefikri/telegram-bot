@@ -27,3 +27,24 @@ GRANT UPDATE (provider_reference,provider_total_payment,provider_fee,provider_ex
 GRANT USAGE, SELECT ON SEQUENCE public.payment_events_id_seq,
     public.external_money_receipts_id_seq, public.external_money_receipt_aliases_id_seq,
     public.manual_fulfillment_reviews_id_seq TO candidate_runtime;
+
+-- P13 retained provider/proof/presentation authority. Explicit provisioning only.
+GRANT SELECT (raw_payload) ON public.payment_events TO candidate_runtime;
+GRANT SELECT (id,enabled,image_path,qr_x,qr_y,qr_width,qr_height,version,singleton_key)
+    ON public.payment_qr_template_settings TO candidate_runtime;
+GRANT SELECT (admin_telegram_chat_id,admin_username,instructions) ON public.manual_payment_settings TO candidate_runtime;
+GRANT SELECT (provider_payload,provider_qris_url,provider_created_at,provider_payment_number,
+    provider_payment_number_hash,klikqris_transaction_signature,klikqris_status_failure_count,
+    klikqris_status_next_check_at,klikqris_status_last_error,payment_proof_file_id,payment_proof_admin_chat_id)
+    ON public.payments TO candidate_runtime;
+GRANT UPDATE (provider_payload,provider_qris_url,provider_created_at,klikqris_transaction_signature,
+    klikqris_status_failure_count,klikqris_status_next_check_at,klikqris_status_last_error,
+    payment_proof_file_id,payment_proof_submitted_at,payment_proof_admin_chat_id)
+    ON public.payments TO candidate_runtime;
+GRANT SELECT (id,order_id,payment_id,provider,state,attempt_count,provider_response,last_error,
+    started_at,finished_at,created_at,updated_at) ON public.provider_cancellation_attempts TO candidate_runtime;
+GRANT UPDATE (state,attempt_count,provider_response,last_error,started_at,finished_at,updated_at)
+    ON public.provider_cancellation_attempts TO candidate_runtime;
+GRANT INSERT (payment_id) ON public.payment_events TO candidate_runtime;
+GRANT SELECT (received_at) ON public.payment_events TO candidate_runtime;
+GRANT UPDATE (payment_id) ON public.payment_events TO candidate_runtime;

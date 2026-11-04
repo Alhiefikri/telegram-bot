@@ -1,18 +1,10 @@
-"""Navigation checkout bridge: detail selection -> canonical Cart -> P07 -> P08.
+"""Map admitted detail selections to canonical Cart/CheckoutService operations.
 
-This owner adds no second checkout, payment, provider or receipt writer. It
-materializes the exact Product/quantity selected in the Telegram detail screen
-as a canonical Cart item, delegates all commercial work to ``CheckoutService``
-and delegates provider invoice creation and observation to the existing
-``SakurupiahLifecycle``. Provider I/O always runs outside a database
-transaction; replay is resolved from the canonical Order ``checkout_key`` before
-any Cart, stock or provider mutation.
-
-The admitted runtime injects the sandbox-only P08 adapter and a fixed synthetic
-request identity. No production endpoint, credential or real-money path exists
-here; when the sandbox relay is absent the QRIS rail fails closed as
-``provider_unavailable``. Store Balance keeps using the existing P07 ledger and
-spending gates.
+QrisPayments selects only new checkout from the store setting; replay, status
+and cancellation retain the Payment's original provider and money snapshot.
+Provider I/O runs outside transactions. Store Balance retains its P07 ledger
+and spending gates. The admitted default still exposes only the P08 sandbox
+relay; additional provider adapters require explicit, qualified injection.
 """
 
 from dataclasses import dataclass
@@ -50,7 +42,8 @@ _PAYMENT_COLUMNS = (
 _SUCCESS = 'paid'
 _EXPIRED = ('expired', 'provider_expired')
 _UNAVAILABLE = ('provider_invalid_result', 'provider_qris_unusable', 'failed', 'refunded')
-_RECOVERY = ('outcome_unknown', 'recovery_unconfirmed', 'recovery_pending', 'busy')
+_RECOVERY = ('creating', 'outcome_unknown', 'recovery_unconfirmed', 'recovery_pending',
+             'provider_total_pending', 'status_deferred', 'busy')
 
 
 class NavigationCheckoutError(ValueError):
@@ -75,6 +68,10 @@ class CheckoutView:
     checkout_url: str | None = None
     replayed: bool = False
     rail: str | None = None
+    provider: str = 'sakurupiah'
+    photo_bytes: bytes | None = None
+    provider_environment: str = 'sandbox'
+    provider_hosts: tuple = ()
 
 
 def _now():
@@ -114,6 +111,8 @@ class NavigationCheckout:
         self.clock = clock or _now
         self.preparation = (SakurupiahPreparation(lifecycle.adapter)
                             if isinstance(lifecycle, SakurupiahLifecycle) else None)
+        from lhie_candidate.payments.routing import QrisPayments
+        self.payments = lifecycle if isinstance(lifecycle, QrisPayments) else None
 
     # -- reads ---------------------------------------------------------
 
@@ -193,16 +192,20 @@ class NavigationCheckout:
             if existing['customer_id'] != customer_id:
                 return CheckoutView('stale')
             return self._replay_view(existing, rail)
-        if rail == 'qris' and self.preparation is None:
-            # Never let CheckoutService's Store Balance default turn an
-            # unavailable QRIS rail into a wallet debit.
+        preparation = self.preparation
+        if rail == 'qris' and self.payments is not None:
+            try:
+                preparation = self.payments.preparation(CheckoutService(using=self.using)._setting(lock=False))
+            except CheckoutError:
+                return CheckoutView('provider_unavailable', rail='qris')
+        if rail == 'qris' and preparation is None:
             return CheckoutView('provider_unavailable', rail='qris')
         try:
             cart_id = self._prepare_cart(customer_id, product_id, quantity,
                                          chat_id=chat_id, message_id=message_id, root=root)
             service = (CheckoutService(preparation=StoreBalancePreparation(), using=self.using)
                        if rail == 'balance' else
-                       CheckoutService(preparation=self.preparation, using=self.using))
+                       CheckoutService(preparation=preparation, using=self.using))
             request = CheckoutRequest(
                 customer_id, cart_id, checkout_key,
                 service.quote_cart(customer_id, cart_id))
@@ -318,7 +321,7 @@ class NavigationCheckout:
                                 invoice_number=result.invoice_number, amount=result.amount,
                                 total=payment['provider_total_payment'] or payment['amount'],
                                 replayed=replayed, rail=rail)
-        if rail != 'qris' or self.lifecycle is None or self.preparation is None:
+        if rail != 'qris' or self.lifecycle is None or (self.preparation is None and self.payments is None):
             return CheckoutView('provider_unavailable', order_id=result.order_id,
                                 payment_id=result.payment_id,
                                 invoice_number=result.invoice_number,
@@ -332,7 +335,7 @@ class NavigationCheckout:
             if (lifecycle.state in ('pending', 'create_failed', 'provider_unavailable')
                     and payment['provider_create_state'] in
                     (None, 'create_failed', 'provider_unavailable')):
-                args = self._request(payment)
+                args = self._request(payment) if payment['provider'] == 'sakurupiah' else {}
                 if args is None:
                     return CheckoutView('provider_unavailable', order_id=result.order_id,
                                         payment_id=result.payment_id,
@@ -348,7 +351,8 @@ class NavigationCheckout:
         return _lifecycle_view(
             lifecycle, order_id=result.order_id, payment_id=result.payment_id,
             invoice_number=result.invoice_number, amount=result.amount,
-            replayed=replayed, rail=rail)
+            replayed=replayed, rail=rail, provider=payment['provider'],
+            presentation=self.payments.presentation if self.payments else None)
 
     def check(self, customer, root, *, payment_id):
         """Observe the provider authoritatively; never create a second invoice."""
@@ -367,7 +371,7 @@ class NavigationCheckout:
             return self._payment_view(payment, state='review', replayed=True)
         if payment['status'] == 'paid':
             return self._payment_view(payment, state='paid', replayed=True)
-        if self.lifecycle is None or payment['provider'] != 'sakurupiah':
+        if self.lifecycle is None or (self.payments is None and payment['provider'] != 'sakurupiah'):
             return self._payment_view(payment, state='provider_unavailable')
         if not self._root_matches(
                 root, customer_id=customer_id, chat_id=chat_id, message_id=message_id):
@@ -396,12 +400,14 @@ class NavigationCheckout:
         return _lifecycle_view(
             result, order_id=str(payment['order_id']), payment_id=str(payment['id']),
             invoice_number=payment['invoice_number'], amount=payment['amount'],
-            replayed=True, rail='qris')
+            replayed=True, rail='qris', provider=payment['provider'],
+            presentation=self.payments.presentation if self.payments else None)
 
     def _payment_view(self, payment, *, state, replayed=False):
         fee = None
         try:
-            presentation = self.lifecycle.encrypter.decrypt_json(payment['provider_presentation'])
+            lifecycle = self.payments.for_payment(payment['id']) if self.payments else self.lifecycle
+            presentation = lifecycle.encrypter.decrypt_json(payment['provider_presentation'])
             provider_fee = payment['provider_fee']
             if (type(presentation) is dict and presentation.get('customer_pays_fee') is True
                     and type(provider_fee) is int and provider_fee >= 0
@@ -410,6 +416,34 @@ class NavigationCheckout:
         except (AttributeError, KeyError, TypeError, ValueError):
             pass
         return _payment_view(payment, state=state, replayed=replayed, fee=fee)
+
+    def cancel(self, customer, root, *, order_id):
+        try:
+            customer_id, _, _, _ = self._context(customer, root)
+            UUID(str(order_id))
+            from .lifecycle import OrderLifecycle
+            result = OrderLifecycle(using=self.using).apply_pending_cancellation(
+                order_id, customer_id=customer_id)
+            state = 'cancelled' if result.order['order_status'] == 'cancelled' else 'review'
+            return CheckoutView(state, order_id=str(order_id))
+        except (NavigationCheckoutError, CheckoutError, ValueError, TypeError):
+            return CheckoutView('stale')
+
+    def manual_prompt(self, customer, root, *, order_id):
+        try:
+            customer_id, _, _, _ = self._context(customer, root)
+            UUID(str(order_id))
+            payment = self.db.one('''SELECT p.id FROM public.payments p JOIN public.orders o ON o.id=p.order_id
+                WHERE o.id=%s AND o.customer_id=%s AND p.provider='manual' AND p.method='QR_MANUAL'
+                AND p.status='pending' AND o.order_status='pending_payment' ORDER BY p.id LIMIT 1''',
+                (order_id, customer_id))
+            if payment is None:
+                return CheckoutView('stale')
+            row = self._payment(payment['id'], customer_id=customer_id)
+            return CheckoutView('manual_proof', order_id=str(order_id), payment_id=str(payment['id']),
+                                invoice_number=row['invoice_number'], amount=row['amount'], provider='manual')
+        except (NavigationCheckoutError, ValueError, TypeError):
+            return CheckoutView('stale')
 
 
 def _checkout_state(code):
@@ -434,7 +468,7 @@ def _checkout_state(code):
     return 'invalid'
 
 
-def _presentation_values(presentation):
+def _presentation_values(presentation, provider='sakurupiah'):
     if not isinstance(presentation, dict):
         return None, None, None
     try:
@@ -445,9 +479,10 @@ def _presentation_values(presentation):
             or presentation.get('mode') not in ('qris_image', 'hosted')):
         return None, None, None
     qr = presentation.get('qris_image_url')
-    qris_url = qr if validate_sakurupiah_qr_image_url(qr) else None
+    environment, hosts = presentation.get('environment', 'sandbox'), presentation.get('allowed_hosts', ())
+    qris_url = qr if _qr_image_url(qr, provider, environment, hosts) else None
     hosted = presentation.get('checkout_url')
-    checkout_url = hosted if validate_sakurupiah_checkout_url(hosted) else None
+    checkout_url = hosted if _checkout_url(hosted, provider, environment) else None
     if presentation.get('mode') == 'qris_image' and qris_url is None:
         return None, None, None
     if presentation.get('mode') == 'hosted' and checkout_url is None:
@@ -456,13 +491,13 @@ def _presentation_values(presentation):
 
 
 def _lifecycle_view(result, *, order_id, payment_id, invoice_number, amount,
-                    replayed=False, rail=None):
+                    replayed=False, rail=None, provider='sakurupiah', presentation=None):
     state = result.state
     if state == _SUCCESS:
         mapped = 'paid'
     elif state in _EXPIRED:
         mapped = 'expired'
-    elif state == 'review':
+    elif state in ('review', 'proof_submitted'):
         mapped = 'review'
     elif state == 'created':
         mapped = 'pending'
@@ -472,16 +507,31 @@ def _lifecycle_view(result, *, order_id, payment_id, invoice_number, amount,
         mapped = 'pending'
     else:
         mapped = 'provider_unavailable'
-    qris_url = checkout_url = expires = None
+    qris_url = checkout_url = expires = photo = None
+    snapshot = result.presentation or {}
+    environment, hosts = snapshot.get('environment', 'sandbox'), tuple(snapshot.get('allowed_hosts', ()))
     if state == 'created':
-        qris_url, checkout_url, expires = _presentation_values(result.presentation)
-        if qris_url is None and checkout_url is None:
+        if snapshot.get('mode') == 'manual':
+            photo = snapshot.get('photo')
+            expires = _deadline(snapshot.get('effective_expires_at'))
+        elif snapshot.get('mode') == 'qris' and presentation is not None:
+            photo = presentation.payload(snapshot['qris_payload'])
+            expires = _deadline(snapshot.get('effective_expires_at'))
+        else:
+            qris_url, checkout_url, expires = _presentation_values(snapshot, provider)
+            if qris_url is not None and presentation is not None:
+                try:
+                    photo = presentation.provider_image(qris_url, provider, environment=environment, allowed_hosts=hosts)
+                except (ValueError, OSError):
+                    photo = None
+        if photo is None and qris_url is None and checkout_url is None:
             mapped = 'provider_unavailable'
     return CheckoutView(
         mapped, order_id=order_id, payment_id=payment_id, invoice_number=invoice_number,
         amount=amount, fee=result.fee if result.customer_pays_fee else None,
         total=result.total, expires_at=expires, qris_url=qris_url,
-        checkout_url=checkout_url, replayed=replayed, rail=rail)
+        checkout_url=checkout_url, replayed=replayed, rail=rail, provider=provider, photo_bytes=photo,
+        provider_environment=environment, provider_hosts=hosts)
 
 
 def _payment_view(payment, *, state, replayed=False, fee=None):
@@ -491,4 +541,22 @@ def _payment_view(payment, *, state, replayed=False, fee=None):
         fee=fee,
         total=(payment['provider_total_payment']
                if type(payment['provider_total_payment']) is int else None),
-        replayed=replayed, rail='qris')
+        replayed=replayed, rail='qris', provider=payment['provider'])
+
+
+def _qr_image_url(url, provider='sakurupiah', environment='sandbox', allowed_hosts=()):
+    if provider == 'sakurupiah':
+        return validate_sakurupiah_qr_image_url(url)
+    if provider == 'klikqris':
+        from lhie_candidate.payments.klikqris import valid_qr_url
+        return valid_qr_url(url, environment, allowed_hosts)
+    return False
+
+
+def _checkout_url(url, provider='sakurupiah', environment='sandbox'):
+    if provider == 'sakurupiah':
+        return validate_sakurupiah_checkout_url(url, environment)
+    if provider == 'pakasir':
+        from lhie_candidate.payments.pakasir import valid_checkout_url
+        return valid_checkout_url(url)
+    return False

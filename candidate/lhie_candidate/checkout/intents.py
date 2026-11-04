@@ -16,6 +16,7 @@ class PaymentSetting:
     active: bool
     provider: str | None = None
     sakurupiah_channel: str | None = None
+    qris_ttl_minutes: int = 10
 
 
 @dataclass(frozen=True, slots=True)

@@ -23,15 +23,24 @@ class PaymentHandler:
         self.spec = queue_spec("payment")
         self._sweep_start = 0
         self._payment_cursors = {"hints": None, "ambiguous": None, "expiry": None}
+        self._payment_cursors.update(active=None)
+        self.providers = tuple(getattr(lifecycle, 'lifecycles', {'sakurupiah': lifecycle}))
+        self.cancellations = None
+        pakasir = getattr(lifecycle, 'lifecycles', {}).get('pakasir')
+        if pakasir is not None:
+            from ..payments.pakasir import PakasirCancellationAttempts
+            self.cancellations = PakasirCancellationAttempts(pakasir)
 
     def _payment_for_event(self, event_id):
         rows = self.db.rows(
             """SELECT p.id FROM public.payment_events e
                JOIN public.payments p ON p.merchant_ref=e.merchant_ref
-                 AND (p.provider_reference IS NULL OR p.provider_reference=e.provider_reference)
-               WHERE e.id=%s AND e.provider='sakurupiah' AND p.provider='sakurupiah'
+                 AND (p.provider_reference IS NULL OR p.provider_reference=e.provider_reference
+                      OR e.provider_reference=p.merchant_ref)
+                 AND p.provider=e.provider
+               WHERE e.id=%s AND p.provider=ANY(%s)
                ORDER BY p.id LIMIT 2""",
-            (event_id,),
+            (event_id, list(self.providers)),
         )
         return rows[0]["id"] if len(rows) == 1 else None
 
@@ -64,23 +73,63 @@ class PaymentHandler:
             "hints",
             """SELECT DISTINCT p.id FROM public.payment_events e
                JOIN public.payments p ON p.merchant_ref=e.merchant_ref
-                 AND p.provider_reference=e.provider_reference
-               WHERE e.provider='sakurupiah' AND e.event_type='callback'
-                 AND e.processed_at IS NULL AND p.provider='sakurupiah'
-                 AND p.status NOT IN ('paid', 'refunded')""", (), limit)
+                 AND (p.provider_reference=e.provider_reference OR p.provider_reference IS NULL
+                      OR e.provider_reference=p.merchant_ref) AND p.provider=e.provider
+               WHERE e.event_type='callback' AND e.processed_at IS NULL
+                 AND p.provider=ANY(%s)
+                 AND p.status NOT IN ('paid', 'refunded')""", (list(self.providers),), limit)
 
     def _ambiguous_payments(self, limit):
         return self._payment_page(
             "ambiguous",
             """SELECT p.id FROM public.payments p JOIN public.orders o ON o.id=p.order_id
-               WHERE p.provider='sakurupiah' AND p.status='pending'
-                 AND p.provider_create_state='outcome_unknown'
-                 AND p.provider_total_payment IS NOT NULL AND p.provider_total_payment > 0
-                 AND p.provider_create_attempted_at IS NOT NULL AND p.provider_create_attempted_at < %s
-                 AND o.order_status='pending_payment' AND o.payment_status='pending'
+               WHERE p.provider=ANY(%s) AND p.status NOT IN ('paid','refunded')
+                 AND ((p.provider_create_state IN ('creating','outcome_unknown','recovery_unconfirmed',
+                       'recovery_pending','create_failed','transient_qris_image','provider_total_pending')
+                       AND p.provider_create_attempted_at IS NOT NULL AND p.provider_create_attempted_at < %s
+                       AND o.order_status='pending_payment' AND o.payment_status='pending')
+                      OR p.provider_create_state IN ('provider_berhasil','provider_SUCCESS'))
                  AND NOT EXISTS (SELECT 1 FROM public.manual_fulfillment_reviews r
                      WHERE r.order_id=o.id AND r.state IN ('pending','refund_uncertain'))""",
-            (_now() - timedelta(seconds=10),), limit)
+            (list(self.providers), _now() - timedelta(seconds=10)), limit)
+
+    def _active_payments(self, limit):
+        return self._payment_page(
+            'active',
+            """SELECT p.id FROM public.payments p JOIN public.orders o ON o.id=p.order_id
+               WHERE p.provider=ANY(%s) AND p.provider<>'manual'
+                 AND ((p.status='pending' AND o.order_status='pending_payment'
+                       AND o.payment_status='pending' AND o.expires_at>%s
+                       AND (p.provider_reference IS NOT NULL OR p.provider IN ('klikqris','pakasir')))
+                      OR (p.provider='pakasir' AND p.status IN ('expired','failed')))
+                 AND NOT EXISTS (SELECT 1 FROM public.payment_events e WHERE e.provider=p.provider
+                     AND e.merchant_ref=p.merchant_ref AND e.provider_status='candidate_poll'
+                     AND e.received_at>%s - interval '24 seconds')
+                 AND NOT EXISTS (SELECT 1 FROM public.manual_fulfillment_reviews r
+                     WHERE r.order_id=o.id AND r.state IN ('pending','refund_uncertain'))""",
+            (list(self.providers), _now(), _now()), limit)
+
+    def _reconcile(self, payment_id):
+        payment = self.db.one('SELECT provider,merchant_ref FROM public.payments WHERE id=%s', (payment_id,))
+        if payment is None:
+            return
+        self.db.execute("""INSERT INTO public.payment_events
+            (provider,event_type,merchant_ref,provider_status,raw_payload,received_at,last_received_at,received_count)
+            VALUES (%s,'reconciliation',%s,'candidate_poll','{}'::jsonb,%s,%s,1)""",
+            (payment['provider'], payment['merchant_ref'], _now(), _now()))
+        return getattr(self.lifecycle, 'refresh_background', self.lifecycle.refresh)(payment_id)
+
+    def _cancellation_attempts(self, limit):
+        if self.cancellations is None:
+            return []
+        return self.db.rows("""SELECT id FROM public.provider_cancellation_attempts
+            WHERE provider='pakasir' AND state IN ('pending','retryable_failure','processing')
+              AND (state='pending' OR started_at IS NULL
+                   OR (state='processing' AND started_at<=%s)
+                   OR (state='retryable_failure' AND started_at<=%s -
+                       CASE WHEN attempt_count=1 THEN interval '30 seconds' ELSE interval '120 seconds' END))
+            ORDER BY updated_at,id LIMIT %s""",
+            (_now() - timedelta(seconds=120), _now(), limit))
 
     def _due_payments(self, limit):
         return self._payment_page(
@@ -111,7 +160,7 @@ class PaymentHandler:
         return self.sweep_bounded(limit, lambda function, *args: function(*args), lambda: False)
 
     def sweep_bounded(self, limit, bounded, stopped):
-        result = {"hints": 0, "ambiguous": 0, "expiry": 0, "failures": 0}
+        result = {"hints": 0, "ambiguous": 0, "active": 0, "expiry": 0, "cancellations": 0, "failures": 0}
         if self.processor:
             result.update(navigation=0, recovered=0)
 
@@ -146,12 +195,26 @@ class PaymentHandler:
                     result["failures"] += 1
                 yield
 
+        def cancellations():
+            for row in bounded(self._cancellation_attempts, limit):
+                if stopped():
+                    break
+                try:
+                    bounded(self.cancellations.process, row['id'])
+                    result['cancellations'] += 1
+                except Exception:
+                    result['failures'] += 1
+                yield
+
         phases = [
             iter(recover_navigation()),
             iter(navigation()),
             iter(payments("hints", self._pending_hint_payments, self.lifecycle.consume_callbacks)),
-            iter(payments("ambiguous", self._ambiguous_payments, self.lifecycle.recover)),
+            iter(payments("ambiguous", self._ambiguous_payments,
+                          getattr(self.lifecycle, 'recover_background', self.lifecycle.recover))),
             iter(payments("expiry", self._due_payments, self._expire_due)),
+            iter(payments("active", self._active_payments, self._reconcile)),
+            iter(cancellations()),
         ]
         start = self._sweep_start
         self._sweep_start = (start + 1) % len(phases)
