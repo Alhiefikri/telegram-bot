@@ -13,7 +13,7 @@ use Throwable;
 
 class BinancePayClient
 {
-    private const HISTORY_CACHE_KEY = 'binance:pay-history:v2:window';
+    private const HISTORY_CACHE_KEY = 'binance:pay-history:v4:window';
 
     public function configured(): bool
     {
@@ -105,9 +105,19 @@ class BinancePayClient
             throw new BinanceProviderException('Binance Pay rejected the history request (code '.$code.').', 200, false);
         }
 
-        $data = $response['data'] ?? [];
+        $data = $response['data'] ?? null;
+        if (! is_array($data) || ! array_is_list($data)) {
+            throw new BinanceProviderException('Binance Pay returned invalid history data.', 200, false);
+        }
 
-        return is_array($data) ? array_values(array_filter($data, 'is_array')) : [];
+        foreach ($data as $payload) {
+            if (! is_array($payload) || ! is_scalar($payload['transactionId'] ?? null)
+                || trim((string) $payload['transactionId']) === '') {
+                throw new BinanceProviderException('Binance Pay returned an invalid history transaction.', 200, false);
+            }
+        }
+
+        return $data;
     }
 
     private function historyCacheKey(?int $startTimeMs, ?int $endTimeMs, int $limit): string
@@ -122,7 +132,7 @@ class BinancePayClient
     /** @param list<array<string, mixed>> $transactions */
     private function cacheableTransactions(array $transactions): array
     {
-        return array_values(array_filter(array_map(function (array $payload): ?array {
+        return array_map(function (array $payload): array {
             $receiver = is_array($payload['receiverInfo'] ?? null) ? $payload['receiverInfo'] : [];
             $minimal = [
                 'orderId' => $payload['orderId'] ?? null,
@@ -130,21 +140,20 @@ class BinancePayClient
                 'orderType' => $payload['orderType'] ?? null,
                 'amount' => $payload['amount'] ?? null,
                 'currency' => $payload['currency'] ?? null,
-                'status' => $payload['status'] ?? null,
-                'transactionStatus' => $payload['transactionStatus'] ?? null,
                 'transactionTime' => $payload['transactionTime'] ?? null,
                 'receiverInfo' => [
                     'accountId' => $receiver['accountId'] ?? null,
                     'binanceId' => $receiver['binanceId'] ?? null,
                 ],
             ];
-
-            if (! is_scalar($minimal['transactionId']) || trim((string) $minimal['transactionId']) === '') {
-                return null;
+            foreach (['status', 'transactionStatus'] as $field) {
+                if (array_key_exists($field, $payload)) {
+                    $minimal[$field] = $payload[$field];
+                }
             }
 
             return $minimal;
-        }, $transactions), 'is_array'));
+        }, $transactions);
     }
 
     /** @return null|list<array<string, mixed>> */

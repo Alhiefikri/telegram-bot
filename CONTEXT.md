@@ -169,11 +169,11 @@ An Owner-managed amount button on the Wallet Funding Chooser's USD screen. Choos
 _Avoid_: fixed top-up price, funding limit, quota
 
 **Expired Unpaid Target**:
-A confirmed USD funding target whose payment deadline and grace window passed without any settled payment. Its immutable `expired_unpaid` resolution releases the single active-funding slot without moving money; a transfer that arrives later is routed to manual review instead of being credited against the released target.
+A confirmed USD funding target whose payment deadline and any applicable grace period passed without any settled payment. Its immutable `expired_unpaid` resolution releases the single active-funding slot without moving money; a transfer discovered after release is routed to manual review instead of being credited against the released target. Release does not prove that no transfer occurred.
 _Avoid_: cancelled top-up, refunded target
 
 **Cancelled Funding Target**:
-A confirmed USD funding target that the Customer closed before any payment settled, because a wrongly chosen amount must never be forced. Its immutable `cancelled_by_customer` resolution releases the active-funding slot without moving money, and a transfer that arrives later follows the same manual-review path as an expired unpaid target.
+A confirmed USD funding target closed before any payment settled. Its immutable `cancelled_by_customer` resolution releases the active-funding slot without moving money; a transfer discovered after release follows the same manual-review path as an expired unpaid target. A private `/start` no longer cancels a target; historical resolutions alone do not establish whether a transfer occurred or whether cancellation was deliberate.
 _Avoid_: refund, expired target
 
 **BSC Payment Verification**:
@@ -263,7 +263,7 @@ A Customer-owned shopping balance held in a separate USDT account and immutable 
 _Avoid_: Store Balance USDT, non-custodial wallet, Supplier Balance
 
 **Customer USDT Balance Entry**:
-One immutable ledger row recording a single economic effect on a Customer USDT Balance — a funding credit, purchase debit, refund credit, or linked reversal debit — with its exact positive micro-USDT amount, per-account sequence, typed economic source, request fingerprint and unique idempotency claim. Reapplying the same source, key or fingerprint returns the existing entry; a changed payload conflicts.
+One immutable ledger row recording a single economic effect on a Customer USDT Balance — a funding credit, Owner-attested adjustment, purchase debit, refund credit, or linked reversal debit — with its exact positive micro-USDT amount, per-account sequence, typed economic source, request fingerprint and unique idempotency claim. An Owner-attested adjustment is not a verified deposit and does not resolve an existing top-up. Reapplying the same source, key or fingerprint returns the existing entry; a changed payload conflicts.
 _Avoid_: USDT transaction, balance mutation, wallet row
 
 **Customer USDT Balance History**:

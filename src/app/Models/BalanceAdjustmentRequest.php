@@ -25,11 +25,16 @@ final class BalanceAdjustmentRequest extends Model
         return $this->belongsTo(StoreBalanceEntry::class, 'ledger_entry_id');
     }
 
+    public function usdtLedgerEntry()
+    {
+        return $this->belongsTo(CustomerUsdtBalanceEntry::class, 'usdt_ledger_entry_id');
+    }
+
     protected static function booted(): void
     {
         self::updating(function (self $request): void {
             if (! in_array($request->getRawOriginal('state'), ['pending', 'approved'], true)
-                || array_diff(array_keys($request->getDirty()), ['state', 'ledger_entry_id', 'resolved_at', 'updated_at']) !== []) {
+                || array_diff(array_keys($request->getDirty()), ['state', 'ledger_entry_id', 'usdt_ledger_entry_id', 'resolved_at', 'updated_at']) !== []) {
                 throw new LogicException('Adjustment preview is immutable.');
             }
         });

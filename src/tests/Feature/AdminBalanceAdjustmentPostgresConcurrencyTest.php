@@ -20,6 +20,7 @@ use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
 use App\Services\StoreBalance\BalanceAdjustmentService;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\StoreBalance\StoreBalanceReconciliation;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\Warranty\WarrantySettlementService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -74,6 +75,21 @@ final class AdminBalanceAdjustmentPostgresConcurrencyTest extends NonTransaction
         ]);
         $this->assertContains('replayed', $replays);
         $this->assertContains('preview_binding_mismatch', $replays);
+    }
+
+    public function test_concurrent_usdt_approvals_have_one_accounting_effect(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $preview = $service->request($owner, (string) $customer->telegram_id, '0.123456', 'Owner attestation', currency: 'USDT');
+        $results = $this->race([
+            fn () => $this->attempt(fn () => $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password')),
+            fn () => $this->attempt(fn () => $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password')),
+        ]);
+        $this->assertSame(1, count(array_filter($results, fn ($result) => $result === 'applied')));
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 1);
+        $this->assertDatabaseCount('customer_usdt_balance_accounting_events', 1);
+        $this->assertSame(123456, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertDatabaseCount('telegram_outbound_effects', 2);
     }
 
     public function test_approve_reject_race_resolves_once_without_partial_money(): void

@@ -388,25 +388,28 @@ final class BinancePaymentVerification
     /** @param list<array<string, mixed>> $rawTransactions */
     private function matchAndConfirmOrderId(Payment $payment, array $rawTransactions, int $submissionVersion): BinanceVerificationResult
     {
-        $transactions = collect($rawTransactions)
-            ->map(fn (array $payload): ?BinancePayTransaction => BinancePayTransaction::fromPayload($payload))
-            ->filter()
-            ->values();
-
         $orderId = trim((string) $payment->binance_order_id);
         if ($orderId === '') {
             return BinanceVerificationResult::of(BinanceVerificationOutcome::NotFound);
         }
 
-        $matchingTransactions = $transactions
-            ->filter(fn (BinancePayTransaction $transaction): string|false => $transaction->matchesSubmittedOrderId($orderId))
-            ->values();
-        $transaction = $matchingTransactions->first(
-            fn (BinancePayTransaction $transaction): bool => $this->transactionMatchesPayment($transaction, $payment),
-        );
+        $transaction = null;
+        $evidence = null;
+        foreach ($rawTransactions as $payload) {
+            if (BinancePayTransaction::payloadMatchesSubmittedOrderId($payload, $orderId) === false) {
+                continue;
+            }
+            $candidate = BinancePayTransaction::fromPayload($payload);
+            if ($candidate === null) {
+                return BinanceVerificationResult::of(BinanceVerificationOutcome::ProviderError);
+            }
+            $evidence ??= $candidate;
+            if ($transaction === null && $this->transactionMatchesPayment($candidate, $payment)) {
+                $transaction = $candidate;
+            }
+        }
 
         if ($transaction === null) {
-            $evidence = $matchingTransactions->first();
             if ($evidence === null) {
                 return BinanceVerificationResult::of(BinanceVerificationOutcome::NotFound);
             }
@@ -516,7 +519,8 @@ final class BinancePaymentVerification
 
         [$payId, $uid] = $this->receiverFor($payment);
 
-        return $transaction->isIncomingToConfiguredReceiver($payId, $uid)
+        return $transaction->successful()
+            && $transaction->isIncomingToConfiguredReceiver($payId, $uid)
             && $transaction->currency() === strtoupper((string) $payment->currency)
             && $transaction->amountMicro() === (int) $payment->amount
             && $transactionTimeMs >= $createdMs - $this->clockSkewMs()

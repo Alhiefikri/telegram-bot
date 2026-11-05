@@ -184,7 +184,7 @@ final class UsdtFundingExpiryReleaseTest extends TestCase
     public function test_customer_cancel_releases_the_slot_before_the_deadline(): void
     {
         $actions = app(TelegramUsdtFundingActions::class);
-        $actions->cancelOpenTargets($this->customer);
+        $this->assertTrue($actions->cancelTarget($this->customer, $this->target->id));
 
         $this->assertSame('released', DB::table('customer_usdt_funding_reservations')->value('state'));
         $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
@@ -193,8 +193,8 @@ final class UsdtFundingExpiryReleaseTest extends TestCase
         $this->assertSame(UsdtTopUpStatus::STATE_CANCELLED_BY_CUSTOMER, app(UsdtTopUpStatusReader::class)->for($this->target)->state);
         $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
 
-        // Replaying the same start-over is idempotent and creates no second target.
-        $actions->cancelOpenTargets($this->customer);
+        // Replaying the same cancellation creates no second target.
+        $actions->cancelTarget($this->customer, $this->target->id);
         $this->assertSame(1, CustomerUsdtTopUp::query()->count());
 
         // The Customer can pick a different amount immediately.
@@ -203,12 +203,26 @@ final class UsdtFundingExpiryReleaseTest extends TestCase
         $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
     }
 
+    public function test_cancelled_status_does_not_claim_that_no_payment_was_made(): void
+    {
+        $this->assertTrue(app(TelegramUsdtFundingActions::class)->cancelTarget($this->customer, $this->target->id));
+        $surface = app(TelegramUsdtBalanceIntents::class)->statusSurface(
+            $this->customer,
+            $this->target->fresh(),
+            app(UsdtTopUpStatusReader::class)->for($this->target),
+        );
+
+        $this->assertStringContainsString('ditutup tanpa kredit saldo', $surface->caption);
+        $this->assertStringContainsString('Jika Anda sudah membayar, hubungi dukungan', $surface->caption);
+        $this->assertStringNotContainsString('dibatalkan sebelum ada pembayaran', $surface->caption);
+    }
+
     public function test_customer_cancel_is_rejected_while_a_worker_holds_a_lease(): void
     {
         DB::table('customer_usdt_top_up_work')->where('top_up_id', $this->target->id)
             ->update(['lease_until' => now()->addMinutes(2)]);
 
-        app(TelegramUsdtFundingActions::class)->cancelOpenTargets($this->customer);
+        $this->assertFalse(app(TelegramUsdtFundingActions::class)->cancelTarget($this->customer, $this->target->id));
         $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
         $this->assertSame('reserved', DB::table('customer_usdt_funding_reservations')->value('state'));
     }

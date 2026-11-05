@@ -7,8 +7,10 @@ use App\Enums\StoreBalanceTopUpStatus;
 use App\Enums\TelegramNavigationMediaKind;
 use App\Enums\TelegramNavigationScreen;
 use App\Enums\UserRole;
+use App\Models\BalanceAdjustmentRequest;
 use App\Models\Customer;
 use App\Models\CustomerUsdtFundingPolicy;
+use App\Models\CustomerUsdtTopUp;
 use App\Models\ManualPaymentSetting;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
@@ -104,6 +106,26 @@ final class AdminBalanceReportTest extends TestCase
         ]);
         $this->assertSame('frozen', $usdt['rows'][0]['status']);
         $this->assertSame('2.5 USDT', $usdt['rows'][0]['amount']);
+    }
+
+    public function test_audit_reports_keep_malformed_historical_subjects_without_matching_a_customer(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        Customer::factory()->create(['telegram_id' => 940003]);
+        DB::table('audit_logs')->insert([
+            ['action' => 'balance.adjustment.requested', 'subject_type' => BalanceAdjustmentRequest::class, 'subject_id' => 'not-a-uuid', 'created_at' => now()],
+            ['action' => 'store_balance.top_up.settled', 'subject_type' => StoreBalanceTopUp::class, 'subject_id' => '9223372036854775808', 'created_at' => now()],
+            ['action' => 'store_balance.top_up.settled', 'subject_type' => StoreBalanceTopUp::class, 'subject_id' => 'not-a-number', 'created_at' => now()],
+            ['action' => 'usdt_top_up.settled', 'subject_type' => CustomerUsdtTopUp::class, 'subject_id' => 'not-a-uuid', 'created_at' => now()],
+        ]);
+        $reader = app(AdminBalanceReportReader::class);
+        $this->assertCount(3, $reader->page($owner, ['section' => 'audit', 'currency' => 'IDR'])['rows']);
+        $this->assertCount(1, $reader->page($owner, ['section' => 'audit', 'currency' => 'USDT'])['rows']);
+        foreach (['IDR', 'USDT'] as $currency) {
+            $this->assertSame([], $reader->page($owner, [
+                'section' => 'audit', 'currency' => $currency, 'telegram_id' => '940003',
+            ])['rows']);
+        }
     }
 
     public function test_reports_are_role_checked_for_each_section_and_support_is_denied(): void

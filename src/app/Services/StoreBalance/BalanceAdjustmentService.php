@@ -10,6 +10,7 @@ use App\Exceptions\InsufficientStoreBalance;
 use App\Models\BalanceAdjustmentRequest;
 use App\Models\Customer;
 use App\Models\CustomerBalanceAccount;
+use App\Models\CustomerUsdtBalanceEntry;
 use App\Models\OrderRefund;
 use App\Models\StoreBalanceEntry;
 use App\Models\StoreBalanceTopUp;
@@ -21,14 +22,20 @@ use App\Services\MoneyReceipts\MoneyReceiptTarget;
 use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
 use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\OwnerUsdtAdjustment;
+use App\Services\UsdtBalance\UsdtBalanceMutationResult;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 final class BalanceAdjustmentService
 {
     public function __construct(
         private readonly StoreBalanceLedger $ledger,
+        private readonly CustomerUsdtBalanceLedger $usdtLedger,
         private readonly BalanceAdjustmentPasswordConfirmation $passwords,
         private readonly AuditLogger $audit,
         private readonly TelegramOutboundEffectService $outbound,
@@ -50,10 +57,28 @@ final class BalanceAdjustmentService
     }
 
     public function request(User $actor, mixed $telegramId, mixed $amount, string $reason,
-        string $category = 'owner_attested', ?string $sourceId = null, ?VerifiedMoneyReceipt $receipt = null): BalanceAdjustmentRequest
+        string $category = 'owner_attested', ?string $sourceId = null, ?VerifiedMoneyReceipt $receipt = null,
+        string $currency = 'IDR'): BalanceAdjustmentRequest
     {
         $actor = $this->owner($actor);
-        $amount = $this->exactAmount($amount);
+        if (! in_array($currency, ['IDR', 'USDT'], true)) {
+            throw new BalanceAdjustmentRejected('invalid_currency');
+        }
+        if ($currency === 'USDT') {
+            if ($category !== 'owner_attested' || $sourceId !== null || $receipt !== null) {
+                throw new BalanceAdjustmentRejected('invalid_source');
+            }
+            try {
+                if (! is_string($amount) || preg_match('/\A(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?\z/', $amount) !== 1) {
+                    throw new InvalidArgumentException('USDT amount must be a decimal string with at most six decimal places.');
+                }
+                $amount = UsdtMicroAmount::fromDecimalString($amount)->units();
+            } catch (InvalidArgumentException $error) {
+                throw new BalanceAdjustmentRejected('invalid_amount_or_reason');
+            }
+        } else {
+            $amount = $this->exactAmount($amount);
+        }
         $customer = $this->registeredCustomer($telegramId);
         if ($customer === null) {
             throw new BalanceAdjustmentRejected('customer_not_registered');
@@ -96,7 +121,7 @@ final class BalanceAdjustmentService
             'id' => $id, 'customer_id' => $customer->id, 'telegram_id' => (string) $customer->telegram_id,
             'username' => $customer->username, 'owner_user_id' => $actor->id,
             'session_binding' => $this->sessionBinding(), 'credential_binding' => hash('sha256', $actor->password),
-            'mode' => 'single_owner', 'currency' => 'IDR', 'amount' => $amount, 'reason' => $reason,
+            'mode' => 'single_owner', 'currency' => $currency, 'amount' => $amount, 'reason' => $reason,
             'category' => $category, 'source_id' => $sourceId, 'receipt_fingerprint' => $receipt?->fingerprint(),
             'version' => 1, 'state' => 'pending', 'expires_at' => now()->addMinutes(5),
         ];
@@ -146,14 +171,14 @@ final class BalanceAdjustmentService
     }
 
     public function confirm(User $actor, string $id, string $fingerprint, int $version, string $password,
-        ?VerifiedMoneyReceipt $receipt = null): StoreBalanceMutationResult
+        ?VerifiedMoneyReceipt $receipt = null): StoreBalanceMutationResult|UsdtBalanceMutationResult
     {
         $actor = $this->owner($actor);
         $identity = $this->boundRequest($actor, $id, $fingerprint, $version);
         $approval = $this->passwords->verify($actor, $password, $identity);
         $token = $approval->token;
         try {
-            $result = DB::transaction(function () use ($actor, $identity, $fingerprint, $version, $token, $receipt, $approval): StoreBalanceMutationResult|BalanceAdjustmentRejected {
+            $result = DB::transaction(function () use ($actor, $identity, $fingerprint, $version, $token, $receipt, $approval): StoreBalanceMutationResult|UsdtBalanceMutationResult|BalanceAdjustmentRejected {
                 // Recheck persisted authority and password rotation under a shared lock.
                 $freshActor = User::query()->whereKey($actor->id)->sharedLock()->firstOrFail();
                 $this->owner($freshActor);
@@ -162,7 +187,11 @@ final class BalanceAdjustmentService
                 }
                 $this->passwords->consume($freshActor, $token);
                 $customer = Customer::query()->whereKey($identity->customer_id)->lockForUpdate()->firstOrFail();
-                $this->ledger->lockForTransaction($customer);
+                if ($identity->currency === 'USDT') {
+                    $this->usdtLedger->lockForTransaction($customer);
+                } else {
+                    $this->ledger->lockForTransaction($customer);
+                }
                 $preview = $this->boundRequest($freshActor, $identity->id, $fingerprint, $version, true);
                 if ((string) $customer->telegram_id !== $preview->telegram_id) {
                     throw new BalanceAdjustmentRejected('recipient_changed');
@@ -179,7 +208,9 @@ final class BalanceAdjustmentService
                     throw new BalanceAdjustmentRejected('unexpected_receipt');
                 }
                 if ($preview->state === 'applied') {
-                    return StoreBalanceMutationResult::replayed(StoreBalanceEntry::findOrFail($preview->ledger_entry_id));
+                    return $preview->currency === 'USDT'
+                        ? UsdtBalanceMutationResult::replayed(CustomerUsdtBalanceEntry::findOrFail($preview->usdt_ledger_entry_id))
+                        : StoreBalanceMutationResult::replayed(StoreBalanceEntry::findOrFail($preview->ledger_entry_id));
                 }
                 if ($preview->state !== 'pending' || now()->gte($preview->expires_at)) {
                     throw new BalanceAdjustmentRejected('preview_unavailable');
@@ -217,32 +248,46 @@ final class BalanceAdjustmentService
                     if (! $mutation->applied) {
                         throw new BalanceAdjustmentRejected('original_already_reversed');
                     }
+                } elseif ($preview->currency === 'USDT') {
+                    $mutation = $this->usdtLedger->creditOwnerAdjustment($customer, new OwnerUsdtAdjustment(
+                        (int) $customer->id, UsdtMicroAmount::fromUnits($preview->amount), $preview->id, $preview->fingerprint, $approval,
+                    ));
                 } else {
                     $mutation = $this->ledger->creditApprovedAdjustment($preview, $approval);
                 }
-                $preview->forceFill(['state' => 'applied', 'ledger_entry_id' => $mutation->entryId, 'resolved_at' => now()])->save();
-                DB::table('balance_adjustment_accounting_events')->insert([
-                    'request_id' => $preview->id, 'ledger_entry_id' => $mutation->entryId, 'currency' => 'IDR', 'amount' => $preview->amount,
-                    'debit_account' => $preview->category === 'reversal'
-                        ? 'customer_idr_liability'
-                        : match ($preview->category) {
-                            'funded_transfer' => 'verified_settlement_asset', 'promotional_grant' => 'promotional_expense',
-                            'refund_recovery' => 'sale_refund', 'correction' => 'correction_suspense', default => 'owner_attested_adjustment_suspense',
-                        },
-                    'credit_account' => $preview->category === 'reversal'
-                        ? $this->reversalCounterpartAccount($reversalOriginal)
-                        : 'customer_idr_liability',
-                    'source_fingerprint' => $preview->fingerprint, 'created_at' => now(),
-                ]);
+                $preview->forceFill([
+                    'state' => 'applied',
+                    $preview->currency === 'USDT' ? 'usdt_ledger_entry_id' : 'ledger_entry_id' => $mutation->entryId,
+                    'resolved_at' => now(),
+                ])->save();
+                if ($preview->currency === 'IDR') {
+                    DB::table('balance_adjustment_accounting_events')->insert([
+                        'request_id' => $preview->id, 'ledger_entry_id' => $mutation->entryId, 'currency' => 'IDR', 'amount' => $preview->amount,
+                        'debit_account' => $preview->category === 'reversal'
+                            ? 'customer_idr_liability'
+                            : match ($preview->category) {
+                                'funded_transfer' => 'verified_settlement_asset', 'promotional_grant' => 'promotional_expense',
+                                'refund_recovery' => 'sale_refund', 'correction' => 'correction_suspense', default => 'owner_attested_adjustment_suspense',
+                            },
+                        'credit_account' => $preview->category === 'reversal'
+                            ? $this->reversalCounterpartAccount($reversalOriginal)
+                            : 'customer_idr_liability',
+                        'source_fingerprint' => $preview->fingerprint, 'created_at' => now(),
+                    ]);
+                }
                 $this->audit->logWithResolvedContext('balance.adjustment.applied', $preview, new: $this->auditValues($preview), user: $freshActor);
+                $displayAmount = $preview->currency === 'USDT'
+                    ? UsdtMicroAmount::formatUnits($preview->amount).' USDT'
+                    : 'Rp '.number_format($preview->amount, 0, ',', '.');
                 if ($preview->category === 'reversal') {
-                    $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'customer', $this->locale->translate($customer, 'balance.adjustment.reversal', ['amount' => 'Rp '.number_format($preview->amount, 0, ',', '.')]), $customer);
+                    $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'customer', $this->locale->translate($customer, 'balance.adjustment.reversal', ['amount' => $displayAmount]), $customer);
                 } elseif ($preview->category !== 'top_up_recovery') {
-                    $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'customer', $this->locale->translate($customer, 'balance.adjustment.credit', ['amount' => 'Rp '.number_format($preview->amount, 0, ',', '.')]), $customer);
+                    $key = $preview->currency === 'USDT' ? 'balance.adjustment.usdt_credit' : 'balance.adjustment.credit';
+                    $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'customer', $this->locale->translate($customer, $key, ['amount' => $displayAmount]), $customer);
                 }
                 $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'owner', $preview->category === 'reversal'
-                    ? 'Reversal IDR '.$preview->id.' diterapkan: Rp '.number_format($preview->amount, 0, ',', '.').' dari adjustment '.$reversalOriginal->id.'.'
-                    : 'Adjustment IDR '.$preview->id.' diterapkan: Rp '.number_format($preview->amount, 0, ',', '.').'.');
+                    ? 'Reversal IDR '.$preview->id.' diterapkan: '.$displayAmount.' dari adjustment '.$reversalOriginal->id.'.'
+                    : 'Adjustment '.$preview->currency.' '.$preview->id.' diterapkan: '.$displayAmount.'.');
 
                 return $mutation;
             }, 5);
@@ -434,6 +479,6 @@ final class BalanceAdjustmentService
 
     private function auditValues(BalanceAdjustmentRequest $preview): array
     {
-        return $preview->only(['customer_id', 'owner_user_id', 'currency', 'amount', 'reason', 'category', 'source_id', 'fingerprint', 'state', 'ledger_entry_id']);
+        return $preview->only(['customer_id', 'owner_user_id', 'currency', 'amount', 'reason', 'category', 'source_id', 'fingerprint', 'state', 'ledger_entry_id', 'usdt_ledger_entry_id']);
     }
 }

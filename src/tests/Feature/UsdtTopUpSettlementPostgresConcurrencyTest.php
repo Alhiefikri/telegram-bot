@@ -27,6 +27,7 @@ use App\Services\Bsc\BscVerificationRpcClientInterface;
 use App\Services\Checkout\BalanceCheckoutRequest;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
+use App\Services\StoreBalance\BalanceAdjustmentService;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
@@ -266,6 +267,40 @@ final class UsdtTopUpSettlementPostgresConcurrencyTest extends TestCase
             $this->assertSame($settled ? 'settled' : 'manual_review',
                 DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->value('state'));
         }
+    }
+
+    public function test_owner_usdt_credit_racing_checkout_preserves_both_ledger_effects(): void
+    {
+        $customer = $this->customer;
+        $owner = User::factory()->create(['role' => UserRole::Owner, 'password' => 'owner-password']);
+        $this->actingAs($owner);
+        $session = app('session')->driver();
+        $session->start();
+        request()->setLaravelSession($session);
+        config(['services.telegram.admin_telegram_chat_id' => '998877']);
+        $ledger = app(CustomerUsdtBalanceLedger::class);
+        $ledger->creditVerifiedTopUp($customer, new VerifiedUsdtFunding($customer->id, UsdtMicroAmount::fromUnits(500_000),
+            'owner-spend-opening-funds', 'owner-spend-opening-receipt', 'v1'), 'owner-spend-opening-funds');
+        $preview = app(BalanceAdjustmentService::class)->request($owner, (string) $customer->telegram_id, '0.3', 'Owner attestation', currency: 'USDT');
+        $cart = $this->fundingRaceCart($customer, 200_000);
+
+        $results = $this->runConcurrentWorkers(2, function (int $index) use ($owner, $preview, $cart): string {
+            if ($index === 0) {
+                $result = app(BalanceAdjustmentService::class)->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+
+                return $result->applied ? 'applied' : 'replayed';
+            }
+            $order = app(OrderCheckoutService::class)->checkout(Cart::findOrFail($cart->id),
+                checkoutKey: 'owner-credit-spend-race',
+                balanceRequest: new BalanceCheckoutRequest(BalancePaymentPreference::UsdFirst, 10_000, 200_000));
+
+            return (string) $order->id;
+        }, 'owner-credit-spend-race');
+        $this->assertWorkersSucceeded($results);
+        $this->assertSame('applied', $results[0]['value']);
+        $this->assertSame(600_000, $ledger->snapshot($customer)->balanceMicro());
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('kind', 'owner_adjustment_credit')->where('source_id', $preview->id)->count());
+        $this->assertSame(1, CustomerUsdtBalanceEntry::where('kind', 'purchase_debit')->where('source_id', $results[1]['value'])->count());
     }
 
     public function test_binance_credit_racing_checkout_keeps_transaction_time_receipt_balances(): void

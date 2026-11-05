@@ -337,6 +337,7 @@ final class CustomerUsdtActivityService
             kind: $kind->value,
             state: match ($kind) {
                 UsdtBalanceEntryKind::FundingCredit => CustomerUsdtActivityItem::STATE_CREDITED,
+                UsdtBalanceEntryKind::OwnerAdjustmentCredit => CustomerUsdtActivityItem::STATE_CREDITED,
                 UsdtBalanceEntryKind::PurchaseDebit => CustomerUsdtActivityItem::STATE_DEBITED,
                 UsdtBalanceEntryKind::RefundCredit => CustomerUsdtActivityItem::STATE_REFUNDED,
                 UsdtBalanceEntryKind::ReversalDebit => CustomerUsdtActivityItem::STATE_REVERSED,

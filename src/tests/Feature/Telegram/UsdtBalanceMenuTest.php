@@ -1125,61 +1125,61 @@ final class UsdtBalanceMenuTest extends TelegramBotTestSupport
         ))->assertOk();
     }
 
-    public function test_start_cancels_the_unpaid_target_and_allows_a_new_amount(): void
+    #[DataProvider('startFundingRails')]
+    public function test_start_preserves_and_reopens_target_with_pending_hint_then_explicit_cancel_closes_it(string $rail): void
     {
         $this->enableBinance();
         $root = $this->startRoot();
-        $old = $this->openBinanceTarget($root, '1 USD');
+        $target = $rail === 'binance_pay'
+            ? $this->openBinanceTarget($root, '1 USD')
+            : $this->openSharedTarget('1');
+        $hint = $rail === 'binance_pay' ? '445011487581044736' : '0x'.str_repeat('ab', 32);
+        $this->sendText($hint);
+        $this->assertSame($target->id, DB::table('customer_usdt_top_up_inbox')->value('top_up_id'));
 
         $this->sendText('/start');
-
-        $this->assertSame('released', DB::table('customer_usdt_funding_reservations')->value('state'));
-        $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
-        $this->assertSame(0, DB::table('customer_usdt_funding_reservations')->whereNull('resolved_at')->count());
-
-        $root = TelegramNavigationRoot::query()->sole();
-        $this->tap('methods-again', 'balance:add', $root);
-        $this->tap('binance-again', 'balance:usd:binance_pay', $root);
-        $five = $this->presetCallback($this->lastCanonicalEdit(self::CHAT_ID), '5 USD');
-        $this->tap('five-again', $five, $root);
-
-        $fresh = CustomerUsdtTopUp::query()->where('id', '!=', $old->id)->sole();
-        $this->assertSame(5_000_000, (int) $fresh->amount_micro);
-        $this->assertStringContainsString('Kirim tepat: 5 USDT', $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID)));
+        $this->assertSame(TelegramNavigationScreen::Home, $root->fresh()->screen);
+        $this->assertSame('reserved', DB::table('customer_usdt_funding_reservations')->value('state'));
         $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->whereNull('resolved_at')->count());
-        $this->assertSame(1, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertSame(1, DB::table('customer_usdt_top_up_inbox')->count());
+        $this->assertSame($target->id, DB::table('customer_usdt_top_up_inbox')->value('top_up_id'));
+        $this->assertNoMoney();
+
+        $this->tap('methods-again', 'balance:add', $root);
+        $this->tap('rail-again', 'balance:usd:'.$rail, $root);
+        $this->tap('five-again', $this->presetCallback($this->lastCanonicalEdit(self::CHAT_ID), '5 USD'), $root);
+        $copy = $this->editCopy($this->lastCanonicalEdit(self::CHAT_ID));
+        $this->assertStringContainsString('Kirim tepat: 1 USDT', $copy);
+        $this->assertStringNotContainsString('Kirim tepat: 5 USDT', $copy);
+        $this->assertSame($target->id, CustomerUsdtTopUp::query()->sole()->id);
+        $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->count());
+        $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
+        $this->assertNoMoney();
+
+        $this->tap('cancel-after-start', 'usdt:close:'.$target->id, $root);
+        $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $this->assertSame('released', DB::table('customer_usdt_funding_reservations')->value('state'));
         $this->assertNoMoney();
     }
 
-    public function test_start_cancels_bep20_target_and_asks_for_a_new_amount(): void
+    public static function startFundingRails(): array
     {
-        $old = $this->openSharedTarget('1');
-        $this->sendText('/start');
-        $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->value('kind'));
-
-        $root = TelegramNavigationRoot::query()->sole();
-        $this->tap('bsc-again', 'balance:usd:bsc', $root);
-        $this->tap('bsc-custom-again', 'balance:usd:bsc:x', $root);
-        $this->assertSame(TelegramNavigationScreen::UsdtFundingAmount, $root->fresh()->screen);
-        $this->sendText('0.1');
-
-        $fresh = CustomerUsdtTopUp::query()->where('id', '!=', $old->id)->sole();
-        $this->assertSame(100_000, (int) $fresh->amount_micro);
-        $this->assertNoMoney();
+        return [['binance_pay'], ['bsc']];
     }
 
-    public function test_start_warns_when_an_in_flight_top_up_cannot_be_cancelled(): void
+    public function test_start_keeps_an_in_flight_settlement_lease_unchanged(): void
     {
         $this->enableBinance();
         $root = $this->startRoot();
         $target = $this->openBinanceTarget($root, '1 USD');
         DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)
             ->update(['lease_until' => now()->addMinutes(2), 'version' => DB::raw('version + 1')]);
+        $work = DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->sole();
 
         $this->sendText('/start');
 
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'Top-up sebelumnya belum bisa dibatalkan.'));
+        $this->assertEquals($work, DB::table('customer_usdt_top_up_settlement_work')->where('top_up_id', $target->id)->sole());
         $this->assertSame(0, DB::table('customer_usdt_top_up_resolutions')->count());
         $this->assertSame(1, DB::table('customer_usdt_funding_reservations')->whereNull('resolved_at')->count());
         $this->assertNoMoney();

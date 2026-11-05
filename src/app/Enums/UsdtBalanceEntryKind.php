@@ -5,6 +5,7 @@ namespace App\Enums;
 enum UsdtBalanceEntryKind: string
 {
     case FundingCredit = 'funding_credit';
+    case OwnerAdjustmentCredit = 'owner_adjustment_credit';
     case PurchaseDebit = 'purchase_debit';
     case RefundCredit = 'refund_credit';
     case ReversalDebit = 'reversal_debit';
@@ -12,7 +13,7 @@ enum UsdtBalanceEntryKind: string
     public function direction(): int
     {
         return match ($this) {
-            self::FundingCredit, self::RefundCredit => 1,
+            self::FundingCredit, self::RefundCredit, self::OwnerAdjustmentCredit => 1,
             self::PurchaseDebit, self::ReversalDebit => -1,
         };
     }

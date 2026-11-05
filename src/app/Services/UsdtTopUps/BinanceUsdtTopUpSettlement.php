@@ -128,13 +128,17 @@ final class BinanceUsdtTopUpSettlement
         if (! $result->complete) {
             throw new RuntimeException('Binance history window incomplete.');
         }
-        $transactions = array_values(array_filter(array_map(fn ($payload): ?BinancePayTransaction => BinancePayTransaction::fromPayload($payload), $result->transactions)));
+        $reference = (string) $claim['inbox']->provider_reference;
         $transaction = null;
-        foreach ($transactions as $candidate) {
-            if ($candidate->matchesSubmittedOrderId((string) $claim['inbox']->provider_reference) !== false) {
-                $transaction = $candidate;
-                break;
+        foreach ($result->transactions as $payload) {
+            if (BinancePayTransaction::payloadMatchesSubmittedOrderId($payload, $reference) === false) {
+                continue;
             }
+            $transaction = BinancePayTransaction::fromPayload($payload);
+            if ($transaction === null) {
+                throw new RuntimeException('Matching Binance history transaction is malformed.');
+            }
+            break;
         }
         $this->apply($claim, $transaction);
 

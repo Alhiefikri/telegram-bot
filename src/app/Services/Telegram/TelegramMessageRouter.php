@@ -43,7 +43,6 @@ class TelegramMessageRouter
         private TelegramUsdtFundingCallbackHandler $usdtFunding,
         private TelegramUsdtFundingSession $usdtFundingSession,
         private TelegramContentIntents $content,
-        private TelegramUsdtFundingActions $usdtTargets,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
@@ -93,11 +92,6 @@ class TelegramMessageRouter
             $this->session->forgetWithLock($customer);
             $this->catalogQueries->forget($customer);
             $this->startIntents->forget($customer);
-            if ($isPrivateChat) {
-                if (! $this->usdtTargets->cancelOpenTargets($customer)) {
-                    $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.usdt.notice.restart_cancel_unavailable'));
-                }
-            }
             $startIntent = $this->startIntent($text);
             if ($startIntent !== null) {
                 $this->startIntents->put($customer, $startIntent);

@@ -29,8 +29,8 @@
 
         {{-- Status and validation errors are rendered in the shared shell above. --}}
 
-        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Tambah saldo Rupiah">
-            <p class="text-xs font-medium text-admin-muted">Store Balance · IDR</p>
+        <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Tambah saldo Customer">
+            <p class="text-xs font-medium text-admin-muted">Store Balance · IDR / USDT</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">Tambah saldo Customer</h1>
             <p class="mt-2 max-w-3xl text-sm leading-6 text-admin-muted">
                 Cari Customer memakai Telegram ID numerik exact. Periksa identitas dan nominal pada preview, lalu konfirmasi dengan password Owner. Form ini menambahkan nominal ke saldo; form ini tidak menetapkan saldo akhir.
@@ -77,10 +77,15 @@
                             @else
                                 <p class="mt-1 text-sm font-semibold text-neo-danger-text">Saldo Rupiah tidak dapat ditampilkan sampai ledger direkonsiliasi.</p>
                             @endif
+                            @if ($customerUsdtBalance?->isAvailable())
+                                <p class="mt-1 text-sm font-medium text-admin-muted">Saldo USDT saat ini <span class="font-semibold text-admin-ink">{{ \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($customerUsdtBalance->balanceMicro()) }} USDT</span>{{ $customerUsdtBalance->isFrozen() ? ' (dibekukan)' : '' }}</p>
+                            @else
+                                <p class="mt-1 text-sm font-semibold text-neo-danger-text">Saldo USDT tidak dapat ditampilkan sampai ledger direkonsiliasi.</p>
+                            @endif
                         </div>
                     </div>
 
-                    @if ($customerBalance?->isAvailable())
+                    @if ($customerBalance?->isAvailable() || ($customerUsdtBalance?->isAvailable() && ! $customerUsdtBalance->isFrozen()))
                     <form
                         method="POST"
                         action="{{ route('admin.store-balance.adjustments.previews.store') }}"
@@ -92,20 +97,27 @@
                         @csrf
                         <input type="hidden" name="telegram_id" value="{{ $customerId }}">
                         <div class="block text-xs font-medium text-admin-ink">
-                            <x-admin-dashboard.field-label for="balance-adjustment-amount">Jumlah tambahan Rupiah</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.field-label for="balance-adjustment-currency">Mata uang</x-admin-dashboard.field-label>
+                            <select id="balance-adjustment-currency" name="currency" class="mt-1 min-h-11 w-full rounded-lg border border-admin-line bg-admin-surface px-3 text-base font-normal text-admin-ink focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper" required>
+                                <option value="IDR" @selected(old('currency', $customerBalance?->isAvailable() ? 'IDR' : 'USDT') === 'IDR') @disabled(! $customerBalance?->isAvailable())>IDR</option>
+                                <option value="USDT" @selected(old('currency', $customerBalance?->isAvailable() ? 'IDR' : 'USDT') === 'USDT') @disabled(! $customerUsdtBalance?->isAvailable() || $customerUsdtBalance->isFrozen())>USDT</option>
+                            </select>
+                        </div>
+                        <div class="block text-xs font-medium text-admin-ink">
+                            <x-admin-dashboard.field-label for="balance-adjustment-amount">Jumlah tambahan</x-admin-dashboard.field-label>
                             <input
                                 id="balance-adjustment-amount"
                                 name="amount"
                                 type="text"
-                                inputmode="numeric"
-                                pattern="[0-9]*"
+                                inputmode="decimal"
                                 autocomplete="off"
                                 value="{{ old('amount') }}"
                                 class="mt-1 min-h-11 w-full rounded-lg border border-admin-line bg-admin-surface px-3 text-base font-normal text-admin-ink transition-colors placeholder:text-admin-muted focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper"
                                 required
                             >
                         </div>
-                        <p class="-mt-2 text-xs font-medium leading-5 text-admin-muted">Masukkan angka Rupiah positif tanpa titik, koma, atau desimal.</p>
+                        <p class="-mt-2 text-xs font-medium leading-5 text-admin-muted">IDR: angka utuh tanpa pemisah. USDT: gunakan titik desimal, maksimal enam angka di belakang koma.</p>
+                        <x-admin-dashboard.notice tone="warning" role="note">Penambahan Owner-attested adalah pernyataan Owner, bukan transfer yang terverifikasi. Kredit ini terpisah dari settlement Binance dan dapat menduplikasi kredit yang masuk kemudian. Periksa transaksi terkait sebelum melanjutkan.</x-admin-dashboard.notice>
                         <div class="block text-xs font-medium text-admin-ink">
                             <x-admin-dashboard.field-label for="balance-adjustment-reason">Alasan penambahan</x-admin-dashboard.field-label>
                             <textarea id="balance-adjustment-reason" name="reason" rows="3" maxlength="500" class="mt-1 min-h-28 w-full rounded-lg border border-admin-line bg-admin-surface px-3 py-3 text-sm font-normal text-admin-ink transition-colors placeholder:text-admin-muted focus:outline-none focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper" required>{{ old('reason') }}</textarea>
@@ -118,6 +130,12 @@
                     </form>
                     @else
                         <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">Penambahan saldo dinonaktifkan karena proyeksi Customer tidak cocok dengan ledger.</x-admin-dashboard.notice>
+                    @endif
+                    @if (! $customerBalance?->isAvailable())
+                        <p class="mt-2 text-xs font-medium text-admin-muted">Penambahan saldo dinonaktifkan untuk IDR sampai ledger direkonsiliasi.</p>
+                    @endif
+                    @if (! $customerUsdtBalance?->isAvailable() || $customerUsdtBalance->isFrozen())
+                        <p class="mt-2 text-xs font-medium text-admin-muted">Penambahan saldo USDT dinonaktifkan karena saldo tidak tersedia atau dibekukan.</p>
                     @endif
                 </section>
             @endif
@@ -133,7 +151,7 @@
             <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="{{ $previewReversal ? 'Preview reversal saldo' : 'Preview penambahan saldo' }}">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <p class="text-xs font-medium text-admin-muted">Preview {{ $previewReversal ? 'reversal' : 'penambahan' }} IDR</p>
+                        <p class="text-xs font-medium text-admin-muted">Preview {{ $previewReversal ? 'reversal' : 'penambahan' }} {{ $preview->currency }}</p>
                         <h2 class="mt-1 text-lg font-semibold text-admin-ink">Periksa sebelum konfirmasi</h2>
                     </div>
                     <x-admin-dashboard.badge :tone="$preview->state === 'applied' ? 'success' : ($previewExpired || $preview->state !== 'pending' ? 'warning' : 'blue')" dot>
@@ -151,7 +169,7 @@
                     </div>
                     <div>
                         <dt class="text-xs font-medium text-admin-muted">{{ $previewReversal ? 'Jumlah reversal' : 'Jumlah tambahan' }}</dt>
-                        <dd class="mt-1 text-lg font-semibold text-admin-ink">Rp {{ number_format($preview->amount, 0, ',', '.') }}</dd>
+                        <dd class="mt-1 text-lg font-semibold text-admin-ink">{{ $preview->currency === 'USDT' ? \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($preview->amount).' USDT' : 'Rp '.number_format($preview->amount, 0, ',', '.') }}</dd>
                     </div>
                     <div>
                         <dt class="text-xs font-medium text-admin-muted">Alasan</dt>
@@ -168,8 +186,11 @@
                         <dd class="mt-1 text-sm font-medium text-admin-ink">{{ $preview->expires_at->timezone(config('app.timezone'))->format('d M Y, H:i T') }}</dd>
                     </div>
                 </dl>
+                @if ($preview->currency === 'USDT')
+                    <x-admin-dashboard.notice tone="warning" class="mt-4" role="note">Penambahan Owner-attested bukan transfer terverifikasi dan terpisah dari settlement Binance. Kredit yang masuk kemudian dapat menduplikasi penambahan ini.</x-admin-dashboard.notice>
+                @endif
 
-                @if ($preview->state === 'pending' && ! $previewExpired && $previewBalance?->isAvailable())
+                @if ($preview->state === 'pending' && ! $previewExpired && $previewBalance?->isAvailable() && ($preview->currency !== 'USDT' || ! $previewBalance->isFrozen()))
                     <form
                         method="POST"
                         action="{{ route('admin.store-balance.adjustments.previews.confirm', ['adjustment' => $preview->id]) }}"
@@ -202,7 +223,7 @@
                 @elseif ($preview->state === 'applied')
                     <x-admin-dashboard.notice tone="success" class="mt-4" role="status">{{ $previewReversal ? 'Reversal ini sudah diterapkan. Konfirmasi ulang tidak mendebit saldo kedua kali.' : 'Penambahan ini sudah diterapkan. Pengiriman ulang konfirmasi tidak membuat kredit kedua.' }}</x-admin-dashboard.notice>
                 @elseif ($preview->state === 'pending' && ! $previewExpired)
-                    <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">Saldo Customer tidak dapat diverifikasi dengan ledger. Konfirmasi ditahan sampai rekonsiliasi dilakukan.</x-admin-dashboard.notice>
+                    <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">Saldo Customer tidak tersedia atau dibekukan. Konfirmasi ditahan sampai masalah ledger diselesaikan.</x-admin-dashboard.notice>
                 @elseif ($previewExpired)
                     <x-admin-dashboard.notice tone="warning" class="mt-4" role="status">Preview kedaluwarsa. Cari Customer dan buat preview baru untuk melanjutkan.</x-admin-dashboard.notice>
                 @endif
@@ -211,15 +232,15 @@
 
         @if ($customer && $history)
             <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Riwayat penambahan saldo Customer">
-                <p class="text-xs font-medium text-admin-muted">Riwayat IDR Customer</p>
-                <h2 class="mt-1 text-lg font-semibold text-admin-ink">Riwayat penambahan dan reversal IDR</h2>
+                <p class="text-xs font-medium text-admin-muted">Riwayat IDR / USDT Customer</p>
+                <h2 class="mt-1 text-lg font-semibold text-admin-ink">Riwayat penambahan dan reversal IDR / USDT</h2>
                 <div class="mt-4 space-y-3">
                     @forelse ($history as $entry)
                         @php($entryDirection = $entry->ledgerEntry?->kind?->direction() ?? ($entry->category === 'reversal' ? -1 : 1))
                         <article class="rounded-lg border border-admin-line bg-admin-surface-muted p-3" data-adjustment-state="{{ $entry->state }}">
                             <div class="flex flex-wrap items-start justify-between gap-2">
                                 <div>
-                                    <p class="font-semibold text-admin-ink">{{ $entryDirection < 0 ? '−' : '+' }}Rp {{ number_format($entry->amount, 0, ',', '.') }}</p>
+                                    <p class="font-semibold text-admin-ink">{{ $entryDirection < 0 ? '−' : '+' }}{{ $entry->currency === 'USDT' ? \App\Services\UsdtBalance\UsdtMicroAmount::formatUnits($entry->amount).' USDT' : 'Rp '.number_format($entry->amount, 0, ',', '.') }}</p>
                                     <p class="mt-1 text-xs font-medium text-admin-muted">{{ $entry->created_at?->timezone(config('app.timezone'))->format('d M Y, H:i T') }} · {{ strtoupper(str_replace('_', ' ', $entry->category)) }}</p>
                                 </div>
                                 <x-admin-dashboard.badge :tone="$entry->state === 'applied' ? 'success' : ($entry->state === 'pending' ? 'warning' : 'slate')">
@@ -227,8 +248,8 @@
                                 </x-admin-dashboard.badge>
                             </div>
                             <p class="mt-2 break-words text-sm font-medium text-admin-ink">{{ $entry->reason }}</p>
-                            @if ($entry->ledger_entry_id)
-                                <p class="mt-2 text-xs font-medium text-admin-muted">Ledger entry #{{ $entry->ledger_entry_id }}</p>
+                            @if ($entry->currency === 'USDT' ? $entry->usdt_ledger_entry_id : $entry->ledger_entry_id)
+                                <p class="mt-2 text-xs font-medium text-admin-muted">Ledger entry #{{ $entry->currency === 'USDT' ? $entry->usdt_ledger_entry_id : $entry->ledger_entry_id }}</p>
                             @endif
                             @if (in_array($entry->id, $reversibleAdjustmentIds, true))
                                 <form

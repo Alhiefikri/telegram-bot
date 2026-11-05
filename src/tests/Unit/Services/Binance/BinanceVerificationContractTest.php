@@ -82,7 +82,7 @@ class BinanceVerificationContractTest extends TestCase
             yield 'invalid amount '.$amount => [array_replace($valid, ['amount' => $amount])];
         }
         foreach (['status', 'transactionStatus'] as $field) {
-            foreach ([['value' => 'FAILED'], false] as $status) {
+            foreach ([['value' => 'FAILED'], false, null] as $status) {
                 yield 'malformed '.$field.' '.get_debug_type($status) => [array_replace($valid, [$field => $status])];
             }
         }
@@ -99,7 +99,7 @@ class BinanceVerificationContractTest extends TestCase
 
     public static function unsuccessfulStatuses(): iterable
     {
-        foreach (['PENDING', 'FAILED', 'CANCELLED', 'REFUNDED', 'PROCESSING', 'UNKNOWN'] as $status) {
+        foreach (['PENDING', 'FAILED', 'CANCELLED', 'REFUNDED', 'PROCESSING', 'UNKNOWN', '', '   '] as $status) {
             yield $status => [$status];
         }
     }

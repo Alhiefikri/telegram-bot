@@ -29,34 +29,6 @@ final class TelegramUsdtFundingActions
         private readonly CustomerUsdtFundingReservationService $reservations,
     ) {}
 
-    /** Return false when an open target could not be cancelled safely. */
-    public function cancelOpenTargets(Customer $customer): bool
-    {
-        $active = $this->reservations->activeForCustomer($customer);
-        if ($active === null || $active->reservation->sourceType !== 'customer_usdt_top_up') {
-            return true;
-        }
-
-        try {
-            $result = $this->reservations->cancelUnpaidTarget(
-                $customer,
-                $active->reservation->reservationId,
-                CustomerUsdtFundingRelease::cancelledByCustomer(
-                    'customer-restart:'.$active->reservation->sourceId,
-                    'customer:'.$customer->getKey(),
-                ),
-            );
-        } catch (CustomerUsdtFundingReservationConflict) {
-            return false;
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return false;
-        }
-
-        return in_array($result->outcome, [CustomerUsdtFundingReservationOutcome::Released, CustomerUsdtFundingReservationOutcome::Replayed], true);
-    }
-
     /** Cancel one unpaid target from its own instruction surface. */
     public function cancelTarget(Customer $customer, string $topUpId): bool
     {

@@ -25,19 +25,20 @@ in practice needed an operator to intervene.
   lease, or when either work row is already terminal. A Customer who opens a new
   amount also triggers release of an eligible expired target without waiting for
   the sweep. A concurrent settlement or review always wins.
-- Credit terms for late money are unchanged: every settlement path sees the
-  existing resolution and routes the transfer to manual review instead of
-  crediting a released reservation.
+- Credit terms for money discovered after release are unchanged: settlement
+  paths seeing the existing resolution route the transfer to manual review
+  instead of crediting a released reservation, including an on-time transfer.
+  Binance recovery requires a pending Order ID hint and searches the target
+  window; it does not automatically discover unsubmitted or later transfers.
 - The Customer-facing status of a released target is the new terminal state
   `expired_unpaid`: it explains that the window closed with no payment detected,
   offers no check/lookup buttons, and promises no credit.
 
-- The Customer can also close one unpaid target on demand: the payment
-  instructions carry a danger-styled cancel button, and a private `/start`
-  cancels the open target so a wrongly chosen amount never has to be paid. Both
-  paths use the same transactional close with the immutable
-  `cancelled_by_customer` resolution, skip targets with an active settlement
-  lease, and never move money.
+- The Customer can also close one unpaid target on demand using the
+  danger-styled cancel button on the payment instructions. The transactional
+  close records an immutable `cancelled_by_customer` resolution, skips targets
+  with an active settlement lease, and never moves money. Private `/start`
+  returns to navigation without cancelling the target; it can be reopened.
 - Successful inline cancellation deletes the payment instruction message,
   clears the pending lookup prompt, and sends Home as the new canonical root.
   The immutable target/resolution history remains available.

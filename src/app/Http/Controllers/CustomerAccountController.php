@@ -275,6 +275,7 @@ class CustomerAccountController extends Controller
             $activityRows = array_map(fn ($item): array => [
                 'kind' => $item->kind === 'top_up' ? 'Top-up' : match ($item->kind) {
                     'funding_credit' => 'Saldo masuk',
+                    'owner_adjustment_credit' => 'Penyesuaian saldo oleh Owner',
                     'purchase_debit' => 'Pembelian',
                     'refund_credit' => 'Pengembalian',
                     'reversal_debit' => 'Pembalikan',

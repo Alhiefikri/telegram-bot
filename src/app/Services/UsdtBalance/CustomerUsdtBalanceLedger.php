@@ -7,6 +7,7 @@ use App\Enums\UsdtBalanceEntryKind;
 use App\Exceptions\InsufficientUsdtBalance;
 use App\Exceptions\UsdtBalanceFrozenException;
 use App\Exceptions\UsdtBalanceProjectionMismatchException;
+use App\Models\BalanceAdjustmentRequest;
 use App\Models\Customer;
 use App\Models\CustomerUsdtBalanceAccount;
 use App\Models\CustomerUsdtBalanceEntry;
@@ -131,6 +132,26 @@ final class CustomerUsdtBalanceLedger
                 || $receipt->tx_hash !== $request->transaction_hash
                 || UsdtMicroAmount::fromRawTokenUnits($receipt->amount_units, (int) $receipt->decimals)->units() !== $source->amountMicro()) {
                 throw new InvalidArgumentException('Recovery requires its exact password-authorized verified receipt.');
+            }
+        });
+    }
+
+    public function creditOwnerAdjustment(Customer $customer, OwnerUsdtAdjustment $source): UsdtBalanceMutationResult
+    {
+        if (DB::transactionLevel() === 0) {
+            throw new InvalidArgumentException('Owner adjustment requires a transaction.');
+        }
+
+        return $this->apply($customer, $source, 'owner-adjustment:'.$source->requestId, function () use ($customer, $source): void {
+            $request = BalanceAdjustmentRequest::query()->whereKey($source->requestId)->lockForUpdate()->firstOrFail();
+            $source->authority->assertMatches($request);
+            if ($request->state !== 'approved' || $request->currency !== 'USDT'
+                || $request->category !== 'owner_attested' || $request->source_id !== null
+                || $request->receipt_fingerprint !== null || (int) $request->customer_id !== (int) $customer->id
+                || $request->amount !== $source->amountMicro()
+                || ! hash_equals($request->fingerprint, $source->requestFingerprint)
+                || now()->gte($request->expires_at)) {
+                throw new InvalidArgumentException('USDT adjustment requires its exact approved owner request.');
             }
         });
     }
@@ -403,6 +424,7 @@ final class CustomerUsdtBalanceLedger
         } else {
             [$debit, $credit] = match ($source->kind()) {
                 UsdtBalanceEntryKind::FundingCredit => ['usdt_settlement_asset', 'customer_usdt_liability'],
+                UsdtBalanceEntryKind::OwnerAdjustmentCredit => ['owner_attested_adjustment_suspense', 'customer_usdt_liability'],
                 UsdtBalanceEntryKind::PurchaseDebit => ['customer_usdt_liability', 'usdt_sale'],
                 UsdtBalanceEntryKind::RefundCredit => ['usdt_sale_refund', 'customer_usdt_liability'],
                 UsdtBalanceEntryKind::ReversalDebit => throw new InvalidArgumentException('USDT reversal requires its original accounting event.'),

@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Admin;
 
 use App\Exceptions\BalanceAdjustmentRejected;
 use App\Exceptions\StoreBalanceProjectionMismatchException;
+use App\Exceptions\UsdtBalanceFrozenException;
+use App\Exceptions\UsdtBalanceProjectionMismatchException;
 use App\Http\Controllers\Controller;
 use App\Models\BalanceAdjustmentRequest as BalanceAdjustmentPreview;
 use App\Models\Customer;
@@ -12,6 +14,8 @@ use App\Models\User;
 use App\Services\Admin\BalanceAdjustmentDashboardReadiness;
 use App\Services\StoreBalance\BalanceAdjustmentService;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtMicroAmount;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -25,7 +29,7 @@ final class AdminBalanceAdjustmentController extends Controller
 
     public function __construct(private readonly BalanceAdjustmentDashboardReadiness $readiness) {}
 
-    public function index(Request $request, BalanceAdjustmentService $adjustments, StoreBalanceLedger $ledger): View
+    public function index(Request $request, BalanceAdjustmentService $adjustments, StoreBalanceLedger $ledger, CustomerUsdtBalanceLedger $usdtLedger): View
     {
         $this->assertDashboardReady();
         $owner = $this->owner($request);
@@ -45,11 +49,12 @@ final class AdminBalanceAdjustmentController extends Controller
         }
 
         $customerBalance = $customer === null ? null : $ledger->snapshot($customer);
+        $customerUsdtBalance = $customer === null ? null : $usdtLedger->snapshot($customer);
 
         $previewId = $request->query('preview');
         $preview = is_string($previewId) && Str::isUuid($previewId)
             ? BalanceAdjustmentPreview::query()
-                ->select(['id', 'customer_id', 'owner_user_id', 'telegram_id', 'username', 'amount', 'reason', 'category', 'source_id', 'fingerprint', 'version', 'state', 'ledger_entry_id', 'expires_at', 'resolved_at'])
+                ->select(['id', 'customer_id', 'owner_user_id', 'telegram_id', 'username', 'currency', 'amount', 'reason', 'category', 'source_id', 'fingerprint', 'version', 'state', 'ledger_entry_id', 'usdt_ledger_entry_id', 'expires_at', 'resolved_at'])
                 ->whereKey($previewId)
                 ->where('owner_user_id', $owner->id)
                 ->whereIn('category', ['owner_attested', 'reversal'])
@@ -60,7 +65,9 @@ final class AdminBalanceAdjustmentController extends Controller
         $previewCustomer = $preview === null
             ? null
             : Customer::query()->select(['id', 'telegram_id'])->find($preview->customer_id);
-        $previewBalance = $previewCustomer === null ? null : $ledger->snapshot($previewCustomer);
+        $previewBalance = $previewCustomer === null ? null : ($preview->currency === 'USDT'
+            ? $usdtLedger->snapshot($previewCustomer)
+            : $ledger->snapshot($previewCustomer));
 
         $previewUnavailable = $previewId !== null && $preview === null;
         $positiveBalances = CustomerBalanceAccount::query()
@@ -94,7 +101,7 @@ final class AdminBalanceAdjustmentController extends Controller
                 ->orderByDesc('created_at')
                 ->orderByDesc('id')
                 ->paginate(self::HISTORY_PAGE_SIZE, [
-                    'id', 'customer_id', 'telegram_id', 'username', 'amount', 'reason', 'category', 'currency', 'state', 'ledger_entry_id', 'created_at',
+                    'id', 'customer_id', 'telegram_id', 'username', 'amount', 'reason', 'category', 'currency', 'state', 'ledger_entry_id', 'usdt_ledger_entry_id', 'created_at',
                 ], 'history_page')
                 ->withQueryString();
 
@@ -118,6 +125,7 @@ final class AdminBalanceAdjustmentController extends Controller
             'telegramId' => is_string($telegramId) ? $telegramId : null,
             'customer' => $customer,
             'customerBalance' => $customerBalance,
+            'customerUsdtBalance' => $customerUsdtBalance,
             'lookupError' => $lookupError,
             'preview' => $preview,
             'previewOriginal' => $previewOriginal,
@@ -137,18 +145,19 @@ final class AdminBalanceAdjustmentController extends Controller
         $telegramId = $request->input('telegram_id');
         $amount = $request->input('amount');
         $reason = $request->input('reason');
+        $currency = $request->input('currency', 'IDR');
 
         try {
-            if (! is_string($reason)) {
+            if (! is_string($reason) || ! is_string($currency)) {
                 throw new BalanceAdjustmentRejected('invalid_amount_or_reason');
             }
 
-            $preview = $adjustments->request($owner, $telegramId, $amount, $reason);
+            $preview = $adjustments->request($owner, $telegramId, $amount, $reason, currency: $currency);
         } catch (BalanceAdjustmentRejected $exception) {
             return redirect()
                 ->route('admin.store-balance.adjustments.index', $this->lookupQuery($telegramId))
                 ->withErrors(['adjustment' => $this->message($exception->reason)])
-                ->withInput($this->safeInput($telegramId, $amount, $reason));
+                ->withInput($this->safeInput($telegramId, $amount, $reason, $currency));
         }
 
         return redirect()
@@ -212,19 +221,24 @@ final class AdminBalanceAdjustmentController extends Controller
             return redirect()
                 ->route('admin.store-balance.adjustments.index', ['preview' => $adjustment])
                 ->withErrors(['confirmation' => $this->message($exception->reason)]);
-        } catch (StoreBalanceProjectionMismatchException) {
+        } catch (StoreBalanceProjectionMismatchException|UsdtBalanceProjectionMismatchException|UsdtBalanceFrozenException) {
             return redirect()
                 ->route('admin.store-balance.adjustments.index', ['preview' => $adjustment])
                 ->withErrors(['confirmation' => 'Saldo tidak dapat diverifikasi dengan ledger. Penambahan ditahan sampai rekonsiliasi dilakukan.']);
         }
 
-        $preview = BalanceAdjustmentPreview::query()->select(['id', 'telegram_id', 'category'])->find($adjustment);
+        $preview = BalanceAdjustmentPreview::query()->select(['id', 'telegram_id', 'category', 'currency'])->find($adjustment);
         abort_if($preview === null, 404);
         $reversal = $preview->category === 'reversal';
+        $balanceDisplay = $preview->currency === 'USDT'
+            ? UsdtMicroAmount::formatUnits($result->balanceAfterMicro).' USDT'
+            : 'Rp '.number_format($result->balanceAfter, 0, ',', '.');
         $status = $result->applied
             ? ($reversal
                 ? 'Reversal saldo diterapkan. Entry #'.$result->entryId.'; saldo Rupiah sekarang Rp '.number_format($result->balanceAfter, 0, ',', '.').'.'
-                : 'Penambahan saldo diterapkan. Entry #'.$result->entryId.'; saldo Rupiah sekarang Rp '.number_format($result->balanceAfter, 0, ',', '.').'.')
+                : ($preview->currency === 'USDT'
+                    ? 'Penambahan saldo diterapkan. Entry #'.$result->entryId.'; saldo sekarang '.$balanceDisplay.'.'
+                    : 'Penambahan saldo diterapkan. Entry #'.$result->entryId.'; saldo Rupiah sekarang '.$balanceDisplay.'.'))
             : ($reversal
                 ? 'Reversal ini sudah diterapkan sebelumnya. Saldo tidak didebit kembali.'
                 : 'Permintaan ini sudah diterapkan sebelumnya. Saldo tidak ditambah kembali.');
@@ -284,12 +298,13 @@ final class AdminBalanceAdjustmentController extends Controller
         return is_string($telegramId) ? ['telegram_id' => $telegramId] : [];
     }
 
-    private function safeInput(mixed $telegramId, mixed $amount, mixed $reason): array
+    private function safeInput(mixed $telegramId, mixed $amount, mixed $reason, mixed $currency): array
     {
         return [
             'telegram_id' => is_string($telegramId) ? $telegramId : '',
             'amount' => is_string($amount) ? $amount : '',
             'reason' => is_string($reason) ? $reason : '',
+            'currency' => is_string($currency) ? $currency : 'IDR',
         ];
     }
 
@@ -298,7 +313,7 @@ final class AdminBalanceAdjustmentController extends Controller
         return match ($reason) {
             'invalid_telegram_id' => 'Telegram ID harus berupa angka positif tanpa pemisah.',
             'customer_not_registered' => 'Customer tidak ditemukan untuk Telegram ID tersebut.',
-            'invalid_amount_or_reason' => 'Masukkan nominal Rupiah positif dalam angka utuh dan alasan maksimal 500 karakter.',
+            'invalid_amount_or_reason' => 'Masukkan nominal positif (IDR angka utuh atau USDT dengan ketelitian mikro) dan alasan maksimal 500 karakter.',
             'owner_required' => 'Hanya Owner yang dapat mengelola penambahan saldo.',
             'invalid_password' => 'Password Owner tidak cocok. Preview masih menunggu konfirmasi.',
             'owner_locked' => 'Konfirmasi dikunci selama 15 menit setelah terlalu banyak password salah.',

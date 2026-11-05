@@ -116,6 +116,25 @@ final class CustomerBalanceWebTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_usdt_owner_adjustment_is_shown_as_an_adjustment_not_a_top_up(): void
+    {
+        $customer = Customer::factory()->create(['email' => 'adjustment-owner@example.test', 'email_verified_at' => now()]);
+        $other = Customer::factory()->create(['email' => 'adjustment-other@example.test', 'email_verified_at' => now()]);
+        $this->createUsdtHistory($customer, 1, kind: 'owner_adjustment_credit');
+
+        $this->actingAs($customer, 'customer')
+            ->get(route('customer.balance.show', ['currency' => 'USDT']))
+            ->assertOk()
+            ->assertSee('Penyesuaian saldo oleh Owner')
+            ->assertSee('+1 USDT')
+            ->assertDontSee('Saldo masuk');
+
+        $this->actingAs($other, 'customer')
+            ->get(route('customer.balance.show', ['currency' => 'USDT']))
+            ->assertOk()
+            ->assertDontSee('Penyesuaian saldo oleh Owner');
+    }
+
     public function test_guest_recovery_key_or_telegram_id_does_not_authenticate_the_customer_balance(): void
     {
         $customer = Customer::factory()->create();
@@ -130,7 +149,7 @@ final class CustomerBalanceWebTest extends TestCase
         ]))->assertRedirect(route('customer.account'));
     }
 
-    private function createUsdtHistory(Customer $customer, int $entryCount, ?string $frozenReason = null): int
+    private function createUsdtHistory(Customer $customer, int $entryCount, ?string $frozenReason = null, string $kind = 'funding_credit'): int
     {
         $now = now();
         $accountId = DB::table('customer_usdt_balance_accounts')->insertGetId([
@@ -148,7 +167,7 @@ final class CustomerBalanceWebTest extends TestCase
             $lastEntryId = DB::table('customer_usdt_balance_entries')->insertGetId([
                 'customer_usdt_balance_account_id' => $accountId,
                 'account_sequence' => $sequence,
-                'kind' => 'funding_credit',
+                'kind' => $kind,
                 'amount_micro' => 1_000_000,
                 'balance_after_micro' => $sequence * 1_000_000,
                 'source_type' => 'fixture',

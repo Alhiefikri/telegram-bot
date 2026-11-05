@@ -218,6 +218,89 @@ final class AdminBalanceAdjustmentDashboardTest extends NonTransactionalDatabase
         $this->assertSame(2, DB::table('telegram_outbound_effects')->count());
     }
 
+    public function test_owner_can_preview_and_confirm_an_exact_usdt_adjustment_once(): void
+    {
+        Queue::fake();
+        config(['services.telegram.admin_telegram_chat_id' => '998877']);
+        $owner = User::factory()->create(['role' => UserRole::Owner, 'password' => 'owner-password']);
+        $customer = Customer::factory()->create(['telegram_id' => 9007199254740993, 'username' => 'usdt_customer']);
+
+        $this->actingAs($owner)->get(route('admin.store-balance.adjustments.index', ['telegram_id' => '9007199254740993']))
+            ->assertOk()
+            ->assertSee('Saldo USDT saat ini')
+            ->assertSee('0 USDT')
+            ->assertSee('name="currency"', false)
+            ->assertSee('bukan transfer yang terverifikasi')
+            ->assertSee('menduplikasi');
+
+        $response = $this->actingAs($owner)->post(route('admin.store-balance.adjustments.previews.store'), [
+            'telegram_id' => '9007199254740993',
+            'currency' => 'USDT',
+            'amount' => '123456789.000001',
+            'reason' => 'Owner attests this adjustment.',
+        ])->assertRedirect();
+        $this->carrySessionCookie($response);
+        $preview = BalanceAdjustmentRequest::query()->sole();
+        $this->assertSame('USDT', $preview->currency);
+        $this->assertSame(123456789000001, $preview->amount);
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+
+        $this->get(route('admin.store-balance.adjustments.index', ['telegram_id' => '9007199254740993', 'preview' => $preview->id]))
+            ->assertOk()
+            ->assertSee('Preview penambahan USDT')
+            ->assertSee('123456789.000001 USDT')
+            ->assertSee('bukan transfer terverifikasi')
+            ->assertSee('Password Owner untuk tindakan ini');
+
+        $route = route('admin.store-balance.adjustments.previews.confirm', ['adjustment' => $preview->id]);
+        $confirmation = ['fingerprint' => $preview->fingerprint, 'version' => $preview->version, 'password' => 'owner-password'];
+        $response = $this->actingAs($owner)->post($route, array_replace($confirmation, ['password' => 'wrong-password']))
+            ->assertRedirect()->assertSessionHasErrors('confirmation');
+        $this->carrySessionCookie($response);
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+        $response = $this->actingAs($owner)->post($route, $confirmation)->assertRedirect()
+            ->assertSessionHas('status', fn (string $status): bool => str_contains($status, '123456789.000001 USDT'));
+        $this->carrySessionCookie($response);
+        $response = $this->actingAs($owner)->post($route, $confirmation)->assertRedirect()
+            ->assertSessionHas('status', fn (string $status): bool => str_contains($status, 'diterapkan sebelumnya'));
+        $this->carrySessionCookie($response);
+
+        $this->get(route('admin.store-balance.adjustments.index', ['telegram_id' => '9007199254740993']))
+            ->assertOk()->assertSee('+123456789.000001 USDT')->assertSee('Saldo USDT saat ini');
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 1);
+        $this->assertSame(123456789000001, (int) DB::table('customer_usdt_balance_accounts')->where('customer_id', $customer->id)->value('balance_micro'));
+    }
+
+    public function test_usdt_invalid_precision_and_projection_drift_are_visible_without_affecting_idr(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $customer = Customer::factory()->create(['telegram_id' => 901550]);
+
+        $this->actingAs($owner)->post(route('admin.store-balance.adjustments.previews.store'), [
+            'telegram_id' => '901550', 'currency' => 'USDT', 'amount' => '0.0000001', 'reason' => 'Invalid precision',
+        ])->assertRedirect()->assertSessionHasErrors('adjustment');
+        $this->assertDatabaseCount('balance_adjustment_requests', 0);
+        $response = $this->actingAs($owner)->post(route('admin.store-balance.adjustments.previews.store'), [
+            'telegram_id' => '901550', 'currency' => 'USDT', 'amount' => '2.5', 'reason' => 'Check projection before confirming.',
+        ])->assertRedirect();
+        $this->carrySessionCookie($response);
+        $preview = BalanceAdjustmentRequest::query()->sole();
+
+        DB::table('customer_usdt_balance_accounts')->insert([
+            'customer_id' => $customer->id, 'currency' => 'USDT', 'balance_micro' => 1000000,
+            'version' => 0, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->actingAs($owner)->get(route('admin.store-balance.adjustments.index', ['telegram_id' => '901550', 'preview' => $preview->id]))
+            ->assertOk()
+            ->assertSee('Saldo USDT tidak dapat ditampilkan')
+            ->assertSee('Penambahan saldo USDT dinonaktifkan')
+            ->assertSee('Saldo Rupiah saat ini')
+            ->assertSee('Konfirmasi ditahan')
+            ->assertDontSee('Konfirmasi penambahan')
+            ->assertDontSee('1 USDT');
+    }
+
     public function test_unknown_invalid_and_non_owner_submissions_never_create_or_credit_a_customer(): void
     {
         Queue::fake();

@@ -39,7 +39,7 @@ final readonly class BinancePayTransaction
             return null;
         }
         foreach (['status', 'transactionStatus'] as $field) {
-            if (isset($payload[$field]) && ! is_string($payload[$field])) {
+            if (array_key_exists($field, $payload) && ! is_string($payload[$field])) {
                 return null;
             }
         }
@@ -47,6 +47,11 @@ final readonly class BinancePayTransaction
         $receiver = is_array($payload['receiverInfo'] ?? null) ? $payload['receiverInfo'] : [];
         $receiverAccountId = self::stringValue($receiver['accountId'] ?? null);
         $receiverBinanceId = self::stringValue($receiver['binanceId'] ?? null);
+
+        $status = strtoupper(self::stringValue($payload['status'] ?? $payload['transactionStatus'] ?? null));
+        if ($status === '' && (array_key_exists('status', $payload) || array_key_exists('transactionStatus', $payload))) {
+            $status = 'UNKNOWN';
+        }
 
         return new self(
             orderId: $orderId,
@@ -58,7 +63,7 @@ final readonly class BinancePayTransaction
             note: self::stringValue($payload['note'] ?? null),
             receiverAccountId: $receiverAccountId,
             receiverBinanceId: $receiverBinanceId,
-            status: strtoupper(self::stringValue($payload['status'] ?? $payload['transactionStatus'] ?? null)),
+            status: $status,
             sanitizedPayload: self::sanitize($payload),
         );
     }
@@ -73,13 +78,31 @@ final readonly class BinancePayTransaction
         return $this->transactionId;
     }
 
+    public static function payloadMatchesSubmittedOrderId(mixed $payload, string $submitted): string|false
+    {
+        if (! is_array($payload)) {
+            return false;
+        }
+
+        return self::matchReference(
+            self::stringValue($payload['orderId'] ?? null),
+            self::stringValue($payload['transactionId'] ?? null),
+            $submitted,
+        );
+    }
+
     public function matchesSubmittedOrderId(string $submitted): string|false
     {
-        if ($this->orderId !== '' && hash_equals($this->orderId, $submitted)) {
+        return self::matchReference($this->orderId, $this->transactionId, $submitted);
+    }
+
+    private static function matchReference(string $orderId, string $transactionId, string $submitted): string|false
+    {
+        if ($orderId !== '' && hash_equals($orderId, $submitted)) {
             return 'order_id';
         }
 
-        if ($this->transactionId !== '' && hash_equals($this->transactionId, $submitted)) {
+        if ($transactionId !== '' && hash_equals($transactionId, $submitted)) {
             return 'transaction_id_compatibility';
         }
 

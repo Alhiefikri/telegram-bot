@@ -32,15 +32,20 @@ final class AdminBalanceReportReader
         UsdtTopUpStatus::STATE_REJECTED,
     ];
 
-    private const IDR_AUDIT_ACTIONS = [
+    private const ADJUSTMENT_AUDIT_ACTIONS = [
         'balance.adjustment.applied', 'balance.adjustment.approved', 'balance.adjustment.rejected',
-        'balance.adjustment.requested', 'balance.adjustment.reversal_review', 'balance.adjustment.lockout',
+        'balance.adjustment.requested', 'balance.adjustment.reversal_review',
+    ];
+
+    private const IDR_AUDIT_ACTIONS = [
+        ...self::ADJUSTMENT_AUDIT_ACTIONS, 'balance.adjustment.lockout',
         'store_balance.top_up.compensated', 'store_balance.top_up.compensation_provider_evidence',
         'store_balance.top_up.late_settled', 'store_balance.top_up.settled',
         'store_balance.top_up.manually_confirmed', 'store_balance.top_up.manually_rejected',
     ];
 
     private const USDT_AUDIT_ACTIONS = [
+        ...self::ADJUSTMENT_AUDIT_ACTIONS,
         'usdt_top_up.review_resolved', 'usdt_top_up.settled', 'usdt_reorg.detected', 'usdt_reorg.recovery_authorized',
     ];
 
@@ -299,6 +304,7 @@ SQL;
             $query = DB::table('balance_adjustment_requests as reviews')
                 ->join('customers', 'customers.id', '=', 'reviews.customer_id')
                 ->leftJoin('users', 'users.id', '=', 'reviews.owner_user_id')
+                ->where('reviews.currency', '=', 'IDR')
                 ->select([
                     'reviews.id as row_id', 'reviews.customer_id', 'reviews.amount', 'reviews.category', 'reviews.state',
                     'reviews.reason', 'reviews.created_at as report_time', 'customers.first_name', 'customers.telegram_id',
@@ -334,6 +340,21 @@ SQL;
         return [$query, 'movements.occurred_at', 'movements.id'];
     }
 
+    private function auditSubjectId(string $type): string
+    {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return $type === 'uuid'
+                ? 'audit.subject_id'
+                : 'CASE WHEN audit.subject_id = CAST(CAST(audit.subject_id AS INTEGER) AS TEXT) THEN CAST(audit.subject_id AS INTEGER) END';
+        }
+
+        if ($type === 'uuid') {
+            return "CASE WHEN audit.subject_id ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN CAST(audit.subject_id AS uuid) END";
+        }
+
+        return "CASE WHEN audit.subject_id ~ '^(0|[1-9][0-9]{0,18})$' AND (length(audit.subject_id) < 19 OR audit.subject_id <= '9223372036854775807') THEN CAST(audit.subject_id AS bigint) END";
+    }
+
     /** @return array{Builder, string, string} */
     private function auditQuery(string $currency): array
     {
@@ -345,6 +366,24 @@ SQL;
                 'audit.id as row_id', 'audit.action as state', 'audit.subject_type', 'audit.subject_id',
                 'audit.created_at as report_time', 'users.name as actor',
             ]);
+        $adjustmentSubjectId = $this->auditSubjectId('uuid');
+        $matchingUsdtAdjustment = static function (Builder $requests) use ($adjustmentSubjectId): void {
+            $requests->selectRaw('1')->from('balance_adjustment_requests as requests')
+                ->where('audit.subject_type', '=', BalanceAdjustmentRequest::class)
+                ->whereRaw('requests.id = '.$adjustmentSubjectId)
+                ->where('requests.currency', '=', 'USDT');
+        };
+        if ($currency === 'IDR') {
+            $query->where(function (Builder $scope) use ($matchingUsdtAdjustment): void {
+                $scope->whereNotIn('audit.action', self::ADJUSTMENT_AUDIT_ACTIONS)
+                    ->orWhereNotExists($matchingUsdtAdjustment);
+            });
+        } else {
+            $query->where(function (Builder $scope) use ($matchingUsdtAdjustment): void {
+                $scope->whereNotIn('audit.action', self::ADJUSTMENT_AUDIT_ACTIONS)
+                    ->orWhereExists($matchingUsdtAdjustment);
+            });
+        }
 
         return [$query, 'audit.created_at', 'audit.id'];
     }
@@ -359,23 +398,26 @@ SQL;
 
             return;
         }
+        $uuidSubjectId = $this->auditSubjectId('uuid');
+        $integerSubjectId = $this->auditSubjectId('integer');
 
-        $query->where(function (Builder $subjects) use ($currency, $telegramId): void {
+        $query->where(function (Builder $subjects) use ($currency, $telegramId, $uuidSubjectId, $integerSubjectId): void {
+            $subjects->where(function (Builder $adjustments) use ($telegramId, $uuidSubjectId): void {
+                $adjustments->where('audit.subject_type', BalanceAdjustmentRequest::class)
+                    ->whereExists(function (Builder $exists) use ($telegramId, $uuidSubjectId): void {
+                        $exists->selectRaw('1')->from('balance_adjustment_requests as requests')
+                            ->join('customers as report_customers', 'report_customers.id', '=', 'requests.customer_id')
+                            ->whereRaw('requests.id = '.$uuidSubjectId)
+                            ->where('report_customers.telegram_id', '=', $telegramId);
+                    });
+            });
             if ($currency === 'IDR') {
-                $subjects->where(function (Builder $adjustments) use ($telegramId): void {
-                    $adjustments->where('audit.subject_type', BalanceAdjustmentRequest::class)
-                        ->whereExists(function (Builder $exists) use ($telegramId): void {
-                            $exists->selectRaw('1')->from('balance_adjustment_requests as requests')
-                                ->join('customers as report_customers', 'report_customers.id', '=', 'requests.customer_id')
-                                ->whereColumn('requests.id', 'audit.subject_id')
-                                ->where('report_customers.telegram_id', '=', $telegramId);
-                        });
-                })->orWhere(function (Builder $topUps) use ($telegramId): void {
+                $subjects->orWhere(function (Builder $topUps) use ($telegramId, $integerSubjectId): void {
                     $topUps->where('audit.subject_type', StoreBalanceTopUp::class)
-                        ->whereExists(function (Builder $exists) use ($telegramId): void {
+                        ->whereExists(function (Builder $exists) use ($telegramId, $integerSubjectId): void {
                             $exists->selectRaw('1')->from('store_balance_top_ups as topups')
                                 ->join('customers as report_customers', 'report_customers.id', '=', 'topups.customer_id')
-                                ->whereColumn('topups.id', 'audit.subject_id')
+                                ->whereRaw('topups.id = '.$integerSubjectId)
                                 ->where('report_customers.telegram_id', '=', $telegramId);
                         });
                 });
@@ -383,13 +425,15 @@ SQL;
                 return;
             }
 
-            $subjects->where('audit.subject_type', CustomerUsdtTopUp::class)
-                ->whereExists(function (Builder $exists) use ($telegramId): void {
-                    $exists->selectRaw('1')->from('customer_usdt_top_ups as topups')
-                        ->join('customers as report_customers', 'report_customers.id', '=', 'topups.customer_id')
-                        ->whereColumn('topups.id', 'audit.subject_id')
-                        ->where('report_customers.telegram_id', '=', $telegramId);
-                });
+            $subjects->orWhere(function (Builder $topUps) use ($telegramId, $uuidSubjectId): void {
+                $topUps->where('audit.subject_type', CustomerUsdtTopUp::class)
+                    ->whereExists(function (Builder $exists) use ($telegramId, $uuidSubjectId): void {
+                        $exists->selectRaw('1')->from('customer_usdt_top_ups as topups')
+                            ->join('customers as report_customers', 'report_customers.id', '=', 'topups.customer_id')
+                            ->whereRaw('topups.id = '.$uuidSubjectId)
+                            ->where('report_customers.telegram_id', '=', $telegramId);
+                    });
+            });
         });
     }
 

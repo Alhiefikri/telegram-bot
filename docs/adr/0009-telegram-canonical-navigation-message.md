@@ -61,9 +61,10 @@ Choosing a USD funding amount deletes the originating menu and sends a new
 text-only `usdt_payment` root. The invoice never inherits the welcome banner.
 Check callbacks and BSC lookup hints update that payment message; leaving the
 payment screen deletes it and sends the destination menu as the next root.
-A successful cancel clears the lookup prompt and opens Home, using the same
-unpaid-target cancellation boundary as `/start`. Active settlement leases
-still prevent cancellation; the customer sees the current status instead.
+A successful cancel clears the lookup prompt and opens Home. Private `/start`
+also opens Home and clears navigation prompts, but does not cancel the target.
+Active settlement leases prevent explicit cancellation; the customer sees the
+current status instead.
 
 The existing generation/lease fencing and delete-before-send failure semantics
 apply. The immutable funding target, resolution, ledger and durable receipt

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\StoreBalanceEntryKind;
+use App\Enums\UsdtBalanceEntryKind;
 use App\Enums\UserRole;
 use App\Exceptions\BalanceAdjustmentRejected;
 use App\Exceptions\InvalidOrderTransition;
@@ -25,6 +26,9 @@ use App\Services\StoreBalance\StoreBalanceOwnerCompensationService;
 use App\Services\StoreBalance\StoreBalanceReconciliation;
 use App\Services\Telegram\BalanceAdjustmentNoticeDeliveryPipeline;
 use App\Services\Telegram\TelegramBotClient;
+use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
+use App\Services\UsdtBalance\UsdtBalanceReconciliation;
+use App\Services\UsdtBalance\UsdtReceiptReconciliation;
 use App\Services\Warranty\WarrantySettlementService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -59,6 +63,89 @@ final class AdminBalanceAdjustmentTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(25000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
         $this->assertDatabaseCount('balance_adjustment_accounting_events', 1);
         $this->assertDatabaseCount('telegram_outbound_effects', 2);
+    }
+
+    public function test_owner_usdt_adjustment_posts_exactly_once_to_suspense_without_a_receipt(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $ledger = app(CustomerUsdtBalanceLedger::class);
+        $preview = $service->request($owner, (string) $customer->telegram_id, '12.000001', 'Owner attestation', currency: 'USDT');
+        $this->assertSame('USDT', $preview->currency);
+        $this->assertSame(12000001, $preview->amount);
+        $this->assertSame(0, $ledger->snapshot($customer)->balanceMicro());
+        $result = $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $replay = $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+        $this->assertTrue($result->applied);
+        $this->assertFalse($replay->applied);
+        $this->assertSame($result->entryId, $replay->entryId);
+        $this->assertSame(12000001, $ledger->snapshot($customer)->balanceMicro());
+        $this->assertSame($result->entryId, $preview->fresh()->usdt_ledger_entry_id);
+        $this->assertNull($preview->fresh()->ledger_entry_id);
+        $this->assertDatabaseHas('customer_usdt_balance_entries', [
+            'id' => $result->entryId, 'kind' => UsdtBalanceEntryKind::OwnerAdjustmentCredit->value,
+            'source_type' => 'balance_adjustment', 'source_id' => $preview->id, 'amount_micro' => 12000001,
+        ]);
+        $this->assertDatabaseHas('customer_usdt_balance_accounting_events', [
+            'customer_usdt_balance_entry_id' => $result->entryId, 'amount_micro' => 12000001,
+            'debit_account' => 'owner_attested_adjustment_suspense', 'credit_account' => 'customer_usdt_liability',
+        ]);
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 1);
+        $this->assertDatabaseCount('customer_usdt_balance_accounting_events', 1);
+        $this->assertDatabaseCount('balance_adjustment_accounting_events', 0);
+        $this->assertDatabaseCount('external_money_receipts', 0);
+        $this->assertDatabaseCount('telegram_outbound_effects', 2);
+        $notice = TelegramOutboundEffect::query()->where('source_id', $preview->id)->where('target_type', 'customer')->firstOrFail();
+        $this->assertSame('Your USDT balance increased by 12.000001 USDT.', $notice->outcome_metadata['message']);
+        $this->assertEmpty(app(UsdtBalanceReconciliation::class)->inspect($customer->id, null, 10)->findings);
+        $this->assertEmpty(app(UsdtReceiptReconciliation::class)->inspect($customer->id, null, null, 10)->findings);
+    }
+
+    public function test_usdt_adjustment_rejects_inexact_amounts_and_unapproved_sources(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        foreach ([0, 1.5, '', '0', '-1', '1e2', '1,2', '01', '0.0000001', '1.0000000', '9223372036854.775808'] as $amount) {
+            $this->rejects('invalid_amount_or_reason', fn () => $service->request($owner, (string) $customer->telegram_id, $amount, 'Reason', currency: 'USDT'));
+        }
+        $this->rejects('invalid_source', fn () => $service->request($owner, (string) $customer->telegram_id, '1', 'Reason', 'correction', currency: 'USDT'));
+        $this->rejects('invalid_currency', fn () => $service->request($owner, (string) $customer->telegram_id, '1', 'Reason', currency: 'BTC'));
+        $this->assertDatabaseCount('balance_adjustment_requests', 0);
+    }
+
+    public function test_usdt_adjustment_requires_password_and_matching_session(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $preview = $service->request($owner, (string) $customer->telegram_id, '0.000001', 'Reason', currency: 'USDT');
+        $this->rejects('invalid_password', fn () => $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'wrong'));
+        request()->session()->migrate();
+        $this->rejects('preview_binding_mismatch', fn () => $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password'));
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+    }
+
+    public function test_usdt_adjustment_rolls_back_on_accounting_failure(): void
+    {
+        [$owner, $customer, $service] = $this->fixture();
+        $preview = $service->request($owner, (string) $customer->telegram_id, '1', 'Reason', currency: 'USDT');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::unprepared("CREATE FUNCTION fail_usdt_adjustment_insert() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN RAISE EXCEPTION 'injected failure'; END \$\$; CREATE TRIGGER fail_usdt_adjustment_insert BEFORE INSERT ON customer_usdt_balance_accounting_events FOR EACH ROW EXECUTE FUNCTION fail_usdt_adjustment_insert()");
+        } else {
+            DB::unprepared("CREATE TRIGGER fail_usdt_adjustment_insert BEFORE INSERT ON customer_usdt_balance_accounting_events BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
+        }
+        try {
+            $service->confirm($owner, $preview->id, $preview->fingerprint, 1, 'owner-password');
+            $this->fail('Expected insert failure.');
+        } catch (QueryException $error) {
+            $this->assertStringContainsString('injected failure', $error->getMessage());
+        } finally {
+            if (DB::getDriverName() === 'pgsql') {
+                DB::unprepared('DROP TRIGGER fail_usdt_adjustment_insert ON customer_usdt_balance_accounting_events; DROP FUNCTION fail_usdt_adjustment_insert()');
+            } else {
+                DB::unprepared('DROP TRIGGER fail_usdt_adjustment_insert');
+            }
+        }
+        $this->assertSame('pending', $preview->fresh()->state);
+        $this->assertSame(0, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+        $this->assertDatabaseCount('telegram_outbound_effects', 0);
     }
 
     public function test_five_failed_passwords_are_durable_and_one_alert_is_created(): void

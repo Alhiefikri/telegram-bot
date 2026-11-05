@@ -13,6 +13,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\TelegramNavigationRoot;
 use App\Models\UsdtTopUpReviewRequest;
 use App\Models\User;
+use App\Services\Telegram\TelegramMessageRouter;
 use App\Services\Telegram\TelegramUsdtFundingActions;
 use App\Services\UsdtTopUps\BinanceUsdtTopUpSettlement;
 use App\Services\UsdtTopUps\UsdtTopUpReview;
@@ -817,6 +818,143 @@ final class BinanceUsdtTopUpTest extends TestCase
             $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
             Http::assertNothingSent();
         }
+    }
+
+    public function test_submitted_binance_payment_settles_after_start_without_a_second_target(): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771044, '0.7');
+        $customer = Customer::findOrFail($target->customer_id);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        config(['services.telegram.token' => 'test-only', 'services.telegram.api_base_url' => 'https://api.telegram.org',
+            'services.telegram.welcome_banner_url' => 'test-banner']);
+        Http::fake([
+            '*sapi/v1/pay/transactions*' => Http::response(['code' => '000000', 'success' => true, 'data' => [[
+                'transactionId' => '445011487581044736', 'amount' => '0.7', 'currency' => 'USDT',
+                'transactionTime' => now()->getTimestampMs(), 'orderType' => 'C2C', 'receiverInfo' => ['accountId' => '12345678'],
+            ]]]),
+            'https://api.telegram.org/*/sendPhoto' => Http::response(['ok' => true, 'result' => ['message_id' => 701, 'photo' => [['file_id' => 'test-photo']]]]),
+            'https://api.telegram.org/*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 702]]),
+            'https://api.telegram.org/*' => Http::response(['ok' => true]),
+        ]);
+        $service->submit($customer, $target->id, '445011487581044736');
+        app(TelegramMessageRouter::class)->route($customer, (string) $customer->telegram_id, ['text' => '/start'], 'private');
+
+        $this->assertDatabaseCount('customer_usdt_top_up_resolutions', 0);
+        $this->assertTrue($service->check($target->id));
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $this->assertSame(700_000, (int) DB::table('customer_usdt_balance_entries')->sum('amount_micro'));
+        $this->assertSame(1, CustomerUsdtTopUp::query()->count());
+    }
+
+    public function test_incomplete_history_does_not_report_order_missing_and_later_recovers(): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771045, '0.7');
+        $customer = Customer::findOrFail($target->customer_id);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit($customer, $target->id, '445011487581044736');
+        $page = array_fill(0, 99, ['transactionId' => 'another-transfer']);
+        $page[] = ['orderId' => '445011487581044736'];
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::sequence()
+            ->push(['code' => '000000', 'success' => true, 'data' => $page])
+            ->push(['code' => '000000', 'success' => true, 'data' => [[
+                'transactionId' => '445011487581044736', 'amount' => '0.7', 'currency' => 'USDT',
+                'transactionTime' => now()->getTimestampMs(), 'orderType' => 'C2C', 'receiverInfo' => ['accountId' => '12345678'],
+            ]]])]);
+
+        $this->assertSame(0, $service->recover());
+        $this->assertSame('pending', DB::table('customer_usdt_top_up_inbox')->sole()->state);
+        $this->assertNotSame('binance_order_not_found', DB::table('customer_usdt_top_up_settlement_work')->sole()->last_error);
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+
+        $this->travel(3)->minutes();
+        $this->assertSame(1, $service->recover());
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $this->assertSame(700_000, (int) DB::table('customer_usdt_balance_entries')->sum('amount_micro'));
+    }
+
+    #[DataProvider('malformedMatchingHistoryRows')]
+    public function test_malformed_matching_history_stays_unresolved_and_can_recover(array $changes, string $reference): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771046, '0.7');
+        $customer = Customer::findOrFail($target->customer_id);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $valid = $this->transaction($target, ['amount' => '0.7']);
+        Http::fake(['*sapi/v1/pay/transactions*' => Http::sequence()
+            ->push(['code' => '000000', 'success' => true, 'data' => [array_replace($valid, $changes)]])
+            ->push(['code' => '000000', 'success' => true, 'data' => [$valid]])]);
+        $service->submit($customer, $target->id, $reference);
+
+        $processed = $service->recover();
+        $this->assertDatabaseCount('customer_usdt_balance_entries', 0);
+        $this->assertSame(0, $processed);
+        $this->assertNotSame('binance_order_not_found', DB::table('customer_usdt_top_up_settlement_work')->sole()->last_error);
+        $this->assertDatabaseCount('customer_usdt_top_up_resolutions', 0);
+
+        $this->travel(3)->minutes();
+        $this->assertSame(1, $service->recover());
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $this->assertSame(700_000, (int) DB::table('customer_usdt_balance_entries')->sum('amount_micro'));
+    }
+
+    public static function malformedMatchingHistoryRows(): array
+    {
+        return [
+            'order ID with inexact amount' => [['amount' => '0.7000001'], '445011487581044736'],
+            'transaction ID with missing time' => [['transactionTime' => null], 'TX-445011487581044736'],
+            'order ID with null status' => [['status' => null], '445011487581044736'],
+            'transaction ID with null transaction status' => [['transactionStatus' => null], 'TX-445011487581044736'],
+        ];
+    }
+
+    public function test_cached_history_without_optional_status_can_still_settle(): void
+    {
+        $this->freezeTime();
+        config(['services.binance.history_cache_seconds' => 20]);
+        $target = $this->target(771047, '0.7');
+        $transaction = $this->transaction($target, ['amount' => '0.7']);
+        unset($transaction['status']);
+        $this->fakeHistory($transaction);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $service->submit(Customer::findOrFail($target->customer_id), $target->id, '445011487581044736');
+
+        $this->assertTrue($service->check($target->id));
+        $this->assertSame('settled', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $this->assertSame(700_000, (int) DB::table('customer_usdt_balance_entries')->sum('amount_micro'));
+    }
+
+    public function test_on_time_payment_with_pending_hint_is_reviewed_after_explicit_cancellation(): void
+    {
+        $this->freezeTime();
+        $target = $this->target(771041);
+        $customer = Customer::findOrFail($target->customer_id);
+        $service = app(BinanceUsdtTopUpSettlement::class);
+        $this->fakeHistory($this->transaction($target));
+        $service->submit($customer, $target->id, '445011487581044736');
+        $this->travel(1)->seconds();
+        $this->assertTrue(app(TelegramUsdtFundingActions::class)->cancelTarget($customer, $target->id));
+        $this->assertTrue($service->check($target->id));
+
+        $this->assertSame('cancelled_by_customer', DB::table('customer_usdt_top_up_resolutions')->sole()->kind);
+        $this->assertSame('receipt_after_resolution', DB::table('customer_usdt_top_up_settlement_work')->sole()->last_error);
+        $this->assertSame('review', DB::table('customer_usdt_top_up_inbox')->sole()->state);
+        $this->assertSame(1, DB::table('external_money_receipts')->count());
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
+    }
+
+    public function test_cancelled_binance_target_without_hint_is_not_automatically_searched(): void
+    {
+        $target = $this->target(771042);
+        $customer = Customer::findOrFail($target->customer_id);
+        $this->assertTrue(app(TelegramUsdtFundingActions::class)->cancelTarget($customer, $target->id));
+        $this->assertFalse(app(UsdtTopUpStatusReader::class)->for($target)->acceptsCustomerLookup());
+
+        app(BinanceUsdtTopUpSettlement::class)->recover();
+        Http::assertNothingSent();
+        $this->assertSame(0, DB::table('external_money_receipts')->count());
+        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->count());
     }
 
     public function test_transfer_after_customer_cancel_is_held_for_review_without_reopening_resolution(): void
