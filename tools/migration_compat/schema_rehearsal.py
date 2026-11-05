@@ -31,6 +31,7 @@ def php(boundary, code):
                "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                "--user", "1000:1000", "--tmpfs", "/tmp:size=64m",
                "--mount", f"type=bind,src={ROOT / 'tools/migration_compat'},dst=/probe,readonly",
+               "--mount", f"type=bind,src={ROOT / 'src/database/migrations'},dst=/var/www/html/database/migrations,readonly",
                "--env", "APP_ENV=testing", "--env", "APP_DEBUG=false",
                "--env", "APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                "--env", "DB_CONNECTION=pgsql", "--env", "DB_HOST=127.0.0.1",

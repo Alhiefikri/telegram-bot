@@ -17,6 +17,18 @@ class PaymentSetting:
     provider: str | None = None
     sakurupiah_channel: str | None = None
     qris_ttl_minutes: int = 10
+    binance_enabled: bool = False
+    binance_ttl_minutes: int = 20
+    binance_verification_mode: str = 'amount_unique'
+    binance_receiver_type: str | None = None
+    binance_receiver_value: str | None = None
+    bsc_enabled: bool = False
+    bsc_ttl_minutes: int = 30
+    bsc_min_confirmations: int = 3
+    bsc_require_finalized_block: bool = False
+    bsc_confirmation_grace_minutes: int = 3
+    updated_at: datetime | None = None
+    binance_order_id_compatibility_ready_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +47,8 @@ class PaymentPlan:
     expires_at: datetime
     balance_paid: bool = False
     sakurupiah_channel: str | None = None
+    currency: str = 'IDR'
+    rail_snapshot: object | None = None
 
 
 class PaymentPreparation(Protocol):
@@ -70,7 +84,7 @@ def telegram_checkout_key(key: str, customer_id: int, telegram_id: int, chat_id:
     require_integer(customer_id, minimum=1)
     require_integer(telegram_id, minimum=1)
     require_integer(message_id, minimum=1)
-    if data in ('checkout:current', 'checkout:balance', 'checkout:binance'):
+    if data in ('checkout:current', 'checkout:balance', 'checkout:binance', 'checkout:bsc'):
         data = 'checkout:choice'
     payload = '|'.join(map(str, ('telegram-direct-checkout', customer_id, telegram_id,
                                 chat_id, message_id, data)))

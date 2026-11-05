@@ -155,4 +155,35 @@ if (getenv('P19_AUTH_SMOKE') === '1') {
     $fixtures['auth']['signed_url'] = Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show',
         now()->addMinutes(15), ['order' => App\Models\Order::where('checkout_key', str_repeat('a', 64))->value('id')]);
 }
+if (getenv('P14_EXTERNAL_SMOKE') === '1') {
+    Illuminate\Support\Facades\DB::table('manual_payment_settings')->where('is_active', true)
+        ->update(['binance_order_id_compatibility_ready_at' => now()]);
+    app(App\Services\Binance\BinanceOrderIdActivation::class)->activate();
+    Illuminate\Support\Facades\DB::table('manual_payment_settings')->where('is_active', true)
+        ->update(['binance_verification_mode' => 'amount_unique']);
+    $fixtures['external'] = [];
+    foreach (['binance_unique', 'binance_order', 'binance_compat', 'binance_duplicate',
+        'binance_reversed', 'binance_stale', 'binance_late', 'binance_race',
+        'binance_rotation',
+        'binance_alias_first', 'binance_alias_second',
+        'bsc_discovery', 'bsc_hash', 'bsc_duplicate', 'bsc_parent', 'bsc_stale',
+        'bsc_bad_token', 'bsc_bad_receiver', 'bsc_bad_amount',
+        'bsc_late', 'bsc_rotation', 'bsc_race', 'navigation_binance', 'navigation_bsc'] as $name) {
+        $customer = buyer(0);
+        $customer->update(['locale' => 'id']);
+        $product = product('p14-'.$name);
+        // A current catalog price is mutable; no Order/Payment economics are rewritten.
+        $product->update(['usdt_price_amount' => 1000000]);
+        $fixtures['external'][$name] = row($customer, $product, cart($customer, $product));
+    }
+    foreach (['1', '3'] as $digit) {
+        $receiver = App\Models\BscPaymentReceiver::factory()->manuallyVerified()->create([
+            'address' => '0x'.str_repeat($digit, 40),
+            'address_normalized' => '0x'.str_repeat($digit, 40),
+            'token_contract' => '0x55d398326f99059ff775485246999027b3197955',
+            'is_active' => $digit === '1',
+        ]);
+        $fixtures['external_receivers'][] = $receiver->id;
+    }
+}
 echo json_encode($fixtures, JSON_THROW_ON_ERROR);

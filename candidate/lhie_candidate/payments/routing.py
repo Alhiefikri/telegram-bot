@@ -11,11 +11,14 @@ from .settings import NEW_QRIS_PROVIDERS
 
 
 class QrisPayments:
-    def __init__(self, lifecycles=(), *, presentation=None, using='default'):
+    def __init__(self, lifecycles=(), *, external_lifecycles=(), presentation=None, using='default'):
         self.db = Database(using)
         self.using = using
         self.presentation = presentation or QrPresentation(using=using)
         self.lifecycles = dict(lifecycles)
+        self.external_lifecycles = dict(external_lifecycles)
+        if set(self.external_lifecycles) - {'BINANCE_PAY_ID', 'USDT_BEP20'}:
+            raise ValueError('Invalid external checkout rail')
         self.lifecycles.setdefault('manual', ManualQrisLifecycle(self.presentation, using=using))
         self.orders = OrderLifecycle(using=using)
 
@@ -34,9 +37,19 @@ class QrisPayments:
         return KlikQrisPreparation(lifecycle.adapter)
 
     def for_payment(self, payment_id):
-        row = self.db.one('SELECT provider FROM public.payments WHERE id=%s', (payment_id,))
+        row = self.db.one('SELECT provider,method FROM public.payments WHERE id=%s', (payment_id,))
         if row is None:
             raise CheckoutError('foreign_payment')
+        if row['provider'].lower() == 'manual' and row['method'] in ('BINANCE_PAY_ID', 'USDT_BEP20'):
+            lifecycle = self.external_lifecycles.get(row['method'])
+            if lifecycle is not None:
+                return lifecycle
+            # Retained snapshots remain readable without admitting a new rail.
+            if row['method'] == 'BINANCE_PAY_ID':
+                from .binance import BinanceLifecycle
+                return BinanceLifecycle(None, using=self.using)
+            from .bsc import BscLifecycle
+            return BscLifecycle(using=self.using)
         return self.lifecycles.get(row['provider'].lower())
 
     def _call(self, operation, payment_id, **kwargs):
@@ -79,3 +92,12 @@ class QrisPayments:
         if isinstance(lifecycle, SakurupiahLifecycle):
             return lifecycle.recover(payment_id, background=True)
         return lifecycle.recover(payment_id)
+
+    def preparation_for_rail(self, rail):
+        from ..checkout.external_usdt import BinancePreparation, BscPreparation
+        method, preparation = {'binance_pay': ('BINANCE_PAY_ID', BinancePreparation),
+                               'bsc': ('USDT_BEP20', BscPreparation)}[rail]
+        lifecycle = self.external_lifecycles.get(method)
+        if lifecycle is None:
+            raise CheckoutError('provider_unavailable')
+        return preparation(lifecycle.adapter, using=self.using)

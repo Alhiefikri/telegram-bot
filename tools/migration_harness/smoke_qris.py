@@ -28,12 +28,13 @@ def cli(*args):
 def main():
     rails = sys.argv[1:] == ['--rails']
     integrated = sys.argv[1:] == ['--integrated']
-    if sys.argv[1:] not in ([], ['--integrated'], ['--rails']):
-        raise ValueError('Usage: smoke_qris.py [--integrated|--rails]')
+    external = sys.argv[1:] == ['--external']
+    if sys.argv[1:] not in ([], ['--integrated'], ['--rails'], ['--external']):
+        raise ValueError('Usage: smoke_qris.py [--integrated|--rails|--external]')
     os.umask(0o077)
-    namespace = 'migration-p13' if rails else 'migration-726-' + uuid4().hex if integrated else 'migration-p08'
+    namespace = 'migration-p14' if external else 'migration-p13' if rails else 'migration-726-' + uuid4().hex if integrated else 'migration-p08'
     harness.STATE = ROOT / '.local' / namespace / 'lifecycle'
-    harness.PREFIX = 'lhie-p13-' if rails else 'lhie-726-' + namespace[-12:] + '-' if integrated else 'lhie-p08-'
+    harness.PREFIX = 'lhie-p14-' if external else 'lhie-p13-' if rails else 'lhie-726-' + namespace[-12:] + '-' if integrated else 'lhie-p08-'
     directory = harness.STATE / 'candidate'
     if not (directory / 'config.json').exists():
         cli('init', 'candidate')
@@ -53,18 +54,20 @@ def main():
         database = container('candidate', 'database')
         php(boundary, 'php artisan migrate --force --no-interaction')
         fixture = (ROOT / 'tools/migration_harness/checkout_fixture.php').read_text().removeprefix('<?php')
-        fixtures = json.loads(php(boundary, 'php -r ' + shlex.quote(fixture)))
+        fixtures = json.loads(php(boundary, ('P14_EXTERNAL_SMOKE=1 ' if external else '') + 'php -r ' + shlex.quote(fixture)))
         schema = '\n'.join((ROOT / 'candidate/lhie_candidate/navigation' / name).read_text()
             for name in ('schema.sql', 'ingress_schema.sql', 'assets_schema.sql', 'grants.sql'))
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/checkout/grants.sql').read_text()
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
-        if rails:
+        if rails or external:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/settings_grants.sql').read_text()
-        if integrated or rails:
+        if external:
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/receiving_grants.sql').read_text()
+        if integrated or rails or external:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
         docker('exec', database, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'harness', '-d', 'disposable', '-c', schema)
         oracle_key = directory / 'receipt-oracle-key'
-        if integrated or rails:
+        if integrated or rails or external:
             docker('exec', database, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'harness', '-d', 'disposable', '-c',
                    "UPDATE public.orders SET telegram_receipt_sent_at=now() "
                    "WHERE customer_id IN (SELECT id FROM public.customers WHERE telegram_id=700001) "
@@ -80,10 +83,11 @@ def main():
             '--mount', f'type=bind,src={directory / "candidate.json"},dst=/run/harness/candidate.json,readonly',
             '--mount', f'type=bind,src={directory / "django-key"},dst=/run/harness/django-key,readonly',
             '--mount', f'type=bind,src={output},dst=/evidence',
-            *(['--mount', f'type=bind,src={oracle_key},dst=/run/harness/app-key,readonly'] if integrated or rails else []),
+            *(['--mount', f'type=bind,src={oracle_key},dst=/run/harness/app-key,readonly'] if integrated or rails or external else []),
             '--env', 'P07_CHECKOUT_SMOKE=disposable-local-only',
             '--env', 'P08_QRIS_SMOKE=disposable-local-only',
             '--env', f'P13_QRIS_RAILS={"1" if rails else "0"}',
+            '--env', f'P14_EXTERNAL_SMOKE={"1" if external else "0"}',
             '--env', f'P08_INTEGRATED_SMOKE={"1" if integrated else "0"}', '--entrypoint', 'python',
             'lhie-p13-candidate:local', 'smoke_qris.py']
         probe = subprocess.run(command, input=json.dumps(fixtures), capture_output=True, text=True, timeout=180)
@@ -93,7 +97,7 @@ def main():
         observed = json.loads(probe.stdout)
         assert observed['status'] == 'passed'
         observed['harness_manifest'] = str(Path(manifest).relative_to(ROOT))
-        if rails:
+        if rails or external:
             sources = [*sorted((ROOT / 'candidate/lhie_candidate/payments').glob('*')),
                        *sorted((ROOT / 'candidate/lhie_candidate/checkout').glob('*')),
                        *sorted((ROOT / 'candidate/lhie_candidate/workers').glob('*.py')),
@@ -101,7 +105,18 @@ def main():
                        ROOT / 'candidate/lhie_candidate/navigation/processor.py',
                        ROOT / 'candidate/lhie_candidate/navigation/presentation.py',
                        ROOT / 'candidate/lhie_candidate/navigation/roots.py',
-                       ROOT / 'candidate/lhie_candidate/navigation/transport.py', Path(__file__)]
+                       ROOT / 'candidate/lhie_candidate/navigation/transport.py',
+                       ROOT / 'candidate/lhie_candidate/navigation/ingress.py',
+                       ROOT / 'candidate/lhie_candidate/runtime.py',
+                       ROOT / 'candidate/lhie_candidate/readiness.py',
+                       ROOT / 'candidate/tests/test_public_receiving.py',
+                       ROOT / 'tools/migration_compat/schema_rehearsal.py',
+                       ROOT / 'candidate/smoke_qris.py',
+                       ROOT / 'tools/migration_harness/checkout_fixture.php',
+                       ROOT / 'candidate/tests/test_external_usdt_postgres.py',
+                       ROOT / 'candidate/tests/test_binance.py', ROOT / 'candidate/tests/test_bsc.py',
+                       ROOT / 'src/database/migrations/2026_11_05_000001_add_public_binance_checkout_receiver.php',
+                       Path(__file__)]
             observed['source_sha256'] = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                                          for path in sources if path.is_file()}
             observed['base_revision'] = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()

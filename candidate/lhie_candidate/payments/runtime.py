@@ -8,7 +8,8 @@ from .routing import QrisPayments
 from .sakurupiah import SakurupiahSandboxAdapter
 
 
-def payment_services(*, klikqris=None, pakasir=None, sakurupiah=None, presentation=None, using='default'):
+def payment_services(*, klikqris=None, pakasir=None, sakurupiah=None, binance=None, bsc=None,
+                     presentation=None, using='default'):
     cipher = LaravelEncrypter(application_key())
     rails = {'sakurupiah': SakurupiahLifecycle(
         sakurupiah or SakurupiahSandboxAdapter(transport=SandboxRelay()), cipher, using=using)}
@@ -18,5 +19,13 @@ def payment_services(*, klikqris=None, pakasir=None, sakurupiah=None, presentati
     if pakasir is not None:
         from .pakasir import PakasirLifecycle
         rails['pakasir'] = PakasirLifecycle(pakasir, cipher, using=using)
-    return QrisPayments(rails, presentation=presentation or QrPresentation(
-        public_storage='/run/harness/public-assets', using=using), using=using)
+    external = {}
+    if binance is not None:
+        from .binance import BinanceLifecycle
+        external['BINANCE_PAY_ID'] = BinanceLifecycle(binance, cipher, using=using)
+    if bsc is not None:
+        from .bsc import BscLifecycle
+        external['USDT_BEP20'] = BscLifecycle(bsc, cipher, using=using)
+    return QrisPayments(rails, external_lifecycles=external,
+        presentation=presentation or QrPresentation(
+            public_storage='/run/harness/public-assets', using=using), using=using)

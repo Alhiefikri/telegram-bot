@@ -926,3 +926,122 @@ python3 -m unittest discover -s tests/migration_harness -p test_navigation_bound
 No production data/secrets, real provider calls, real-money tests, customer
 messages, provider activation, deployment or CI/CD operations were used.
 
+## P14: Binance Pay and BSC USDT checkout verification (#697)
+
+`checkout/external_usdt.py` prepares the customer-selected rail under the
+existing checkout/setting locks. Readiness runs before those locks. Orders keep
+their original IDR economics; Payments and retained item price snapshots use
+exact micro-USDT. The amount allocator preserves existing Binance occupancy and
+BSC's active-checkout/shared-funding exclusions. It never converts an IDR total
+to USDT or enables a funding rail.
+
+### Receiving configuration and immutable contracts
+
+The additive `2026_11_05_000001_add_public_binance_checkout_receiver.php`
+migration adds nullable public receiver type/value fields to the existing
+payment setting. It copies neither ENV values nor historical Payment data.
+`payments/receiving.py::PublicReceivingSettings` owns Owner-only, versioned
+read/change/clear operations with locked role revalidation and an atomic masked
+audit. Its explicit `receiving_grants.sql` is separate from ordinary payment
+worker grants. Dashboard composition remains P23-owned.
+
+New Order ID checkout requires the existing
+`binance_order_id_compatibility_ready_at` marker. The canonical
+`BinanceOrderIdActivation` owner switches the legacy amount index; startup and
+the verifier never perform that activation. The disposable fixture explicitly
+qualifies this schema contract without enabling any live provider.
+
+Binance receiver/mode/automatic-verification fields are inserted with the
+Payment, not patched afterward; the runtime cannot update them. BSC retains
+the existing verified checkout receiver/claim, network, token, decimals, exact
+token units, deadline, confirmations, finality and grace policy in
+`payment_bsc_details`. Public receiving configuration is independent of provider
+credentials, signing and custody. There is no application wallet key service.
+
+### Verification, recovery and presentation
+
+- `payments/binance.py` signs bounded history requests and strictly parses
+  exact amounts and receiver identities. Amount-unique and Order ID verification
+  share the same authoritative evidence; `transactionId` remains a lookup
+  compatibility alias, never independent proof. Incomplete history, missing
+  evidence and outages cannot cancel or fulfill an Order.
+- `payments/bsc.py` is watch-only. Bounded log discovery finds a candidate;
+  receipt, Transfer, canonical block, exact receiver/token/amount/window and
+  frozen confirmation/finality checks remain authoritative. Historical
+  transaction-hash Payments keep their submission path. Reobservations preserve
+  the first transfer-evidence row and append durable events.
+- Receipt claims use PHP-compatible canonical identities and fingerprints.
+  Binance canonical/Order ID aliases share one uniqueness domain; BSC also
+  claims the parent transaction across checkout and funding. Held claims keep
+  their review reservations. Exact late money is retained for review, never
+  automatic fulfillment, a second credit or a reopened terminal Order.
+- PostgreSQL settlement relocks and revalidates the original snapshot and
+  submission version after provider I/O. BSC writes use a transaction-local
+  `pg_catalog, public, pg_temp` search path for retained public ownership
+  triggers; the restricted session default remains unchanged.
+- Configured external rails join the existing bounded payment-worker sweep.
+  Binance recovery has a 30-second dispatch interval; BSC retains one-minute
+  normal/five-minute provider-error eligibility. Redis remains a wakeup only.
+  Text replies to root-bound Order ID/hash prompts also run on the payment
+  worker, release the chat advisory lock for provider I/O, and revalidate the
+  claim, session and canonical root before rendering.
+
+The existing Telegram chooser, locales, copyable amounts/receivers, DB-backed
+icons and blue button convention are retained. Instructions reload immutable
+Order-item names and payment targets rather than current catalog/config values.
+Pending, confirming, review and terminal views do not imply proof from a hint.
+The shared lifecycle intentionally leaves these `provider=manual` paid Orders
+in `processing`, matching PHP; receipt eligibility remains independent.
+
+Default runtime composition still installs no Binance/BSC adapter. Existing
+snapshots remain readable without admitting new targets. Explicit adapter
+injection is a technical composition seam, not live qualification. BSC shared
+address/amount reuse retains ADR-0003's documented late-transfer attribution
+tradeoff; this port does not create per-invoice receivers.
+
+### P14 local verification and limits
+
+```sh
+python3 tools/migration_harness/smoke_qris.py --external
+python3 tools/migration_harness/smoke_qris.py --integrated
+```
+Both modes passed locally after the insert-only snapshot cutover. The external
+manifest's source hashes were checked against the working tree with no mismatch.
+
+
+The external mode extends P01/P07/P08 rather than creating another harness.
+Its single private manifest is `.local/migration-p14/verification.json`, with
+source hashes, base revision, dataset, harness and dependency-image identities.
+The PHP schema oracle mounts current migrations read-only over its cached
+dependency image; provisioning remains explicit and disposable.
+
+The changed flow covers authoritative mismatch/outage/finality observations,
+both Binance lookup modes, BSC discovery/historical hashes, receiver rotation,
+stale hints, terminal late money, per-rail multiprocess settlement, cross-target
+reversed Binance aliases, global BSC parent conflicts, credential receipt
+delivery, Owner configuration rollback and runtime SQL privilege denial.
+Shared cart/stock/wallet proofs remain P07/P12-owned.
+
+Focused contracts are `tests.test_binance`, `test_bsc`,
+`test_external_usdt_checkout`, `test_public_receiving` and
+`test_navigation_checkout`, plus the affected worker/ingress and shared payment
+regressions. No full-suite or performance qualification is implied.
+Telegram surfaces were exercised through the real presenter/processor with
+synthetic transport ACKs, not a native client/device visual run.
+
+UI delivery gate, scoped to the ported Telegram surface:
+
+- **Hard Gate PASS:** retained native message/button patterns; no new assets,
+  visual framework or presentation ENV settings.
+- **Purpose Gate PASS:** the selected rail, exact amount and immutable receiver
+  remain the instruction hierarchy; no catalog or locale redesign.
+- **Liveness PASS:** ENERGY/RHYTHM/MOTION 1/1/1; existing invoice identity,
+  icons and button semantics retained, with no animation added.
+- **Craftsmanship PASS:** chooser, owned prompts, refresh/review/terminal states,
+  stale actions and provider uncertainty exercised with synthetic transports.
+  Native-client contrast, keyboard and viewport qualification is not claimed.
+
+No production mutation, live Binance/chain call, real-money test, customer send,
+funding/custody activation, deployment or CI/CD operation is part of this proof.
+HD/H2 retain actual history, receiver/provider and release qualification.
+

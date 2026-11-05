@@ -3,6 +3,18 @@
 from .contract import LEASE_SECONDS, validate_queue_name
 
 
+def _external_checkout_selectable():
+    from ..checkout.db import Database
+    admitted = Database().one("""SELECT has_column_privilege(current_user,
+        'public.payments','binance_receiver_value','INSERT') AS checkout""")
+    if not admitted['checkout']:
+        return False
+    row = Database().one('''SELECT EXISTS (SELECT 1 FROM public.manual_payment_settings s
+        WHERE s.is_active AND ((s.binance_pay_enabled AND s.binance_receiver_type IN ('pay_id','uid')
+          AND s.binance_receiver_value IS NOT NULL) OR s.bsc_payment_enabled)) AS visible''')
+    return row['visible']
+
+
 def _navigation_processor(*, lifecycle=None, key=None, family):
     from ..checkout.navigation import NavigationCheckout, sandbox_request
     from ..funding.service import FundingService
@@ -27,6 +39,7 @@ def _navigation_processor(*, lifecycle=None, key=None, family):
                                   request_factory=sandbox_request if lifecycle else None,
                                   key=key)
     presenter = CatalogPresenter(repository, bot_scope=scope, custom_emoji=True,
+                                 dollar_rail_selectable=_external_checkout_selectable,
                                  funding=funding, checkout=checkout)
     return NavigationProcessor(repository, presenter, roots, transport, family=family)
 

@@ -7,7 +7,7 @@ and spending gates. The admitted default still exposes only the P08 sandbox
 relay; additional provider adapters require explicit, qualified injection.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -28,7 +28,7 @@ from .service import CheckoutRequest, CheckoutResult, CheckoutService
 
 
 JAKARTA = ZoneInfo('Asia/Jakarta')
-RAILS = ('qris', 'balance')
+RAILS = ('qris', 'balance', 'binance_pay', 'bsc')
 CART_TTL = timedelta(hours=24)
 _ORDER_COLUMNS = (
     'id customer_id invoice_number order_status payment_status total_amount currency'
@@ -72,6 +72,8 @@ class CheckoutView:
     photo_bytes: bytes | None = None
     provider_environment: str = 'sandbox'
     provider_hosts: tuple = ()
+    external: dict | None = None
+    currency: str = 'IDR'
 
 
 def _now():
@@ -86,6 +88,12 @@ def _deadline(value):
     if not isinstance(value, datetime):
         raise ValueError('invalid deadline')
     return value.astimezone(JAKARTA).replace(tzinfo=None) if value.tzinfo else value
+
+
+def _rail(payment):
+    if payment['provider'] == 'store_balance':
+        return 'balance'
+    return {'BINANCE_PAY_ID': 'binance_pay', 'USDT_BEP20': 'bsc'}.get(payment['method'], 'qris')
 
 
 
@@ -122,11 +130,16 @@ class NavigationCheckout:
                 or customer_id < 1 or not isinstance(chat_id, str) or not chat_id
                 or type(message_id) is not int or message_id < 1):
             return False
+        generation = getattr(root, 'generation', None)
+        params = (scope, customer_id, chat_id, message_id)
+        fence = ''
+        if type(generation) is int:
+            fence = ' AND generation=%s'
+            params += (generation,)
         return self.db.one(
             'SELECT 1 AS present FROM django_candidate.navigation_roots '
             'WHERE bot_asset_scope=%s AND customer_id=%s AND chat_id=%s AND message_id=%s'
-            + (' FOR SHARE' if lock else ''),
-            (scope, customer_id, chat_id, message_id)) is not None
+            + fence + (' FOR SHARE' if lock else ''), params) is not None
 
     def _context(self, customer, root):
         value = customer.get if isinstance(customer, dict) else lambda name: getattr(customer, name, None)
@@ -200,6 +213,13 @@ class NavigationCheckout:
                 return CheckoutView('provider_unavailable', rail='qris')
         if rail == 'qris' and preparation is None:
             return CheckoutView('provider_unavailable', rail='qris')
+        if rail in ('binance_pay', 'bsc'):
+            try:
+                if self.payments is None:
+                    raise CheckoutError('provider_unavailable')
+                preparation = self.payments.preparation_for_rail(rail)
+            except CheckoutError:
+                return CheckoutView('provider_unavailable', rail=rail)
         try:
             cart_id = self._prepare_cart(customer_id, product_id, quantity,
                                          chat_id=chat_id, message_id=message_id, root=root)
@@ -273,9 +293,9 @@ class NavigationCheckout:
         if payment is None:
             return CheckoutView('invalid', rail=rail)
         payment_id = str(payment['id'])
-        actual_rail = 'balance' if payment['provider'] == 'store_balance' else 'qris'
+        actual_rail = _rail(payment)
         if order['payment_status'] == 'paid':
-            if actual_rail == 'qris':
+            if actual_rail != 'balance':
                 return self._payment_view(self._payment(payment_id), state='paid', replayed=True)
             return CheckoutView('paid', order_id=str(order['id']), payment_id=payment_id,
                                 invoice_number=order['invoice_number'],
@@ -314,6 +334,9 @@ class NavigationCheckout:
                                 amount=result.amount, rail=rail)
         if payment.get('needs_review'):
             return self._payment_view(payment, state='review', replayed=replayed)
+        rail = _rail(payment)
+        if rail in ('binance_pay', 'bsc'):
+            return self._external_view(payment, action='classify', replayed=replayed)
         if payment['status'] == 'paid' and rail == 'qris':
             return self._payment_view(payment, state='paid', replayed=replayed)
         if payment['status'] == 'paid':
@@ -376,6 +399,8 @@ class NavigationCheckout:
         if not self._root_matches(
                 root, customer_id=customer_id, chat_id=chat_id, message_id=message_id):
             return CheckoutView('stale')
+        if _rail(payment) in ('binance_pay', 'bsc'):
+            return self._external_view(payment, action='refresh', replayed=True)
         if (payment['provider_reference'] is None
                 and payment['provider_create_state'] in
                 (None, 'create_failed', 'provider_unavailable')):
@@ -416,6 +441,65 @@ class NavigationCheckout:
         except (AttributeError, KeyError, TypeError, ValueError):
             pass
         return _payment_view(payment, state=state, replayed=replayed, fee=fee)
+
+    def _external_view(self, payment, *, action, replayed=False):
+        rail = _rail(payment)
+        if payment.get('needs_review'):
+            return _payment_view(payment, state='review', replayed=replayed)
+        if self.payments is None:
+            return _payment_view(payment, state='pending', replayed=replayed)
+        try:
+            lifecycle = self.payments.for_payment(payment['id'])
+            result = getattr(lifecycle, action)(str(payment['id']))
+            if result.state in ('pending', 'stale_submission') and not result.presentation:
+                result = lifecycle.classify(str(payment['id']))
+            if result.state == 'not_payable' and payment['order_status'] in ('expired', 'cancelled'):
+                return _payment_view(payment, state=payment['order_status'], replayed=replayed)
+            if result.presentation:
+                items = self.db.rows('''SELECT product_name,quantity FROM public.order_items
+                    WHERE order_id=%s ORDER BY id''', (payment['order_id'],))
+                result = replace(result, presentation={**result.presentation,
+                    'items': '\n'.join(f"{item['product_name']} × {item['quantity']}" for item in items)})
+        except Exception:
+            return _payment_view(payment, state='pending', replayed=replayed)
+        return _lifecycle_view(result, order_id=str(payment['order_id']),
+                               payment_id=str(payment['id']), invoice_number=payment['invoice_number'],
+                               amount=payment['amount'], replayed=replayed, rail=rail, provider='manual')
+
+    def hint_prompt(self, customer, root, *, payment_id, kind):
+        try:
+            customer_id, _, _, _ = self._context(customer, root)
+            UUID(str(payment_id))
+            payment = self._payment(payment_id, customer_id=customer_id)
+        except (NavigationCheckoutError, ValueError, TypeError):
+            return CheckoutView('stale')
+        expected = 'binance_pay' if kind == 'order' else 'bsc' if kind == 'hash' else None
+        if (payment is None or expected is None or _rail(payment) != expected
+                or payment['status'] != 'pending' or payment['order_status'] != 'pending_payment'
+                or payment.get('needs_review')):
+            return CheckoutView('stale')
+        return CheckoutView('hint_' + kind, payment_id=str(payment['id']), rail=expected,
+                            order_id=str(payment['order_id']), invoice_number=payment['invoice_number'])
+
+    def submit_hint(self, customer, root, *, payment_id, kind, candidate):
+        prompt = self.hint_prompt(customer, root, payment_id=payment_id, kind=kind)
+        if prompt.state == 'stale' or self.payments is None:
+            return CheckoutView('stale')
+        customer_id = customer['id'] if isinstance(customer, dict) else customer.id
+        try:
+            lifecycle = self.payments.for_payment(payment_id)
+            submit = lifecycle.submit_order_id if kind == 'order' else lifecycle.submit_hash
+            outcome = submit(payment_id, candidate, customer_id=customer_id)
+        except Exception:
+            return prompt
+        state = getattr(outcome, 'state', outcome)
+        if state in ('not_owned', 'not_payable'):
+            return CheckoutView('stale')
+        if state in ('expired', 'grace_expired', 'paid', 'review'):
+            return self.check(customer, root, payment_id=payment_id)
+        if state != 'accepted':
+            return replace(prompt, external={'hint_outcome': state})
+        return self.check(customer, root, payment_id=payment_id)
 
     def cancel(self, customer, root, *, order_id):
         try:
@@ -510,6 +594,16 @@ def _lifecycle_view(result, *, order_id, payment_id, invoice_number, amount,
     qris_url = checkout_url = expires = photo = None
     snapshot = result.presentation or {}
     environment, hosts = snapshot.get('environment', 'sandbox'), tuple(snapshot.get('allowed_hosts', ()))
+    external = snapshot if snapshot.get('mode') in ('binance', 'bsc') else None
+    if rail in ('binance_pay', 'bsc'):
+        try:
+            expires = _deadline(snapshot.get('effective_expires_at'))
+        except (ValueError, TypeError):
+            expires = None
+        return CheckoutView(mapped, order_id=order_id, payment_id=payment_id,
+                            invoice_number=invoice_number, amount=amount, total=amount,
+                            expires_at=expires, replayed=replayed, rail=rail, provider=provider,
+                            external=external, currency='USDT')
     if state == 'created':
         if snapshot.get('mode') == 'manual':
             photo = snapshot.get('photo')
@@ -541,7 +635,8 @@ def _payment_view(payment, *, state, replayed=False, fee=None):
         fee=fee,
         total=(payment['provider_total_payment']
                if type(payment['provider_total_payment']) is int else None),
-        replayed=replayed, rail='qris', provider=payment['provider'])
+        replayed=replayed, rail=_rail(payment), provider=payment['provider'],
+        currency=payment['currency'])
 
 
 def _qr_image_url(url, provider='sakurupiah', environment='sandbox', allowed_hosts=()):
