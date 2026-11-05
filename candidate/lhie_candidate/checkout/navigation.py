@@ -110,12 +110,13 @@ def sandbox_request(payment):
 
 class NavigationCheckout:
     def __init__(self, *, lifecycle=None, request_factory=None, key=None,
-                 using='default', clock=None):
+                 using='default', clock=None, supplier_encrypter=None):
         self.db = Database(using)
         self.using = using
         self.lifecycle = lifecycle
         self.request_factory = request_factory
         self.key = key
+        self.supplier_encrypter = supplier_encrypter
         self.clock = clock or _now
         self.preparation = (SakurupiahPreparation(lifecycle.adapter)
                             if isinstance(lifecycle, SakurupiahLifecycle) else None)
@@ -223,9 +224,8 @@ class NavigationCheckout:
         try:
             cart_id = self._prepare_cart(customer_id, product_id, quantity,
                                          chat_id=chat_id, message_id=message_id, root=root)
-            service = (CheckoutService(preparation=StoreBalancePreparation(), using=self.using)
-                       if rail == 'balance' else
-                       CheckoutService(preparation=preparation, using=self.using))
+            service = CheckoutService(preparation=StoreBalancePreparation() if rail == 'balance' else preparation,
+                                      using=self.using, supplier_encrypter=self.supplier_encrypter)
             request = CheckoutRequest(
                 customer_id, cart_id, checkout_key,
                 service.quote_cart(customer_id, cart_id))
@@ -506,7 +506,9 @@ class NavigationCheckout:
             customer_id, _, _, _ = self._context(customer, root)
             UUID(str(order_id))
             from .lifecycle import OrderLifecycle
-            result = OrderLifecycle(using=self.using).apply_pending_cancellation(
+            from ..compat.crypto import LaravelEncrypter
+            cipher = self.supplier_encrypter or (LaravelEncrypter(self.key) if self.key else None)
+            result = OrderLifecycle(using=self.using, encrypter=cipher).apply_pending_cancellation(
                 order_id, customer_id=customer_id)
             state = 'cancelled' if result.order['order_status'] == 'cancelled' else 'review'
             return CheckoutView(state, order_id=str(order_id))

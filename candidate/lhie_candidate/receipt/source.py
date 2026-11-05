@@ -93,12 +93,22 @@ class ReceiptSource:
         return tuple(tuple(row.values()) for row in rows)
 
     def authorize(self, order_id, chat_id, *, lock=False, receipt=False):
-        """Check ownership and lifecycle without reading credential fields."""
+        """Authorize a Telegram chat against the canonical Customer and Order."""
+        return self._authorize(order_id, chat_id=chat_id, lock=lock, receipt=receipt)
+
+    def authorize_customer(self, order_id, customer_id, *, lock=False, receipt=False):
+        """Share the same paid-delivery gate with customer-owned API readers."""
+        if type(customer_id) is not int or customer_id < 1:
+            raise ReceiptUnavailable()
+        return self._authorize(order_id, customer_id=customer_id, lock=lock, receipt=receipt)
+
+    def _authorize(self, order_id, *, chat_id=None, customer_id=None, lock=False, receipt=False):
         suffix = ' FOR UPDATE OF o' if lock else ''
         order = self.db.one('''SELECT o.id,o.customer_id,o.invoice_number,o.order_status,o.payment_status,
             o.telegram_receipt_sent_at,o.total_amount,o.currency,o.created_at,c.telegram_id,c.locale,c.first_name
             FROM public.orders o JOIN public.customers c ON c.id=o.customer_id WHERE o.id=%s''' + suffix, (order_id,))
-        if (not order or order['telegram_id'] is None or str(order['telegram_id']) != str(chat_id)
+        if (not order or (customer_id is not None and order['customer_id'] != customer_id)
+                or (customer_id is None and (order['telegram_id'] is None or str(order['telegram_id']) != str(chat_id)))
                 or order['payment_status'] != 'paid' or order['order_status'] not in ('processing', 'completed')):
             raise ReceiptUnavailable()
         payment = self.db.one('''SELECT id,status,paid_at,method,amount,currency,provider_total_payment,provider_fee
@@ -117,6 +127,13 @@ class ReceiptSource:
     def load(self, order_id, chat_id, *, locale=None, lock=False, receipt=False):
         """Authorization precedes credential selection and decryption."""
         order, payment = self.authorize(order_id, chat_id, lock=lock, receipt=receipt)
+        return self._load(order_id, order, payment, locale=locale)
+
+    def load_customer(self, order_id, customer_id, *, locale=None, lock=False):
+        order, payment = self.authorize_customer(order_id, customer_id, lock=lock)
+        return self._load(order_id, order, payment, locale=locale)
+
+    def _load(self, order_id, order, payment, *, locale):
         items = self.db.rows('''SELECT i.id,i.product_id,i.product_name,i.product_icon,i.product_custom_emoji_id,
             i.quantity,i.unit_price,i.subtotal,i.usdt_unit_price,i.usdt_subtotal,i.delivery_note,i.delivery_note_snapshotted,
             i.usage_guide_title,i.usage_guide_url,i.usage_guide_snapshotted,
@@ -142,6 +159,10 @@ class ReceiptSource:
               AND r.state='confirmed' AND r.warranty_claim_id IS NOT NULL''',
             (order_id, payment['id'], order['customer_id'], payment['currency'],
              order_id, payment['id'], order['customer_id'], payment['currency']))
+        handoffs = self.db.rows('''SELECT f.order_item_id,COALESCE(SUM(h.quantity),0) AS quantity
+            FROM public.supplier_fulfillments f JOIN public.supplier_manual_handoffs h
+              ON h.supplier_fulfillment_id=f.id
+            WHERE f.order_id=%s AND f.state='delivered' GROUP BY f.order_item_id''', (order_id,))
         retired_ids = {row['stock_id'] for row in refunded if row['stock_id'] is not None}
         if any((row['retired_at'] is not None) != (row['id'] in retired_ids) for row in allocated):
             raise ReceiptUnavailable()
@@ -155,7 +176,8 @@ class ReceiptSource:
                 if any(row['product_id'] != item['product_id'] for row in rows):
                     raise ReceiptUnavailable()
                 returned = sum(row['quantity'] for row in refunded if row['order_item_id'] == item['id'])
-                if not 0 <= returned <= item['quantity'] or len(rows) != item['quantity'] - returned:
+                handed = sum(row['quantity'] for row in handoffs if row['order_item_id'] == item['id'])
+                if not 0 <= returned + handed <= item['quantity'] or len(rows) != item['quantity'] - returned - handed:
                     raise ReceiptUnavailable()
                 if not rows:
                     continue
@@ -201,7 +223,8 @@ class ReceiptSource:
             unsigned = f"/shop/orders/{order['id']}?expires={expires}"
             invoice_url = self.invoice_base_url + unsigned + '&signature=' + signed_url_digest(unsigned, self.signing_key)
         invoice = order['invoice_number'] or str(order['id'])
-        return {'order_id': str(order['id']), 'customer_id': order['customer_id'], 'chat_id': str(order['telegram_id']),
+        return {'order_id': str(order['id']), 'customer_id': order['customer_id'],
+            'chat_id': str(order['telegram_id']) if order['telegram_id'] is not None else None,
             'invoice_number': invoice, 'invoice_number_raw': order['invoice_number'], 'locale': display_locale, 'items': [
                 {'product_name': i['product_name'], 'icon': i['product_icon'], 'custom_emoji_id': i['product_custom_emoji_id'],
                  'quantity': i['quantity'],

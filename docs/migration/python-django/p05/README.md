@@ -675,6 +675,60 @@ qualify live custody/funding, actual historical data/keys, production performanc
 new UI/auth adapters, deployment or CI/CD. The existing P07/P09 proofs remain
 the shared owners of unrelated checkout and delivery scenarios.
 
+## P18: supplier acquisition and historical entitlements (#698)
+
+`candidate/lhie_candidate/suppliers/` operates on the existing supplier,
+fulfillment, purchase, dispatch, account-unit and refund tables. Checkout can
+explicitly receive the Laravel-compatible encrypter to reserve a ranked
+supplier source after local stock. Product locks precede globally ordered
+Supplier and SKU locks. Source, cost and conversion snapshots remain encrypted
+or immutable, and supplier wallet and SKU commitments remain separate from
+local stock. Catalog sync and administration use the separately provisioned
+supplier operator connection; `operator_privileges.verify_operator_privileges`
+checks its identity and grants before an operator consumer uses it.
+
+`SupplierAcquisition` commits a claim and a dispatch episode before provider
+I/O. Interrupted non-idempotent dispatches remain ambiguous with their holds;
+the documented idempotent providers can replay the original reference once
+within the bounded window. Known identities recover with an exact-order read.
+`SupplierHistory` records bounded ToolOrAx history scans and CSxStore
+candidate facts without automatically releasing holds. ToolOrAx automatic
+scans cannot qualify an unverified timezone; Owner/operator no-debit evidence
+and CSxStore candidate confirmation retain the original purchase identity.
+Provider evidence and Owner no-debit attestation are distinct. Manual
+credentials or an external handoff resolve customer delivery independently
+of the original supplier economics. Historical per-unit and definitively
+missing-unit refunds use the P12 original-currency refund owner; retired or
+exposed credentials are not restocked. Provider-specific warranty claims,
+replacement purchases, deposits and webhooks remain retired under ADR-0017.
+
+`SupplierRecoveryWorker` runs bounded PostgreSQL discovery and token-fenced
+acquisition in an isolated consumer with a caller-supplied client factory. It
+is not part of the default supervisor or the existing four-connection budget:
+starting it requires separate runtime admission and an explicitly qualified
+transport. The default application installs neither supplier grants nor a live
+transport, and does not start this consumer. Injected transports must enforce
+the response-size and timeout limits, disable redirects and avoid logging
+secrets. Do not point local tests at suppliers. Operator/dashboard adapters,
+automatic worker composition and notification delivery remain with P23/P26
+and P25 respectively; this slice does not qualify production suppliers.
+
+The existing checkout harness provides the local changed-flow proof:
+
+```sh
+python3 tools/migration_harness/smoke_checkout.py --supplier
+```
+
+It provisions disposable PostgreSQL/Redis and a separate test operator role,
+uses synthetic keys and fake transports, and records one source-bound manifest
+at `.local/migration-p18/verification.json`. It exercises catalog sync and
+draft import, partial/complete delivery through the bounded consumer,
+exact-order and history-candidate recovery, ambiguous purchase review, Owner/provider evidence,
+retained warranty and missing-unit refunds, retirement, foreign access and
+competing checkout, acquisition and historical credential-refund claims.
+The test also checks fixed supplier URLs, redirect refusal and retired webhook
+routes. It does not qualify live provider contracts or actual historical data.
+
 ## P19: authentication, identity linking and ownership compatibility (#695)
 
 `candidate/lhie_candidate/auth/` ports the existing Customer authentication

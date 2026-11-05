@@ -6,6 +6,7 @@ from .errors import CheckoutError
 class FulfillmentResources:
     def __init__(self, using='default', *, encrypter=None):
         self.db = Database(using)
+        self.using = using
         self.encrypter = encrypter
 
     def lock(self, order_id):
@@ -61,6 +62,7 @@ class FulfillmentResources:
             raise CheckoutError('supplier_purchase_unresolved')
 
     def release(self, fulfillments, now):
+        released_suppliers = set()
         for row in fulfillments:
             if row['state'] in ('delivered', 'cancelled'):
                 continue
@@ -76,6 +78,7 @@ class FulfillmentResources:
                     (row['reserved_quantity'], now, row['reserved_catalog_item_id'], row['reserved_quantity']))
                 if changed != 1:
                     raise CheckoutError('supplier_hold_invariant')
+                released_suppliers.add(row['reserved_supplier_id'])
             self.db.execute('''UPDATE public.supplier_fulfillments SET state='cancelled',next_attempt_at=NULL,
                 reserved_cost_micros=0,reserved_quantity=0,updated_at=%s WHERE id=%s''', (now, row['id']))
             if row['current_purchase_id'] is not None:
@@ -84,6 +87,10 @@ class FulfillmentResources:
                     (now, row['current_purchase_id'], row['id']))
                 if changed != 1:
                     raise CheckoutError('supplier_purchase_identity_invalid')
+        if released_suppliers and self.db.one("""SELECT has_column_privilege(current_user,
+                'public.products','supplier_available_stock','UPDATE') AS allowed""")['allowed']:
+            from ..suppliers.capacity import refresh_shared_wallet_after_commit
+            refresh_shared_wallet_after_commit(released_suppliers, using=self.using)
 
     def paid(self, order_id, now):
         # The durable pending row is the handoff. No provider call is made here.

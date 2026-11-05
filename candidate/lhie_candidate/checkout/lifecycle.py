@@ -173,6 +173,12 @@ class OrderLifecycle:
               AND a.customer_id=%s AND e.amount=%s""", (str(order_id), order['customer_id'], payment['amount']))
         if debit is None:
             raise CheckoutError('balance_purchase_debit_missing')
+        fulfillments = self.fulfillment.lock(order_id)
+        if fulfillments:
+            self.inventory.lifecycle_sales(str(order_id))
+            self.fulfillment.paid(order_id, self.clock())
+            self._statuses(order, payment, order_status='processing', payment_status='paid')
+            return self._result(order, payment, changed=True)
         self.inventory.record_sales(str(order_id))
         self._statuses(order, payment, order_status='completed', payment_status='paid')
         wake_after_commit('order', str(order_id), using=self.using)
