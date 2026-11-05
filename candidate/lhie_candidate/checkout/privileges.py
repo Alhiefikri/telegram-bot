@@ -98,6 +98,30 @@ LIFECYCLE_UPDATE = {
 }
 
 
+SUPPLIER_INSERT = {
+    'supplier_fulfillments': set('order_id order_item_id quantity state maximum_cost_idr sources_snapshot reserved_supplier_id reserved_catalog_item_id reserved_cost_micros reserved_quantity created_at updated_at'.split()),
+    'supplier_purchases': set('supplier_fulfillment_id supplier_id supplier_catalog_item_id reference quantity expected_cost_micros exchange_rate_idr state delivery_payload last_error created_at updated_at'.split()),
+    'supplier_purchase_dispatches': set('supplier_purchase_id claim_token started_at outcome'.split()),
+    'supplier_purchase_evidence': set('supplier_purchase_id actor_user_id kind evidence_source provider_reference note history_reconciliation_id observed_at created_at updated_at'.split()),
+    'supplier_manual_handoffs': set('supplier_fulfillment_id actor_user_id idempotency_key quantity note handed_off_at created_at updated_at'.split()),
+    'supplier_order_history_reconciliations': set('supplier_purchase_id actor_user_id outcome error_code requested_limit row_count dispatch_at requested_at observed_at history_timezone purchase_version purchase_claim_token coverage_kind created_at updated_at'.split()),
+    'product_stock_items': set('product_id order_item_id secret supplier_purchase_id supplier_unit_index created_at updated_at'.split()),
+    'order_refunds': set('warranty_claim_id supplier_account_unit_id supplier_fulfillment_id missing_quantity'.split()),
+    'inventory_movements': {'available_before', 'available_after'},
+    'audit_logs': {'old_values', 'ip_address'},
+}
+SUPPLIER_UPDATE = {
+    'suppliers': set('balance_micros reserved_balance_micros version sync_token sync_attempted_at sync_lease_expires_at synced_at sync_expires_at sync_failures sync_next_attempt_at balance_observed_at is_active last_error updated_at'.split()),
+    'supplier_catalog_items': set('stock reserved_quantity updated_at'.split()),
+    'supplier_fulfillments': set('reserved_supplier_id reserved_catalog_item_id reserved_cost_micros reserved_quantity current_purchase_id state next_attempt_at last_error delivered_at refunded_quantity updated_at'.split()),
+    'supplier_purchases': set('supplier_order_id observed_quantity actual_cost_micros state claim_token lease_expires_at dispatched_at replay_count next_attempt_at delivery_payload trusted_delivery_payload last_error committed_at updated_at'.split()),
+    'supplier_purchase_dispatches': {'finished_at', 'outcome', 'error_code'},
+    'supplier_order_history_reconciliations': set('outcome error_code requested_limit reported_count row_count coverage_start coverage_end history_timezone response_sha256 candidate_order_ids candidate_facts coverage_kind observed_at updated_at'.split()),
+    'products': {'supplier_available_stock', 'supplier_available_until', 'price_amount', 'updated_at'},
+    'warranty_claims': {'customer_id', 'settlement_choice', 'settlement_state', 'replacement_next_attempt_at', 'updated_at'},
+}
+
+
 AUTH_INSERT = {
     'customers': set('email email_verified_at first_name auth_version enrollment_version created_at updated_at'.split()),
     'customer_auth_tokens': set('customer_id email purpose token_hash challenge_hash session_binding_hash proposed_password_hash auth_version enrollment_version attempts expires_at consumed_at created_at updated_at'.split()),
@@ -153,6 +177,10 @@ def verify_public_writes(cursor):
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, LIFECYCLE_INSERT)
         allowed_update = _merge(allowed_update, LIFECYCLE_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.supplier_purchases','reference','INSERT')")
+    if cursor.fetchone()[0]:
+        allowed_insert = _merge(allowed_insert, SUPPLIER_INSERT)
+        allowed_update = _merge(allowed_update, SUPPLIER_UPDATE)
     cursor.execute("SELECT has_column_privilege(current_user,'public.manual_payment_settings','payment_mode','UPDATE')")
     if cursor.fetchone()[0]:
         allowed_update = _merge(allowed_update, {'manual_payment_settings':

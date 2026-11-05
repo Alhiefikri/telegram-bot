@@ -145,6 +145,18 @@ including real PostgreSQL settlement/reversed-alias races and receipt delivery.
 Default composition admits neither external adapter nor USDT funding. Live
 qualification, actual history and dashboard composition retain H2/HD/P23 owners.
 
+P18 [supplier acquisition and historical entitlement](../migration/python-django/p05/README.md#p18-supplier-acquisition-and-historical-entitlements-698)
+owns `candidate/lhie_candidate/suppliers/`: private supplier catalog, pricing,
+capacity, checkout holds, durable purchase claims/dispatch evidence and
+operator recovery, plus retained warranty and missing-unit refund selection.
+It reuses P12's Order/Payment locks and refund ledgers and P09's authorized
+receipt source; a supplier hold remains independent of manual customer delivery.
+Supplier transport, checkout enablement and operator grants require explicit
+injection/provisioning. No unqualified provider or retired warranty webhook,
+deposit or replacement workflow is activated. The disposable P01-based
+`smoke_checkout.py --supplier` covers the changed PostgreSQL and fake-provider
+boundaries; actual provider and historical-data qualification remain separate.
+
 P19 [authentication and ownership compatibility](../migration/python-django/p05/README.md#p19-authentication-identity-linking-and-ownership-compatibility-695)
 owns `candidate/lhie_candidate/auth/`: Customer password/verification/OTP/reset/
 magic-link authority, canonical Google/Telegram claims, independent admin guards,

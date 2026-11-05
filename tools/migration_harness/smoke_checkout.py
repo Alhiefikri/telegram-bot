@@ -32,13 +32,14 @@ def main():
     receipt = sys.argv[1:] == ['--receipt']
     lifecycle = sys.argv[1:] == ['--lifecycle']
     auth = sys.argv[1:] == ['--auth']
-    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth']):
-        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth]')
+    supplier = sys.argv[1:] == ['--supplier']
+    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth'], ['--supplier']):
+        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth|--supplier]')
     os.umask(0o077)
-    scope = 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
+    scope = 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
     harness.STATE = ROOT / '.local' / scope / 'lifecycle'
-    harness.PREFIX = 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
-    harness.IMAGE = 'lhie-p19-boundary:local' if auth else 'lhie-p09-boundary:local' if receipt or lifecycle else 'lhie-p01-boundary:1'
+    harness.PREFIX = 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
+    harness.IMAGE = 'lhie-p19-boundary:local' if auth else 'lhie-p09-boundary:local' if receipt or lifecycle or supplier else 'lhie-p01-boundary:1'
     if not (harness.STATE / 'candidate/config.json').exists():
         cli('init','candidate')
     config = harness.validate(json.loads((harness.STATE / 'candidate/config.json').read_text()))
@@ -64,17 +65,22 @@ def main():
         schema = '\n'.join((ROOT / 'candidate/lhie_candidate/navigation' / name).read_text()
             for name in ('schema.sql','ingress_schema.sql','assets_schema.sql','grants.sql'))
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/checkout/grants.sql').read_text()
-        if lifecycle:
+        if lifecycle or supplier:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
-        if receipt or lifecycle:
+        if receipt or lifecycle or supplier:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
+        if supplier:
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/grants.sql').read_text()
+            docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
+                '-c',"CREATE ROLE candidate_supplier_operator LOGIN PASSWORD 'candidate-local-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS")
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/operator_grants.sql').read_text()
         if auth:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/schema.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/grants.sql').read_text()
         docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable','-c',schema)
         directory = harness.STATE / 'candidate'
         oracle_key = directory / 'p09-oracle-key'
-        if receipt or lifecycle or auth:
+        if receipt or lifecycle or auth or supplier:
             oracle_key.write_text('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n')
             oracle_key.chmod(0o600)
         command = ['docker','run','--rm','-i','--network','container:'+boundary,
@@ -84,13 +90,14 @@ def main():
             '--mount',f'type=bind,src={ROOT / "candidate"},dst=/opt/candidate,readonly',
             '--mount',f'type=bind,src={directory / "candidate.json"},dst=/run/harness/candidate.json,readonly',
             '--mount',f'type=bind,src={directory / "django-key"},dst=/run/harness/django-key,readonly',
-            '--mount',f'type=bind,src={oracle_key if receipt or lifecycle or auth else directory / "app-key"},dst=/run/harness/app-key,readonly',
+            '--mount',f'type=bind,src={oracle_key if receipt or lifecycle or auth or supplier else directory / "app-key"},dst=/run/harness/app-key,readonly',
             '--mount',f'type=bind,src={output},dst=/evidence',
             '--env','P07_CHECKOUT_SMOKE=disposable-local-only',
             '--env',f'P07_RECEIPT_SMOKE={"1" if receipt else "0"}',
             '--env',f'P12_LIFECYCLE_SMOKE={"1" if lifecycle else "0"}',
-            '--env',f'P19_AUTH_SMOKE={"1" if auth else "0"}','--entrypoint','python',
-            'lhie-p09-candidate:local' if receipt or lifecycle or auth else 'lhie-p05-candidate:1','smoke_checkout.py']
+            '--env',f'P19_AUTH_SMOKE={"1" if auth else "0"}',
+            '--env',f'P18_SUPPLIER_SMOKE={"1" if supplier else "0"}','--entrypoint','python',
+            'lhie-p13-candidate:local' if supplier else 'lhie-p09-candidate:local' if receipt or lifecycle or auth else 'lhie-p05-candidate:1','smoke_checkout.py']
         probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=240)
         if probe.returncode:
             if receipt:
@@ -120,6 +127,14 @@ def main():
                 'candidate/lhie_candidate/receipt/source.py', 'candidate/lhie_candidate/receipt/service.py',
                 'candidate/lhie_candidate/receipt/protocol.py', 'candidate/lhie_candidate/payments/claimed_order.py',
                 'candidate/lhie_candidate/navigation/presentation.py'))
+        if supplier:
+            sources.extend(sorted((ROOT / 'candidate/lhie_candidate/suppliers').glob('*')))
+            sources.extend(ROOT / name for name in (
+                'candidate/tests/test_supplier_postgres.py', 'candidate/lhie_candidate/receipt/source.py',
+                'candidate/lhie_candidate/receipt/grants.sql', 'candidate/lhie_candidate/payments/grants.sql',
+                'candidate/lhie_candidate/payments/routing.py', 'candidate/lhie_candidate/payments/manual.py',
+                'candidate/lhie_candidate/payments/runtime.py', 'candidate/lhie_candidate/workers/consumer.py',
+                'candidate/lhie_candidate/workers/contract.py', 'candidate/lhie_candidate/workers/metrics.py'))
         if auth:
             sources.extend(sorted((ROOT / 'candidate/lhie_candidate/auth').glob('*')))
             sources.extend(ROOT / name for name in (
@@ -132,7 +147,7 @@ def main():
         observed['source_sha256'] = {str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest()
                                       for path in sources if path.is_file()}
         observed['base_revision'] = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-        observed['dependency_image'] = docker('image','inspect','lhie-p09-candidate:local' if receipt or lifecycle or auth else 'lhie-p05-candidate:1','--format','{{.Id}}')
+        observed['dependency_image'] = docker('image','inspect','lhie-p13-candidate:local' if supplier else 'lhie-p09-candidate:local' if receipt or lifecycle or auth else 'lhie-p05-candidate:1','--format','{{.Id}}')
         if receipt or auth:
             observed['boundary_image'] = docker('image','inspect',harness.IMAGE,'--format','{{.Id}}')
         migration_digest = hashlib.sha256()
@@ -190,6 +205,10 @@ def main():
                 'No real Google/Telegram identities, mail recipients, historical key qualification or production activation',
                 'Explicit additive browser session metadata; old PHP cookies require relogin at H2, never deserialized',
                 'No production, deployment, provider activation or CI/CD operations']
+        if supplier:
+            observed['limits'] = ['Synthetic disposable PostgreSQL and Redis, injected supplier/Telegram fixtures only',
+                'No live supplier targets, actual historical data or production provider qualification',
+                'Explicit supplier grants; no production, deployment or CI/CD operations']
         (output / 'verification.json').write_text(json.dumps(observed,indent=2)+'\n')
         (output / 'probe-failure.txt').unlink(missing_ok=True)
         (output / 'probe-failure.stderr').unlink(missing_ok=True)

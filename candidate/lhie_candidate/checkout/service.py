@@ -56,11 +56,12 @@ class CheckoutResult:
 class CheckoutService:
     """Atomic local-credential checkout with immutable rail and pricing snapshots."""
 
-    def __init__(self, *, using='default', preparation=None, reseller=False):
+    def __init__(self, *, using='default', preparation=None, reseller=False, supplier_encrypter=None):
         self.db = Database(using)
         self.using = using
         self.preparation = preparation or StoreBalancePreparation()
         self.reseller = reseller
+        self.supplier_encrypter = supplier_encrypter
         self.balance = StoreBalanceLedger(using)
         self.inventory = InventoryLedger(using)
 
@@ -136,7 +137,10 @@ class CheckoutService:
         items = self.db.rows('SELECT product_id,quantity FROM public.cart_items WHERE cart_id=%s ORDER BY product_id FOR UPDATE', (request.cart_id,))
         if not items:
             raise CheckoutError('empty_cart')
-        products = self.inventory.lock_products(items)
+        products = self.inventory.lock_products(items, allow_supplier=self.supplier_encrypter is not None)
+        if self.supplier_encrypter is not None:
+            from lhie_candidate.suppliers.capacity import lock_checkout_resources
+            lock_checkout_resources(sorted(products), using=self.using)
         setting = self._setting(lock=True)
         pricing = self._pricing(items, products, reseller=self.reseller)
         if pricing != request.expected_pricing:
@@ -186,6 +190,8 @@ class CheckoutService:
         if plan.rail_snapshot is not None and binance is None:
             plan.rail_snapshot.persist(self.db, payment_id, now)
         for quote in pricing.quotes:
+            local_quantity = min(quote.quantity, products[quote.product_id]['local_available_stock'])
+            supplier_quantity = quote.quantity - local_quantity
             product = products[quote.product_id]
             family = None
             if product.get('product_family_id') is not None:
@@ -198,20 +204,36 @@ class CheckoutService:
                  delivery_note,delivery_note_snapshotted,usage_guide_title,usage_guide_url,usage_guide_snapshotted,
                  quantity,local_quantity,supplier_quantity,quantity_price_tier_minimum,unit_price,usdt_unit_price,
                  subtotal,usdt_subtotal,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,true,%s,%s,true,%s,%s,0,%s,%s,%s,%s,%s,%s,%s) RETURNING id''',
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,true,%s,%s,true,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id''',
                 (order_id, quote.product_id, product['name'], icon, custom_emoji_id,
                  product.get('product_family_id'), family['name'] if family else None,
                  product.get('delivery_note'), product.get('usage_guide_title'), product.get('usage_guide_url'),
-                 quote.quantity, quote.quantity, quote.tier_minimum, quote.unit_price,
+                 quote.quantity, local_quantity, supplier_quantity, quote.tier_minimum, quote.unit_price,
                  quote.usdt_unit_price if external_usdt else None, quote.subtotal,
                  quote.usdt_subtotal if external_usdt else None, now, now))
-            self.inventory.allocate(item['id'], quote.product_id, quote.quantity)
+            if local_quantity:
+                self.inventory.allocate(item['id'], quote.product_id, local_quantity)
             self.inventory.reserve(order_id, quote.product_id, quote.quantity)
+            if supplier_quantity:
+                from lhie_candidate.suppliers.capacity import SupplierCapacityError, reserve
+                try:
+                    reserve(item['id'], quote.product_id, supplier_quantity, quote.subtotal,
+                            self.supplier_encrypter, now, using=self.using)
+                except SupplierCapacityError as error:
+                    raise CheckoutError('insufficient_stock') from error
+        if self.supplier_encrypter is not None:
+            from lhie_candidate.suppliers.capacity import refresh_locked, refresh_shared_wallet_after_commit
+            refresh_locked(sorted(products), now, using=self.using)
+            supplier_ids = [row['reserved_supplier_id'] for row in self.db.rows(
+                'SELECT reserved_supplier_id FROM public.supplier_fulfillments WHERE order_id=%s AND reserved_supplier_id IS NOT NULL', (order_id,))]
+            refresh_shared_wallet_after_commit(supplier_ids, using=self.using)
+        order_status = 'pending_payment'
         if is_balance:
             self.balance.debit_purchase(request.customer_id, order_id)
-            OrderLifecycle(using=self.using).balance_paid_locked(order_id, payment_id)
+            result = OrderLifecycle(using=self.using, encrypter=self.supplier_encrypter).balance_paid_locked(order_id, payment_id)
+            order_status = result.order['order_status']
         self.db.execute("UPDATE public.carts SET status='checked_out',updated_at=%s WHERE id=%s", (now, request.cart_id))
-        return CheckoutResult(order_id, payment_id, invoice, 'completed' if is_balance else 'pending_payment',
+        return CheckoutResult(order_id, payment_id, invoice, order_status,
                               'paid' if is_balance else 'pending', plan.amount, False)
 
     def _replay(self, request, *, by_cart=False):

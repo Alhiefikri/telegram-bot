@@ -11,16 +11,17 @@ from .settings import NEW_QRIS_PROVIDERS
 
 
 class QrisPayments:
-    def __init__(self, lifecycles=(), *, external_lifecycles=(), presentation=None, using='default'):
+    def __init__(self, lifecycles=(), *, external_lifecycles=(), presentation=None, using='default', encrypter=None):
         self.db = Database(using)
         self.using = using
         self.presentation = presentation or QrPresentation(using=using)
         self.lifecycles = dict(lifecycles)
         self.external_lifecycles = dict(external_lifecycles)
+        self.encrypter = encrypter
         if set(self.external_lifecycles) - {'BINANCE_PAY_ID', 'USDT_BEP20'}:
             raise ValueError('Invalid external checkout rail')
-        self.lifecycles.setdefault('manual', ManualQrisLifecycle(self.presentation, using=using))
-        self.orders = OrderLifecycle(using=using)
+        self.lifecycles.setdefault('manual', ManualQrisLifecycle(self.presentation, using=using, encrypter=encrypter))
+        self.orders = OrderLifecycle(using=using, encrypter=encrypter)
 
     def preparation(self, setting):
         provider = setting.provider if setting is not None else 'manual'
@@ -47,9 +48,9 @@ class QrisPayments:
             # Retained snapshots remain readable without admitting a new rail.
             if row['method'] == 'BINANCE_PAY_ID':
                 from .binance import BinanceLifecycle
-                return BinanceLifecycle(None, using=self.using)
+                return BinanceLifecycle(None, encrypter=self.encrypter, using=self.using)
             from .bsc import BscLifecycle
-            return BscLifecycle(using=self.using)
+            return BscLifecycle(encrypter=self.encrypter, using=self.using)
         return self.lifecycles.get(row['provider'].lower())
 
     def _call(self, operation, payment_id, **kwargs):

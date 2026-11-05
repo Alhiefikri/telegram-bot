@@ -28,4 +28,4 @@ def payment_services(*, klikqris=None, pakasir=None, sakurupiah=None, binance=No
         external['USDT_BEP20'] = BscLifecycle(bsc, cipher, using=using)
     return QrisPayments(rails, external_lifecycles=external,
         presentation=presentation or QrPresentation(
-            public_storage='/run/harness/public-assets', using=using), using=using)
+            public_storage='/run/harness/public-assets', using=using), using=using, encrypter=cipher)

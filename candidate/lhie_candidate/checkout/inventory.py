@@ -19,7 +19,7 @@ class InventoryLedger:
     def __init__(self, using="default"):
         self.db = Database(using)
 
-    def lock_products(self, items: list[dict]) -> dict[int, dict]:
+    def lock_products(self, items: list[dict], *, allow_supplier=False) -> dict[int, dict]:
         self.db.require_transaction()
         quantities = {}
         for item in items:
@@ -41,9 +41,14 @@ class InventoryLedger:
                   AND supplier_unit_index IS NULL AND order_item_id IS NULL AND retired_at IS NULL
             """, (product_id,))["count"]
             available = min(product["stock"] - product["reserved_stock"], count)
-            if available < quantity:
+            external = 0
+            if allow_supplier and product["supplier_available_until"] is not None:
+                external = self.db.one("""SELECT CASE WHEN %s > CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta'
+                    THEN %s ELSE 0 END AS available""",
+                    (product["supplier_available_until"], product["supplier_available_stock"]))["available"]
+            if available + external < quantity:
                 raise CheckoutError("insufficient_stock")
-            product["available_stock"] = available
+            product["available_stock"] = available + external
             product["local_available_stock"] = available
         return products
 
@@ -55,16 +60,16 @@ class InventoryLedger:
         source = self.db.one("SELECT order_id FROM public.order_items WHERE id=%s", (order_item_id,))
         if source is None:
             raise CheckoutError("inventory_invariant")
-        order, items, products, proofs, allocations = self._state(source["order_id"])
+        order, items, products, proofs, allocations = self._state(source["order_id"], local_only=False)
         self._assert_unpaid(order)
         item = next((item for item in items if item["id"] == order_item_id), None)
-        if item is None or item["product_id"] != product_id or item["quantity"] != quantity:
+        if item is None or item["product_id"] != product_id or item["local_quantity"] != quantity:
             raise CheckoutError("inventory_invariant")
         if (product_id, "sale") in proofs or (product_id, "release") in proofs:
             raise CheckoutError("invalid_order_transition")
         existing = allocations[order_item_id]
         if existing:
-            self._assert_allocated(item, existing)
+            self._assert_local_allocated(item, existing)
             return
         if (product_id, "reservation") in proofs:
             raise CheckoutError("inventory_invariant")
@@ -96,22 +101,23 @@ class InventoryLedger:
         self.db.require_transaction()
         require_integer(product_id, minimum=1)
         require_integer(quantity, minimum=1)
-        order, items, products, proofs, allocations = self._state(order_id)
+        order, items, products, proofs, allocations = self._state(order_id, local_only=False)
         self._assert_unpaid(order)
         item = next((item for item in items if item["product_id"] == product_id), None)
         if item is None or item["quantity"] != quantity:
             raise CheckoutError("inventory_invariant")
         if (product_id, "sale") in proofs or (product_id, "release") in proofs:
             raise CheckoutError("invalid_order_transition")
-        self._assert_allocated(item, allocations[item["id"]])
+        self._assert_local_allocated(item, allocations[item["id"]])
         if (product_id, "reservation") in proofs:
             return
         product = products[product_id]
         if not product["public_visible"]:
             raise CheckoutError("unavailable_product")
-        if product["stock"] - product["reserved_stock"] < quantity:
+        local = item["quantity"] if item["local_quantity"] is None else item["local_quantity"]
+        if product["stock"] - product["reserved_stock"] < local:
             raise CheckoutError("insufficient_stock")
-        self._change_product(product_id, 0, quantity)
+        self._change_product(product_id, 0, local)
         self._movement(order_id, product_id, "reservation", quantity, "Order reservation")
 
     def record_sales(self, order_id: str) -> None:
@@ -388,6 +394,14 @@ class InventoryLedger:
         if any(credential["credential_format"] == "structured_account" and credential["id"] not in emails
                for credential in credentials):
             raise CheckoutError("inventory_invariant")
+
+    def _assert_local_allocated(self, item, credentials):
+        local = item["quantity"] if item["local_quantity"] is None else item["local_quantity"]
+        if len(credentials) != local:
+            raise CheckoutError("inventory_invariant")
+        self._assert_credentials(credentials, item["product_id"])
+        if any(row["retired_at"] is not None for row in credentials):
+            raise CheckoutError("invalid_order_transition")
 
     def _assert_allocated(self, item, credentials, *, allow_retired=False):
         if len(credentials) != item["quantity"]:

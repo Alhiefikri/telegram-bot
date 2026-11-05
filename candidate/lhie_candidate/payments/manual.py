@@ -17,12 +17,12 @@ def _now():
 
 
 class ManualQrisLifecycle:
-    def __init__(self, presentation, *, using='default', clock=None):
+    def __init__(self, presentation, *, using='default', clock=None, encrypter=None):
         self.presentation = presentation
         self.using = using
         self.db = Database(using)
         self.clock = clock or _now
-        self.orders = OrderLifecycle(using=using, clock=self.clock)
+        self.orders = OrderLifecycle(using=using, clock=self.clock, encrypter=encrypter)
 
     def _locked(self, payment_id):
         order, payment, payments, account = self.orders.lock_payment(payment_id)
