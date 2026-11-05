@@ -150,8 +150,8 @@ class UpdateInbox:
         if not duplicate:
             from ..workers import wakeup
             # A lost Redis hint is repaired by the worker's PostgreSQL sweep.
-            from .processor import payment_callback
-            wakeup.enqueue("payment.navigation" if payment_callback(payload) else "navigation.update",
+            from .processor import payment_update
+            wakeup.enqueue("payment.navigation" if payment_update(payload) else "navigation.update",
                            update_id)
         acknowledgement = ({"method": "answerCallbackQuery", "callback_query_id": source["id"]}
                            if callback else {"ok": True})

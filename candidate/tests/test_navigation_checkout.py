@@ -275,5 +275,82 @@ class NavigationCheckoutPresentationTests(unittest.TestCase):
         self.assertEqual(_checkout_state('unknown_new_code'), 'invalid')
 
 
+class ExternalCheckoutPresentationTests(unittest.TestCase):
+    def presenter(self, checkout=None):
+        catalog = MemoryCatalog()
+        catalog.product_rows[1]['usdt_price_amount'] = 1234567
+        return CatalogPresenter(catalog, signing_key='synthetic-key', checkout=checkout,
+                                dollar_rail_selectable=True)
+
+    def test_usdt_detail_opens_chooser_then_selected_canonical_checkout(self):
+        view = CheckoutView('pending', payment_id=str(uuid4()), invoice_number='INV-USDT',
+                            amount=1234567, total=1234567, rail='binance_pay', provider='manual',
+                            currency='USDT', external={'mode': 'binance', 'verification_mode': 'order_id',
+                                'receiver_type': 'uid', 'receiver_value': '123456'})
+        gateway = FakeCheckout(view)
+        presenter = self.presenter(gateway)
+        state = {}
+        detail = presenter.detail(CUSTOMER, 2, state=state)
+        chooser = presenter.route(CUSTOMER, callback(detail, 'detail:pay:binance:'),
+                                  state, root=ROOT, chat_id='41001')
+        self.assertEqual(gateway.calls, [])
+        self.assertIn('selection', state)
+        self.assertTrue(all(button.get('style') == 'primary' for button in buttons(chooser)))
+        surface = presenter.route(CUSTOMER, callback(chooser, 'detail:pay:binance_pay:'),
+                                  state, root=ROOT, chat_id='41001')
+        self.assertEqual(gateway.calls[0][-1], 'binance_pay')
+        self.assertIn('<code>1.234567</code> USDT', surface.caption)
+        self.assertIn('123456', surface.caption)
+        self.assertNotIn('QR Manual', surface.caption)
+        self.assertNotIn('Rp ', surface.caption)
+        self.assertRegex(callback(surface, 'checkout:hint:order:'), r'order:[0-9a-f-]{36}$')
+        self.assertNotIn('selection', state)
+
+    def test_stale_usdt_selector_never_creates_checkout(self):
+        gateway = FakeCheckout()
+        presenter = self.presenter(gateway)
+        self.assertIsNone(presenter.route(CUSTOMER, 'detail:pay:binance_pay:2:old',
+                                          {}, root=ROOT, chat_id='41001'))
+        self.assertEqual(gateway.calls, [])
+
+    def test_bsc_presentation_keeps_persisted_target_and_no_qris_controls(self):
+        address = '0x' + 'a' * 40
+        surface = self.presenter()._checkout_surface(CUSTOMER, CheckoutView(
+            'pending', rail='bsc', provider='manual', amount=1234567, currency='USDT',
+            payment_id=str(uuid4()), invoice_number='INV-BSC',
+            external={'mode': 'bsc', 'verification_mode': 'transaction_hash',
+                      'receiver_address': address, 'required_confirmations': 7, 'confirmations': 2}))
+        self.assertIn(address, surface.caption)
+        self.assertIn('<code>1.234567</code> USDT', surface.caption)
+        self.assertIn('2/7', surface.caption)
+        self.assertRegex(callback(surface, 'checkout:hint:hash:'), r'hash:[0-9a-f-]{36}$')
+        self.assertNotIn('photo_url', surface.options)
+        self.assertFalse(any('url' in button for button in buttons(surface)))
+
+    def test_terminal_external_status_never_reuses_payment_instructions(self):
+        for state in ('paid', 'review', 'expired'):
+            surface = self.presenter()._checkout_surface(CUSTOMER, CheckoutView(
+                state, rail='binance_pay', provider='manual', invoice_number='INV-OLD',
+                external={'mode': 'binance', 'receiver_value': 'OLD-RECEIVER'}))
+            self.assertNotIn('OLD-RECEIVER', surface.caption)
+            self.assertFalse(any(button.get('callback_data', '').startswith('checkout:hint:')
+                                 for button in buttons(surface)))
+
+    def test_hint_session_is_invalidated_by_root_generation_or_other_navigation(self):
+        gateway = FakeCheckout()
+        submitted = []
+        gateway.submit_hint = lambda *args, **kwargs: submitted.append(kwargs)
+        presenter = self.presenter(gateway)
+        state = {'payment_hint': {'payment_id': str(uuid4()), 'kind': 'order',
+                                 'chat_id': '41001', 'message_id': 7, 'generation': 2}}
+        root = SimpleNamespace(chat_id='41001', message_id=7, generation=3)
+        self.assertIsNone(presenter.payment_hint(CUSTOMER, 'lookup-only', state, root))
+        self.assertEqual(submitted, [])
+        self.assertNotIn('payment_hint', state)
+        state['payment_hint'] = {'payment_id': str(uuid4())}
+        presenter.route(CUSTOMER, 'product:2', state, root=ROOT, chat_id='41001')
+        self.assertNotIn('payment_hint', state)
+
+
 if __name__ == '__main__':
     unittest.main()

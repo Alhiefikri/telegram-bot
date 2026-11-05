@@ -42,6 +42,9 @@ def run():
     from tests.test_checkout_postgres import admin_connection
 
     fixtures = json.load(sys.stdin)
+    if os.environ.get('P14_EXTERNAL_SMOKE') == '1':
+        from tests.test_external_usdt_postgres import exercise_external_usdt
+        return exercise_external_usdt(fixtures)
     if os.environ.get('P13_QRIS_RAILS') == '1':
         from tests.test_qris_postgres import exercise_qris_rails
         return exercise_qris_rails(fixtures)

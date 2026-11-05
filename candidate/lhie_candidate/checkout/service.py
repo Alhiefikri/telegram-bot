@@ -54,7 +54,7 @@ class CheckoutResult:
 
 
 class CheckoutService:
-    """Single transaction owner for the experimental local-credential IDR slice."""
+    """Atomic local-credential checkout with immutable rail and pricing snapshots."""
 
     def __init__(self, *, using='default', preparation=None, reseller=False):
         self.db = Database(using)
@@ -150,7 +150,12 @@ class CheckoutService:
         plan = self.preparation.prepare(pricing, setting, preflight, now)
         if (plan.provider, plan.method) != (self.preparation.provider, self.preparation.method):
             raise CheckoutError('invalid_payment_plan')
-        if require_integer(plan.amount, minimum=1) != pricing.idr_total or plan.expires_at <= now:
+        external_usdt = (plan.provider == 'manual' and plan.method in ('BINANCE_PAY_ID', 'USDT_BEP20')
+                         and plan.currency == 'USDT' and plan.rail_snapshot is not None)
+        expected_amount = pricing.usdt_total if external_usdt else pricing.idr_total
+        if (require_integer(plan.amount, minimum=1) < (expected_amount or 0)
+                or (not external_usdt and (plan.currency != 'IDR' or plan.amount != expected_amount))
+                or (external_usdt and expected_amount is None) or plan.expires_at <= now):
             raise CheckoutError('invalid_payment_plan')
         if plan.balance_paid != is_balance or (is_balance and plan.method != 'STORE_BALANCE'):
             raise CheckoutError('invalid_payment_plan')
@@ -167,12 +172,19 @@ class CheckoutService:
              pricing.idr_total, plan.expires_at, request.terms_version,
              None if request.terms_accepted_at is None else request.terms_accepted_at.astimezone(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None),
              snapshot, now, now))
+        binance = plan.rail_snapshot if external_usdt and plan.method == 'BINANCE_PAY_ID' else None
         self.db.execute('''INSERT INTO public.payments
             (id,order_id,provider,merchant_ref,method,amount,currency,status,expired_at,
-             sakurupiah_channel,binance_verification_status,created_at,updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,'IDR','pending',%s,%s,'checking',%s,%s)''',
-            (payment_id, order_id, plan.provider, _reference('PAY', now), plan.method, plan.amount, plan.expires_at,
-             plan.sakurupiah_channel, now, now))
+             sakurupiah_channel,binance_auto_verification_enabled,binance_verification_mode,
+             binance_receiver_type,binance_receiver_value,binance_verification_status,created_at,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+            (payment_id, order_id, plan.provider, _reference('PAY', now), plan.method, plan.amount,
+             plan.currency, plan.expires_at, plan.sakurupiah_channel, binance is not None,
+             binance.mode if binance else 'amount_unique', binance.receiver_type if binance else None,
+             binance.receiver_value if binance else None,
+             'awaiting_submission' if binance and binance.mode == 'order_id' else 'checking', now, now))
+        if plan.rail_snapshot is not None and binance is None:
+            plan.rail_snapshot.persist(self.db, payment_id, now)
         for quote in pricing.quotes:
             product = products[quote.product_id]
             family = None
@@ -184,12 +196,15 @@ class CheckoutService:
             item = self.db.one('''INSERT INTO public.order_items
                 (order_id,product_id,product_name,product_icon,product_custom_emoji_id,family_id,family_name,
                  delivery_note,delivery_note_snapshotted,usage_guide_title,usage_guide_url,usage_guide_snapshotted,
-                 quantity,local_quantity,supplier_quantity,quantity_price_tier_minimum,unit_price,subtotal,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,true,%s,%s,true,%s,%s,0,%s,%s,%s,%s,%s) RETURNING id''',
+                 quantity,local_quantity,supplier_quantity,quantity_price_tier_minimum,unit_price,usdt_unit_price,
+                 subtotal,usdt_subtotal,created_at,updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,true,%s,%s,true,%s,%s,0,%s,%s,%s,%s,%s,%s,%s) RETURNING id''',
                 (order_id, quote.product_id, product['name'], icon, custom_emoji_id,
                  product.get('product_family_id'), family['name'] if family else None,
                  product.get('delivery_note'), product.get('usage_guide_title'), product.get('usage_guide_url'),
-                 quote.quantity, quote.quantity, quote.tier_minimum, quote.unit_price, quote.subtotal, now, now))
+                 quote.quantity, quote.quantity, quote.tier_minimum, quote.unit_price,
+                 quote.usdt_unit_price if external_usdt else None, quote.subtotal,
+                 quote.usdt_subtotal if external_usdt else None, now, now))
             self.inventory.allocate(item['id'], quote.product_id, quote.quantity)
             self.inventory.reserve(order_id, quote.product_id, quote.quantity)
         if is_balance:
@@ -210,11 +225,11 @@ class CheckoutService:
         cart = self.db.one('SELECT customer_id FROM public.carts WHERE id=%s', (request.cart_id,))
         if cart is None or cart['customer_id'] != request.customer_id:
             raise CheckoutError('foreign_cart')
-        payment = self.db.one('SELECT id,method FROM public.payments WHERE order_id=%s ORDER BY created_at,id LIMIT 1', (order['id'],))
+        payment = self.db.one('SELECT id,method,amount FROM public.payments WHERE order_id=%s ORDER BY created_at,id LIMIT 1', (order['id'],))
         if payment is None:
             raise CheckoutError('checkout_invariant')
         return CheckoutResult(str(order['id']), str(payment['id']), order['invoice_number'],
-                              order['order_status'], order['payment_status'], order['total_amount'], True)
+                              order['order_status'], order['payment_status'], payment['amount'], True)
 
     def _pricing(self, items, products, *, reseller=False):
         tiers = {}
@@ -227,11 +242,22 @@ class CheckoutService:
     def _setting(self, *, lock):
         suffix = ' FOR UPDATE' if lock else ''
         setting = self.db.one('''SELECT id,is_active,payment_provider_version,payment_mode,sakurupiah_channel,
-            qris_payment_ttl_minutes FROM public.manual_payment_settings
+            qris_payment_ttl_minutes,binance_pay_enabled,binance_payment_ttl_minutes,
+            binance_verification_mode,binance_receiver_type,binance_receiver_value,bsc_payment_enabled,
+            bsc_payment_ttl_minutes,bsc_min_confirmations,bsc_require_finalized_block,
+            bsc_confirmation_grace_minutes,updated_at,binance_order_id_compatibility_ready_at
+            FROM public.manual_payment_settings
             WHERE is_active=true ORDER BY id LIMIT 1''' + suffix)
-        return None if setting is None else PaymentSetting(setting['id'], setting['payment_provider_version'],
-            setting['is_active'], setting['payment_mode'], setting['sakurupiah_channel'],
-            max(1, setting['qris_payment_ttl_minutes'] or 10))
+        return None if setting is None else PaymentSetting(
+            setting['id'], setting['payment_provider_version'], setting['is_active'],
+            setting['payment_mode'], setting['sakurupiah_channel'],
+            max(1, setting['qris_payment_ttl_minutes'] or 10),
+            setting['binance_pay_enabled'], max(1, setting['binance_payment_ttl_minutes'] or 20),
+            setting['binance_verification_mode'], setting['binance_receiver_type'],
+            setting['binance_receiver_value'], setting['bsc_payment_enabled'],
+            max(1, setting['bsc_payment_ttl_minutes'] or 30), max(3, setting['bsc_min_confirmations'] or 3),
+            setting['bsc_require_finalized_block'], setting['bsc_confirmation_grace_minutes'],
+            setting['updated_at'], setting['binance_order_id_compatibility_ready_at'])
 
 
 def _reference(prefix, now):

@@ -5,11 +5,12 @@ CHECKOUT_INSERT = {
     'carts': set('customer_id origin status expires_at created_at updated_at'.split()),
     'cart_items': set('cart_id product_id quantity created_at updated_at'.split()),
     'orders': set('id customer_id cart_id checkout_key invoice_number order_status payment_status total_amount currency expires_at terms_version terms_accepted_at balance_checkout_snapshot created_at updated_at'.split()),
-    'payments': set('id order_id provider merchant_ref method amount currency status expired_at sakurupiah_channel binance_verification_status created_at updated_at'.split()),
-    'order_items': set('order_id product_id product_name product_icon product_custom_emoji_id family_id family_name delivery_note delivery_note_snapshotted usage_guide_title usage_guide_url usage_guide_snapshotted quantity local_quantity supplier_quantity quantity_price_tier_minimum unit_price subtotal created_at updated_at'.split()),
+    'payments': set('id order_id provider merchant_ref method amount currency status expired_at sakurupiah_channel binance_auto_verification_enabled binance_verification_mode binance_receiver_type binance_receiver_value binance_verification_status created_at updated_at'.split()),
+    'order_items': set('order_id product_id product_name product_icon product_custom_emoji_id family_id family_name delivery_note delivery_note_snapshotted usage_guide_title usage_guide_url usage_guide_snapshotted quantity local_quantity supplier_quantity quantity_price_tier_minimum unit_price usdt_unit_price subtotal usdt_subtotal created_at updated_at'.split()),
     'inventory_movements': set('product_id order_id type quantity stock_before became_unavailable notes created_at'.split()),
     'customer_balance_accounts': set('customer_id balance created_at updated_at'.split()),
     'store_balance_entries': set('customer_balance_account_id kind amount balance_after source_type source_id idempotency_key created_at refund_order_id'.split()),
+    'payment_bsc_details': set('payment_id receiver_id receiver_address chain_id token_contract token_decimals base_amount_micro payable_amount_micro expected_token_units verification_status verification_mode required_confirmations requires_finalized_block confirmation_grace_minutes created_at updated_at'.split()),
 }
 CHECKOUT_UPDATE = {
     'carts': {'status', 'updated_at'},
@@ -18,7 +19,8 @@ CHECKOUT_UPDATE = {
     'product_stock_items': {'order_item_id', 'retired_at', 'retired_reason', 'updated_at'},
     'customer_balance_accounts': {'balance', 'updated_at'},
     'orders': {'order_status', 'payment_status', 'updated_at'},
-    'payments': {'status', 'paid_at', 'updated_at'},
+    'payments': set('status paid_at updated_at binance_verification_status'.split()),
+    'bsc_payment_receivers': {'last_assigned_at'},
     # PostgreSQL row locking requires UPDATE on at least one column. No setting
     # value, guard state, identity, or version is writable by the candidate.
     'customer_usdt_funding_policies': {'updated_at'},
@@ -28,15 +30,20 @@ CHECKOUT_UPDATE = {
 }
 
 P08_INSERT = {
-    'payment_events': set('payment_id provider event_type merchant_ref provider_reference provider_status raw_payload idempotency_key received_at last_received_at received_count'.split()),
-    'external_money_receipts': set('canonical_key provider identity_kind account_namespace reference beneficiary currency amount_units decimals status target_type target_id fingerprint evidence_payload claimed_at created_at updated_at'.split()),
+    'payment_events': set('payment_id provider event_type merchant_ref provider_reference provider_status raw_payload idempotency_key received_at last_received_at received_count processed_at'.split()),
+    'external_money_receipts': set('canonical_key provider identity_kind account_namespace reference chain_id tx_hash log_index beneficiary currency amount_units decimals status target_type target_id fingerprint evidence_payload claimed_at created_at updated_at'.split()),
     'external_money_receipt_aliases': set('external_money_receipt_id alias_key alias_type created_at'.split()),
+    'external_money_receipt_parent_claims': set('chain_id tx_hash external_money_receipt_id status target_type target_id created_at updated_at'.split()),
+    'external_money_receipt_reservations': set('source legacy_type legacy_id provider reason details reserved_at created_at updated_at'.split()),
+    'bsc_payment_transfer_evidence': set('payment_id tx_hash token_contract receiver_address from_address amount_units block_number block_hash block_timestamp receipt_status log_index confirmations verification_status evidence_payload first_seen_at last_verified_at created_at updated_at'.split()),
     'manual_fulfillment_reviews': set('order_id payment_id amount currency reason state provider_reference created_at updated_at'.split()),
 }
 P08_UPDATE = {
     'payment_events': {'payment_id', 'last_received_at', 'received_count', 'processed_at'},
-    'external_money_receipts': {'updated_at'},
-    'payments': set('provider_reference provider_total_payment provider_fee provider_expires_at provider_payment_method provider_presentation provider_create_state provider_create_attempted_at provider_create_last_error provider_payload provider_qris_url provider_created_at klikqris_transaction_signature klikqris_status_failure_count klikqris_status_next_check_at klikqris_status_last_error payment_proof_file_id payment_proof_submitted_at payment_proof_admin_chat_id updated_at'.split()),
+    'external_money_receipts': {'updated_at', 'status', 'review_reason', 'claimed_at'},
+    'external_money_receipt_parent_claims': {'status', 'review_reason', 'updated_at'},
+    'payments': set('provider_reference provider_total_payment provider_fee provider_expires_at provider_payment_method provider_presentation provider_create_state provider_create_attempted_at provider_create_last_error provider_payload provider_qris_url provider_created_at klikqris_transaction_signature klikqris_status_failure_count klikqris_status_next_check_at klikqris_status_last_error payment_proof_file_id payment_proof_submitted_at payment_proof_admin_chat_id binance_order_id binance_order_id_attempts binance_order_id_submission_version binance_order_id_submitted_at binance_verification_grace_until binance_verification_status binance_last_verified_at expired_at updated_at'.split()),
+    'payment_bsc_details': set('current_tx_hash tx_submission_version tx_attempts verification_status last_verified_at current_confirmations current_block_number current_from_address evidence_payload verification_grace_until updated_at'.split()),
     'provider_cancellation_attempts': set('state attempt_count provider_response last_error started_at finished_at updated_at'.split()),
 }
 
@@ -150,6 +157,12 @@ def verify_public_writes(cursor):
     if cursor.fetchone()[0]:
         allowed_update = _merge(allowed_update, {'manual_payment_settings':
             {'payment_mode', 'payment_provider_version', 'is_active', 'sakurupiah_channel', 'updated_at'}})
+    cursor.execute("SELECT has_column_privilege(current_user,'public.manual_payment_settings','binance_receiver_value','UPDATE')")
+    if cursor.fetchone()[0]:
+        allowed_update = _merge(allowed_update, {
+            'manual_payment_settings': {'binance_receiver_type', 'binance_receiver_value',
+                                        'payment_provider_version', 'updated_at'},
+            'users': {'updated_at'}})
     cursor.execute("SELECT has_column_privilege(current_user,'public.customer_auth_tokens','token_hash','INSERT')")
     auth = cursor.fetchone()[0]
     if auth:

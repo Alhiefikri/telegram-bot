@@ -24,6 +24,8 @@ class PaymentHandler:
         self._sweep_start = 0
         self._payment_cursors = {"hints": None, "ambiguous": None, "expiry": None}
         self._payment_cursors.update(active=None)
+        self.external_methods = tuple(getattr(lifecycle, 'external_lifecycles', {}))
+        self._payment_cursors['external'] = None
         self.providers = tuple(getattr(lifecycle, 'lifecycles', {'sakurupiah': lifecycle}))
         self.cancellations = None
         pakasir = getattr(lifecycle, 'lifecycles', {}).get('pakasir')
@@ -108,6 +110,35 @@ class PaymentHandler:
                  AND NOT EXISTS (SELECT 1 FROM public.manual_fulfillment_reviews r
                      WHERE r.order_id=o.id AND r.state IN ('pending','refund_uncertain'))""",
             (list(self.providers), _now(), _now()), limit)
+
+    def _external_payments(self, limit):
+        if not self.external_methods:
+            return []
+        return self._payment_page(
+            'external',
+            """SELECT p.id FROM public.payments p JOIN public.orders o ON o.id=p.order_id
+               LEFT JOIN public.payment_bsc_details d ON d.payment_id=p.id
+               WHERE p.provider='manual' AND p.method=ANY(%s) AND p.currency='USDT'
+                 AND p.status='pending' AND o.order_status='pending_payment' AND o.payment_status='pending'
+                 AND ((p.method='BINANCE_PAY_ID' AND p.binance_auto_verification_enabled
+                   AND p.provider_reference IS NULL
+                   AND ((p.binance_verification_mode='amount_unique' AND p.expired_at>%s)
+                     OR (p.binance_verification_mode='order_id' AND p.binance_order_id IS NOT NULL
+                       AND p.binance_verification_status IN ('awaiting_submission','checking','not_found','provider_error')
+                       AND p.binance_verification_grace_until>%s))
+                   AND (p.binance_last_verified_at IS NULL OR p.binance_last_verified_at<=%s - interval '30 seconds'))
+                  OR (p.method='USDT_BEP20'
+                   AND (d.verification_mode='amount_unique'
+                     OR (d.verification_mode='transaction_hash' AND d.current_tx_hash IS NOT NULL))
+                   AND d.verification_status NOT IN ('confirmed','expired','manual_review','mismatch','transaction_already_used')
+                   AND (d.last_verified_at IS NULL OR d.last_verified_at<=%s -
+                     CASE WHEN d.verification_status='provider_error' THEN interval '5 minutes' ELSE interval '1 minute' END)))
+                 AND NOT EXISTS (SELECT 1 FROM public.manual_fulfillment_reviews r
+                     WHERE r.order_id=o.id AND r.state IN ('pending','refund_uncertain'))""",
+            (list(self.external_methods), _now(), _now(), _now(), _now()), limit)
+
+    def _external_reconcile(self, payment_id):
+        return getattr(self.lifecycle, 'refresh_background', self.lifecycle.refresh)(payment_id)
 
     def _reconcile(self, payment_id):
         payment = self.db.one('SELECT provider,merchant_ref FROM public.payments WHERE id=%s', (payment_id,))
@@ -216,6 +247,8 @@ class PaymentHandler:
             iter(payments("active", self._active_payments, self._reconcile)),
             iter(cancellations()),
         ]
+        if self.external_methods:
+            phases.append(iter(payments("external", self._external_payments, self._external_reconcile)))
         start = self._sweep_start
         self._sweep_start = (start + 1) % len(phases)
         phases = phases[start:] + phases[:start]

@@ -10,7 +10,7 @@ GRANT SELECT (id,customer_id,cart_id,checkout_key,invoice_number,order_status,pa
     ON public.orders TO candidate_runtime;
 GRANT SELECT (id,order_id,provider,method,amount,currency,status,paid_at,created_at)
     ON public.payments TO candidate_runtime;
-GRANT SELECT (id,order_id,product_id,quantity,local_quantity,supplier_quantity,unit_price,subtotal,quantity_price_tier_minimum)
+GRANT SELECT (id,order_id,product_id,product_name,quantity,local_quantity,supplier_quantity,unit_price,subtotal,quantity_price_tier_minimum)
     ON public.order_items TO candidate_runtime;
 GRANT SELECT (id,product_id,order_item_id,supplier_purchase_id,supplier_unit_index,retired_at,retired_reason,
     credential_format,secret,credential_payload) ON public.product_stock_items TO candidate_runtime;
@@ -33,7 +33,9 @@ GRANT INSERT (customer_id,origin,status,expires_at,created_at,updated_at)
 GRANT INSERT (cart_id,product_id,quantity,created_at,updated_at)
     ON public.cart_items TO candidate_runtime;
 GRANT INSERT (id,order_id,provider,merchant_ref,method,amount,currency,status,expired_at,
-    sakurupiah_channel,binance_verification_status,created_at,updated_at) ON public.payments TO candidate_runtime;
+    sakurupiah_channel,binance_auto_verification_enabled,binance_verification_mode,
+    binance_receiver_type,binance_receiver_value,binance_verification_status,created_at,updated_at)
+    ON public.payments TO candidate_runtime;
 GRANT INSERT (order_id,product_id,product_name,product_icon,product_custom_emoji_id,family_id,family_name,
     delivery_note,delivery_note_snapshotted,usage_guide_title,usage_guide_url,usage_guide_snapshotted,
     quantity,local_quantity,supplier_quantity,quantity_price_tier_minimum,unit_price,subtotal,created_at,updated_at)
@@ -127,3 +129,22 @@ GRANT UPDATE (updated_at) ON public.supplier_account_units,public.order_items TO
 GRANT UPDATE (refunded_quantity,last_error) ON public.supplier_fulfillments TO candidate_runtime;
 GRANT USAGE ON SEQUENCE public.customer_usdt_balance_entries_id_seq,
     public.customer_usdt_balance_accounting_events_id_seq TO candidate_runtime;
+
+-- Public receiving settings are independent of signing/API credentials.
+GRANT SELECT (binance_pay_enabled,binance_payment_ttl_minutes,binance_verification_mode,
+    binance_receiver_type,binance_receiver_value,bsc_payment_enabled,bsc_payment_ttl_minutes,
+    bsc_min_confirmations,bsc_require_finalized_block,bsc_confirmation_grace_minutes,updated_at,
+    binance_order_id_compatibility_ready_at)
+    ON public.manual_payment_settings TO candidate_runtime;
+GRANT SELECT ON public.payment_bsc_details TO candidate_runtime;
+GRANT SELECT (id,address_normalized,chain_id,token_contract,token_decimals,address_claim_id,
+    verification_status,verified_at,is_active,last_assigned_at) ON public.bsc_payment_receivers TO candidate_runtime;
+GRANT SELECT (id,channel,chain_id,address_normalized) ON public.usdt_receiver_address_claims TO candidate_runtime;
+GRANT SELECT (rail,state,expires_at,payable_micro) ON public.customer_usdt_funding_intents TO candidate_runtime;
+GRANT SELECT (rail,created_at,payable_micro) ON public.customer_usdt_top_ups TO candidate_runtime;
+GRANT INSERT (payment_id,receiver_id,receiver_address,chain_id,token_contract,token_decimals,
+    base_amount_micro,payable_amount_micro,expected_token_units,verification_status,verification_mode,
+    required_confirmations,requires_finalized_block,confirmation_grace_minutes,created_at,updated_at)
+    ON public.payment_bsc_details TO candidate_runtime;
+GRANT UPDATE (last_assigned_at) ON public.bsc_payment_receivers TO candidate_runtime;
+GRANT INSERT (usdt_unit_price,usdt_subtotal) ON public.order_items TO candidate_runtime;

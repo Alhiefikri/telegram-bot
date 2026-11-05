@@ -37,8 +37,9 @@ _BALANCE_ACTIVITY = re.compile(r'balance:a:(o|n):([A-Za-z0-9_-]{25,})')
 _BALANCE_DETAIL = re.compile(r'balance:a:d:([A-Za-z0-9_-]{25,})')
 _FUNDING_INTENT = re.compile(r'balance:(confirm|cancel|back):([a-f0-9]{32})\Z')
 _FUNDING_TOPUP = re.compile(r'balance:topup:([1-9][0-9]{0,18}):(check|retry)\Z')
-_CHECKOUT_PAY = re.compile(r'detail:pay:(qris|balance):([1-9][0-9]*):([A-Za-z0-9_-]+)\Z')
+_CHECKOUT_PAY = re.compile(r'detail:pay:(qris|balance|binance|binance_pay|bsc):([1-9][0-9]*):([A-Za-z0-9_-]+)\Z')
 _CHECKOUT_CHECK = re.compile(r'checkout:check:([0-9a-fA-F-]{36})\Z')
+_CHECKOUT_HINT = re.compile(r'checkout:hint:(order|hash):([0-9a-fA-F-]{36})\Z')
 _BALANCE_KINDS = {
     'admin_adjustment_credit': ('balance.activity.kind.adjustment', 1),
     'admin_adjustment_reversal': ('balance.activity.kind.adjustment_reversal', -1),
@@ -631,6 +632,8 @@ class CatalogPresenter:
                     and _qr_image_url(view.qris_url, provider, environment, hosts) else None)
         checkout_url = (view.checkout_url if view.state == 'pending'
                         and _checkout_url(view.checkout_url, provider, environment) else None)
+        if getattr(view, 'rail', None) in ('binance_pay', 'bsc'):
+            return self._external_checkout_surface(customer, view, product=product, quantity=quantity)
         if view.state == 'pending':
             if provider == 'manual':
                 lines = [
@@ -767,6 +770,112 @@ class CatalogPresenter:
                                   surface.locale, surface.options)
         return surface
 
+    def _external_checkout_surface(self, customer, view, *, product=None, quantity=None):
+        snapshot = getattr(view, 'external', None) or {}
+        lines, rows = [], []
+        if view.state in ('hint_order', 'hint_hash'):
+            key = 'payment.binance.order_id_prompt' if view.state == 'hint_order' else 'payment.bsc.hash_prompt'
+            lines = [self.t_html(customer, key)]
+            outcome = snapshot.get('hint_outcome')
+            error_key = ({
+                'invalid': 'payment.binance.order_id_invalid',
+                'limit': 'payment.binance.max_order_ids',
+                'manual': 'payment.binance.manual_fallback',
+            } if view.state == 'hint_order' else {
+                'invalid_hash': 'payment.bsc.hash_invalid',
+                'submission_limit': 'payment.bsc.hash_limit',
+            }).get(outcome)
+            if error_key:
+                lines.insert(0, self.t_html(customer, error_key, invoice=view.invoice_number or ''))
+        elif view.state == 'pending' and snapshot:
+            items = (product['name'] + ' × ' + str(quantity)
+                     if product is not None and quantity is not None else snapshot.get('items', ''))
+            amount = usdt(view.amount)
+            if view.rail == 'binance_pay':
+                label = 'BINANCE UID' if snapshot.get('receiver_type') == 'uid' else 'BINANCE PAY ID'
+                verification_mode = snapshot.get('verification_mode', 'amount_unique')
+                mode = verification_mode if snapshot.get('auto_verification_enabled', True) else 'manual'
+                lines = [self.t_html(customer, 'payment.binance.' + mode,
+                    invoice=view.invoice_number or '', items=items, amount=amount,
+                    receiver_label=label, receiver=snapshot.get('receiver_value', ''),
+                    receiver_instruction=label)]
+                lines.append(self.t_html(customer, 'payment.binance.text_fallback'))
+                status = snapshot.get('verification_status')
+                if status == 'mismatch':
+                    lines.append(self.t_html(customer, 'payment.binance.manual_review', invoice=view.invoice_number or ''))
+                elif status in ('provider_error', 'checking', 'not_found') and snapshot.get('order_id_submitted'):
+                    lines.append(self.t_html(customer, 'payment.binance.not_found_order_id', invoice=view.invoice_number or ''))
+                if mode == 'order_id':
+                    rows.append([self._legacy_button(customer, 'payment.action.paid',
+                        f'checkout:hint:order:{view.payment_id}')])
+            else:
+                mode = snapshot.get('verification_mode')
+                key = 'payment.bsc.instructions_auto' if mode == 'amount_unique' else 'payment.bsc.instructions'
+                lines = [self.t_html(customer, key, invoice=view.invoice_number or '', items=items,
+                    amount=amount, address=snapshot.get('receiver_address', ''),
+                    ttl=snapshot.get('ttl_minutes', ''),
+                    deadline=self._funding_date(customer, view.expires_at) if view.expires_at else self.t(customer, 'payment.bsc.deadline_default'),
+                    confirmations=snapshot.get('required_confirmations', ''),
+                    current_confirmations=snapshot.get('confirmations', 0))]
+                if snapshot.get('verification_status') == 'confirming':
+                    lines.append(self.t_html(customer, 'payment.bsc.confirming',
+                        confirmations=snapshot.get('confirmations') or 0,
+                        required=snapshot.get('required_confirmations', '')))
+                elif snapshot.get('verification_status') == 'provider_error':
+                    lines.append(self.t_html(customer, 'payment.bsc.provider_error'))
+                if mode != 'amount_unique':
+                    rows.append([self._legacy_button(customer, 'payment.bsc.submit_hash',
+                        f'checkout:hint:hash:{view.payment_id}')])
+            if view.expires_at is not None and view.rail == 'binance_pay':
+                lines.append(self.t_html(customer, 'payment.manual.deadline_short',
+                                         date=self._funding_date(customer, view.expires_at)))
+            receiver = snapshot.get('receiver_value') if view.rail == 'binance_pay' else snapshot.get('receiver_address')
+            if receiver:
+                escaped_receiver = escape(str(receiver))
+                lines[0] = lines[0].replace('\n' + escaped_receiver + '\n',
+                                          '\n<code>' + escaped_receiver + '</code>\n')
+            lines[0] = lines[0].replace('\n' + escape(amount) + ' USDT',
+                                      '\n<code>' + escape(amount) + '</code> USDT')
+            if view.order_id:
+                rows.append([self._legacy_button(customer, 'payment.action.cancel',
+                             f'buyer:cancel-pending:{view.order_id}')])
+        elif view.state == 'paid':
+            lines = [self.t_html(customer, 'order.guidance.processing')]
+        elif view.state == 'review':
+            key = 'payment.bsc.manual_review' if view.rail == 'bsc' else 'payment.binance.manual_review'
+            lines = [self.t_html(customer, key, invoice=view.invoice_number or '')]
+        elif view.state in ('expired', 'cancelled'):
+            key = ('payment.cancel.success' if view.state == 'cancelled' else
+                   'payment.bsc.expired' if view.rail == 'bsc' else 'storefront.invoice.terminal.expired.binance')
+            lines = [self.t_html(customer, key, invoice=view.invoice_number or '')]
+        elif view.state == 'provider_unavailable':
+            lines = [self.t_html(customer, 'checkout.recovery.configuration_invalid')]
+        else:
+            lines = [self.t_html(customer, 'order.refresh.pending')]
+        if view.invoice_number and not (view.state == 'pending' and snapshot):
+            lines.append(self.t_html(customer, 'payment.invoice', invoice=view.invoice_number))
+        if view.payment_id and view.state not in ('paid', 'cancelled'):
+            rows.append([self._legacy_button(customer, 'payment.action.check',
+                                             f'checkout:check:{view.payment_id}')])
+        rows.append([self._button(customer, 'checkout.orders_button', 'menu:orders', slot='menu.orders')])
+        rows.append(self._navigation_row(customer))
+        return self._surface(customer, '\n'.join(lines), rows, screen='checkout')
+
+    def payment_hint(self, customer, text, state, root):
+        hint = state.get('payment_hint') or {}
+        if not self._checkout_ready() or not hint:
+            return None
+        if (str(getattr(root, 'chat_id', '')) != hint.get('chat_id')
+                or getattr(root, 'message_id', None) != hint.get('message_id')
+                or getattr(root, 'generation', None) != hint.get('generation')):
+            state.pop('payment_hint', None)
+            return None
+        view = self.checkout.submit_hint(customer, root, payment_id=hint['payment_id'],
+                                         kind=hint['kind'], candidate=text)
+        if not view.state.startswith('hint_'):
+            state.pop('payment_hint', None)
+        return self._checkout_surface(customer, view)
+
     def _pay_detail(self, customer, rail, product_id, token, state, root, chat_id):
         self.callback_handled = True
         selection = state.get('selection') or {}
@@ -776,6 +885,16 @@ class CatalogPresenter:
                 or selection.get('locale') != locale(customer)):
             self.callback_notice = plain(self.t(customer, 'catalog.selection.stale'))
             return None
+        if rail == 'binance':
+            rows = [
+                [self._legacy_button(customer, 'checkout.payment.binance_pay_id',
+                                     f'detail:pay:binance_pay:{product_id}:{token}')],
+                [self._legacy_button(customer, 'checkout.payment.usdt_bep20',
+                                     f'detail:pay:bsc:{product_id}:{token}')],
+                [self._button(customer, 'menu.back', f'product:{product_id}', slot='menu.back')],
+            ]
+            return self._surface(customer, self.t_html(customer, 'checkout.payment.binance_selector'),
+                                 rows, screen='checkout')
         if not self._checkout_ready():
             state.pop('selection', None)
             self.callback_notice = plain(
@@ -814,8 +933,14 @@ class CatalogPresenter:
             'provider_unavailable': 'checkout.recovery.configuration_invalid',
         }
         key = notices.get(view.state)
+        if view.rail in ('binance_pay', 'bsc'):
+            prefix = 'payment.bsc.' if view.rail == 'bsc' else 'payment.binance.'
+            if view.state == 'review':
+                key = prefix + 'manual_review'
+            elif view.state == 'expired':
+                key = prefix + ('expired' if view.rail == 'bsc' else 'grace_expired')
         if key:
-            self.callback_notice = plain(self.t(customer, key))
+            self.callback_notice = plain(self.t(customer, key, invoice=view.invoice_number or ''))
         return self._checkout_surface(customer, view)
 
     def _token_key(self):
@@ -1293,7 +1418,9 @@ class CatalogPresenter:
             maintenance = flags['maintenance'] if maintenance is None else maintenance
             spending = flags['spending_available'] if spending is None else spending
         notice = self._maintenance(customer, maintenance)
-        dual = bool(not notice and can_select and quote['dollar_total'] is not None and self.dollar_rail_selectable)
+        dual = bool(not notice and can_select and quote['dollar_total'] is not None
+                    and (self.dollar_rail_selectable() if callable(self.dollar_rail_selectable)
+                         else self.dollar_rail_selectable))
         def price_line(key, amount, dollars=None, **values):
             return html_text(self.t(customer,key + ('_dual' if dual else ''),amount=number(amount),
                                     usdt=usdt(dollars) if dollars is not None else '',**values))
@@ -1367,7 +1494,7 @@ class CatalogPresenter:
                     rows.append([self._button(customer,'catalog.detail.pay_balance',f'detail:pay:balance:{product_id}:{token}',slot='menu.balance')])
                 if dual:
                     rows.append([{'text':self.t(customer,'catalog.detail.pay_binance',amount=usdt(quote['dollar_total'])),
-                                  'callback_data':f'detail:pay:binance:{product_id}:{token}'}])
+                                  'callback_data':f'detail:pay:binance:{product_id}:{token}','style':'primary'}])
             rows.append([self._button(customer,'catalog.detail.back_products',f'detail:back:{product_id}:{token}',slot='menu.back')])
         else:
             if notice:
@@ -1439,6 +1566,8 @@ class CatalogPresenter:
         self._icon_rows = None
         self.callback_handled = False
         self.callback_notice = None
+        if not data.startswith('checkout:hint:'):
+            state.pop('payment_hint', None)
         if data in ('menu','home','start','/start','/menu','menu:home','menu:back','family:back:menu'):
             state.clear()
             return self.home(customer)
@@ -1482,6 +1611,18 @@ class CatalogPresenter:
         match = _CHECKOUT_CHECK.fullmatch(data)
         if match:
             return self._check_payment(customer, match[1], root)
+        match = _CHECKOUT_HINT.fullmatch(data)
+        if match and self._checkout_ready():
+            self.callback_handled = True
+            kind, payment_id = match.groups()
+            view = self.checkout.hint_prompt(customer, root, payment_id=payment_id, kind=kind)
+            if view.state == 'stale':
+                self.callback_notice = plain(self.t(customer, 'checkout.payment.selector_stale'))
+                return None
+            state['payment_hint'] = {'payment_id': payment_id, 'kind': kind,
+                'chat_id': str(getattr(root, 'chat_id', '')), 'message_id': getattr(root, 'message_id', None),
+                'generation': getattr(root, 'generation', None)}
+            return self._checkout_surface(customer, view)
         match = re.fullmatch(r'manual:paid:([0-9a-fA-F-]{36})', data)
         if match and self.checkout is not None:
             self.callback_handled = True

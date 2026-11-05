@@ -6,13 +6,34 @@ from django.db import connection
 from .customers import resolve_customer
 
 _PAYMENT_CALLBACK = ("(COALESCE(payload #>> '{callback_query,data}', '') LIKE 'detail:pay:%%' "
-                     "OR COALESCE(payload #>> '{callback_query,data}', '') LIKE 'checkout:check:%%')")
+                     "OR COALESCE(payload #>> '{callback_query,data}', '') LIKE 'checkout:check:%%' "
+                     "OR COALESCE(payload #>> '{callback_query,data}', '') LIKE 'checkout:hint:%%' "
+                     "OR (payload ? 'message' AND EXISTS ("
+                     "SELECT 1 FROM public.customers hint_customer "
+                     "JOIN django_candidate.navigation_sessions hint_session "
+                     "ON hint_session.customer_id=hint_customer.id "
+                     "WHERE hint_customer.telegram_id::text=payload #>> '{message,from,id}' "
+                     "AND jsonb_typeof(hint_session.state->'payment_hint')='object')))")
 
 
 def payment_callback(payload):
     callback = payload.get("callback_query")
     data = callback.get("data") if isinstance(callback, dict) else None
-    return isinstance(data, str) and data.startswith(("detail:pay:", "checkout:check:"))
+    return isinstance(data, str) and data.startswith(("detail:pay:", "checkout:check:", "checkout:hint:"))
+
+
+def payment_update(payload):
+    if payment_callback(payload):
+        return True
+    message = payload.get('message')
+    if type(message) is not dict or type(message.get('from')) is not dict:
+        return False
+    with connection.cursor() as cursor:
+        cursor.execute('''SELECT EXISTS (SELECT 1 FROM public.customers c
+            JOIN django_candidate.navigation_sessions s ON s.customer_id=c.id
+            WHERE c.telegram_id=%s AND jsonb_typeof(s.state->'payment_hint')='object')''',
+            [message['from']['id']])
+        return cursor.fetchone()[0]
 
 
 def _family_filter(family):
@@ -154,6 +175,11 @@ class NavigationProcessor:
             elif (state.get("selection") or {}).get("mode") == "awaiting_custom_quantity":
                 data = "quantity:input"
                 surface = self.presenter.quantity_input(customer, source.get("text", ""), state)
+            elif state.get("payment_hint"):
+                data = "checkout:hint:input"
+                if command in ("/batal", "/cancel"):
+                    state.pop("payment_hint", None)
+                    surface = self.presenter.home(customer)
             elif command.startswith("/deposit"):
                 data = "balance:deposit"
                 surface = self.presenter.funding_deposit(
@@ -169,12 +195,13 @@ class NavigationProcessor:
                     or selection.get("interaction_token") != match[3]
                     or selection.get("locale") != locale(customer)):
                 return self._feedback(customer, callback, "stale")
-        elif callback and data.startswith("checkout:check:"):
+        elif callback and data.startswith(("checkout:check:", "checkout:hint:")):
             from uuid import UUID
-            from .presentation import _CHECKOUT_CHECK
+            from .presentation import _CHECKOUT_CHECK, _CHECKOUT_HINT
             match = _CHECKOUT_CHECK.fullmatch(data)
+            hint_match = _CHECKOUT_HINT.fullmatch(data)
             try:
-                payment_id = UUID(match[1]) if match else None
+                payment_id = UUID(match[1] if match else hint_match[2]) if (match or hint_match) else None
             except ValueError:
                 payment_id = None
             if payment_id is None:
@@ -187,12 +214,15 @@ class NavigationProcessor:
                 if not cursor.fetchone()[0]:
                     return self._feedback(customer, callback, "stale")
         if surface is None:
-            if callback and payment_callback(payload):
+            if (callback and payment_callback(payload)) or data == "checkout:hint:input":
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT pg_advisory_unlock(%s)", [chat["id"]])
                 try:
-                    surface = self.presenter.route(customer, data, state,
-                                                   root=root, chat_id=str(chat["id"]))
+                    if data == "checkout:hint:input":
+                        surface = self.presenter.payment_hint(customer, source.get("text", ""), state, root)
+                    else:
+                        surface = self.presenter.route(customer, data, state,
+                                                       root=root, chat_id=str(chat["id"]))
                 finally:
                     with connection.cursor() as cursor:
                         cursor.execute("SELECT pg_advisory_lock(%s)", [chat["id"]])
@@ -232,6 +262,13 @@ class NavigationProcessor:
             outcome = self.roots.render(customer, root, str(chat["id"]), surface,
                                         refresh=bool(callback and data == "catalog:refresh"))
         if outcome in ("applied", "replaced", "established"):
+            if state.get("payment_hint"):
+                current_root = self.roots.current_for_chat(customer, str(chat["id"]))
+                if current_root is None:
+                    state.pop("payment_hint", None)
+                else:
+                    state["payment_hint"].update(chat_id=current_root.chat_id,
+                        message_id=current_root.message_id, generation=current_root.generation)
             with connection.cursor() as cursor:
                 cursor.execute("INSERT INTO django_candidate.navigation_sessions (customer_id,state) VALUES (%s,%s::jsonb) "
                                "ON CONFLICT (customer_id) DO UPDATE SET state=EXCLUDED.state",

@@ -130,6 +130,21 @@ reuses P12 lifecycle and global receipt claims; Pakasir remains historical-only.
 `.local/migration-p13/verification.json`. Production and new external adapters
 remain absent from default composition; fixture success does not qualify them.
 
+P14 [Binance Pay and BSC USDT checkout](../migration/python-django/p05/README.md#p14-binance-pay-and-bsc-usdt-checkout-verification-697)
+owns `payments/binance.py`, `bsc.py`, `receiving.py` and
+`checkout/external_usdt.py`. IDR Order economics and micro-USDT Payment/item
+snapshots remain distinct. New receiving settings are database-backed; existing
+Payments retain their receiver, mode, deadlines and BSC policy. Binance snapshot
+columns are insert-only for the runtime role. Provider/RPC observations happen
+outside locks, then use the existing receipt/alias/parent registry and P12
+lifecycle. Outages stay unresolved; terminal money enters review without sale.
+Payment-worker sweeps recover configured rails, and root-bound text hints stay
+on that worker instead of blocking interaction. `smoke_qris.py --external`
+extends the existing runner with `.local/migration-p14/verification.json`,
+including real PostgreSQL settlement/reversed-alias races and receipt delivery.
+Default composition admits neither external adapter nor USDT funding. Live
+qualification, actual history and dashboard composition retain H2/HD/P23 owners.
+
 P19 [authentication and ownership compatibility](../migration/python-django/p05/README.md#p19-authentication-identity-linking-and-ownership-compatibility-695)
 owns `candidate/lhie_candidate/auth/`: Customer password/verification/OTP/reset/
 magic-link authority, canonical Google/Telegram claims, independent admin guards,
