@@ -168,6 +168,20 @@ AUTH_UPDATE = {
     'orders': {'customer_id', 'updated_at'},
 }
 
+API_INSERT = {
+    'customer_api_credentials': set('customer_id selector secret_digest created_at'.split()),
+    'customer_api_usage': {'customer_id', 'request_count'},
+    'customer_api_order_claims': set('customer_id operation idempotency_key fingerprint credential_id state attempt_token lease_expires_at preference preference_source product_id quantity expected_idr_total expected_usd_total_micro created_at updated_at'.split()),
+    'orders': {'api_order_claim_id'},
+}
+API_UPDATE = {
+    'customers': {'balance_payment_preference'},
+    'customer_api_credentials': set('revoked_at rotation_digest rotation_message_id rotation_expires_at last_used_at'.split()),
+    'customer_api_usage': {'request_count', 'last_used_at'},
+    'customer_api_settings': {'updated_at'},
+    'customer_api_order_claims': set('state order_id attempt_token lease_expires_at updated_at'.split()),
+}
+
 
 def _merge(*mappings):
     merged = {}
@@ -233,6 +247,10 @@ def verify_public_writes(cursor):
     if auth:
         allowed_insert = _merge(allowed_insert, AUTH_INSERT)
         allowed_update = _merge(allowed_update, AUTH_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.customer_api_credentials','secret_digest','INSERT')")
+    if cursor.fetchone()[0]:
+        allowed_insert = _merge(allowed_insert, API_INSERT)
+        allowed_update = _merge(allowed_update, API_UPDATE)
     cursor.execute('''SELECT c.relname FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p')

@@ -35,13 +35,14 @@ def main():
     supplier = sys.argv[1:] == ['--supplier']
     p16 = sys.argv[1:] == ['--p16']
     p17 = sys.argv[1:] == ['--p17']
-    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth'], ['--supplier'], ['--p16'], ['--p17']):
-        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth|--supplier|--p16|--p17]')
+    api = sys.argv[1:] == ['--api']
+    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth'], ['--supplier'], ['--p16'], ['--p17'], ['--api']):
+        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth|--supplier|--p16|--p17|--api]')
     os.umask(0o077)
-    scope = 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
+    scope = 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
     harness.STATE = ROOT / '.local' / scope / 'lifecycle'
-    harness.PREFIX = 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
-    harness.IMAGE = 'lhie-p19-boundary:local' if auth else 'lhie-p09-boundary:local' if receipt or lifecycle or supplier or p16 or p17 else 'lhie-p01-boundary:1'
+    harness.PREFIX = 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
+    harness.IMAGE = 'lhie-p19-boundary:local' if auth or api else 'lhie-p09-boundary:local' if receipt or lifecycle or supplier or p16 or p17 else 'lhie-p01-boundary:1'
     if not (harness.STATE / 'candidate/config.json').exists():
         cli('init','candidate')
     config = harness.validate(json.loads((harness.STATE / 'candidate/config.json').read_text()))
@@ -59,7 +60,7 @@ def main():
         database = container('candidate','database')
         php(boundary,'php artisan migrate --force --no-interaction')
         fixture = (ROOT / 'tools/migration_harness/checkout_fixture.php').read_text().removeprefix('<?php')
-        fixtures = json.loads(php(boundary, ('P17_USDT_SMOKE=1 ' if p17 else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
+        fixtures = json.loads(php(boundary, ('P20_API_SMOKE=1 P16_USDT_SMOKE=1 ' if api else 'P17_USDT_SMOKE=1 ' if p17 else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
         if receipt:
             customer_id = int(fixtures['python']['customer_id'])
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
@@ -67,9 +68,9 @@ def main():
         schema = '\n'.join((ROOT / 'candidate/lhie_candidate/navigation' / name).read_text()
             for name in ('schema.sql','ingress_schema.sql','assets_schema.sql','grants.sql'))
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/checkout/grants.sql').read_text()
-        if lifecycle or supplier or p16 or p17:
+        if lifecycle or supplier or p16 or p17 or api:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
-        if receipt or lifecycle or supplier or p16 or p17:
+        if receipt or lifecycle or supplier or p16 or p17 or api:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
         if p16 or p17:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/grants.sql').read_text()
@@ -78,18 +79,22 @@ def main():
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/operations_grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/adjustments/grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/schema.sql').read_text()
-        if supplier:
+        if supplier or api:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/grants.sql').read_text()
+        if supplier:
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
                 '-c',"CREATE ROLE candidate_supplier_operator LOGIN PASSWORD 'candidate-local-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS")
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/operator_grants.sql').read_text()
         if auth:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/schema.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/grants.sql').read_text()
+        if api:
+            schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/customer_api' / name).read_text()
+                                       for name in ('credential_grants.sql','orders_grants.sql','reads_grants.sql'))
         docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable','-c',schema)
         directory = harness.STATE / 'candidate'
         oracle_key = directory / 'p09-oracle-key'
-        if receipt or lifecycle or auth or supplier or p16 or p17:
+        if receipt or lifecycle or auth or supplier or p16 or p17 or api:
             oracle_key.write_text('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n')
             oracle_key.chmod(0o600)
         command = ['docker','run','--rm','-i','--network','container:'+boundary,
@@ -99,7 +104,7 @@ def main():
             '--mount',f'type=bind,src={ROOT / "candidate"},dst=/opt/candidate,readonly',
             '--mount',f'type=bind,src={directory / "candidate.json"},dst=/run/harness/candidate.json,readonly',
             '--mount',f'type=bind,src={directory / "django-key"},dst=/run/harness/django-key,readonly',
-            '--mount',f'type=bind,src={oracle_key if receipt or lifecycle or auth or supplier or p16 or p17 else directory / "app-key"},dst=/run/harness/app-key,readonly',
+            '--mount',f'type=bind,src={oracle_key if receipt or lifecycle or auth or supplier or p16 or p17 or api else directory / "app-key"},dst=/run/harness/app-key,readonly',
             '--mount',f'type=bind,src={output},dst=/evidence',
             '--env','P07_CHECKOUT_SMOKE=disposable-local-only',
             '--env',f'P07_RECEIPT_SMOKE={"1" if receipt else "0"}',
@@ -107,8 +112,9 @@ def main():
             '--env',f'P19_AUTH_SMOKE={"1" if auth else "0"}',
             '--env',f'P16_USDT_SMOKE={"1" if p16 else "0"}',
             '--env',f'P17_USDT_SMOKE={"1" if p17 else "0"}',
+            '--env',f'P20_API_SMOKE={"1" if api else "0"}',
             '--env',f'P18_SUPPLIER_SMOKE={"1" if supplier else "0"}','--entrypoint','python',
-            'lhie-p13-candidate:local' if supplier or p17 else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
+            'lhie-p13-candidate:local' if supplier or p17 or api else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
         probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=240)
         if probe.returncode:
             if receipt:
@@ -177,10 +183,19 @@ def main():
                 'candidate/lhie_candidate/navigation/processor.py', 'candidate/lhie_candidate/payments/binance.py',
                 'candidate/lhie_candidate/payments/bsc.py', 'candidate/lhie_candidate/payments/receipts.py',
                 'candidate/lhie_candidate/workers/payment.py'))
+        if api:
+            sources.extend(sorted((ROOT / 'candidate/lhie_candidate/customer_api').glob('*')))
+            sources.extend(sorted((ROOT / 'candidate/lhie_candidate/suppliers').glob('*.py')))
+            sources.append(ROOT / 'candidate/lhie_candidate/suppliers/grants.sql')
+            sources.extend(ROOT / name for name in ('candidate/tests/test_customer_api_postgres.py',
+                'candidate/tests/test_customer_api_contract.py', 'candidate/customer_api_usage.py',
+                'candidate/lhie_candidate/receipt/source.py', 'candidate/lhie_candidate/urls.py',
+                'candidate/lhie_candidate/http.py', 'candidate/lhie_candidate/navigation/repository.py',
+                'candidate/lhie_candidate/usdt/ledger.py', 'candidate/lhie_candidate/receipt/render.py'))
         observed['source_sha256'] = {str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest()
                                       for path in sources if path.is_file()}
         observed['base_revision'] = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-        observed['dependency_image'] = docker('image','inspect','lhie-p13-candidate:local' if supplier or p17 else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','--format','{{.Id}}')
+        observed['dependency_image'] = docker('image','inspect','lhie-p13-candidate:local' if supplier or p17 or api else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','--format','{{.Id}}')
         if receipt or auth:
             observed['boundary_image'] = docker('image','inspect',harness.IMAGE,'--format','{{.Id}}')
         migration_digest = hashlib.sha256()
@@ -250,6 +265,10 @@ def main():
             observed['limits'] = ['Synthetic disposable PostgreSQL and injected fake provider/Telegram only',
                 'Unqualified live funding and custody remain disabled; no production or CI/CD operations',
                 'Explicit disposable grants are never applied at startup']
+        if api:
+            observed['limits'] = ['Synthetic disposable PostgreSQL/Redis only; no production or external providers',
+                'Source mounted over cached dependency image; explicit grants, no production activation',
+                'No claim of live provider qualification or historical production key coverage']
         (output / 'verification.json').write_text(json.dumps(observed,indent=2)+'\n')
         (output / 'probe-failure.txt').unlink(missing_ok=True)
         (output / 'probe-failure.stderr').unlink(missing_ok=True)

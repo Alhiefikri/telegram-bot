@@ -206,6 +206,16 @@ The runbook states the H2 reauthentication policy, native-form same-origin CSRF
 exception, provider defaults and HD/live-qualification limits. Full storefront/
 dashboard presentation and automatic notification operations retain P21/P22/P25/P26.
 
+P20 [Customer API v1](../migration/python-django/p05/README.md#p20-customer-api-v1-702)
+owns `candidate/lhie_candidate/customer_api/`: PHP-compatible bearer keys,
+Redis admission, database availability and credential fences, durable order
+claims over shared checkout, allowlisted reads and owned encrypted-cursor
+delivery. Explicit disposable grants never run at startup.
+`smoke_checkout.py --api` records synthetic PostgreSQL/Redis and WSGI proof;
+its runbook documents shared recovery eligibility, the stricter automatic-receipt
+gate, Redis cutover configuration, usage drain and supplier-injection limits.
+P24 owns private Telegram management and P26 owns scheduling.
+
 P11 [experiment gate](../migration/python-django/p11/README.md) owns
 `tools/migration_benchmark/protocol_p11.json`, `candidate_probe.py` and
 `compare.py`. `runner.py --protocol p11 --implementation django` runs the

@@ -1265,3 +1265,68 @@ Context7 guidance: Django 5.2 [transaction callbacks](https://docs.djangoproject
 run after the outer commit and are discarded on rollback; PostgreSQL 16
 [`SKIP LOCKED`](https://www.postgresql.org/docs/16/sql-select.html#SQL-FOR-UPDATE-SHARE)
 is suitable for queue claims, not a complete reconciliation snapshot.
+
+## P20: Customer API v1 (#702)
+
+`candidate/lhie_candidate/customer_api/` provides the bearer-only v1 routes,
+legacy selector/SHA-256 key format, database availability fence, shared Redis
+admission and token-owned order permits. Key rotation and checkout both lock
+the Customer before the credential. API order claims remain keyed by Customer,
+operation and idempotency key across rotations. The accepted Order, isolated
+API Cart, wallet debit, inventory allocation and claim acceptance share the
+existing checkout transaction; external supplier work stays outside it.
+
+Catalog, balance and order reads use explicit response projections. Delivery
+holds the owned Order shared, rechecks the existing paid-receipt authority,
+reads only the requested credential chunk and uses Laravel-compatible encrypted
+continuations. Page continuation does not change whole-Order progress.
+API and Telegram recovery share the paid-ownership gate: an open late-payment
+review or undelivered supplier fulfillment blocks credential reads. Other open
+reviews remain visible in Order progress, while already allocated non-retired
+units are recoverable as in Laravel. Retirement between pages removes that
+unit from subsequent reads; confirmed refunded units must be retired and remain
+unavailable. Automatic receipt effects use the stricter complete-allocation gate
+and reject any open review, so a partial recovery read cannot mark fulfillment
+or a receipt complete.
+
+Disposable provisioning requires the existing checkout, payment, receipt and,
+when explicitly testing supplier-backed checkout, supplier grants, plus
+`customer_api/{credential_grants,orders_grants,reads_grants}.sql`. Startup never
+applies grants. The default HTTP composition does not inject a supplier
+acquisition capability; trusted composition can inject the encrypter after
+separate qualification. No live supplier or funding provider is enabled here.
+The Python and Laravel limiters share budgets only when explicitly configured
+to use the same Redis database, effective Redis/cache prefix and Laravel app
+key. P01 uses isolated Redis DB 0; it is not evidence of cross-runtime shared
+admission. Cutover must preserve one writer and qualify the actual configuration.
+
+Inside the admitted candidate runtime, `python customer_api_usage.py --once`
+drains at most 500 usage fields. It is intentionally not scheduled by startup.
+P26 must schedule bounded drains; until then counts can expire after ten minutes
+and are lower bounds, not financial authority. Store Bot key-management callbacks
+and their private actor/root checks remain P24; callers of these credential
+services must enforce
+the key-operation limiter and private navigation authority.
+
+Local verification: `python3 tools/migration_harness/smoke_checkout.py --api`
+uses synthetic PHP-generated keys and cursor, PostgreSQL 16, Redis and a
+loopback WSGI server. It exercises catalog/balance, IDR and USD purchases,
+concurrent same-key attempts, conflict/replay, key-rotation fencing, disabled
+admission, foreign and tampered delivery cursors, review gating, retired stock,
+supplier pending with explicit synthetic injection, and bounded usage drain.
+It also buys 100 maximum-length structured accounts through real PHP intake,
+then recovers them across 1 MiB-bounded pages without another debit. Structured
+checkout follows Laravel's identity registry: email alone is not a unique
+identity, and accounts without an auth token need no registry identity.
+Source identity and limits are recorded in `.local/migration-p20/verification.json`.
+The separate `--receipt` and `--supplier` smokes exercise the shared recovery
+and supplier authorities. From `candidate/`, run `.venv/bin/python -m unittest
+tests.test_customer_api_contract tests.test_checkout_pricing
+tests.test_wallet_selection tests.test_money tests.test_receipt_render`.
+These proofs do not qualify historical production keys, live providers,
+production deployment or CI/CD.
+
+Context7 `/django/django/5.2.18` was consulted for
+[nested atomic blocks](https://docs.djangoproject.com/en/5.2/topics/db/transactions/):
+database exceptions must be handled after the appropriate savepoint has rolled
+back. Network calls and permit admission remain outside the money transaction.

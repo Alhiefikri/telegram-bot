@@ -97,6 +97,38 @@ foreach (['navigation_qris', 'navigation_balance', 'navigation_race'] as $name) 
     ];
 }
 $fixtures['key'] = hash_hmac('sha256', 'telegram-direct-checkout|42|700042|700042|99|checkout:choice', str_repeat('a', 64));
+if (getenv('P20_API_SMOKE') === '1') {
+    $fixtures['p20_legacy_cursor'] = rtrim(strtr(Illuminate\Support\Facades\Crypt::encryptString('12345'), '+/', '-_'), '=');
+    $existing = App\Models\Customer::findOrFail($fixtures['foreign']['customer_id']);
+    $fixtures['p20_legacy_key'] = app(App\Services\CustomerApi\CustomerApiCredentials::class)->generate($existing)->takeSecret();
+    config(['services.credentials.identity_fingerprint_key' => 'p20-synthetic-identity-key']);
+    if (Illuminate\Support\Facades\Artisan::call('credentials:backfill-identity-registry') !== 0) {
+        throw new RuntimeException('Synthetic credential identity backfill failed');
+    }
+    $largeCustomer = buyer(50000);
+    $largeProduct = App\Models\Product::factory()->create([
+        'name' => 'Synthetic P20 large result', 'stock' => 0, 'reserved_stock' => 0,
+        'price_amount' => 1, 'usdt_price_amount' => null, 'reseller_price_amount' => null,
+        'reseller_usdt_price_amount' => null, 'category_id' => null, 'product_family_id' => null, 'is_active' => true,
+        'delivery_note' => str_repeat('u', 2000),
+    ]);
+    $largeItems = array_map(fn ($index) => [
+        'email' => 'p20-'.$index.'@example.invalid',
+        'password' => str_repeat('p', 1024),
+        'access_method' => 'auth_token',
+        'access_value' => str_pad('p20-token-'.$index.'-', 3500, 't'),
+    ], range(1, 100));
+    foreach (array_chunk($largeItems, 20) as $chunk) {
+        app(App\Services\ProductStockIntake::class)->submit($largeProduct,
+            App\Services\ProductStockIntakeSubmission::structured($chunk), dispatchNotifications: false);
+    }
+    app(App\Services\ProductStockIntake::class)->submit($largeProduct,
+        App\Services\ProductStockIntakeSubmission::structured([[
+            'email' => 'p20-no-token@example.invalid', 'password' => 'synthetic-password',
+            'access_method' => 'none', 'access_value' => null,
+        ]]), dispatchNotifications: false);
+    $fixtures['p20_large'] = row($largeCustomer, $largeProduct, cart($largeCustomer, $largeProduct));
+}
 $customerId = $fixtures['python']['customer_id'];
 $orderId = '69400000-0000-4000-8000-000000000001';
 $paymentId = '69400000-0000-4000-8000-000000000002';

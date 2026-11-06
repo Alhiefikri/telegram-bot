@@ -1,6 +1,7 @@
-from django.urls import include, path
+from django.urls import include, path, re_path
 
 from . import http
+from .customer_api.http import endpoint as customer_api
 from .navigation.webhook import receive
 from .payments.callback import receive as receive_sakurupiah
 from .payments.ingress import receive_klikqris, receive_klikqris_sandbox, receive_pakasir
@@ -9,6 +10,8 @@ from .payments.ingress import receive_sakurupiah_production
 
 urlpatterns = [
     path("", include("lhie_candidate.auth.urls")),
+    path("api/v1", customer_api),
+    re_path(r"^api/v1/(?P<route>.*)$", customer_api),
     path("health", http.health),
     path("ready", http.ready),
     path("webhook/telegram", receive),
