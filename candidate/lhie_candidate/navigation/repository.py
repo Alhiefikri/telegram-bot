@@ -232,6 +232,73 @@ class CatalogRepository:
             row['occurred_micros'] = self._occurred_micros(row['occurred_at'])
         return rows
 
+    def usdt_history(self, customer_id, *, direction=None, cursor=None):
+        if direction not in (None, 'older', 'newer') or (direction is None) != (cursor is None):
+            raise ValueError('invalid USDT history cursor')
+        allowed = self._one("SELECT has_column_privilege(current_user,'public.customer_usdt_top_ups','id','SELECT') AS allowed")
+        if not allowed['allowed']:
+            return self._usdt_entry_history(customer_id, direction=direction, cursor=cursor)
+        params = [customer_id, customer_id]
+        predicate = ''
+        if cursor is not None:
+            stamp, rank, item_id = cursor
+            timestamp = self._activity_timestamp(stamp)
+            exists = self._one(
+                "SELECT 1 AS present FROM ("
+                "SELECT t.created_at,1 AS rank,t.intent_id AS item_id FROM public.customer_usdt_top_ups t WHERE t.customer_id=%s "
+                "UNION ALL SELECT e.created_at,2,e.id FROM public.customer_usdt_balance_entries e "
+                "JOIN public.customer_usdt_balance_accounts a ON a.id=e.customer_usdt_balance_account_id WHERE a.customer_id=%s"
+                ") x WHERE x.created_at=%s::timestamp AND x.rank=%s AND x.item_id=%s",
+                (customer_id, customer_id, timestamp, rank, item_id))
+            if exists is None:
+                return None
+            operator = '<' if direction == 'older' else '>'
+            predicate = f' WHERE (created_at,rank,item_id) {operator} (%s::timestamp,%s,%s)'
+            params += [timestamp, rank, item_id]
+        order = 'ASC' if direction == 'newer' else 'DESC'
+        rows = self._rows(
+            "SELECT *,to_char(created_at,'YYYY-MM-DD\"T\"HH24:MI:SS.US') AS occurred_at FROM ("
+            "SELECT t.created_at,1 AS rank,t.intent_id AS item_id,t.id::text AS target_id,"
+            "t.amount_micro,'top_up' AS kind,t.reference AS reference "
+            "FROM public.customer_usdt_top_ups t WHERE t.customer_id=%s "
+            "AND (NOT EXISTS (SELECT 1 FROM public.customer_usdt_top_up_resolutions r WHERE r.top_up_id=t.id) "
+            "OR EXISTS (SELECT 1 FROM public.customer_usdt_top_up_resolutions r "
+            "JOIN public.customer_usdt_top_up_settlement_work w ON w.top_up_id=r.top_up_id "
+            "WHERE r.top_up_id=t.id AND r.kind IN ('expired_unpaid','cancelled_by_customer') AND w.state='manual_review')) "
+            "UNION ALL SELECT e.created_at,2,e.id,NULL::text,e.amount_micro,e.kind,"
+            "COALESCE(e.source_id::text,'') FROM public.customer_usdt_balance_entries e "
+            "JOIN public.customer_usdt_balance_accounts a ON a.id=e.customer_usdt_balance_account_id WHERE a.customer_id=%s"
+            ") x" + predicate + f" ORDER BY created_at {order},rank {order},item_id {order} LIMIT {USDT_ACTIVITY_ROWS + 1}",
+            params)
+        for row in rows:
+            row['occurred_micros'] = self._occurred_micros(row['occurred_at'])
+        return rows
+
+    def _usdt_entry_history(self, customer_id, *, direction, cursor):
+        params, predicate = [customer_id], ''
+        if cursor is not None:
+            stamp, rank, item_id = cursor
+            if rank != 2:
+                return None
+            timestamp = self._activity_timestamp(stamp)
+            if not self._one('''SELECT e.id FROM public.customer_usdt_balance_entries e
+                JOIN public.customer_usdt_balance_accounts a ON a.id=e.customer_usdt_balance_account_id
+                WHERE a.customer_id=%s AND e.created_at=%s::timestamp AND e.id=%s''',
+                (customer_id, timestamp, item_id)):
+                return None
+            operator = '<' if direction == 'older' else '>'
+            predicate = f' AND (e.created_at,e.id) {operator} (%s::timestamp,%s)'
+            params += [timestamp, item_id]
+        order = 'ASC' if direction == 'newer' else 'DESC'
+        rows = self._rows('''SELECT to_char(e.created_at,'YYYY-MM-DD"T"HH24:MI:SS.US') AS occurred_at,
+            2 AS rank,e.id AS item_id,NULL::text AS target_id,e.amount_micro,e.kind,
+            COALESCE(e.source_id::text,'') AS reference FROM public.customer_usdt_balance_entries e
+            JOIN public.customer_usdt_balance_accounts a ON a.id=e.customer_usdt_balance_account_id
+            WHERE a.customer_id=%s''' + predicate + f' ORDER BY e.created_at {order},e.id {order} LIMIT {USDT_ACTIVITY_ROWS + 1}', params)
+        for row in rows:
+            row['occurred_micros'] = self._occurred_micros(row['occurred_at'])
+        return rows
+
     def orders_for_balance_entries(self, customer_id, order_ids):
         if not order_ids:
             return {}

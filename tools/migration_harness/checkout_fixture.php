@@ -204,4 +204,16 @@ if (getenv('P16_USDT_SMOKE') === '1') {
         }
     }
 }
+if (getenv('P17_USDT_SMOKE') === '1') {
+    $customer = buyer(0);
+    $product = product('p17-bsc');
+    $product->update(['usdt_price_amount' => 600000]);
+    $owner = App\Models\User::factory()->create(['role' => App\Enums\UserRole::Owner]);
+    $registry = app(App\Services\UsdtReceivers\UsdtDepositReceiverRegistry::class);
+    $registration = $registry->register($customer, '0x'.str_repeat('1', 40), $owner);
+    $receiver = $registry->manualVerify($registration->receiver, true, $owner);
+    $fixtures['p17_bsc'] = row($customer, $product, cart($customer, $product));
+    $fixtures['p17_bsc']['receiver_id'] = $receiver->id;
+    $fixtures['p17_bsc']['telegram_id'] = $customer->telegram_id;
+}
 echo json_encode($fixtures, JSON_THROW_ON_ERROR);

@@ -169,9 +169,23 @@ class NavigationProcessor:
                 return self._manual_proof(customer, source, proof)
             command = source.get("text", "").strip().split("@", 1)[0].lower()
             if command in ("/start", "/menu", "☰ menu", "menu"):
+                if command == "/start" and self.presenter.usdt_funding is not None:
+                    self.presenter.usdt_funding.cancel_open(customer["id"])
                 data = "menu"
             elif command in ("/product", "/products", "/produk", "/lihat_produk", "/lihat produk", "/katalog"):
                 data = "katalog"
+            elif re.match(r'^/usdt-return(?:@[A-Za-z0-9_]{1,32})?(?:\s|$)', proof, re.I):
+                data = "usdt:return"
+                state.pop("usdt_amount", None)
+                state.pop("usdt_hint", None)
+                surface = self.presenter.usdt_return(customer, proof, root, str(chat["id"]), update_id)
+            elif re.match(r'^/usdt(?:@[A-Za-z0-9_]{1,32})?(?:\s|$)', proof, re.I):
+                data = "usdt:open"
+                state.pop("usdt_amount", None)
+                state.pop("usdt_hint", None)
+                parts = re.split(r'\s+', proof, maxsplit=1)
+                surface = self.presenter.usdt_chooser(customer,
+                    'balance.usdt.topup.unavailable' if len(parts) > 1 else None)
             elif (state.get("selection") or {}).get("mode") == "awaiting_custom_quantity":
                 data = "quantity:input"
                 surface = self.presenter.quantity_input(customer, source.get("text", ""), state)
@@ -180,6 +194,22 @@ class NavigationProcessor:
                 if command in ("/batal", "/cancel"):
                     state.pop("payment_hint", None)
                     surface = self.presenter.home(customer)
+            elif state.get("usdt_amount"):
+                data = "usdt:amount:input"
+                if command in ("/batal", "/cancel"):
+                    state.pop("usdt_amount", None)
+                    surface = self.presenter.usdt_chooser(customer)
+                else:
+                    surface = self.presenter.usdt_amount_input(
+                        customer, source.get("text", ""), state, root, str(chat["id"]))
+            elif state.get("usdt_hint"):
+                data = "usdt:hint:input"
+                if command in ("/batal", "/cancel"):
+                    state.pop("usdt_hint", None)
+                    surface = self.presenter.usdt_chooser(customer)
+                else:
+                    surface = self.presenter.usdt_hint_input(
+                        customer, source.get("text", ""), state, root, str(chat["id"]))
             elif command.startswith("/deposit"):
                 data = "balance:deposit"
                 surface = self.presenter.funding_deposit(
@@ -268,6 +298,20 @@ class NavigationProcessor:
                     state.pop("payment_hint", None)
                 else:
                     state["payment_hint"].update(chat_id=current_root.chat_id,
+                        message_id=current_root.message_id, generation=current_root.generation)
+            if state.get("usdt_amount"):
+                current_root = self.roots.current_for_chat(customer, str(chat["id"]))
+                if current_root is None:
+                    state.pop("usdt_amount", None)
+                else:
+                    state["usdt_amount"].update(chat_id=current_root.chat_id,
+                        message_id=current_root.message_id, generation=current_root.generation)
+            if state.get("usdt_hint"):
+                current_root = self.roots.current_for_chat(customer, str(chat["id"]))
+                if current_root is None:
+                    state.pop("usdt_hint", None)
+                else:
+                    state["usdt_hint"].update(chat_id=current_root.chat_id,
                         message_id=current_root.message_id, generation=current_root.generation)
             with connection.cursor() as cursor:
                 cursor.execute("INSERT INTO django_candidate.navigation_sessions (customer_id,state) VALUES (%s,%s::jsonb) "

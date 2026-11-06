@@ -11,7 +11,7 @@ from django.db import connections, transaction
 
 from .jobs import decode_job, wake_after_commit
 from .protocol import (ACTION_TYPE, EFFECT_TYPE, PHOTO_TEMPLATE, QUEUE, TEXT_TEMPLATE,
-                       REFUND_TYPE, TXT_TYPE, ReceiptProtocol, _now, receipt_group_key)
+                       BALANCE_ALERT_TYPE, REFUND_TYPE, TOPUP_TYPE, TXT_TYPE, ReceiptProtocol, _now, receipt_group_key)
 from .historical import normalize_unit, render_legacy, render_product_detail
 from .render import render_action_panel, render_receipt, render_txt
 from .source import ReceiptUnavailable
@@ -147,12 +147,12 @@ class ReceiptService:
         if effect is None:
             return 'not_ready'
         token = effect['claim_token']
-        if effect['effect_type'] != REFUND_TYPE and (
+        if effect['effect_type'] not in (BALANCE_ALERT_TYPE, REFUND_TYPE, TOPUP_TYPE) and (
                 effect['source_type'] != 'App\\Models\\Order' or effect['target_type'] != 'customer'):
             self.protocol.finalize_failed(effect_id, token, 'receipt_not_eligible')
             return 'ineligible'
         try:
-            if effect['effect_type'] == REFUND_TYPE:
+            if effect['effect_type'] in (BALANCE_ALERT_TYPE, REFUND_TYPE, TOPUP_TYPE):
                 source = None
             elif effect['effect_type'] == ACTION_TYPE:
                 source, _ = self.source.authorize(effect['source_id'], effect['telegram_chat_id'])
@@ -170,6 +170,12 @@ class ReceiptService:
             if effect['effect_type'] == REFUND_TYPE:
                 from ..checkout.refund_receipt import refund_payload
                 payload = refund_payload(self.db, effect)
+            elif effect['effect_type'] == TOPUP_TYPE:
+                from ..usdt.outbound import topup_payload
+                payload = topup_payload(self.db, effect)
+            elif effect['effect_type'] == BALANCE_ALERT_TYPE:
+                from ..usdt.alerts_outbound import alert_payload
+                payload = alert_payload(self.db, effect)
             elif effect['effect_type'] == ACTION_TYPE:
                 if not self.protocol.is_receipt_group_complete(metadata.get('receipt_group_key')) or source['telegram_receipt_sent_at'] is None:
                     raise ValueError('Receipt incomplete')

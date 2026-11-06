@@ -167,6 +167,16 @@ records the disposable PostgreSQL proof at `.local/migration-p16/verification.js
 Verified funding settlement and its authority remain P17; no funding rail,
 receiver provisioner or operator reversal workflow is activated by this slice.
 
+P17 [USDT funding and operational controls](../migration/python-django/p05/README.md#p17-usdt-funding-finality-and-operations-701)
+adds `usdt/funding.py`, `funding_settlement.py`, `chain.py`, `review.py` and
+`operations*.py`. Targets and immutable reservations share the existing receipt,
+ledger and Telegram effect authorities. A proven chain reorg freezes the account
+without rewriting entries; Owner-bound review/recovery does not clear a reorg
+hold. Full reconciliation and restore are fail-closed without complete,
+explicitly injected custody and scan evidence. The default worker installs no
+qualified funding or custody adapter. `smoke_checkout.py --p17` exercises the
+synthetic disposable PostgreSQL flow; it does not qualify live rails or custody.
+
 P18 [supplier acquisition and historical entitlement](../migration/python-django/p05/README.md#p18-supplier-acquisition-and-historical-entitlements-698)
 owns `candidate/lhie_candidate/suppliers/`: private supplier catalog, pricing,
 capacity, checkout holds, durable purchase claims/dispatch evidence and
