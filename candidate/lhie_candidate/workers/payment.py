@@ -17,12 +17,16 @@ def _now():
 
 
 class PaymentHandler:
-    def __init__(self, lifecycle, db, *, processor=None, funding_klik=None, funding=None):
+    def __init__(self, lifecycle, db, *, processor=None, funding_klik=None, funding=None,
+                 usdt_funding=None, usdt_settlement=None, reorg_monitor=None):
         self.lifecycle = lifecycle
         self.db = db
         self.processor = processor
         self.funding_klik = funding_klik
         self.funding = funding or (funding_klik.funding if funding_klik is not None else None)
+        self.usdt_funding = usdt_funding
+        self.usdt_settlement = usdt_settlement
+        self.reorg_monitor = reorg_monitor
         self.funding_providers = tuple(
             provider for provider, enabled in (
                 ('klikqris', funding_klik is not None),
@@ -358,6 +362,14 @@ class PaymentHandler:
                 except Exception:
                     result['failures'] += 1
                 yield
+        def usdt_recovery(name, operation):
+            try:
+                bounded(operation, 1)
+                result[name] = 1
+            except Exception:
+                result['failures'] += 1
+            yield
+
 
         phases = [
             iter(recover_navigation()),
@@ -379,6 +391,12 @@ class PaymentHandler:
             result['funding_expiries'] = 0
             phases.append(iter(funding_recoveries()))
             phases.append(iter(funding_expiries()))
+        if self.usdt_funding is not None:
+            phases.append(iter(usdt_recovery('usdt_expiry', self.usdt_funding.release_expired)))
+        if self.usdt_settlement is not None:
+            phases.append(iter(usdt_recovery('usdt_recovery', self.usdt_settlement.recover)))
+        if self.reorg_monitor is not None:
+            phases.append(iter(usdt_recovery('usdt_reorg', self.reorg_monitor.recover)))
         start = self._sweep_start
         self._sweep_start = (start + 1) % len(phases)
         phases = phases[start:] + phases[:start]

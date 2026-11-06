@@ -57,6 +57,80 @@ class UsdtLedger:
         if health is None or health['issues']:
             raise CheckoutError('usdt_balance_projection_mismatch')
 
+    def credit_verified_top_up(self, customer_id, top_up_id, receipt_id, evidence_id, *, review_id=None, authority_token=None):
+        """Post only a receipt and verified evidence already bound to this target."""
+        from lhie_candidate.payments.receipts import receipt_consumable
+
+        account = self._lock_account(customer_id)
+        target = self.db.one('''SELECT * FROM public.customer_usdt_top_ups
+            WHERE id=%s AND customer_id=%s FOR UPDATE''', (str(top_up_id), customer_id))
+        evidence = self.db.one('''SELECT * FROM public.customer_usdt_top_up_evidence
+            WHERE id=%s AND top_up_id=%s''', (evidence_id, str(top_up_id)))
+        receipt = self.db.one('''SELECT id,beneficiary,currency,decimals,amount_units
+            FROM public.external_money_receipts WHERE id=%s''', (receipt_id,))
+        if (not target or not evidence or evidence['status'] != 'verified' or not receipt
+                or receipt['beneficiary'] != f'customer:{customer_id}' or receipt['currency'] != 'USDT'
+                or receipt['decimals'] not in (6, 18)
+                or not receipt_consumable(self.db, receipt_id=receipt_id,
+                    target_type='customer_usdt_top_up', target_id=str(top_up_id))):
+            raise CheckoutError('usdt_funding_authority_invalid')
+        expected = target['payable_micro']
+        fields = {}
+        if review_id is not None:
+            from lhie_candidate.auth.types import legacy_now
+            preview = self.db.one('''SELECT * FROM public.usdt_top_up_review_requests
+                WHERE id=%s AND top_up_id=%s''', (str(review_id), str(top_up_id)))
+            state = (self.db.one('''SELECT * FROM public.balance_adjustment_auth_states
+                WHERE user_id=%s FOR UPDATE''', (preview['owner_user_id'],)) if preview else None)
+            if (not preview or preview['decision'] not in ('settled', 'resolved_by_compensation')
+                    or preview['target_fingerprint'] != target['request_fingerprint']
+                    or preview['expires_at'] <= legacy_now() or not state
+                    or str(state['lease_token']) != str(authority_token) or not authority_token
+                    or not state['lease_until'] or state['lease_until'] <= legacy_now()
+                    or str(state['verified_request_id']) != str(review_id)
+                    or state['verified_fingerprint'] != preview['fingerprint']
+                    or evidence['reason'] != 'owner_verified_resolution'):
+                raise CheckoutError('usdt_funding_authority_invalid')
+            expected = require_integer(preview['amount_micro'], minimum=1)
+            fields['review_request_id'] = str(review_id)
+        elif authority_token is not None:
+            raise CheckoutError('usdt_funding_authority_invalid')
+        if str(receipt['amount_units']) != str(expected * 10 ** (receipt['decimals'] - 6)):
+            raise CheckoutError('usdt_funding_authority_invalid')
+        amount = require_integer(expected - target['fee_micro'], minimum=1)
+        fingerprint = _fingerprint('verified_funding', 'funding_credit', customer_id, amount,
+            top_up_id=str(top_up_id), receipt_id=str(receipt_id), evidence_version=str(evidence_id), **fields)
+        key = f'usdt-top-up:{top_up_id}'
+        existing = self.db.one('''SELECT * FROM public.customer_usdt_balance_entries
+            WHERE (customer_usdt_balance_account_id=%s AND idempotency_key=%s)
+              OR (source_type='customer_usdt_top_up' AND source_id=%s AND kind='funding_credit')''',
+            (account['id'], key, str(top_up_id)))
+        if existing:
+            if (existing['customer_usdt_balance_account_id'] != account['id']
+                    or existing['request_fingerprint'] != fingerprint or existing['amount_micro'] != amount):
+                raise CheckoutError('usdt_balance_identity_conflict')
+            return existing
+        self._assert_mutable(account)
+        balance, version = account['balance_micro'], account['version']
+        if balance > MAX_UNITS - amount or version == MAX_UNITS:
+            raise CheckoutError('balance_overflow')
+        entry = self.db.one('''INSERT INTO public.customer_usdt_balance_entries
+            (customer_usdt_balance_account_id,account_sequence,kind,amount_micro,balance_after_micro,
+             source_type,source_id,idempotency_key,request_fingerprint,created_at)
+            VALUES (%s,%s,'funding_credit',%s,%s,'customer_usdt_top_up',%s,%s,%s,
+                    CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta') ON CONFLICT DO NOTHING RETURNING *''',
+            (account['id'], version + 1, amount, balance + amount, str(top_up_id), key, fingerprint))
+        if not entry:
+            raise CheckoutError('usdt_balance_identity_conflict')
+        self.db.execute('''INSERT INTO public.customer_usdt_balance_accounting_events
+            (customer_usdt_balance_entry_id,currency,amount_micro,debit_account,credit_account,source_fingerprint,created_at)
+            VALUES (%s,'USDT',%s,'usdt_settlement_asset','customer_usdt_liability',%s,
+                    CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')''', (entry['id'], amount, fingerprint))
+        self.db.execute('''UPDATE public.customer_usdt_balance_accounts SET balance_micro=%s,version=%s,
+            last_entry_id=%s,updated_at=CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta' WHERE id=%s''',
+            (balance + amount, version + 1, entry['id'], account['id']))
+        return entry
+
     def debit_purchase(self, customer_id, order_id):
         """Debit the locked, snapshotted Order/Payment, or resolve its exact replay."""
         account = self._lock_account(customer_id)

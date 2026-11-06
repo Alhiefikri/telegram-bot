@@ -89,14 +89,14 @@ class PasswordConfirmation:
         self.db = Database(using)
         self.admin_chat_id = admin_chat_id
 
-    def verify(self, request, request_id, fingerprint, version, password):
+    def verify(self, request, request_id, fingerprint, version, password, *, binder=bound_request):
         connection = connections[self.using]
         if connection.vendor != 'postgresql' or connection.in_atomic_block:
             raise AdjustmentRejected('authentication_requires_independent_transaction')
         if not isinstance(self.admin_chat_id, str) or not re.fullmatch(r'[1-9][0-9]{0,18}', self.admin_chat_id):
             raise AdjustmentRejected('owner_notification_unavailable')
         actor = owner(request, self.db)
-        preview = bound_request(self.db, request, actor, request_id, fingerprint, version)
+        preview = binder(self.db, request, actor, request_id, fingerprint, version)
         token = str(uuid4())
         with transaction.atomic(using=self.using):
             self.db.execute("INSERT INTO public.balance_adjustment_auth_states (user_id,failed_at) VALUES (%s,'[]') ON CONFLICT DO NOTHING", (actor['id'],))

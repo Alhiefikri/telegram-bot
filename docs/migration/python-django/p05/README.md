@@ -1212,3 +1212,56 @@ Context7 guidance: Django 5.2
 require handling database errors outside the relevant atomic/savepoint block;
 PostgreSQL 16 [explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html#LOCKING-DEADLOCKS)
 requires consistent lock order. No provider I/O belongs in these money closures.
+
+## P17: USDT funding, finality and operations (#701)
+
+`FundingService` atomically binds a Customer's canonical Telegram root, policy,
+immutable target and one active reservation. Expiry and cancellation release the
+slot without a credit; later verified deposits are claimed to the original target,
+kept in manual review and shown in history. Existing immutable expiry/cancel
+resolutions are not rewritten: the legacy Owner resolution API rejects an
+already-resolved target, so later money needs an operator-led disposition rather
+than an automatic credit or refund.
+
+`FundingSettlement` leases preparation and observation work; provider calls run
+outside transactions and successful evidence is rechecked under database locks
+before the existing receipt claim, ledger posting, resolution and outbound effect
+commit together. Binance history and BSC watch-only finality are injectable
+adapters, not activation decisions. BSC scanning persists bounded checkpoints;
+reorg evidence freezes exposed accounts before the incident worker records
+available and spent exposure. Owner-bound recovery preserves postings and leaves
+the hold unresolved. A recognized drift freeze can be cleared by an authenticated
+Owner only after a locked reinspection, and never while reorg evidence exists.
+
+`OperationalReconciliation` walks all account, receipt and unreceipted-credit
+pages in a repeatable-read snapshot. Custody providers are an explicit injected
+registry, empty by default; missing, unavailable and unsupported backing are not
+zero. `RestoreGate` requires completed settlement/scan replay, quarantined
+ambiguous outbound effects, a subsequent complete reconciliation and zero
+unexplained drift. Pause scopes block new exposure rather than these recovery
+paths. Alert episodes and customer receipts use the existing effect ledger.
+The customer return authorization binds Customer, target and canonical root;
+it does not transfer funds. Owner Dashboard composition remains with P23.
+
+The additive `2026_10_30_000001_restore_usdt_funding_resolution_constraints.php`
+repairs conflicting historical PostgreSQL checks for unpaid release and reviewed
+compensation. Its rollback refuses data that the older checks cannot represent.
+Explicit `usdt/funding_grants.sql` and `usdt/operations_grants.sql`, together
+with their prerequisite grants, are disposable provisioning only and are never
+applied at startup. Default worker composition supplies no funding or custody
+provider; an injected readiness declaration is not evidence of human qualification.
+External custody/signing, receiver rotation, production changes and live-money
+operations remain outside this issue.
+
+Local proof: `python3 tools/migration_harness/smoke_checkout.py --p17` uses the
+existing disposable PostgreSQL 16 harness and synthetic Binance, BSC and Telegram
+adapters. It covers paused settlement, concurrent settlement/delivery dedupe,
+cancel/expiry and late review, Owner authorization, finality and spent reorg,
+scoped alerts, multipage reconciliation and restore refusal. The generated
+`.local/migration-p17/verification.json` records the synthetic scope and source
+hashes; it is not live-provider or custody qualification.
+
+Context7 guidance: Django 5.2 [transaction callbacks](https://docs.djangoproject.com/en/5.2/topics/db/transactions/#performing-actions-after-commit)
+run after the outer commit and are discarded on rollback; PostgreSQL 16
+[`SKIP LOCKED`](https://www.postgresql.org/docs/16/sql-select.html#SQL-FOR-UPDATE-SHARE)
+is suitable for queue claims, not a complete reconciliation snapshot.

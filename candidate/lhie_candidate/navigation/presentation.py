@@ -106,7 +106,7 @@ def plain(text):
 class CatalogPresenter:
     def __init__(self, repository, *, signing_key=None, custom_emoji=False, media_mapping=None,
                  bot_scope='synthetic', dollar_rail_selectable=False, clock=None, funding=None,
-                 checkout=None):
+                 checkout=None, usdt_funding=None, usdt_settlement=None):
         self.repository = repository
         self.signing_key = signing_key
         self.custom_emoji = custom_emoji
@@ -119,6 +119,8 @@ class CatalogPresenter:
         # The minimum P11 funding owner is injected explicitly. Without it the
         # read-only Saldo screen keeps the #718 explicit-refusal behavior.
         self.funding = funding
+        self.usdt_funding = usdt_funding
+        self.usdt_settlement = usdt_settlement
         # The navigation checkout owner is injected explicitly. Without it the
         # existing detail pay callbacks stay an explicit stale acknowledgement.
         self.checkout = checkout
@@ -326,6 +328,8 @@ class CatalogPresenter:
                                     state=row['state'], date=row['date']))
             rows.append([self._legacy_button(customer, 'balance.add', 'balance:add')])
             rows.append([self._legacy_button(customer, 'balance.activity.button', 'balance:activity')])
+        if usd['available']:
+            rows.append([self._legacy_button(customer, 'balance.usdt.history.title', 'usdt:history')])
         rows.append(self._navigation_row(customer))
         return self._surface(customer, '\n'.join(html_text(line) for line in lines),
                              rows, screen='balance')
@@ -384,9 +388,259 @@ class CatalogPresenter:
         rows = []
         if state.get('available') and idr['available']:
             rows.append([self._legacy_button(customer, 'balance.method.qris', 'balance:currency:idr')])
+        rows.append([self._legacy_button(customer, 'balance.usdt.topup.button', 'balance:currency:usd')])
         rows.append(self._navigation_row(customer))
         return self._surface(customer, '\n'.join(html_text(line) for line in lines),
                              rows, screen='balance')
+
+    def _usdt_available(self, rail):
+        try:
+            return bool(self.usdt_funding and self.usdt_funding.availability(rail))
+        except Exception:
+            return False
+
+    def usdt_chooser(self, customer, notice=None):
+        lines = [self.t(customer, 'balance.usd.title'), '━━━━━━━━━━━━━━',
+                 self.t(customer, 'balance.usd.prompt')]
+        if notice:
+            lines.append(self.t(customer, notice))
+        rows = [[self._legacy_button(customer, 'balance.usd.binance_pay', 'usdt:rail:binance_pay')],
+                [self._legacy_button(customer, 'balance.usd.bsc', 'usdt:rail:bsc_usdt')],
+                self._funding_row(customer, 'balance:add')]
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines), rows, screen='balance')
+
+    def usdt_return(self, customer, text, root, chat_id, update_id):
+        from ..checkout.db import Database
+        from ..domain.money import Currency, Money
+        from ..usdt.review import UsdtTopUpReview
+        match = re.fullmatch(r'/usdt-return(?:@[A-Za-z0-9_]{1,32})?\s+([0-9a-fA-F-]{36})\s+(\S+)\s+(0x[0-9a-fA-F]{40})', text.strip())
+        key, replacements = 'balance.usdt.return.usage', {}
+        if match:
+            key = 'balance.usdt.return.invalid'
+            db = Database()
+            admitted = db.one("SELECT has_column_privilege(current_user,'public.usdt_top_up_external_return_authorizations','id','INSERT') AS allowed")
+            if root is not None and admitted['allowed'] and type(update_id) is int and update_id >= 0:
+                try:
+                    amount = Money.from_decimal(Currency.USDT, match[2])
+                    result = UsdtTopUpReview(admin_chat_id=None).authorize_return(
+                        value(customer, 'id'), str(chat_id), root.message_id, root.bot_asset_scope,
+                        match[1], amount.units, match[3].lower(), f'telegram-{update_id:020d}')
+                    key = 'balance.usdt.return.authorized'
+                    replacements = {'authorization': str(result['id']), 'amount': amount.format_decimal(),
+                                    'destination': match[3].lower()}
+                except ValueError:
+                    pass
+        return self._surface(customer, html_text(self.t(customer, key, **replacements)),
+                             [self._funding_row(customer, 'balance:add')], screen='balance')
+
+    def usdt_amounts(self, customer, rail, notice=None):
+        if not self._usdt_available(rail):
+            return self.usdt_chooser(customer, 'balance.usdt.topup.unavailable')
+        try:
+            version, amounts = self.usdt_funding.presets()
+        except Exception:
+            return self.usdt_chooser(customer, 'balance.usdt.topup.unavailable')
+        lines = [self.t(customer, 'balance.usd.amount.title'), '━━━━━━━━━━━━━━',
+                 self.t(customer, 'balance.usd.amount.rail', rail=self.t(
+                     customer, 'balance.usd.binance_pay' if rail == 'binance_pay' else 'balance.usd.bsc')),
+                 self.t(customer, 'balance.usd.amount.parity'), '',
+                 self.t(customer, 'balance.usd.amount.choose')]
+        if notice:
+            lines += ['', self.t(customer, notice)]
+        rows, row = [], []
+        for index, amount in enumerate(amounts):
+            payload = struct.pack('>BqIBB', 3, value(customer, 'id'), int(version),
+                                  1 if rail == 'binance_pay' else 2, index)
+            row.append({'text': plain(self.t(customer, 'balance.usd.amount.preset', amount=usdt(amount))),
+                        'callback_data': 'usdt:p:' + self._encode_token(payload), 'style': 'primary'})
+            if len(row) == 2:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        rows.append([self._legacy_button(customer, 'balance.usd.amount.custom', 'usdt:custom:' + rail)])
+        rows.append(self._funding_row(customer, 'balance:currency:usd'))
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines), rows, screen='balance')
+
+    def usdt_custom_prompt(self, customer, rail, notice=None):
+        lines = [self.t(customer, 'balance.usd.amount.title'), '━━━━━━━━━━━━━━',
+                 self.t(customer, 'balance.usd.amount.rail', rail=self.t(
+                     customer, 'balance.usd.binance_pay' if rail == 'binance_pay' else 'balance.usd.bsc')),
+                 self.t(customer, 'balance.usd.amount.prompt'),
+                 self.t(customer, 'balance.usd.amount.precision')]
+        if notice:
+            lines += ['', self.t(customer, notice)]
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines),
+                             [self._funding_row(customer, 'usdt:rail:' + rail)], screen='balance')
+
+    def usdt_history(self, customer, callback=None):
+        customer_id = value(customer, 'id')
+        direction, cursor = None, None
+        if callback:
+            match = re.fullmatch(r'usdt:h:([on]):([A-Za-z0-9_-]+)', callback)
+            payload = self._decode_token(match[2], 26) if match else None
+            if payload is None:
+                return None
+            version, owner, stamp, rank, item_id = struct.unpack('>BqqBq', payload)
+            if version != 2 or owner != customer_id or stamp < 1 or rank not in (1, 2) or item_id < 1:
+                return None
+            direction, cursor = ('older' if match[1] == 'o' else 'newer'), (stamp, rank, item_id)
+        entries = self.repository.usdt_history(customer_id, direction=direction, cursor=cursor)
+        if entries is None:
+            return None
+        more = len(entries) > 25
+        visible = entries[:25]
+        if direction == 'newer':
+            visible.reverse()
+        lines = [self.t(customer, 'balance.usdt.history.title'), '━━━━━━━━━━━━━━',
+                 self.t(customer, 'balance.usdt.history.note')]
+        if not visible:
+            lines.append(self.t(customer, 'balance.usdt.history.empty'))
+        rows = []
+        for index, entry in enumerate(visible, 1):
+            kind = entry['kind']
+            if kind == 'top_up':
+                status = (self.usdt_funding.status(customer_id, entry['target_id'])
+                          if self.usdt_funding else None)
+                state = (status or {}).get('state')
+                kind_key = 'balance.usdt.history.kind.top_up'
+                amount_line = self.t(customer, 'balance.usdt.history.requested', amount=usdt(entry['amount_micro']))
+                state_key = ('balance.usdt.history.state.' + state if state
+                             else 'balance.usd.amount.unavailable')
+                rows.append([self._legacy_button(customer, 'balance.usdt.history.open',
+                                                'usdt:status:' + entry['target_id'], number=index)])
+            else:
+                kind_key, sign = _USDT_KINDS[kind]
+                state_key = _USDT_STATES[kind]
+                amount_line = self.t(customer, 'balance.usdt.history.amount',
+                                     amount=('+' if sign > 0 else '-') + usdt(entry['amount_micro']))
+            lines += [self.t(customer, 'balance.usdt.history.row', number=index,
+                             kind=self.t(customer, kind_key), state=self.t(customer, state_key)),
+                      amount_line,
+                      self.t(customer, 'balance.usdt.history.date',
+                             date=self._short_date(entry['occurred_at'], lambda key: self.t(customer, key))),
+                      self.t(customer, 'balance.usdt.history.reference', reference=entry['reference'])]
+        def page_button(entry, which):
+            payload = struct.pack('>BqqBq', 2, customer_id, entry['occurred_micros'],
+                                  entry['rank'], entry['item_id'])
+            return self._legacy_button(customer, 'balance.activity.' + ('older' if which == 'o' else 'newer'),
+                                       'usdt:h:' + which + ':' + self._encode_token(payload))
+        paging = []
+        if visible and (more if direction == 'newer' else direction == 'older'):
+            paging.append(page_button(visible[0], 'n'))
+        if visible and (direction == 'newer' or more):
+            paging.append(page_button(visible[-1], 'o'))
+        if paging:
+            rows.append(paging)
+        rows += [[self._legacy_button(customer, 'balance.usdt.topup.button', 'balance:currency:usd')],
+                 self._funding_row(customer, 'balance')]
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines), rows, screen='balance')
+
+    def usdt_status(self, customer, target, notice=None):
+        state = target.get('state') or 'preparing'
+        if state == 'settled' and not target.get('entry_id'):
+            state = 'manual_review'
+        if state not in ('preparing', 'awaiting_payment', 'expired_unresolved', 'manual_review',
+                         'settled', 'resolved_by_compensation', 'externally_refunded', 'rejected',
+                         'expired_unpaid', 'cancelled_by_customer'):
+            state = 'preparing'
+        rail = target.get('rail')
+        snapshot = target.get('payment_snapshot') or {}
+        lines = [self.t(customer, 'balance.usdt.status.title_binance' if rail == 'binance_pay'
+                        else 'balance.usdt.status.title_bep20'), '━━━━━━━━━━━━━━']
+        if notice:
+            lines += [self.t(customer, notice), '']
+        lines += [self.t(customer, 'balance.usdt.status.invoice', reference=target.get('reference', '')),
+                  self.t(customer, 'balance.usdt.status.method', rail=self.t(
+                      customer, 'balance.usdt.rail_label.binance' if rail == 'binance_pay'
+                      else 'balance.usdt.rail_label.bep20')),
+                  self.t(customer, 'balance.usdt.preview.nominal', amount=usdt(target['amount_micro']))]
+        if state == 'awaiting_payment':
+            lines.append(self.t(customer, 'balance.usdt.status.send_exact',
+                                amount=usdt(target['payable_micro'])))
+            receiver = (snapshot.get('receiver_pay_id') or snapshot.get('receiver_uid')
+                        if rail == 'binance_pay' else
+                        snapshot.get('receiver_address') or snapshot.get('address'))
+            if receiver:
+                lines += [self.t(customer, 'balance.usdt.status.pay_id_title' if rail == 'binance_pay'
+                                 else 'balance.usdt.status.address_title'), str(receiver)]
+            if target.get('expires_at'):
+                lines.append(self.t(customer, 'balance.usdt.status.deadline',
+                                    deadline=self._funding_date(customer, target['expires_at'])))
+        else:
+            lines.append(self.t(customer, 'balance.usdt.status.' + state + '_note'))
+        lines.append(self.t(customer, 'balance.usdt.status.state',
+                            state=self.t(customer, 'balance.usdt.state.' + state)))
+        rows = []
+        if state in ('preparing', 'awaiting_payment', 'expired_unresolved', 'manual_review'):
+            rows.append([self._legacy_button(customer, 'balance.usdt.status.check',
+                                             'usdt:check:' + str(target['id']))])
+        if state in ('preparing', 'awaiting_payment'):
+            rows.append([self._legacy_button(customer, 'balance.usdt.status.cancel',
+                                             'usdt:close:' + str(target['id']))])
+        rows.append(self._funding_row(customer, 'usdt:history'))
+        return self._surface(customer, '\n'.join(html_text(line) for line in lines), rows, screen='balance')
+
+    def _usdt_open(self, customer, rail, amount, root, chat_id, policy_version=None, *, state=None):
+        if root is None or self.usdt_funding is None:
+            return self.usdt_chooser(customer, 'balance.usdt.topup.unavailable')
+        result = self.usdt_funding.open_confirmed(value(customer, 'id'), str(chat_id),
+                                                  root.bot_asset_scope, root.message_id, amount, rail,
+                                                  policy_version=policy_version)
+        if not isinstance(result, dict):
+            return self.usdt_chooser(customer, 'balance.usd.amount.restart')
+        if result.get('status') == 'stale_policy':
+            return self.usdt_amounts(customer, rail, 'balance.add.preset_stale')
+        target = result.get('target')
+        if target:
+            target = self.usdt_funding.status(value(customer, 'id'), target['id'])
+            if target:
+                if state is not None:
+                    state['usdt_hint'] = {'top_up_id': str(target['id'])}
+                notice = 'balance.usdt.notice.active_target' if result.get('status') == 'active_target' else None
+                return self.usdt_status(customer, target, notice)
+        notice = ('balance.usdt.notice.active_target' if result.get('status') == 'active_target'
+                  else 'balance.usd.amount.unavailable')
+        return self.usdt_chooser(customer, notice)
+
+    def usdt_amount_input(self, customer, text, state, root, chat_id):
+        prompt = state.get('usdt_amount') or {}
+        if (root is None or str(chat_id) != prompt.get('chat_id')
+                or root.message_id != prompt.get('message_id')):
+            state.pop('usdt_amount', None)
+            return self.usdt_chooser(customer, 'balance.usd.amount.restart')
+        rail = prompt['rail']
+        candidate = text.strip().replace(',', '.')
+        if not re.fullmatch(r'[0-9]+(?:\.[0-9]{1,6})?', candidate):
+            return self.usdt_custom_prompt(customer, rail, 'balance.usd.amount.invalid')
+        whole, _, fraction = candidate.partition('.')
+        if len(whole) > 13:
+            return self.usdt_custom_prompt(customer, rail, 'balance.usd.amount.invalid')
+        amount = int(whole) * 1_000_000 + int(fraction.ljust(6, '0') or '0')
+        if amount < 1 or amount > 9223372036854775807:
+            return self.usdt_custom_prompt(customer, rail, 'balance.usd.amount.invalid')
+        state.pop('usdt_amount', None)
+        return self._usdt_open(customer, rail, amount, root, chat_id, state=state)
+
+    def usdt_hint_input(self, customer, text, state, root, chat_id):
+        prompt = state.get('usdt_hint') or {}
+        if (root is None or str(chat_id) != prompt.get('chat_id')
+                or root.message_id != prompt.get('message_id')
+                or self.usdt_settlement is None or self.usdt_funding is None):
+            state.pop('usdt_hint', None)
+            return self.usdt_chooser(customer, 'balance.usd.amount.restart')
+        target = self.usdt_funding.status(value(customer, 'id'), prompt['top_up_id'])
+        if target is None:
+            state.pop('usdt_hint', None)
+            return self.usdt_chooser(customer, 'balance.usd.amount.restart')
+        try:
+            self.usdt_settlement.submit(value(customer, 'id'), prompt['top_up_id'], text.strip())
+        except ValueError:
+            notice = ('balance.usdt.notice.order_invalid' if target['rail'] == 'binance_pay'
+                      else 'balance.usdt.notice.hash_invalid')
+        else:
+            notice = 'balance.usdt.notice.hash_recorded'
+        return self.usdt_status(customer, target, notice)
 
     def balance_presets(self, customer, notice_key=None, **replacements):
         state = self._funding_state()
@@ -1568,6 +1822,67 @@ class CatalogPresenter:
         self.callback_notice = None
         if not data.startswith('checkout:hint:'):
             state.pop('payment_hint', None)
+        if not data.startswith('usdt:custom:'):
+            state.pop('usdt_amount', None)
+        if not data.startswith(('usdt:status:', 'usdt:check:', 'usdt:p:', 'usdt:hint:')):
+            state.pop('usdt_hint', None)
+        if data in ('balance:currency:usd', 'balance:usdt'):
+            self.callback_handled = True
+            return self.usdt_chooser(customer)
+        if data == 'usdt:history' or data.startswith('usdt:h:'):
+            self.callback_handled = True
+            return self.usdt_history(customer, None if data == 'usdt:history' else data)
+        match = re.fullmatch(r'usdt:rail:(binance_pay|bsc_usdt)', data)
+        if match:
+            self.callback_handled = True
+            return self.usdt_amounts(customer, match[1])
+        match = re.fullmatch(r'usdt:custom:(binance_pay|bsc_usdt)', data)
+        if match:
+            self.callback_handled = True
+            if root is None or not self._usdt_available(match[1]):
+                return self.usdt_chooser(customer, 'balance.usdt.topup.unavailable')
+            state['usdt_amount'] = {'rail': match[1]}
+            return self.usdt_custom_prompt(customer, match[1])
+        match = re.fullmatch(r'usdt:p:([A-Za-z0-9_-]+)', data)
+        if match:
+            self.callback_handled = True
+            payload = self._decode_token(match[1], 15)
+            if payload is None or self.usdt_funding is None:
+                return None
+            version, owner, policy_version, rail_id, index = struct.unpack('>BqIBB', payload)
+            if version != 3 or owner != value(customer, 'id') or rail_id not in (1, 2):
+                return None
+            rail = 'binance_pay' if rail_id == 1 else 'bsc_usdt'
+            if not self._usdt_available(rail):
+                return self.usdt_chooser(customer, 'balance.usdt.topup.unavailable')
+            current, amounts = self.usdt_funding.presets()
+            if current != policy_version or index >= len(amounts):
+                return self.usdt_amounts(customer, rail, 'balance.add.preset_stale')
+            return self._usdt_open(customer, rail, amounts[index], root, chat_id, policy_version, state=state)
+        match = re.fullmatch(r'usdt:(status|check|close):([0-9a-fA-F-]{36})', data)
+        if match:
+            self.callback_handled = True
+            if self.usdt_funding is None:
+                return self.usdt_chooser(customer, 'balance.usdt.topup.unavailable')
+            from uuid import UUID
+            try:
+                target_id = str(UUID(match[2]))
+            except ValueError:
+                return None
+            target = self.usdt_funding.status(value(customer, 'id'), target_id)
+            if target is None:
+                return None
+            notice = None
+            if match[1] == 'close':
+                cancelled = self.usdt_funding.cancel(value(customer, 'id'), target_id)
+                state.pop('usdt_hint', None)
+                notice = 'balance.usdt.notice.cancelled_target' if cancelled else 'balance.usdt.notice.cancel_unavailable'
+                target = self.usdt_funding.status(value(customer, 'id'), target_id)
+            elif match[1] == 'check':
+                notice = 'balance.usdt.notice.refreshed'
+            if match[1] != 'close' and target.get('state') in ('preparing', 'awaiting_payment', 'expired_unresolved', 'manual_review'):
+                state['usdt_hint'] = {'top_up_id': target_id}
+            return self.usdt_status(customer, target, notice)
         if data in ('menu','home','start','/start','/menu','menu:home','menu:back','family:back:menu'):
             state.clear()
             return self.home(customer)
