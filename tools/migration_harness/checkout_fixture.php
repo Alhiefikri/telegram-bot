@@ -184,8 +184,31 @@ if (getenv('P19_AUTH_SMOKE') === '1') {
         'invoice' => $guestOrder->invoice_number, 'key' => $recovery];
     $fixtures['auth']['admin'] = ['id' => $admin->id, 'email' => $admin->email];
     $fixtures['auth']['password'] = $password;
+    $fixtures['auth']['balance_cursor'] = app(App\Services\Customer\CustomerBalanceActivityCursorToken::class)->storeBalanceToken(
+        $fixtures['auth']['raw']['id'],
+        App\Services\StoreBalance\StoreBalanceActivityCursor::entry(
+            \Carbon\CarbonImmutable::parse('2026-01-02 09:10:11.123456', 'Asia/Jakarta'), 42));
     $fixtures['auth']['signed_url'] = Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show',
         now()->addMinutes(15), ['order' => App\Models\Order::where('checkout_key', str_repeat('a', 64))->value('id')]);
+}
+
+if (getenv('P21_STOREFRONT_SMOKE') === '1') {
+    $activityCustomer = App\Models\Customer::findOrFail($fixtures['auth']['raw']['id']);
+    Illuminate\Support\Facades\Date::setTestNow(now()->addSecond());
+    try {
+        for ($i = 1; $i <= 27; $i++) {
+            app(App\Services\StoreBalance\StoreBalanceLedger::class)->creditTopUp(
+                $activityCustomer, 1000 + $i, 'p21-activity-'.$i, 'p21-idr-credit-'.$i);
+            app(App\Services\UsdtBalance\CustomerUsdtBalanceLedger::class)->creditVerifiedTopUp(
+                $activityCustomer,
+                new App\Services\UsdtBalance\VerifiedUsdtFunding(
+                    $activityCustomer->id, App\Services\UsdtBalance\UsdtMicroAmount::fromUnits(1000000 + $i),
+                    'p21-usdt-'.$i, 'p21-receipt-'.$i, 'v1'),
+                'p21-usdt-credit-'.$i);
+        }
+    } finally {
+        Illuminate\Support\Facades\Date::setTestNow();
+    }
 }
 if (getenv('P14_EXTERNAL_SMOKE') === '1') {
     Illuminate\Support\Facades\DB::table('manual_payment_settings')->where('is_active', true)

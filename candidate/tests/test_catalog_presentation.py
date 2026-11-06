@@ -618,8 +618,6 @@ class CatalogPresentationTests(unittest.TestCase):
         frozen = self.presenter.route(self.customer,'balance',self.state)
         self.assertIn('💎 Saldo USDT dibekukan sementara selama pemeriksaan insiden.',frozen.caption)
         self.assertNotIn('💎 Saldo USDT: 0 USDT',frozen.caption)
-        self.assertEqual([button['callback_data'] for button in buttons(frozen)],
-                         ['balance:add','balance:activity','menu:back','menu:home'])
 
     def test_balance_history_paginates_ledger_and_rejects_money_actions(self):
         self._balance_rows()

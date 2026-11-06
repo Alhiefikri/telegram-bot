@@ -40,7 +40,8 @@ class QuietHandler(WSGIRequestHandler):
 def main():
     suppress_payload_logging()
     try:
-        application = create_application()
+        from django.contrib.staticfiles.handlers import StaticFilesHandler
+        application = StaticFilesHandler(create_application())
         with open(os.devnull, "w") as discard:
             with make_server("0.0.0.0", 8080, application,
                              server_class=BoundedServer, handler_class=QuietHandler) as server:

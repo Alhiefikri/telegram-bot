@@ -29,6 +29,7 @@ class CheckoutRequest:
     terms_version: str | None = None
     terms_accepted_at: datetime | None = None
     balance_request: BalanceCheckoutRequest | None = None
+    credential_access_key_hash: str | None = None
 
     def __post_init__(self):
         require_integer(self.customer_id, minimum=1)
@@ -45,6 +46,10 @@ class CheckoutRequest:
             raise ValueError('Invalid terms version')
         if self.terms_accepted_at is not None and self.terms_accepted_at.tzinfo is None:
             raise ValueError('Terms acceptance requires an explicit timezone')
+        if self.credential_access_key_hash is not None and (
+                not isinstance(self.credential_access_key_hash, str)
+                or not re.fullmatch(r'\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}', self.credential_access_key_hash)):
+            raise ValueError('Invalid recovery key hash')
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +242,9 @@ class CheckoutService:
             placeholders += ',%s'
             values += (api_order_claim_id,)
         self.db.execute(f'INSERT INTO public.orders ({columns}) VALUES ({placeholders})', values)
+        if request.credential_access_key_hash is not None:
+            self.db.execute('UPDATE public.orders SET credential_access_key_hash=%s WHERE id=%s',
+                            (request.credential_access_key_hash, order_id))
         binance = plan.rail_snapshot if external_usdt and plan.method == 'BINANCE_PAY_ID' else None
         self.db.execute('''INSERT INTO public.payments
             (id,order_id,provider,merchant_ref,method,amount,currency,status,expired_at,

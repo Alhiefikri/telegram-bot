@@ -29,6 +29,18 @@ class HttpTests(unittest.TestCase):
         verify.assert_not_called()
         self.assertEqual(self.client.head("/health").content, b"")
 
+    def test_guide_invoice_return_is_private_and_rejects_external_links(self):
+        response = self.client.get("/gpt/panduan-login-akun", {
+            "return": "/shop/orders/synthetic?expires=1&signature=synthetic", "invoice": "INV-SYNTHETIC"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Kembali ke invoice', response.content)
+        self.assertIn(b'INV-SYNTHETIC', response.content)
+        self.assertIn("no-store", response["Cache-Control"])
+        self.assertEqual(response["Referrer-Policy"], "no-referrer")
+        rejected = self.client.get("/gpt/panduan-login-akun", {"return": "//outside.invalid/shop/orders/x"})
+        self.assertNotIn(b'outside.invalid', rejected.content)
+        self.assertIn(b'href="/akses-pesanan"', rejected.content)
+
     def test_readiness_returns_safe_503_on_identity_or_connection_failure(self):
         with patch("lhie_candidate.http.verify_dependencies", side_effect=ValueError("sensitive-sentinel")):
             result = self.client.get("/ready?token=sensitive-sentinel")
@@ -81,6 +93,24 @@ class HttpTests(unittest.TestCase):
             result = self.client.get("/explode?token=query-sensitive-sentinel")
         self.assertEqual(result.status_code, 500)
         self.assertEqual(result.json(), {"status": "error"})
+
+    def test_missing_view_resource_is_404_without_sensitive_details(self):
+        from django.http import Http404
+        from django.test import override_settings
+        from django.urls import path
+        from lhie_candidate.http import not_found
+
+        def missing(request):
+            raise Http404("resource-sensitive-sentinel")
+
+        class ErrorUrls:
+            urlpatterns = [path("missing", missing)]
+            handler404 = not_found
+
+        with override_settings(ROOT_URLCONF=ErrorUrls):
+            result = self.client.get("/missing")
+        self.assertEqual(result.status_code, 404)
+        self.assertEqual(result.json(), {"status": "not_found"})
 
     def test_unknown_slashes_and_methods_do_not_redirect_or_run_work(self):
         with patch("lhie_candidate.http.verify_dependencies") as verify:

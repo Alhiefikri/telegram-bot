@@ -1,4 +1,7 @@
-from django.http import JsonResponse
+import re
+
+from django.core.exceptions import PermissionDenied, SuspiciousOperation
+from django.http import Http404, JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 
 from .readiness import verify_dependencies
@@ -23,13 +26,20 @@ class PayloadSafeMiddleware(MiddlewareMixin):
                 request.path in ("/webhook/telegram", "/callback/sakurupiah", "/api/webhook/klikqris",
                                  "/api/webhook/klikqris/sandbox", "/api/webhook/pakasir",
                                  "/api/webhook/sakurupiah") or handles_auth(request.path)
-            ))
+            )) or (request.method in ("PATCH", "DELETE")
+                    and re.fullmatch(r"/shop/cart/items/[1-9][0-9]*", request.path))
         ):
             result = response(405, "method_not_allowed")
             result["Allow"] = "GET, HEAD"
             return result
 
     def process_exception(self, request, exception):
+        if isinstance(exception, Http404):
+            return response(404, "not_found")
+        if isinstance(exception, PermissionDenied):
+            return response(403, "forbidden")
+        if isinstance(exception, SuspiciousOperation):
+            return response(400, "bad_request")
         return response(500, "error")
 
     def process_response(self, request, result):

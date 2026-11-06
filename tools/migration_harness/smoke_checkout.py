@@ -31,17 +31,19 @@ def cli(*args):
 def main():
     receipt = sys.argv[1:] == ['--receipt']
     lifecycle = sys.argv[1:] == ['--lifecycle']
-    auth = sys.argv[1:] == ['--auth']
+    browser = sys.argv[1:] == ['--storefront-browser']
+    storefront = sys.argv[1:] in (['--storefront'], ['--storefront-browser'])
+    auth = sys.argv[1:] == ['--auth'] or storefront
     supplier = sys.argv[1:] == ['--supplier']
     p16 = sys.argv[1:] == ['--p16']
     p17 = sys.argv[1:] == ['--p17']
     api = sys.argv[1:] == ['--api']
-    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth'], ['--supplier'], ['--p16'], ['--p17'], ['--api']):
-        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth|--supplier|--p16|--p17|--api]')
+    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api']):
+        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api]')
     os.umask(0o077)
-    scope = 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
+    scope = 'migration-p21' if storefront else 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
     harness.STATE = ROOT / '.local' / scope / 'lifecycle'
-    harness.PREFIX = 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
+    harness.PREFIX = 'lhie-p21-' if storefront else 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
     harness.IMAGE = 'lhie-p19-boundary:local' if auth or api else 'lhie-p09-boundary:local' if receipt or lifecycle or supplier or p16 or p17 else 'lhie-p01-boundary:1'
     if not (harness.STATE / 'candidate/config.json').exists():
         cli('init','candidate')
@@ -52,6 +54,9 @@ def main():
         raise RuntimeError('Stop existing disposable stack before P07')
     output = ROOT / '.local' / scope
     output.mkdir(parents=True,exist_ok=True)
+    if browser:
+        (output / 'browser-finished').unlink(missing_ok=True)
+        (output / 'browser-fixture.json').unlink(missing_ok=True)
     cli('reset','candidate')
     harness.candidate_admission(config,harness.STATE / 'candidate')
     try:
@@ -60,7 +65,7 @@ def main():
         database = container('candidate','database')
         php(boundary,'php artisan migrate --force --no-interaction')
         fixture = (ROOT / 'tools/migration_harness/checkout_fixture.php').read_text().removeprefix('<?php')
-        fixtures = json.loads(php(boundary, ('P20_API_SMOKE=1 P16_USDT_SMOKE=1 ' if api else 'P17_USDT_SMOKE=1 ' if p17 else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
+        fixtures = json.loads(php(boundary, ('P20_API_SMOKE=1 P16_USDT_SMOKE=1 ' if api else 'P17_USDT_SMOKE=1 ' if p17 else 'P21_STOREFRONT_SMOKE=1 P19_AUTH_SMOKE=1 ' if storefront else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
         if receipt:
             customer_id = int(fixtures['python']['customer_id'])
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
@@ -68,9 +73,9 @@ def main():
         schema = '\n'.join((ROOT / 'candidate/lhie_candidate/navigation' / name).read_text()
             for name in ('schema.sql','ingress_schema.sql','assets_schema.sql','grants.sql'))
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/checkout/grants.sql').read_text()
-        if lifecycle or supplier or p16 or p17 or api:
+        if lifecycle or supplier or p16 or p17 or api or storefront:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
-        if receipt or lifecycle or supplier or p16 or p17 or api:
+        if receipt or lifecycle or supplier or p16 or p17 or api or storefront:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
         if p16 or p17:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/grants.sql').read_text()
@@ -79,7 +84,7 @@ def main():
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/operations_grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/adjustments/grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/schema.sql').read_text()
-        if supplier or api:
+        if supplier or api or storefront:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/grants.sql').read_text()
         if supplier:
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
@@ -88,6 +93,10 @@ def main():
         if auth:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/schema.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/grants.sql').read_text()
+        if storefront:
+            schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/storefront' / name).read_text()
+                                       for name in ('catalog_grants.sql', 'grants.sql', 'account_grants.sql',
+                                                    'balance_idr_grants.sql', 'balance_usdt_grants.sql'))
         if api:
             schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/customer_api' / name).read_text()
                                        for name in ('credential_grants.sql','orders_grants.sql','reads_grants.sql'))
@@ -110,12 +119,14 @@ def main():
             '--env',f'P07_RECEIPT_SMOKE={"1" if receipt else "0"}',
             '--env',f'P12_LIFECYCLE_SMOKE={"1" if lifecycle else "0"}',
             '--env',f'P19_AUTH_SMOKE={"1" if auth else "0"}',
+            '--env',f'P21_STOREFRONT_SMOKE={"1" if storefront else "0"}',
+            '--env',f'P21_BROWSER_SMOKE={"1" if browser else "0"}',
             '--env',f'P16_USDT_SMOKE={"1" if p16 else "0"}',
             '--env',f'P17_USDT_SMOKE={"1" if p17 else "0"}',
             '--env',f'P20_API_SMOKE={"1" if api else "0"}',
             '--env',f'P18_SUPPLIER_SMOKE={"1" if supplier else "0"}','--entrypoint','python',
-            'lhie-p13-candidate:local' if supplier or p17 or api else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
-        probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=240)
+            'lhie-p13-candidate:local' if supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
+        probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=1200 if browser else 240)
         if probe.returncode:
             if receipt:
                 diagnostic = [json.loads(line) for line in probe.stderr.splitlines() if line.startswith('{')]
@@ -161,6 +172,12 @@ def main():
                 'candidate/auth_mail.py', 'tools/migration_harness/boundary.py',
                 'candidate/tests/test_auth_core.py', 'candidate/tests/test_auth_http.py',
                 'candidate/tests/test_auth_providers.py', 'tests/migration_harness/test_p09_relay.py'))
+        if storefront:
+            sources.extend(path for directory in (
+                ROOT / 'candidate/lhie_candidate/storefront', ROOT / 'candidate/templates/storefront',
+                ROOT / 'candidate/static/storefront') for path in sorted(directory.rglob('*'))
+                if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc')
+            sources.append(ROOT / 'candidate/tests/test_storefront_postgres.py')
         if p16:
             sources.extend(sorted((ROOT / 'candidate/lhie_candidate/usdt').glob('*.py')))
             sources.append(ROOT / 'candidate/lhie_candidate/usdt/grants.sql')
@@ -195,7 +212,7 @@ def main():
         observed['source_sha256'] = {str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest()
                                       for path in sources if path.is_file()}
         observed['base_revision'] = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-        observed['dependency_image'] = docker('image','inspect','lhie-p13-candidate:local' if supplier or p17 or api else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','--format','{{.Id}}')
+        observed['dependency_image'] = docker('image','inspect','lhie-p13-candidate:local' if supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','--format','{{.Id}}')
         if receipt or auth:
             observed['boundary_image'] = docker('image','inspect',harness.IMAGE,'--format','{{.Id}}')
         migration_digest = hashlib.sha256()
@@ -253,6 +270,10 @@ def main():
                 'No real Google/Telegram identities, mail recipients, historical key qualification or production activation',
                 'Explicit additive browser session metadata; old PHP cookies require relogin at H2, never deserialized',
                 'No production, deployment, provider activation or CI/CD operations']
+        if storefront:
+            observed['limits'] = ['Synthetic disposable PostgreSQL/Redis and local fixture transports only',
+                'Source mounted over cached dependency image; explicit grants, no production activation',
+                'No live providers, real customers, production data, deployment or CI/CD operations']
         if supplier:
             observed['limits'] = ['Synthetic disposable PostgreSQL and Redis, injected supplier/Telegram fixtures only',
                 'No live supplier targets, actual historical data or production provider qualification',

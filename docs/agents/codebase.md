@@ -2575,6 +2575,22 @@ Verification entry points: `tests/Feature/Telegram/TelegramReceiptLatencyTimingT
 `tests/Feature/TelegramLatencyBaselineCommandTest.php` and
 `tests/Unit/TelegramLatencyBaselineReportTest.php`.
 
+### Django storefront adapter (#703)
+
+`candidate/lhie_candidate/storefront/` adapts the catalog, browser-session cart,
+review/checkout, signed invoice and customer pages to the shared navigation,
+checkout, payment, receipt and P19 authentication owners. The review GET has
+no Customer/Cart/Order/Payment side effect. A browser-bound review is rechecked
+on submit; Recovery Key access is paid-only and claim is an explicit ownership
+transition. Credential email resend keeps the encrypted recipient snapshot and
+does not retry an unknown delivery outcome. P25 owns mail delivery and waitlist
+processing; full visual/browser acceptance is P27.
+
+Local entry points and privilege boundaries are in the
+[P21 runbook](../migration/python-django/p05/README.md#p21-storefront-and-customer-pages-703).
+The synthetic `--storefront` smoke uses the existing disposable P01 harness and
+real PostgreSQL/Redis, not production services.
+
 ## 11. Checklist perubahan untuk AI
 
 Sebelum membuka patch:

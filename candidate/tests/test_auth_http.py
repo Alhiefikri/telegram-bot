@@ -2,6 +2,7 @@ import copy
 from contextlib import nullcontext
 from datetime import datetime
 import os
+import re
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -16,7 +17,7 @@ class MetadataDatabase:
         self.sessions = {}
         self.customer_rows = {
             7: {"id": 7, "email": "synthetic@example.test", "email_verified_at": datetime(2026, 1, 1),
-                "telegram_id": None, "auth_version": 0},
+                "telegram_id": None, "auth_version": 0, "first_name": "Synthetic", "username": None},
         }
         self.identities = []
 
@@ -27,6 +28,9 @@ class MetadataDatabase:
         if "public.customers" in sql:
             return copy.deepcopy(self.customer_rows.get(params[0]))
         if "customer_identities" in sql:
+            if len(params) == 1:
+                return next((row for row in self.identities if row["customer_id"] == params[0]
+                             and row["provider"] == "google"), None)
             if "provider='telegram'" in sql:
                 return next((row for row in self.identities if row["customer_id"] == params[0]
                              and row["provider"] == "telegram" and row["provider_subject"] == params[1]), None)
@@ -70,7 +74,16 @@ class AuthHttpTests(unittest.TestCase):
         self.bundle = SimpleNamespace(core=self.core)
         self.patches = [patch("lhie_candidate.auth.sessions.Database", return_value=self.db),
                         patch("lhie_candidate.auth.sessions.transaction.atomic", side_effect=lambda **kwargs: nullcontext()),
-                        patch("lhie_candidate.auth.http.services", return_value=self.bundle)]
+                        patch("lhie_candidate.storefront.account_auth.Database", return_value=self.db),
+                        patch("lhie_candidate.storefront.account.Database", return_value=self.db),
+                        patch("lhie_candidate.storefront.account._account_summary", return_value={
+                            "name": "Synthetic", "initial": "S", "username": None,
+                            "email": "synthetic@example.test", "joined": None,
+                            "counts": {"total": 0, "waiting": 0, "processing": 0, "completed": 0, "issue": 0},
+                            "idr": "Rp 0", "usdt": "0 USDT", "frozen": False}),
+                        patch("lhie_candidate.auth.http.services", return_value=self.bundle),
+                        patch("lhie_candidate.auth.http.google_service", return_value=SimpleNamespace(ready=lambda: False)),
+                        patch("lhie_candidate.auth.http.telegram_service", return_value=SimpleNamespace(ready=lambda: False))]
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
@@ -78,7 +91,10 @@ class AuthHttpTests(unittest.TestCase):
                              HTTP_HOST="localhost", HTTP_ORIGIN="https://localhost")
 
     def csrf(self, client=None):
-        return (client or self.client).get("/akun", secure=True).json()["csrf_token"]
+        response = (client or self.client).get("/akun", secure=True)
+        match = re.search(rb'name="csrfmiddlewaretoken" value="([^"]+)"', response.content)
+        self.assertIsNotNone(match, "Account page must contain a CSRF-protected form")
+        return match.group(1).decode()
 
     def post(self, path, values=None, client=None):
         client = client or self.client
@@ -88,6 +104,18 @@ class AuthHttpTests(unittest.TestCase):
         from lhie_candidate.compat.identity import sha256_digest
         token = (client or self.client).cookies["candidate_browser"].value
         return self.db.sessions[sha256_digest(token)][0]
+
+    def test_customer_identity_follows_session_and_does_not_expose_email(self):
+        guest = self.client.get("/akun/identitas", secure=True)
+        self.assertEqual(guest.json(), {"authenticated": False, "name": None, "initial": None})
+        self.post("/akun/login", {"email": "synthetic@example.test", "password": "synthetic"})
+        identity = self.client.get("/akun/identitas", secure=True)
+        self.assertEqual(identity.json(), {"authenticated": True, "name": "Synthetic", "initial": "S"})
+        self.assertNotIn(b"synthetic@example.test", identity.content)
+        self.assertEqual(identity["Cache-Control"], "no-store, private")
+        self.db.customer_rows[7]["auth_version"] += 1
+        self.assertFalse(self.client.get("/akun/identitas", secure=True).json()["authenticated"])
+
 
     def test_csrf_is_session_bound_and_authentication_destroys_old_identifier(self):
         from django.test import Client
@@ -104,7 +132,8 @@ class AuthHttpTests(unittest.TestCase):
         self.core.login.assert_not_called()
         result = self.client.post("/akun/login", {"csrfmiddlewaretoken": old_csrf,
                                  "email": "synthetic@example.test", "password": "synthetic"}, secure=True)
-        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.status_code, 302)
+        self.assertEqual(result["Location"], "/akun/pesanan")
         self.assertNotEqual(old_id, self.client.cookies["candidate_browser"].value)
         self.assertNotIn(sha256_digest(old_id), self.db.sessions)
         self.assertTrue(result.cookies["candidate_browser"]["secure"])
@@ -121,14 +150,15 @@ class AuthHttpTests(unittest.TestCase):
         metadata = self.session_metadata()
         metadata["admin"] = {"id": 92, "password_digest": "synthetic-admin-binding"}
         metadata["orders"] = {"synthetic-order": 9999999999}
-        self.assertEqual(self.post("/akun/login", {"email": "synthetic@example.test", "password": "synthetic"}).status_code, 200)
+        self.assertEqual(self.post("/akun/login", {"email": "synthetic@example.test", "password": "synthetic"}).status_code, 302)
         self.assertEqual(self.session_metadata()["admin"]["id"], 92)
         self.assertEqual(self.post("/admin/logout").status_code, 200)
         self.assertNotIn("admin", self.session_metadata())
         self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 200)
         self.session_metadata()["admin"] = {"id": 92}
-        self.assertEqual(self.post("/akun/password-reset/confirm", {"token": "synthetic", "password": "Synthetic1!",
-                                                                  "password_confirmation": "Synthetic1!"}).status_code, 200)
+        reset = self.post("/akun/password-reset/confirm", {"token": "synthetic", "password": "Synthetic1!",
+                                                          "password_confirmation": "Synthetic1!"})
+        self.assertEqual((reset.status_code, reset["Location"]), (302, "/akun"))
         self.assertNotIn("customer", self.session_metadata())
         self.assertEqual(self.session_metadata()["admin"]["id"], 92)
         self.assertIn("synthetic-order", self.session_metadata()["orders"])
@@ -136,13 +166,13 @@ class AuthHttpTests(unittest.TestCase):
     def test_version_and_nullable_email_provider_markers_are_checked_each_request(self):
         self.post("/akun/login", {"email": "synthetic@example.test", "password": "synthetic"})
         self.db.customer_rows[7]["auth_version"] += 1
-        self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 401)
+        self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 302)
         self.assertNotIn("customer", self.session_metadata())
         self.post("/akun/login", {"email": "synthetic@example.test", "password": "synthetic"})
         self.db.customer_rows[7]["email_verified_at"] = None
         self.session_metadata()["customer"]["method"] = "google:13"
         self.db.identities = [{"id": 13, "customer_id": 999, "provider": "google"}]
-        self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 401)
+        self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 302)
         self.db.customer_rows[7]["email_verified_at"] = datetime(2026, 1, 1)
         self.post("/akun/login", {"email": "synthetic@example.test", "password": "synthetic"})
         self.db.customer_rows[7]["email_verified_at"] = None
@@ -150,7 +180,7 @@ class AuthHttpTests(unittest.TestCase):
         self.db.identities[0]["customer_id"] = 7
         self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 200)
         self.db.identities.clear()
-        self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 401)
+        self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 302)
 
     def test_confirmation_get_never_consumes_or_reflects_tokens(self):
         for path in ("/akun/verifikasi-email?token=private-sentinel", "/akun/password-reset/confirm?token=private-sentinel",
@@ -165,10 +195,15 @@ class AuthHttpTests(unittest.TestCase):
 
     def test_unknown_and_known_otp_request_responses_are_identical(self):
         first = self.post("/akun/login-code", {"email": "known@example.test"})
+        first_page = self.client.get(first["Location"], secure=True)
         self.core.request_otp.return_value = None
         second = self.post("/akun/login-code", {"email": "unknown@example.test"})
-        self.assertEqual(first.content, second.content)
-        self.assertEqual(first.json(), {"status": "requested"})
+        second_page = self.client.get(second["Location"], secure=True)
+        def normalize(response):
+            return re.sub(rb'(name="csrfmiddlewaretoken" value=")[^"]+', rb'\1CSRF', response.content)
+        self.assertEqual((first.status_code, first["Location"]), (second.status_code, second["Location"]))
+        self.assertEqual((first_page.status_code, second_page.status_code), (200, 200))
+        self.assertEqual(normalize(first_page), normalize(second_page))
         self.assertNotIn("challenge", second.content.decode())
 
     def test_native_confirmation_post_keeps_same_origin_csrf_checks(self):
@@ -183,7 +218,7 @@ class AuthHttpTests(unittest.TestCase):
         self.core.verify.assert_not_called()
         same = client.post("/akun/verifikasi-email", values, secure=True,
                            HTTP_REFERER="https://localhost/akun/verifikasi-email")
-        self.assertEqual(same.status_code, 200)
+        self.assertEqual(same.status_code, 302)
 
     def test_postgresql_json_text_session_reload_keeps_guard_and_csrf(self):
         import json
@@ -198,8 +233,8 @@ class AuthHttpTests(unittest.TestCase):
 
         self.db.one = encoded_metadata
         self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 200)
-        self.assertEqual(self.post("/akun/logout").status_code, 200)
-        self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 401)
+        self.assertEqual(self.post("/akun/logout").status_code, 302)
+        self.assertEqual(self.client.get("/akun/keamanan", secure=True).status_code, 302)
 
 
 class OrderBoundaryTests(unittest.TestCase):
