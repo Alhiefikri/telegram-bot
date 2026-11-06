@@ -56,6 +56,15 @@ class MoneyTests(unittest.TestCase):
             with self.subTest(quantity=quantity), self.assertRaises(ValueError):
                 Money(Currency.IDR, 1).multiply(quantity)
 
+    def test_raw_token_units_are_exact_and_bigint_bounded(self):
+        self.assertEqual(Money.from_raw_usdt_units("1000000000000", 18).units, 1)
+        self.assertEqual(Money.from_raw_usdt_units(str(MAX_UNITS) + "000000000000", 18).units, MAX_UNITS)
+        self.assertEqual(Money.from_raw_usdt_units("123", 3).units, 123000)
+        for raw, decimals in (("1000000000001", 18), (str(MAX_UNITS + 1), 6),
+                              ("0", 18), ("01", 18), ("1", 37), ("1", True)):
+            with self.subTest(raw=raw, decimals=decimals), self.assertRaises(ValueError):
+                Money.from_raw_usdt_units(raw, decimals)
+
     def test_values_are_immutable(self):
         money = Money(Currency.IDR, 1)
         with self.assertRaises(FrozenInstanceError):

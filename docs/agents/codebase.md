@@ -156,6 +156,17 @@ PostgreSQL and fake-provider boundaries. Explicit grant files are never applied
 at startup. Unqualified funding providers remain disabled by default; browser
 and Dashboard presentation and notification delivery remain downstream work.
 
+P16 [USDT ledger and ownership](../migration/python-django/p05/README.md#p16-usdt-ledger-wallet-selection-and-receipt-ownership-700)
+owns `candidate/lhie_candidate/usdt/`, checkout wallet selection, the global
+receipt claim seam and permanent receiver-channel lookup. USDT purchase,
+original-currency refunds and typed linked reversals retain existing entries,
+accounting events and fingerprints; reconciliation detects signed-history drift
+without repairing it. Automatic selection locks IDR before USDT and rejects
+unsafe or stale candidates. `tools/migration_harness/smoke_checkout.py --p16`
+records the disposable PostgreSQL proof at `.local/migration-p16/verification.json`.
+Verified funding settlement and its authority remain P17; no funding rail,
+receiver provisioner or operator reversal workflow is activated by this slice.
+
 P18 [supplier acquisition and historical entitlement](../migration/python-django/p05/README.md#p18-supplier-acquisition-and-historical-entitlements-698)
 owns `candidate/lhie_candidate/suppliers/`: private supplier catalog, pricing,
 capacity, checkout holds, durable purchase claims/dispatch evidence and

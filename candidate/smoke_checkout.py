@@ -9,7 +9,10 @@ def run():
         raise RuntimeError('Explicit disposable checkout opt-in required')
     from lhie_candidate.startup import configure_django
     configure_django()
-    if os.environ.get('P18_SUPPLIER_SMOKE') == '1':
+    if os.environ.get('P16_USDT_SMOKE') == '1':
+        from tests.test_p16_postgres import exercise_p16
+        exercise = exercise_p16
+    elif os.environ.get('P18_SUPPLIER_SMOKE') == '1':
         from tests.test_supplier_postgres import exercise_supplier_protocol
         exercise = exercise_supplier_protocol
     elif os.environ.get('P19_AUTH_SMOKE') == '1':
@@ -27,7 +30,8 @@ def run():
     fixtures = json.load(sys.stdin)
     outcomes = exercise(fixtures)
     import django
-    dataset = ('synthetic-p18-supplier-v1' if os.environ.get('P18_SUPPLIER_SMOKE') == '1'
+    dataset = ('synthetic-p16-usdt-v1' if os.environ.get('P16_USDT_SMOKE') == '1'
+               else 'synthetic-p18-supplier-v1' if os.environ.get('P18_SUPPLIER_SMOKE') == '1'
                else 'synthetic-p19-auth-v1' if os.environ.get('P19_AUTH_SMOKE') == '1'
                else 'synthetic-p12-lifecycle-v1' if os.environ.get('P12_LIFECYCLE_SMOKE') == '1'
                else 'synthetic-p07-checkout-v1')
