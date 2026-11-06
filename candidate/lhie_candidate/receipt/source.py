@@ -115,7 +115,10 @@ class ReceiptSource:
             FROM public.payments WHERE order_id=%s ORDER BY created_at DESC,id DESC LIMIT 1''', (order_id,))
         if not payment or payment['status'] != 'paid' or payment['paid_at'] is None:
             raise ReceiptUnavailable()
-        if self.db.one("SELECT id FROM public.manual_fulfillment_reviews WHERE order_id=%s AND state IN ('pending','refund_uncertain') LIMIT 1", (order_id,)):
+        review = "SELECT id FROM public.manual_fulfillment_reviews WHERE order_id=%s AND state IN ('pending','refund_uncertain')"
+        if not receipt:
+            review += " AND reason='late_payment'"
+        if self.db.one(review + ' LIMIT 1', (order_id,)):
             raise ReceiptUnavailable()
         if self.db.one("SELECT id FROM public.supplier_fulfillments WHERE order_id=%s AND state <> 'delivered' LIMIT 1", (order_id,)):
             raise ReceiptUnavailable()
@@ -127,26 +130,15 @@ class ReceiptSource:
     def load(self, order_id, chat_id, *, locale=None, lock=False, receipt=False):
         """Authorization precedes credential selection and decryption."""
         order, payment = self.authorize(order_id, chat_id, lock=lock, receipt=receipt)
-        return self._load(order_id, order, payment, locale=locale)
+        return self._load(order_id, order, payment, locale=locale, receipt=receipt)
 
     def load_customer(self, order_id, customer_id, *, locale=None, lock=False):
         order, payment = self.authorize_customer(order_id, customer_id, lock=lock)
-        return self._load(order_id, order, payment, locale=locale)
+        return self._load(order_id, order, payment, locale=locale, receipt=False)
 
-    def _load(self, order_id, order, payment, *, locale):
-        items = self.db.rows('''SELECT i.id,i.product_id,i.product_name,i.product_icon,i.product_custom_emoji_id,
-            i.quantity,i.unit_price,i.subtotal,i.usdt_unit_price,i.usdt_subtotal,i.delivery_note,i.delivery_note_snapshotted,
-            i.usage_guide_title,i.usage_guide_url,i.usage_guide_snapshotted,
-            p.delivery_note AS product_delivery_note,p.usage_guide_title AS product_guide_title,
-            p.usage_guide_url AS product_guide_url
-            FROM public.order_items i LEFT JOIN public.products p ON p.id=i.product_id
-            WHERE i.order_id=%s ORDER BY i.id''', (order_id,))
-        if not items:
-            raise ReceiptUnavailable()
-        allocated = self.db.rows('''SELECT s.id,s.order_item_id,s.product_id,s.retired_at,s.credential_format,
-            s.secret,s.credential_payload FROM public.product_stock_items s
-            JOIN public.order_items i ON i.id=s.order_item_id WHERE i.order_id=%s ORDER BY i.id,s.id''', (order_id,))
-        allocation_signature = tuple(tuple(row.values()) for row in allocated)
+    def validate_allocation(self, order, payment, items, allocated, *, require_complete=False):
+        """Validate retained ownership and return only non-retired allocated rows."""
+        order_id = order['id']
         refunded = self.db.rows('''SELECT f.order_item_id,r.missing_quantity AS quantity,
                 NULL::bigint AS stock_id FROM public.order_refunds r
             JOIN public.supplier_fulfillments f ON f.id=r.supplier_fulfillment_id AND f.order_id=r.order_id
@@ -163,22 +155,65 @@ class ReceiptSource:
             FROM public.supplier_fulfillments f JOIN public.supplier_manual_handoffs h
               ON h.supplier_fulfillment_id=f.id
             WHERE f.order_id=%s AND f.state='delivered' GROUP BY f.order_item_id''', (order_id,))
-        retired_ids = {row['stock_id'] for row in refunded if row['stock_id'] is not None}
-        if any((row['retired_at'] is not None) != (row['id'] in retired_ids) for row in allocated):
+        item_by_id = {item['id']: item for item in items}
+        stock_by_id = {row['id']: row for row in allocated}
+        if len(item_by_id) != len(items) or len(stock_by_id) != len(allocated):
             raise ReceiptUnavailable()
-        allocated = [row for row in allocated if row['retired_at'] is None]
+        for row in allocated:
+            item = item_by_id.get(row['order_item_id'])
+            if item is None or row['product_id'] != item['product_id']:
+                raise ReceiptUnavailable()
+        refunded_ids = set()
+        for row in refunded:
+            if row['order_item_id'] not in item_by_id or type(row['quantity']) is not int or row['quantity'] < 1:
+                raise ReceiptUnavailable()
+            if row['stock_id'] is not None:
+                stock = stock_by_id.get(row['stock_id'])
+                if stock is None or stock['order_item_id'] != row['order_item_id'] or stock['retired_at'] is None:
+                    raise ReceiptUnavailable()
+                refunded_ids.add(row['stock_id'])
+        for row in handoffs:
+            if row['order_item_id'] not in item_by_id:
+                raise ReceiptUnavailable()
+        active = [row for row in allocated if row['retired_at'] is None]
+        if require_complete and any(row['retired_at'] is not None and row['id'] not in refunded_ids for row in allocated):
+            raise ReceiptUnavailable()
+        for item in items:
+            rows = [row for row in allocated if row['order_item_id'] == item['id']]
+            retained = [row for row in rows if row['retired_at'] is None]
+            item_refunds = [row for row in refunded if row['order_item_id'] == item['id']]
+            returned = sum(row['quantity'] for row in item_refunds)
+            missing = sum(row['quantity'] for row in item_refunds if row['stock_id'] is None)
+            handed = sum(row['quantity'] for row in handoffs if row['order_item_id'] == item['id'])
+            quantity = item['quantity']
+            if (not 0 <= returned + handed <= quantity
+                    or len(rows) > quantity - missing - handed
+                    or len(retained) > quantity - returned - handed
+                    or (require_complete and len(retained) != quantity - returned - handed)):
+                raise ReceiptUnavailable()
+        return active
+
+    def _load(self, order_id, order, payment, *, locale, receipt):
+        items = self.db.rows('''SELECT i.id,i.product_id,i.product_name,i.product_icon,i.product_custom_emoji_id,
+            i.quantity,i.unit_price,i.subtotal,i.usdt_unit_price,i.usdt_subtotal,i.delivery_note,i.delivery_note_snapshotted,
+            i.usage_guide_title,i.usage_guide_url,i.usage_guide_snapshotted,
+            p.delivery_note AS product_delivery_note,p.usage_guide_title AS product_guide_title,
+            p.usage_guide_url AS product_guide_url
+            FROM public.order_items i LEFT JOIN public.products p ON p.id=i.product_id
+            WHERE i.order_id=%s ORDER BY i.id''', (order_id,))
+        if not items:
+            raise ReceiptUnavailable()
+        allocated = self.db.rows('''SELECT s.id,s.order_item_id,s.product_id,s.retired_at,s.credential_format,
+            s.secret,s.credential_payload FROM public.product_stock_items s
+            JOIN public.order_items i ON i.id=s.order_item_id WHERE i.order_id=%s ORDER BY i.id,s.id''', (order_id,))
+        allocation_signature = tuple(tuple(row.values()) for row in allocated)
+        allocated = self.validate_allocation(order, payment, items, allocated, require_complete=receipt)
         if not allocated:
             raise ReceiptUnavailable()
         groups = []
         try:
             for item in items:
                 rows = [row for row in allocated if row['order_item_id'] == item['id']]
-                if any(row['product_id'] != item['product_id'] for row in rows):
-                    raise ReceiptUnavailable()
-                returned = sum(row['quantity'] for row in refunded if row['order_item_id'] == item['id'])
-                handed = sum(row['quantity'] for row in handoffs if row['order_item_id'] == item['id'])
-                if not 0 <= returned + handed <= item['quantity'] or len(rows) != item['quantity'] - returned - handed:
-                    raise ReceiptUnavailable()
                 if not rows:
                     continue
                 tutorial = item['delivery_note'] if item['delivery_note_snapshotted'] else item['product_delivery_note']

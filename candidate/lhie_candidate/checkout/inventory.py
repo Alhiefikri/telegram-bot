@@ -385,15 +385,9 @@ class InventoryLedger:
             SELECT id,product_id,product_stock_item_id,identity_kind FROM public.credential_identities
             WHERE product_stock_item_id=ANY(%s) ORDER BY id
         """, ([credential["id"] for credential in credentials],))
-        emails = set()
         for identity in identities:
             if identity["product_id"] != product_id or identity["identity_kind"] not in ("email", "auth_token"):
                 raise CheckoutError("inventory_invariant")
-            if identity["identity_kind"] == "email":
-                emails.add(identity["product_stock_item_id"])
-        if any(credential["credential_format"] == "structured_account" and credential["id"] not in emails
-               for credential in credentials):
-            raise CheckoutError("inventory_invariant")
 
     def _assert_local_allocated(self, item, credentials):
         local = item["quantity"] if item["local_quantity"] is None else item["local_quantity"]

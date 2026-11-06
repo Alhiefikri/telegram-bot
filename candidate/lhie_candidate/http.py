@@ -18,11 +18,12 @@ class PayloadSafeMiddleware(MiddlewareMixin):
         except Exception:
             return response(400, "bad_request")
         if request.method not in ("GET", "HEAD") and not (
-            request.method == "POST" and (
+            request.path == "/api/v1" or request.path.startswith("/api/v1/")
+            or (request.method == "POST" and (
                 request.path in ("/webhook/telegram", "/callback/sakurupiah", "/api/webhook/klikqris",
                                  "/api/webhook/klikqris/sandbox", "/api/webhook/pakasir",
                                  "/api/webhook/sakurupiah") or handles_auth(request.path)
-            )
+            ))
         ):
             result = response(405, "method_not_allowed")
             result["Allow"] = "GET, HEAD"

@@ -72,7 +72,14 @@ def exercise_receipt_protocol(fixtures):
                                      (partial_order.order_id,)).fetchone()[0]
         with transaction.atomic():
             InventoryLedger().retire(partial_item)
-        refused(partial_order.order_id, partial_chat)
+        retained = service.source.load(partial_order.order_id, partial_chat)
+        assert retained['allocated_count'] == 1
+        try:
+            service.source.load(partial_order.order_id, partial_chat, receipt=True)
+        except ReceiptUnavailable:
+            pass
+        else:
+            raise AssertionError('Incomplete allocation allowed automatic receipt delivery')
         assert service.materialize(str(partial_order.order_id))['state'] == 'failed'
 
         # A rolled-back materialization leaves neither durable rows nor an on-commit wakeup.

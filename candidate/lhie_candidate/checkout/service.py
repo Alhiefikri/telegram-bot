@@ -107,7 +107,18 @@ class CheckoutService:
                     raise
         raise RuntimeError('Unreachable checkout retry state')
 
-    def _checkout_once(self, request, preflight):
+    def checkout_api_locked(self, request: CheckoutRequest, claim_id: int):
+        """Run a balance-only API checkout inside the caller's financial transaction."""
+        self.db.require_transaction()
+        require_integer(claim_id, minimum=1)
+        if (not self.reseller or type(self.preparation) is not StoreBalancePreparation
+                or request.balance_request is None):
+            raise ValueError('API checkout requires reseller balance selection')
+        preflight = self.preparation.preflight(self._setting(lock=False))
+        return self._checkout_once(request, preflight, api_order_claim_id=claim_id)
+
+    def _checkout_once(self, request, preflight, *, api_order_claim_id=None):
+
         existing = self._replay(request)
         if existing:
             return existing
@@ -168,12 +179,19 @@ class CheckoutService:
         setting = self._setting(lock=True)
         pricing = self._pricing(items, products, reseller=self.reseller)
         if pricing != request.expected_pricing:
-            raise CheckoutError('price_changed')
+            error = CheckoutError('price_changed')
+            error.pricing = pricing
+            raise error
         preparation = self.preparation
         if request.balance_request is not None:
             if preflight.observation is not None:
                 raise CheckoutError('stale_preflight')
-            currency = request.balance_request.select(currencies, pricing, idr_account, usdt_account)
+            try:
+                currency = request.balance_request.select(currencies, pricing, idr_account, usdt_account)
+            except CheckoutError as error:
+                if error.code == 'price_changed':
+                    error.pricing = pricing
+                raise
             preparation = StoreBalancePreparation() if currency == 'IDR' else UsdtBalancePreparation()
             preflight = preparation.preflight(setting)
         elif (preflight.provider, preflight.method) != (preparation.provider, preparation.method):
@@ -207,14 +225,18 @@ class CheckoutService:
             'currency': plan.currency, 'amount': plan.amount,
             'expected_idr_total': selection.expected_idr_total if selection else None,
             'expected_usd_total_micro': selection.expected_usdt_total if selection else None})
-        self.db.execute('''INSERT INTO public.orders
-            (id,customer_id,cart_id,checkout_key,invoice_number,order_status,payment_status,
-             total_amount,currency,expires_at,terms_version,terms_accepted_at,balance_checkout_snapshot,created_at,updated_at)
-            VALUES (%s,%s,%s,%s,%s,'pending_payment','pending',%s,%s,%s,%s,%s,%s,%s,%s)''',
-            (order_id, request.customer_id, request.cart_id, request.checkout_key, invoice,
-             pricing.idr_total, 'USDT' if usdt_paid else 'IDR', plan.expires_at, request.terms_version,
-             None if request.terms_accepted_at is None else request.terms_accepted_at.astimezone(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None),
-             snapshot, now, now))
+        columns = ('id,customer_id,cart_id,checkout_key,invoice_number,order_status,payment_status,'
+                   'total_amount,currency,expires_at,terms_version,terms_accepted_at,balance_checkout_snapshot,created_at,updated_at')
+        values = (order_id, request.customer_id, request.cart_id, request.checkout_key, invoice,
+                  pricing.idr_total, 'USDT' if usdt_paid else 'IDR', plan.expires_at, request.terms_version,
+                  None if request.terms_accepted_at is None else request.terms_accepted_at.astimezone(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None),
+                  snapshot, now, now)
+        placeholders = "%s,%s,%s,%s,%s,'pending_payment','pending',%s,%s,%s,%s,%s,%s,%s,%s"
+        if api_order_claim_id is not None:
+            columns += ',api_order_claim_id'
+            placeholders += ',%s'
+            values += (api_order_claim_id,)
+        self.db.execute(f'INSERT INTO public.orders ({columns}) VALUES ({placeholders})', values)
         binance = plan.rail_snapshot if external_usdt and plan.method == 'BINANCE_PAY_ID' else None
         self.db.execute('''INSERT INTO public.payments
             (id,order_id,provider,merchant_ref,method,amount,currency,status,expired_at,
