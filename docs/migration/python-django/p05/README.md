@@ -1330,3 +1330,59 @@ Context7 `/django/django/5.2.18` was consulted for
 [nested atomic blocks](https://docs.djangoproject.com/en/5.2/topics/db/transactions/):
 database exceptions must be handled after the appropriate savepoint has rolled
 back. Network calls and permit admission remain outside the money transaction.
+
+## P21: Storefront and customer pages (#703)
+
+`candidate/lhie_candidate/storefront/` owns the HTML adapters. Catalog reads use
+the existing navigation repository; checkout prices, stock, payment preparation
+and transitions remain with the checkout and payment owners. A review GET
+stores only browser-session metadata and creates no Customer, Cart, Order or
+Payment. The signed review binds quantities, prices and a same-origin return
+destination to the browser; submit rechecks shared pricing and inventory.
+Recovery Keys are shown
+once, hashed on the Order and never put in a URL. Recovery by invoice and key
+is paid-only, as in Laravel; authenticated claims remain explicit and cannot
+merge Customers by email.
+
+Signed invoice actions use the P19 signature and ownership checks. Credential
+delivery reads through the paid receipt owner. Resend queues the existing
+`credentials_ready` event against its saved encrypted recipient, and refuses
+ambiguous delivery outcomes rather than silently sending again. The P25 mail
+worker owns actual notification delivery; the web response only reports that a
+request was queued. Supplier and non-default payment adapters must be explicitly
+injected after qualification. The local image reader serves only verified
+public image files from the admitted disposable storage root; homepage banner
+dimensions use the same admission and the existing 16:9–4:1 aspect limits.
+
+Owned order history is Customer-scoped, filterable by status and paginated.
+Customer balance history merges funding targets and ledger entries in bounded
+25-row pages. Cursors use the Laravel-encrypted, Customer- and currency-bound
+format; history is read-only and does not change the balance projection.
+Signed-in account pages retain the profile sidebar, Customer-scoped order
+counts and ledger-checked balance summaries alongside the account navigation.
+
+Catalog and product support links use the configured WhatsApp and Telegram
+contacts. Invoice support offers the existing issue categories and sends only
+the invoice number and selected issue in the prepared message, never a signed
+URL, Recovery Key or credentials. The chooser works without JavaScript.
+The ChatGPT login guide retains its original step-by-step copy, images and
+invoice return context; contextual invoice pages remain private and no-store.
+
+Apply `storefront/catalog_grants.sql`, `storefront/grants.sql`,
+`storefront/account_grants.sql`, `storefront/balance_idr_grants.sql`, and
+`storefront/balance_usdt_grants.sql` explicitly alongside the prerequisite
+checkout, payment, receipt and auth grants; startup does not grant privileges.
+Local verification uses the existing synthetic P01/P07 fixture and disposable
+PostgreSQL/Redis: `python3 tools/migration_harness/smoke_checkout.py --storefront`.
+It checks review side effects, signed URLs and CSRF, stale price/stock/cart,
+checkout replay and lock admission, cancellation, paid recovery/claims, safe
+resend and Customer-scoped balance pagination. The `--storefront-browser` variant
+exposes only the loopback disposable fixture for
+interactive checks. Neither qualifies a real payment provider, mail delivery,
+historical production data, deployment or CI. Waitlist delivery remains P25;
+full visual/browser acceptance remains P27.
+
+Context7 `/django/django/5.2.18` and the Django
+[CSRF documentation](https://docs.djangoproject.com/en/5.2/ref/csrf/) were
+consulted for session-bound CSRF and same-origin browser requests. Templates
+retain Django autoescaping; customer and invoice responses are private/no-store.

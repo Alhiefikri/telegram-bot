@@ -1,0 +1,32 @@
+{% extends 'storefront/catalog_base.html' %}
+{% block content %}
+<section class="wrap section">
+  <p>Keranjang web</p><h1>Tinjau keranjang Anda.</h1>
+  <p>Item disimpan di sesi browser ini. Stok belum dicadangkan sampai Anda membuat order.</p>
+  <a class="button" href="/shop">Tambah produk</a>
+  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  {% if items %}
+    {% for item in items %}
+    <article class="neo-panel">
+      <h2>{{ item.name }}</h2>
+      {% if item.unit != None %}<p>Harga satuan efektif: Rp {{ item.unit }} · Subtotal: Rp {{ item.subtotal }}</p>
+      <p>Stok tersedia saat ini: {{ item.stock }}</p>{% else %}<p role="status">Produk tidak lagi tersedia. Hapus item ini untuk melanjutkan.</p>{% endif %}
+      <form method="post" action="/shop/cart/items/{{ item.id }}">{% csrf_token %}
+        <input type="hidden" name="_method" value="PATCH">
+        <label for="quantity-{{ item.id }}">Jumlah {{ item.name }}</label>
+        <input id="quantity-{{ item.id }}" name="quantity" type="number" min="0" max="20" value="{{ item.quantity }}" required>
+        <button type="submit">Perbarui</button>
+      </form>
+      <form method="post" action="/shop/cart/items/{{ item.id }}">{% csrf_token %}
+        <input type="hidden" name="_method" value="DELETE"><button type="submit">Hapus dari keranjang</button>
+      </form>
+    </article>
+    {% endfor %}
+    <aside class="neo-panel"><h2>Ringkasan keranjang</h2><p>Subtotal (IDR): Rp {{ total }}</p>
+      {% if conflict %}<p role="alert">Periksa stok sebelum checkout.</p>{% else %}<a class="button" href="/shop/checkout">Lanjut checkout</a>{% endif %}
+      <p>Harga dan ketersediaan akan dibaca ulang saat order dibuat.</p>
+    </aside>
+  {% elif has_items %}<p role="alert">Item keranjang tidak lagi tersedia. Hapus item atau kembali ke katalog.</p>
+  {% else %}<div class="neo-panel"><h2>Keranjang masih kosong.</h2><p>Pilih produk dari katalog untuk menyiapkan checkout.</p><a class="button" href="/shop">Lihat katalog</a></div>{% endif %}
+</section>
+{% endblock %}

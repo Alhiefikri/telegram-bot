@@ -247,6 +247,17 @@ def verify_public_writes(cursor):
     if auth:
         allowed_insert = _merge(allowed_insert, AUTH_INSERT)
         allowed_update = _merge(allowed_update, AUTH_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.orders','credential_access_key_hash','UPDATE')")
+    storefront = cursor.fetchone()[0]
+    if checkout and auth and storefront:
+        allowed_insert = _merge(allowed_insert, {'order_notification_events': {
+            'order_id', 'event_type', 'status', 'created_at', 'updated_at'}})
+        allowed_update = _merge(allowed_update, {
+            'orders': {'credential_access_key_hash', 'notification_email',
+                       'support_contact_channel', 'support_contact_value'},
+            'order_notification_events': {'status', 'attempts', 'next_attempt_at',
+                                          'delivery_started_at', 'failed_at',
+                                          'last_error', 'updated_at'}})
     cursor.execute("SELECT has_column_privilege(current_user,'public.customer_api_credentials','secret_digest','INSERT')")
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, API_INSERT)

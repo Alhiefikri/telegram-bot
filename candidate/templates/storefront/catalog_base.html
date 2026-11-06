@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{ title|default:'Lhie Store' }} | Lhie Store</title>
+{% if description %}<meta name="description" content="{{ description }}">{% endif %}
+{% if robots %}<meta name="robots" content="{{ robots }}">{% endif %}
+{% if canonical %}<link rel="canonical" href="{{ canonical }}">{% endif %}
+<meta property="og:site_name" content="Lhie Store"><meta property="og:title" content="{{ title|default:'Lhie Store' }}">{% if description %}<meta property="og:description" content="{{ description }}">{% endif %}{% if canonical %}<meta property="og:url" content="{{ canonical }}">{% endif %}
+<meta property="og:type" content="{{ og_type|default:'website' }}"><meta property="og:locale" content="id_ID"><meta property="og:image" content="{{ og_image }}"><meta property="og:image:alt" content="Lhie Store"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{{ title|default:'Lhie Store' }}">{% if description %}<meta name="twitter:description" content="{{ description }}">{% endif %}<meta name="twitter:image" content="{{ og_image }}">{% if schema_json %}<script type="application/ld+json">{{ schema_json|safe }}</script>{% endif %}
+<link rel="icon" href="/static/storefront/favicon.png">
+<link rel="stylesheet" href="/static/storefront/laravel-storefront.css">
+<link rel="stylesheet" href="/static/storefront/catalog.css">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+<a class="skip" href="#main">Langsung ke isi</a>
+{% block header %}
+<header class="storefront-header sticky top-4 z-50 mx-auto mb-4 mt-4 w-[calc(100%-2rem)] max-w-7xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)]">
+  <div class="flex min-h-[88px] w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:flex-nowrap">
+    <a href="/" class="order-1 flex min-w-0 shrink-0 items-center gap-2 lg:w-[8rem] xl:w-[9rem]" aria-label="Beranda Lhie Store">
+      <span class="brand-wordmark flex items-center gap-2.5"><img src="/static/storefront/favicon.png" alt="" width="64" height="64" class="brand-logo-image"><span class="font-display text-[1.08rem] font-black leading-none tracking-tight text-[var(--sf-ink)]">Lhie Store</span></span>
+    </a>
+    <form action="/shop" method="get" role="search" class="order-3 min-w-0 basis-full md:order-2 md:flex md:flex-1 md:basis-auto lg:min-w-[6rem]">
+      <label for="header-search" class="sr-only">Cari produk</label>
+      <div class="storefront-search relative flex h-14 w-full items-center rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-1">
+        <input id="header-search" type="search" name="q" value="{{ search }}" maxlength="80" placeholder="Cari produk digital, template, lisensi..." class="h-12 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm font-bold text-[var(--sf-ink)]">
+        <button type="submit" class="inline-flex h-12 shrink-0 items-center justify-center rounded-xl bg-[var(--sf-accent)] px-4 text-xs font-black text-white">Cari</button>
+      </div>
+    </form>
+    <nav class="order-4 hidden shrink-0 items-center gap-1 rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-1 lg:order-3 lg:flex" aria-label="Navigasi utama">
+      <a href="/shop" class="storefront-nav-link grid h-11 w-11 place-items-center" aria-label="Produk" title="Produk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg></a>
+      <a href="/#cara-beli" class="storefront-nav-link grid h-11 w-11 place-items-center" aria-label="Cara beli" title="Cara beli"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9m2-2 2 2 3-3"/></svg></a>
+      <a href="/akses-pesanan" class="storefront-nav-link grid h-11 w-11 place-items-center" aria-label="Akses pesanan" title="Akses pesanan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 3h10v18l-2-1.5L12 21l-3-1.5L7 21V3Zm3 5h4m-4 4h4"/></svg></a>
+      <a href="/shop/cart" class="storefront-nav-link grid h-11 w-11 place-items-center" aria-label="Keranjang" title="Keranjang"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 7h12l-1 13H7L6 7Zm3 0a3 3 0 0 1 6 0"/></svg></a>
+      <a href="/panduan" class="storefront-nav-link grid h-11 w-11 place-items-center" aria-label="Panduan" title="Panduan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H20v16H7.5A2.5 2.5 0 0 0 5 21V5.5ZM8 7h8m-8 4h7"/></svg></a>
+    </nav>
+    <div class="order-2 ml-auto flex min-w-0 items-center justify-end gap-2 lg:order-4">
+      <button type="button" class="theme-toggle" data-theme-toggle hidden aria-pressed="false">Tema gelap</button>
+      <a href="/akun" data-customer-identity class="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 text-xs font-bold text-[var(--sf-ink)]">Daftar / Masuk</a>
+      <a href="/shop/cart" class="grid h-11 w-11 place-items-center rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] lg:hidden" aria-label="Keranjang"><svg class="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 7h12l-1 13H7L6 7Zm3 0a3 3 0 0 1 6 0"/></svg></a>
+      <details class="storefront-mobile-menu lg:hidden"><summary aria-label="Menu navigasi" class="grid h-11 w-11 place-items-center rounded-xl border border-[var(--sf-border)] bg-[var(--sf-yellow)]">☰</summary><nav aria-label="Menu mobile"><a href="/shop">Produk</a><a href="/#cara-beli">Cara beli</a><a href="/#faq">FAQ</a><a href="/#support">Support</a><a href="/akses-pesanan">Akses pesanan</a><a href="/panduan">Panduan</a></nav></details>
+    </div>
+  </div>
+</header>
+{% endblock %}
+<main id="main">{% block content %}{% endblock %}</main>
+{% block footer %}
+<footer class="footer"><div class="wrap footer-grid"><div><strong>Lhie Store</strong><p>Lhie Store membantu pelanggan menemukan produk digital dan akun premium siap pakai dengan katalog ringan, stok jelas, dan akses pesanan mandiri.</p></div><nav aria-label="Produk"><h2>Produk</h2><a href="/shop">Katalog Lengkap</a><a href="/#cara-beli">Cara Pembelian</a><a href="/panduan">Pusat Panduan</a><a href="/#faq">FAQ</a></nav><nav aria-label="Toko"><h2>Toko</h2><a href="/#support">Tentang Kami</a><a href="/privasi">Kebijakan Privasi</a><a href="/syarat-ketentuan">Syarat Ketentuan</a><a href="/refund">Kebijakan Refund</a></nav><nav aria-label="Bantuan"><h2>Bantuan</h2><a href="/akses-pesanan">Akses Pesanan</a><a href="/akun">Daftar / Masuk</a><a href="/pemulihan-pesanan">Pemulihan Pesanan</a><a href="/panduan">Pusat Panduan</a><span>Simpan invoice dan recovery key</span></nav></div></footer>
+{% endblock %}
+<script src="/static/storefront/catalog.js" defer></script>
+<script type="module" src="/static/storefront/carousels-init.js"></script>
+<script src="/static/storefront/activity.js" defer></script>
+</body></html>

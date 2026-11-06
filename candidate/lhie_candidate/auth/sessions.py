@@ -17,7 +17,8 @@ from .types import AuthError, Browser
 
 _COOKIE = "candidate_browser"
 _SESSION_ID = re.compile(r"[a-f0-9]{64}\Z")
-_AUTH_PATHS = ("/akun", "/auth/google", "/admin", "/akses-pesanan", "/shop/orders/")
+_AUTH_PATHS = ("/akun", "/auth/google", "/admin", "/akses-pesanan", "/produk", "/pilihan",
+               "/shop/cart", "/shop/checkout", "/shop/orders/")
 
 
 def handles(path):
