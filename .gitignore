@@ -72,3 +72,6 @@ candidate/__pycache__/
 .local/
 tools/migration_benchmark/__pycache__/
 tools/migration_compat/__pycache__/
+!candidate/lhie_candidate/adjustments/grants.sql
+!candidate/lhie_candidate/funding/klik_grants.sql
+!candidate/lhie_candidate/funding/policy_admin_grants.sql

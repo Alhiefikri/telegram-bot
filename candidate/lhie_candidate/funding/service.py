@@ -1,10 +1,7 @@
-"""Minimum Store Balance IDR funding owner for the P11 candidate.
+"""Store Balance funding over the existing IDR ledger and receipt registry.
 
-This module deliberately supports one sandbox-shaped rail (Sakurupiah
-``provider_reference``) and one IDR ledger owner. It creates no second ledger,
-does not retarget providers, and performs all provider I/O outside database
-transactions. The default runtime supplies no provider/request factory, so the
-rail is inactive until an operator injects an approved sandbox implementation.
+Manual and KlikQRIS lifecycles require explicit injection and readiness;
+default composition activates no provider. Provider calls occur outside locks.
 """
 
 from dataclasses import dataclass
@@ -25,11 +22,10 @@ from lhie_candidate.domain.money import MAX_UNITS, require_integer
 from lhie_candidate.payments.receipts import claim_provider_reference
 from lhie_candidate.payments.sakurupiah import CreateRequest, InvoiceIdentity, OutcomeState
 
-from .policy import SINGLETON_KEY, parse_amount, parse_preset_callback, policy_from_row
+from .policy import PolicyError, SINGLETON_KEY, parse_amount, parse_preset_callback, policy_from_row
 
 
 INTENT_TTL = timedelta(minutes=10)
-TOPUP_TTL = timedelta(minutes=15)
 CHANNELS = ('QRIS', 'QRISC', 'QRISMU', 'QRIS2')
 _NONCE = re.compile(r'[a-f0-9]{32}\Z')
 _TOPUP_ID = re.compile(r'[1-9][0-9]{0,18}\Z')
@@ -93,7 +89,7 @@ def _event_key(*parts):
 class FundingService:
     TOPUP_COLUMNS = (
         'id customer_id store_balance_funding_intent_id telegram_navigation_root_id chat_id '
-        'canonical_message_id locale provider merchant_ref idempotency_key currency amount status '
+        'canonical_message_id locale provider payment_setting_id payment_provider_version merchant_ref idempotency_key currency amount status '
         'provider_reference provider_qris_url provider_fee provider_total_payment provider_payment_method '
         'sakurupiah_channel provider_created_at provider_expires_at expires_at provider_create_state '
         'provider_create_attempted_at provider_create_last_error paid_at settled_at created_at updated_at'
@@ -113,6 +109,12 @@ class FundingService:
         self.callback_key = callback_key
         self.ledger = ledger or StoreBalanceLedger(using)
         self.clock = clock or _now
+        self.rails = {}
+
+    def register_rail(self, provider, rail, *, ready):
+        if provider not in ('manual', 'klikqris') or not callable(ready):
+            raise ValueError('invalid funding rail')
+        self.rails[provider] = (rail, ready)
 
     # -- reads ---------------------------------------------------------
 
@@ -138,16 +140,20 @@ class FundingService:
             + (' FOR UPDATE' if lock else ''))
 
     def _available(self, policy, setting):
-        return bool(
-            policy is not None and setting is not None and setting['is_active']
-            and (setting['payment_mode'] or '').strip().lower() == 'sakurupiah'
-            and setting['sakurupiah_channel'] in CHANNELS
-            and self.provider is not None and self.request_factory is not None
-            and self.encrypter is not None
-        )
+        if policy is None or setting is None or not setting['is_active']:
+            return False
+        provider = (setting['payment_mode'] or '').strip().lower()
+        if provider in self.rails:
+            try:
+                return bool(self.rails[provider][1]())
+            except Exception:
+                return False
+        return bool(provider == 'sakurupiah' and setting['sakurupiah_channel'] in CHANNELS
+                    and self.provider is not None and self.request_factory is not None
+                    and self.encrypter is not None)
 
     def chooser(self):
-        """Return the current DB policy and whether the one sandbox rail is usable."""
+        """Return the current DB policy and selected rail's readiness."""
         policy = self._policy()
         setting = self._setting()
         return {'policy': policy, 'available': self._available(policy, setting),
@@ -202,6 +208,8 @@ class FundingService:
         if amount < policy.minimum_amount:
             return IntentOutcome('below_minimum')
         if preset is not None and (preset.policy_version != policy.version
+                                   or type(preset.index) is not int
+                                   or not 0 <= preset.index < len(policy.preset_amounts)
                                    or policy.preset_amounts[preset.index] != preset.amount):
             return IntentOutcome('stale_policy')
 
@@ -322,6 +330,15 @@ class FundingService:
         message_id = _value(root, 'message_id')
         if not chat_id or type(message_id) is not int or message_id < 1:
             return TopUpOutcome('stale')
+        existing = self._topup_by_intent(intent_id)
+        setting = self._setting()
+        provider = existing['provider'] if existing is not None else (
+            (setting['payment_mode'] or '').strip().lower() if setting else '')
+        if provider in ('manual', 'klikqris'):
+            registration = self.rails.get(provider)
+            if registration is None or (existing is None and not self._available(self._policy(), setting)):
+                return TopUpOutcome('unavailable')
+            return registration[0].create(customer, root, intent_id)
         try:
             with transaction.atomic(using=self.using):
                 self._lock_customer(customer_id)
@@ -333,7 +350,8 @@ class FundingService:
                     return TopUpOutcome('replayed', existing)
                 setting = self._setting(lock=True)
                 policy = self._policy(lock=True)
-                if not self._available(policy, setting) or policy.version != intent['policy_version']:
+                if (setting is None or (setting['payment_mode'] or '').strip().lower() != 'sakurupiah'
+                        or not self._available(policy, setting) or policy.version != intent['policy_version']):
                     return TopUpOutcome('unavailable')
                 amount = require_integer(intent['amount'], minimum=1)
                 if amount < policy.minimum_amount or amount > MAX_UNITS:
@@ -353,7 +371,7 @@ class FundingService:
                      (customer.get('locale') if isinstance(customer, dict) else getattr(customer, 'locale', None)),
                      setting['id'], setting['payment_provider_version'], merchant_ref,
                      self._idempotency_key(intent), amount, setting['sakurupiah_channel'],
-                     now, now + TOPUP_TTL, now, now))
+                     now, _deadline(intent['expires_at']), now, now))
         except FundingError:
             raise
         except DatabaseError as error:
@@ -379,13 +397,17 @@ class FundingService:
     def _start_provider(self, topup, *, chat_id, message_id):
         """Call the injected sandbox provider after the local top-up committed."""
         self._outside()
+        request = None
+        outcome = None
+        dispatched = False
         try:
             request = self.request_factory(topup)
-            if not isinstance(request, CreateRequest):
+            if not isinstance(request, CreateRequest) or request.identity != self._provider_identity(topup):
                 raise FundingError('provider_unavailable')
+            dispatched = True
             outcome = self.provider.create(request)
         except Exception:
-            outcome = None
+            pass
         with transaction.atomic(using=self.using):
             self._lock_customer(topup['customer_id'])
             locked = self.db.one(
@@ -399,6 +421,13 @@ class FundingService:
             if locked['provider_create_state'] not in ('creating', 'create_failed', 'provider_unavailable'):
                 return TopUpOutcome('replayed', locked)
             now = self.clock()
+            if not dispatched or (outcome is not None and outcome.state is OutcomeState.REJECTED):
+                self.db.execute(
+                    '''UPDATE public.store_balance_top_ups SET status='failed',
+                       provider_create_state='create_failed',provider_create_last_error='provider_rejected',
+                       updated_at=%s WHERE id=%s AND status='pending'
+                       AND provider_create_state='creating' ''', (now, locked['id']))
+                return TopUpOutcome('retryable', self._topup_by_intent(locked['store_balance_funding_intent_id']))
             if outcome is None or outcome.state is OutcomeState.UNKNOWN:
                 self.db.execute(
                     '''UPDATE public.store_balance_top_ups SET provider_create_state='outcome_unknown',
@@ -441,7 +470,8 @@ class FundingService:
             return TopUpOutcome('payable', updated)
 
     def _valid_created(self, outcome, topup, request):
-        if (outcome.identity != request.identity or outcome.state is not OutcomeState.CREATED
+        if (request.identity != self._provider_identity(topup)
+                or outcome.identity != request.identity or outcome.state is not OutcomeState.CREATED
                 or not isinstance(outcome.provider_ref, str) or not outcome.provider_ref
                 or len(outcome.provider_ref) > _MAX_REFERENCE
                 or type(outcome.fee) is not int or outcome.fee < 0
@@ -506,21 +536,46 @@ class FundingService:
         return topup if self._root_matches(
             root, customer_id=customer_id, chat_id=chat_id, message_id=message_id) else None
 
+    def expire_if_due(self, topup_id):
+        require_integer(topup_id, minimum=1)
+        with transaction.atomic(using=self.using):
+            topup = self.top_up_by_id(topup_id)
+            if topup is None:
+                return False
+            self._lock_customer(topup['customer_id'])
+            locked = self.db.one(
+                'SELECT ' + ','.join(self.TOPUP_COLUMNS) + ' FROM public.store_balance_top_ups '
+                'WHERE id=%s AND customer_id=%s FOR UPDATE', (topup_id, topup['customer_id']))
+            if locked is None or locked['status'] in ('paid', 'compensated', 'expired', 'invalid_provider_result'):
+                return False
+            now = self.clock()
+            if not any(value is not None and _deadline(value) <= now
+                       for value in (locked['expires_at'], locked['provider_expires_at'])):
+                return False
+            self.db.execute(
+                "UPDATE public.store_balance_top_ups SET status='expired', "
+                "provider_create_state='provider_expired',provider_create_last_error=NULL,updated_at=%s "
+                "WHERE id=%s", (now, topup_id))
+            return True
+
     def check(self, topup):
         """Observe provider state outside the DB, then settle exactly once."""
         self._outside()
         if topup is None:
             raise FundingError('topup_missing')
+        if topup['provider'] in self.rails:
+            return self.rails[topup['provider']][0].check(topup)
+        if topup['provider'] != 'sakurupiah' or self.provider is None:
+            return topup
         outcome = None
         try:
             total = topup['provider_total_payment']
             identity = self._provider_identity(topup)
-            if topup['status'] in ('paid', 'compensated'):
+            if topup['status'] == 'paid':
                 return topup
-            if topup['provider_reference'] and type(total) is int and total > 0:
+            if topup['provider_reference'] and (total is None or type(total) is int and total > 0):
                 outcome = self.provider.status(identity, topup['provider_reference'], provider_total=total)
-            elif (topup['provider_create_state'] in ('creating', 'outcome_unknown', 'recovery_unconfirmed')
-                  and type(total) is int and total > 0):
+            elif topup['provider_create_state'] in ('creating', 'outcome_unknown', 'recovery_unconfirmed'):
                 recovered = self.provider.recover(identity, provider_total=total)
                 if recovered.provider_ref and recovered.state is not OutcomeState.UNKNOWN:
                     outcome = self.provider.status(identity, recovered.provider_ref, provider_total=total)
@@ -532,30 +587,70 @@ class FundingService:
 
     def _settle_observation(self, topup, outcome):
         with transaction.atomic(using=self.using):
-            self._lock_customer(topup['customer_id'])
+            customer = self._lock_customer(topup['customer_id'])
             self.ledger.lock_for_top_up(topup['customer_id'])
             locked = self.db.one(
                 'SELECT ' + ','.join(self.TOPUP_COLUMNS) + ' FROM public.store_balance_top_ups '
                 'WHERE id=%s AND customer_id=%s FOR UPDATE', (topup['id'], topup['customer_id']))
             if locked is None:
                 return TopUpOutcome('stale')
-            if locked['status'] in ('paid', 'compensated'):
+            if locked['status'] == 'paid':
                 return locked
             now = self.clock()
+            if locked['status'] == 'compensated':
+                if not self._compensated_observation_matches(locked, outcome):
+                    self._review_evidence(locked, 'identity_mismatch', now)
+                    return locked
+                claim = claim_provider_reference(
+                    self.db, provider='sakurupiah', reference=outcome.provider_ref,
+                    beneficiary='customer:' + str(locked['customer_id']), currency='IDR',
+                    amount=int(locked['amount']), target_type='balance_top_up',
+                    target_id=str(locked['id']), now=now, using=self.using,
+                    account_namespace=('default' if locked['payment_setting_id'] is None
+                                       else 'setting:' + str(locked['payment_setting_id'])))
+                if not claim.held:
+                    self.db.execute(
+                        '''UPDATE public.external_money_receipt_reservations
+                           SET resolved_at=%s,updated_at=%s
+                           WHERE legacy_type='store_balance_top_up' AND legacy_id=%s
+                           AND reason='compensated_unresolved_money' AND resolved_at IS NULL''',
+                        (now, now, str(locked['id'])))
+                    event, created = self._log_event(locked, 'compensation_evidence', 'berhasil', outcome.provider_ref, now)
+                    if created:
+                        self._audit(locked, 'store_balance.top_up.compensation_provider_evidence',
+                                    {'status': 'compensated', 'provider_event_id': event['id'],
+                                     'provider_reference_hash': self._reference_hash(outcome.provider_ref),
+                                     'late_evidence': True}, now)
+                else:
+                    self._review_evidence(locked, 'receipt_' + claim.status, now)
+                return locked
+            if outcome.state is OutcomeState.SUCCESS and locked['provider_total_payment'] is None:
+                self.db.execute(
+                    """UPDATE public.store_balance_top_ups SET status='invalid_provider_result',
+                       provider_create_state='reconciliation_review',
+                       provider_create_last_error='quote_conflict',updated_at=%s
+                       WHERE id=%s AND status NOT IN ('paid','compensated','expired')""", (now, locked['id']))
+                self._review_evidence(locked, 'quote_conflict', now)
+                return self._topup_by_intent(locked['store_balance_funding_intent_id'])
             if not self._observation_matches(locked, outcome):
                 self.db.execute(
                     '''UPDATE public.store_balance_top_ups SET status='invalid_provider_result',
                        provider_create_state='reconciliation_review',
                        provider_create_last_error='provider_identity_mismatch',updated_at=%s
                        WHERE id=%s AND status NOT IN ('paid','compensated','expired') ''', (now, locked['id']))
-                self._log_event(locked, 'reconciliation', outcome.reason or 'identity_mismatch', outcome.provider_ref, now)
+                self._review_evidence(locked, 'identity_mismatch', now)
                 return self._topup_by_intent(locked['store_balance_funding_intent_id'])
             if outcome.state is OutcomeState.SUCCESS:
+                deadlines = (locked['expires_at'], locked['provider_expires_at'])
+                late = (locked['status'] not in ('pending', 'payable', 'awaiting_confirmation')
+                        or any(value is None or _deadline(value) <= now for value in deadlines))
                 claim = claim_provider_reference(
                     self.db, provider='sakurupiah', reference=outcome.provider_ref,
                     beneficiary='customer:' + str(locked['customer_id']), currency='IDR',
                     amount=int(locked['amount']), target_type='balance_top_up',
-                    target_id=str(locked['id']), now=now, using=self.using)
+                    target_id=str(locked['id']), now=now, using=self.using,
+                    account_namespace=('default' if locked['payment_setting_id'] is None
+                                       else 'setting:' + str(locked['payment_setting_id'])))
                 if claim.held:
                     self.db.execute(
                         '''UPDATE public.store_balance_top_ups SET status='invalid_provider_result',
@@ -563,19 +658,30 @@ class FundingService:
                            provider_create_last_error=%s,updated_at=%s
                            WHERE id=%s AND status NOT IN ('paid','compensated') ''',
                         ('receipt_' + claim.status, now, locked['id']))
-                    self._log_event(locked, 'reconciliation', 'receipt_' + claim.status, outcome.provider_ref, now)
+                    self._review_evidence(locked, 'receipt_' + claim.status, now)
                     return self._topup_by_intent(locked['store_balance_funding_intent_id'])
-                self.ledger.credit_top_up(
+                entry = self.ledger.credit_top_up(
                     locked['customer_id'], str(locked['id']), int(locked['amount']),
                     'balance_top_up:' + str(locked['id']) + ':credit')
                 settled = self.db.one(
                     '''UPDATE public.store_balance_top_ups SET status='paid',paid_at=%s,settled_at=%s,
-                       provider_create_state='provider_berhasil',provider_create_last_error=NULL,updated_at=%s
+                       provider_create_state=%s,provider_create_last_error=NULL,updated_at=%s
                        WHERE id=%s AND status NOT IN ('paid','compensated')
-                       RETURNING ''' + ','.join(self.TOPUP_COLUMNS), (now, now, now, locked['id']))
-                if settled is not None:
-                    self._log_event(settled, 'settlement', 'berhasil', outcome.provider_ref, now)
-                return settled or self._topup_by_intent(locked['store_balance_funding_intent_id'])
+                       RETURNING ''' + ','.join(self.TOPUP_COLUMNS),
+                    (now, now, 'reconciled_berhasil' if late else 'provider_berhasil', now, locked['id']))
+                if settled is None:
+                    raise FundingError('settlement_state_conflict')
+                event, _ = self._log_event(settled, 'settlement', 'berhasil', outcome.provider_ref, now)
+                self._audit(locked, 'store_balance.top_up.late_settled' if late
+                            else 'store_balance.top_up.settled',
+                            {'status': 'paid', 'amount': locked['amount'],
+                             'provider_total_payment': locked['provider_total_payment'],
+                             'provider_reference_hash': self._reference_hash(outcome.provider_ref),
+                             'provider_event_id': event['id'], 'credit_entry_id': entry['id'],
+                             'balance_after': entry['balance_after'], 'late_settlement': late}, now)
+                from .outbound import record_paid
+                record_paid(self.db, settled, customer, now)
+                return settled
             if outcome.state is OutcomeState.EXPIRED:
                 expired = self.db.one(
                     '''UPDATE public.store_balance_top_ups SET status='expired',
@@ -585,11 +691,24 @@ class FundingService:
                 if expired is not None:
                     self._log_event(expired, 'status', 'expired', outcome.provider_ref, now)
                 return expired or self._topup_by_intent(locked['store_balance_funding_intent_id'])
-            self._log_event(locked, 'status', outcome.reason or 'pending', outcome.provider_ref, now)
+            self._log_event(locked, 'status', 'pending', outcome.provider_ref, now)
             return self._topup_by_intent(locked['store_balance_funding_intent_id'])
 
+    def _compensated_observation_matches(self, topup, outcome):
+        identity = outcome.identity
+        return (topup['provider'] == 'sakurupiah' and topup['currency'] == 'IDR'
+                and isinstance(identity, InvoiceIdentity)
+                and identity.merchant_ref == topup['merchant_ref']
+                and identity.amount == topup['amount']
+                and identity.channel == topup['sakurupiah_channel']
+                and outcome.state is OutcomeState.SUCCESS
+                and isinstance(outcome.provider_ref, str) and bool(outcome.provider_ref)
+                and len(outcome.provider_ref) <= _MAX_REFERENCE
+                and (not topup['provider_reference'] or outcome.provider_ref == topup['provider_reference'])
+                and type(outcome.total) is int and outcome.total >= topup['amount'])
+
     def _observation_matches(self, topup, outcome):
-        if (not isinstance(outcome.identity, InvoiceIdentity)
+        if (topup['provider'] != 'sakurupiah' or not isinstance(outcome.identity, InvoiceIdentity)
                 or outcome.identity.merchant_ref != topup['merchant_ref']
                 or int(outcome.identity.amount) != int(topup['amount'])
                 or outcome.identity.channel != topup['sakurupiah_channel']
@@ -600,8 +719,12 @@ class FundingService:
             return False
         if topup['provider_payment_method'] != topup['sakurupiah_channel']:
             return False
-        if (type(topup['provider_total_payment']) is not int
+        if (topup['currency'] != 'IDR' or type(topup['amount']) is not int
+                or type(topup['provider_total_payment']) is not int
+                or topup['provider_total_payment'] < topup['amount']
                 or type(topup['provider_fee']) is not int or topup['provider_fee'] < 0):
+            return False
+        if outcome.state is OutcomeState.SUCCESS and outcome.total != topup['provider_total_payment']:
             return False
         if outcome.total is not None and outcome.total != topup['provider_total_payment']:
             return False
@@ -609,31 +732,52 @@ class FundingService:
             return True
         return outcome.state is OutcomeState.PENDING
 
+    @staticmethod
+    def _reference_hash(reference):
+        return hashlib.sha256(reference.strip().encode()).hexdigest() if reference and reference.strip() else None
+
+    def _audit(self, topup, action, values, now):
+        self.db.execute(
+            '''INSERT INTO public.audit_logs(action,subject_type,subject_id,old_values,new_values,created_at)
+               VALUES (%s,'App\\Models\\StoreBalanceTopUp',%s,%s::json,%s::json,%s)''',
+            (action, str(topup['id']), json.dumps({'status': topup['status']}), json.dumps(values), now))
+
+    def _review_evidence(self, topup, reason, now):
+        event, created = self._log_event(topup, 'reconciliation', reason, None, now)
+        if created:
+            self._audit(topup, 'store_balance.top_up.reconciliation_review',
+                        {'status': topup['status'] if topup['status'] in ('compensated', 'expired')
+                         else 'invalid_provider_result',
+                         'reason': reason, 'provider_event_id': event['id']}, now)
+
     def _log_event(self, topup, event_type, provider_status, provider_reference, now):
-        savepoint = transaction.savepoint(using=self.using)
-        try:
-            self.db.execute(
-                '''INSERT INTO public.store_balance_top_up_events
-                   (store_balance_top_up_id,provider,event_type,merchant_ref,provider_reference,
-                    provider_status,raw_payload,idempotency_key,received_count,received_at,
-                    last_received_at,processed_at)
-                   VALUES (%s,'sakurupiah',%s,%s,%s,%s,%s::jsonb,%s,1,%s,%s,%s)
-                   ON CONFLICT (provider,event_type,idempotency_key) DO NOTHING''',
-                (topup['id'], event_type, topup['merchant_ref'], provider_reference, provider_status,
-                 json.dumps({'provider_status': provider_status}),
-                 _event_key(topup['id'], event_type, provider_reference, provider_status),
-                 now, now, now))
-            transaction.savepoint_commit(savepoint, using=self.using)
-        except DatabaseError:
-            # Evidence logging must never turn a committed money outcome into a
-            # retryable failure; the top-up row remains authoritative.
-            transaction.savepoint_rollback(savepoint, using=self.using)
+        key = _event_key(topup['id'], event_type, provider_reference, provider_status)
+        event = self.db.one(
+            '''INSERT INTO public.store_balance_top_up_events
+               (store_balance_top_up_id,provider,event_type,merchant_ref,provider_reference,
+                provider_status,raw_payload,idempotency_key,received_count,received_at,
+                last_received_at,processed_at)
+               VALUES (%s,'sakurupiah',%s,%s,%s,%s,%s::jsonb,%s,1,%s,%s,%s)
+               ON CONFLICT (provider,event_type,idempotency_key) DO NOTHING RETURNING id''',
+            (topup['id'], event_type, topup['merchant_ref'], provider_reference, provider_status,
+             json.dumps({'provider_status': provider_status}), key, now, now, now))
+        if event is not None:
+            return event, True
+        event = self.db.one(
+            '''SELECT id FROM public.store_balance_top_up_events
+               WHERE provider='sakurupiah' AND event_type=%s AND idempotency_key=%s
+               AND store_balance_top_up_id=%s''', (event_type, key, topup['id']))
+        if event is None:
+            raise FundingError('event_identity_conflict')
+        return event, False
 
     # -- presentation --------------------------------------------------
 
     def presentation(self, topup):
         if topup is None:
             return {'state': 'missing'}
+        if topup['provider'] in self.rails:
+            return self.rails[topup['provider']][0].presentation(topup)
         now = self.clock()
         paid = topup['status'] == 'paid'
         deadline = None

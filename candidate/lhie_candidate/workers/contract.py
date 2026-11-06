@@ -86,7 +86,7 @@ TOPOLOGY = {
     "payment": QueueSpec(
         name="payment",
         wakeup_queue="candidate:payments",
-        kinds=("payment.event", "payment.navigation"),
+        kinds=("payment.event", "payment.navigation", "funding.klikqris"),
         batch=10,
         sweep_seconds=5,
         sweep_limit=20,

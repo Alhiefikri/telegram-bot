@@ -38,6 +38,22 @@ def _reference_segment(reference):
         return reference
     return hashlib.sha256(reference.encode()).hexdigest()
 
+def _provider_reference_ambiguous(db, provider, reference, namespace, target_type, target_id):
+    if provider not in ('sakurupiah', 'klikqris', 'pakasir'):
+        return False
+    key = f'v1|provider_reference|{provider}|{namespace}|{reference}'
+    db.one("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0)) AS locked",
+           (f'provider-receipt|{provider}|{reference}',))
+    ownership = db.one('''SELECT
+        EXISTS(SELECT 1 FROM public.external_money_receipts
+            WHERE canonical_key=%s AND target_type=%s AND target_id=%s) AS own,
+        EXISTS(SELECT 1 FROM public.external_money_receipts
+            WHERE provider=%s AND identity_kind='provider_reference' AND reference=%s
+            AND account_namespace IS DISTINCT FROM %s
+            AND (target_type IS DISTINCT FROM %s OR target_id IS DISTINCT FROM %s)) AS ambiguous''',
+        (key, target_type, str(target_id), provider, reference, namespace, target_type, str(target_id)))
+    return ownership['ambiguous'] and not ownership['own']
+
 
 def claim_provider_reference(db, *, provider, reference, beneficiary, currency, amount,
                              target_type, target_id, evidence=None, now=None, using='default',
@@ -51,7 +67,11 @@ def claim_provider_reference(db, *, provider, reference, beneficiary, currency, 
     db.require_transaction()
     provider = provider.strip().lower()
     reference = reference.strip()
-    if (not ((provider in ('sakurupiah', 'klikqris', 'pakasir') and account_namespace == 'default' and currency == 'IDR')
+    if (not (((provider in ('sakurupiah', 'klikqris', 'pakasir')
+               or provider == 'manual' and target_type == 'balance_top_up') and currency == 'IDR'
+              and (account_namespace == 'default'
+                   or (target_type == 'balance_top_up'
+                       and re.fullmatch(r'setting:[1-9][0-9]*', account_namespace))))
              or (provider == 'manual' and account_namespace == 'owner_attestation'
                  and currency in ('IDR', 'USDT') and target_type == 'order_payment'))
             or not reference or type(amount) is not int or amount < 1
@@ -59,6 +79,8 @@ def claim_provider_reference(db, *, provider, reference, beneficiary, currency, 
             or not str(target_id).strip()):
         raise ValueError('Invalid receipt claim identity')
     segment = _reference_segment(reference)
+    if _provider_reference_ambiguous(db, provider, segment, account_namespace, target_type, target_id):
+        return ReceiptClaim('review')
     return _claim_receipt(
         db, provider=provider, kind='provider_reference', namespace=account_namespace,
         reference=segment, key=f'v1|provider_reference|{provider}|{account_namespace}|{segment}',

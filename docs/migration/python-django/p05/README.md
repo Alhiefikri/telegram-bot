@@ -1099,3 +1099,66 @@ No production mutation, live Binance/chain call, real-money test, customer send,
 funding/custody activation, deployment or CI/CD operation is part of this proof.
 HD/H2 retain actual history, receiver/provider and release qualification.
 
+## P15: IDR funding, adjustments and reconciliation (#699)
+
+P15 preserves the existing IDR ledger, source claims and effect ledger. Funding
+policy changes use the database singleton, version fencing and transactional
+audit; a funding intent keeps its policy snapshot. New manual, Sakurupiah and
+KlikQris operations require explicit rail composition and configuration. Provider
+I/O is outside money transactions. Settlement, receipt claims, evidence, audit,
+balance and notification obligations commit together; compensated or already
+claimed money cannot be credited a second time.
+If a Sakurupiah create outcome is unknown and no original quote was persisted,
+trusted success is recorded as `quote_conflict` for review, not credited from a
+newly inferred quote. The configured payment worker sweeps durable funding
+events and recoverable top-ups with bounded, rate-limited provider observations.
+
+
+`adjustments/` requires a persisted Owner session, current Owner role and a fresh
+password on every confirmation, including replay. Database-backed attempt
+leases and lockout cannot be reset by Redis loss. Previews bind recipient,
+amount, reason, session, credential version and source. Funded transfers require
+an internally verified, customer-attributed IDR receipt; plain user-provided
+references are not proof. Top-up and refund recovery reuse their original
+resolution owners. Reversals reference an existing adjustment and cannot exceed
+the available balance. Ledger history and accounting entries remain append-only.
+
+Projection reconciliation is read-only and never repairs history:
+
+```sh
+python candidate/check_store_balance.py --customer 123
+python candidate/check_store_balance.py --limit 100
+```
+
+These commands require the admitted candidate runtime and explicit read grants.
+Without `--customer`, the result covers only the first `--limit` accounts ordered
+by Customer ID, not the entire store. Money writers reject inconsistent
+projections rather than silently correcting them. Investigate a reported mismatch
+through the established operator process.
+
+Local qualification uses:
+
+```sh
+python3 tools/migration_harness/smoke_navigation.py --p15
+```
+
+It creates only labeled disposable infrastructure, synthetic records and fake
+provider transports. Its evidence is `.local/migration-p15/verification.json`.
+The local PostgreSQL 16 proof passed for policy snapshot/drift rejection,
+settlement versus compensation, linked reversal versus spending, refund caps,
+revoked sessions and password lockout, receipt and BSC-parent conflicts, audit
+rollback, manual and KlikQris decisions, forged/duplicate callbacks, lost
+wakeups and provider-outage throttling. The focused funding, payment adapter,
+refund and worker suite passed 75 tests.
+
+The run is not live-provider, production-data, native-client, notification-delivery
+or deployment qualification. Legacy KlikQris top-ups without an authoritative
+persisted provider environment fail closed; historical environment binding must
+be qualified before those rows can safely recover. Admin/customer Dashboard
+adapters and delivery of notification obligations retain their downstream owners.
+No runtime grants are installed automatically.
+
+Context7's Django 5.2 transaction guidance was consulted: keep synchronous
+`transaction.atomic()` boundaries around the complete database operation and
+discard `on_commit` wakeups when a transaction rolls back. Redis wakeups are not
+the durable source of money or notification state.
