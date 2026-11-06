@@ -186,4 +186,22 @@ if (getenv('P14_EXTERNAL_SMOKE') === '1') {
         $fixtures['external_receivers'][] = $receiver->id;
     }
 }
+if (getenv('P16_USDT_SMOKE') === '1') {
+    foreach (['purchase', 'automatic', 'stale', 'frozen', 'race', 'reversal'] as $name) {
+        $customer = buyer($name === 'automatic' ? 1000 : 50000);
+        $product = product('p16-'.$name, 4);
+        $product->update(['usdt_price_amount' => 1000001]);
+        app(App\Services\UsdtBalance\CustomerUsdtBalanceLedger::class)->creditVerifiedTopUp(
+            $customer,
+            new App\Services\UsdtBalance\VerifiedUsdtFunding(
+                $customer->id, App\Services\UsdtBalance\UsdtMicroAmount::fromUnits(1500000),
+                'p16-topup-'.$customer->id, 'p16-receipt-'.$customer->id, 'v1'),
+            'p16-credit-'.$customer->id,
+        );
+        $fixtures['p16'][$name] = row($customer, $product, cart($customer, $product));
+        if ($name === 'race') {
+            $fixtures['p16']['race_second'] = row($customer, $product, cart($customer, $product));
+        }
+    }
+}
 echo json_encode($fixtures, JSON_THROW_ON_ERROR);

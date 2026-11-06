@@ -140,6 +140,71 @@ def claim_bsc_payment(db, *, payment, chain_id, tx_hash, log_index, token_contra
         reserve=True)
 
 
+def _valid_usdt_target(top_up_id, customer_id):
+    target = str(top_up_id)
+    return (top_up_id is not None and _SAFE_REFERENCE.fullmatch(target) is not None
+            and '|' not in target and type(customer_id) in (int, str)
+            and re.fullmatch(r'[1-9][0-9]{0,18}', str(customer_id)) is not None)
+
+def claim_usdt_bsc_top_up(db, *, top_up_id, customer_id, chain_id, tx_hash, log_index,
+                          amount_units, decimals, evidence=None, now=None, using='default'):
+    """Claim already-verified BSC evidence; this does not verify or settle it."""
+    if (type(chain_id) is not int or chain_id <= 0 or type(log_index) is not int or log_index < 0
+            or not isinstance(tx_hash, str) or re.fullmatch(r'0x[0-9a-f]{64}', tx_hash.lower()) is None
+            or not isinstance(amount_units, str) or re.fullmatch(r'[1-9][0-9]{0,77}', amount_units) is None
+            or type(decimals) is not int or not 0 <= decimals <= 255
+            or not _valid_usdt_target(top_up_id, customer_id)):
+        raise ValueError('Invalid USDT top-up receipt')
+    tx_hash = tx_hash.lower()
+    return _claim_receipt(
+        db, provider='bsc', kind='bsc_log', namespace=None, reference=None,
+        key=f'v1|bsc_log|chain:{chain_id}|tx:{tx_hash}|log:{log_index}',
+        beneficiary=f'customer:{customer_id}', currency='USDT', units=amount_units,
+        decimals=decimals, target_type='customer_usdt_top_up', target_id=str(top_up_id),
+        chain_id=chain_id, tx_hash=tx_hash, log_index=log_index,
+        evidence=evidence, now=now, using=using)
+
+
+def claim_usdt_binance_top_up(db, *, top_up_id, customer_id, receiver_type, receiver_value,
+                              transaction_id, amount_micro, order_id=None, evidence=None,
+                              now=None, using='default'):
+    """Claim a verified Binance transaction using the persisted receiver namespace."""
+    if (receiver_type not in ('pay_id', 'uid') or not isinstance(receiver_value, str)
+            or re.fullmatch(r'[0-9]{1,57}', receiver_value) is None
+            or not isinstance(transaction_id, str) or not transaction_id.strip()
+            or type(amount_micro) is not int or amount_micro < 1
+            or not _valid_usdt_target(top_up_id, customer_id)
+            or (order_id is not None and not isinstance(order_id, str))):
+        raise ValueError('Invalid Binance USDT top-up receipt')
+    namespace = f'{receiver_type}:{receiver_value}'
+    reference = _reference_segment(transaction_id)
+    key = f'v1|provider_reference|binance|{namespace}|{reference}'
+    aliases = {}
+    if order_id and order_id.strip() and order_id.strip() != transaction_id.strip():
+        aliases[f'v1|provider_reference|binance|{namespace}|{_reference_segment(order_id)}'] = 'binance_order_id'
+    return _claim_receipt(
+        db, provider='binance', kind='provider_reference', namespace=namespace,
+        reference=reference, key=key, beneficiary=f'customer:{customer_id}', currency='USDT',
+        units=str(amount_micro), decimals=6, target_type='customer_usdt_top_up',
+        target_id=str(top_up_id), aliases=aliases, evidence=evidence, now=now, using=using)
+
+
+def receipt_consumable(db, *, receipt_id, target_type, target_id):
+    """Lock and check the receipt and its parent before a money effect."""
+    db.require_transaction()
+    receipt = db.one('''SELECT status,target_type,target_id,identity_kind,chain_id,tx_hash
+        FROM public.external_money_receipts WHERE id=%s FOR UPDATE''', (receipt_id,))
+    if (receipt is None or receipt['status'] != 'claimed'
+            or (receipt['target_type'], receipt['target_id']) != (target_type, str(target_id))):
+        return False
+    if receipt['identity_kind'] != 'bsc_log':
+        return True
+    parent = db.one('''SELECT status,target_type,target_id FROM public.external_money_receipt_parent_claims
+        WHERE chain_id=%s AND tx_hash=%s FOR UPDATE''', (receipt['chain_id'], receipt['tx_hash']))
+    return (parent is not None and parent['status'] == 'claimed'
+            and (parent['target_type'], parent['target_id']) == (target_type, str(target_id)))
+
+
 def _reserve(db, provider, target_id, key, status, now):
     db.execute('''INSERT INTO public.external_money_receipt_reservations
         (source,legacy_type,legacy_id,provider,reason,details,reserved_at,created_at,updated_at)
@@ -160,6 +225,9 @@ def _claim_receipt(db, *, provider, kind, namespace, reference, key, beneficiary
     fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=True, separators=(',', ':')).encode()).hexdigest()
     identities = dict(aliases or {})
     identities[key] = 'canonical'
+    for identity in sorted(identities):
+        db.one('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0)) AS locked',
+               ('money-receipt-identity|' + identity,))
     savepoint = transaction.savepoint(using=using)
 
     def reject(status):

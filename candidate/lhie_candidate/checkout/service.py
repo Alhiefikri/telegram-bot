@@ -12,10 +12,12 @@ from lhie_candidate.domain.money import require_integer
 from .balance import StoreBalanceLedger
 from .db import Database
 from .errors import CheckoutError
-from .intents import PaymentSetting, StoreBalancePreparation
+from .intents import PaymentSetting, StoreBalancePreparation, UsdtBalancePreparation
 from .inventory import InventoryLedger
 from .lifecycle import OrderLifecycle
 from .pricing import PricingSnapshot
+from .wallet_selection import BalanceCheckoutRequest
+from lhie_candidate.usdt.ledger import UsdtLedger
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,12 +28,15 @@ class CheckoutRequest:
     expected_pricing: PricingSnapshot
     terms_version: str | None = None
     terms_accepted_at: datetime | None = None
+    balance_request: BalanceCheckoutRequest | None = None
 
     def __post_init__(self):
         require_integer(self.customer_id, minimum=1)
         require_integer(self.cart_id, minimum=1)
         if not isinstance(self.expected_pricing, PricingSnapshot):
             raise ValueError('Expected an immutable pricing snapshot')
+        if self.balance_request is not None and not isinstance(self.balance_request, BalanceCheckoutRequest):
+            raise ValueError('Invalid balance checkout request')
         if not isinstance(self.checkout_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', self.checkout_key):
             raise ValueError('Invalid checkout key')
         if (self.terms_version is None) != (self.terms_accepted_at is None):
@@ -63,6 +68,7 @@ class CheckoutService:
         self.reseller = reseller
         self.supplier_encrypter = supplier_encrypter
         self.balance = StoreBalanceLedger(using)
+        self.usdt_balance = UsdtLedger(using)
         self.inventory = InventoryLedger(using)
 
     def quote_cart(self, customer_id, cart_id):
@@ -116,11 +122,29 @@ class CheckoutService:
         now = datetime.now(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None)
         if cart['status'] != 'active' or (cart['expires_at'] and cart['expires_at'] <= now):
             raise CheckoutError('inactive_cart')
-        is_balance = self.preparation.provider == 'store_balance'
+        is_balance = self.preparation.provider in ('store_balance', 'usdt_balance')
+        if request.balance_request is not None and not is_balance:
+            raise CheckoutError('balance_request_conflicts_with_rail')
+        idr_account = usdt_account = None
+        preference = None
+        currencies = ()
         if is_balance:
             if customer['telegram_id'] is None:
                 raise CheckoutError('balance_customer_required')
-            self.balance.lock_for_purchase(request.customer_id)
+            if request.balance_request is None:
+                preference = 'idr_only' if self.preparation.provider == 'store_balance' else 'usd_only'
+                currencies = ('IDR',) if preference == 'idr_only' else ('USDT',)
+            else:
+                account_preference = None
+                if request.balance_request.preference is None:
+                    row = self.db.one('SELECT balance_payment_preference FROM public.customers WHERE id=%s',
+                                      (request.customer_id,))
+                    account_preference = row['balance_payment_preference']
+                preference, currencies = request.balance_request.currencies(account_preference)
+            if 'IDR' in currencies:
+                idr_account = self.balance.lock_for_purchase(request.customer_id)
+            if 'USDT' in currencies:
+                usdt_account = self.usdt_balance.lock_for_purchase(request.customer_id)
             policy = self.db.one('''SELECT id FROM public.customer_usdt_funding_policies
                 WHERE singleton_key='customer_usdt_funding_policy' FOR SHARE''')
             restore = self.db.one('SELECT state FROM public.balance_restore_gates WHERE id=1 FOR SHARE')
@@ -145,35 +169,50 @@ class CheckoutService:
         pricing = self._pricing(items, products, reseller=self.reseller)
         if pricing != request.expected_pricing:
             raise CheckoutError('price_changed')
-        if (preflight.provider, preflight.method) != (self.preparation.provider, self.preparation.method):
+        preparation = self.preparation
+        if request.balance_request is not None:
+            if preflight.observation is not None:
+                raise CheckoutError('stale_preflight')
+            currency = request.balance_request.select(currencies, pricing, idr_account, usdt_account)
+            preparation = StoreBalancePreparation() if currency == 'IDR' else UsdtBalancePreparation()
+            preflight = preparation.preflight(setting)
+        elif (preflight.provider, preflight.method) != (preparation.provider, preparation.method):
             raise CheckoutError('stale_preflight')
         if preflight.setting != setting:
-            if not is_balance:
+            if not is_balance or preflight.observation is not None:
                 raise CheckoutError('stale_preflight')
             preflight = replace(preflight, setting=setting)
-        plan = self.preparation.prepare(pricing, setting, preflight, now)
-        if (plan.provider, plan.method) != (self.preparation.provider, self.preparation.method):
+        plan = preparation.prepare(pricing, setting, preflight, now)
+        if (plan.provider, plan.method) != (preparation.provider, preparation.method):
             raise CheckoutError('invalid_payment_plan')
         external_usdt = (plan.provider == 'manual' and plan.method in ('BINANCE_PAY_ID', 'USDT_BEP20')
                          and plan.currency == 'USDT' and plan.rail_snapshot is not None)
-        expected_amount = pricing.usdt_total if external_usdt else pricing.idr_total
+        usdt_paid = is_balance and plan.provider == 'usdt_balance'
+        expected_amount = pricing.usdt_total if external_usdt or usdt_paid else pricing.idr_total
         if (require_integer(plan.amount, minimum=1) < (expected_amount or 0)
-                or (not external_usdt and (plan.currency != 'IDR' or plan.amount != expected_amount))
-                or (external_usdt and expected_amount is None) or plan.expires_at <= now):
+                or (not external_usdt and not usdt_paid and (plan.currency != 'IDR' or plan.amount != expected_amount))
+                or (usdt_paid and (plan.currency != 'USDT' or plan.amount != expected_amount))
+                or ((external_usdt or usdt_paid) and expected_amount is None) or plan.expires_at <= now):
             raise CheckoutError('invalid_payment_plan')
-        if plan.balance_paid != is_balance or (is_balance and plan.method != 'STORE_BALANCE'):
+        if plan.balance_paid != is_balance or (is_balance and plan.method !=
+                ('USDT_BALANCE' if usdt_paid else 'STORE_BALANCE')):
             raise CheckoutError('invalid_payment_plan')
         order_id, payment_id = str(uuid4()), str(uuid4())
         invoice = _reference('INV', now)
+        selection = request.balance_request
         snapshot = None if not is_balance else json.dumps({
-            'preference': 'idr_only', 'source': 'explicit_rail', 'currency': 'IDR',
-            'amount': plan.amount, 'expected_idr_total': None, 'expected_usd_total_micro': None})
+            'preference': preference,
+            'source': ('explicit_rail' if selection is None else
+                       selection.preference_source or ('account' if selection.preference is None else 'override')),
+            'currency': plan.currency, 'amount': plan.amount,
+            'expected_idr_total': selection.expected_idr_total if selection else None,
+            'expected_usd_total_micro': selection.expected_usdt_total if selection else None})
         self.db.execute('''INSERT INTO public.orders
             (id,customer_id,cart_id,checkout_key,invoice_number,order_status,payment_status,
              total_amount,currency,expires_at,terms_version,terms_accepted_at,balance_checkout_snapshot,created_at,updated_at)
-            VALUES (%s,%s,%s,%s,%s,'pending_payment','pending',%s,'IDR',%s,%s,%s,%s,%s,%s)''',
+            VALUES (%s,%s,%s,%s,%s,'pending_payment','pending',%s,%s,%s,%s,%s,%s,%s,%s)''',
             (order_id, request.customer_id, request.cart_id, request.checkout_key, invoice,
-             pricing.idr_total, plan.expires_at, request.terms_version,
+             pricing.idr_total, 'USDT' if usdt_paid else 'IDR', plan.expires_at, request.terms_version,
              None if request.terms_accepted_at is None else request.terms_accepted_at.astimezone(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None),
              snapshot, now, now))
         binance = plan.rail_snapshot if external_usdt and plan.method == 'BINANCE_PAY_ID' else None
@@ -209,8 +248,8 @@ class CheckoutService:
                  product.get('product_family_id'), family['name'] if family else None,
                  product.get('delivery_note'), product.get('usage_guide_title'), product.get('usage_guide_url'),
                  quote.quantity, local_quantity, supplier_quantity, quote.tier_minimum, quote.unit_price,
-                 quote.usdt_unit_price if external_usdt else None, quote.subtotal,
-                 quote.usdt_subtotal if external_usdt else None, now, now))
+                 quote.usdt_unit_price if external_usdt or usdt_paid else None, quote.subtotal,
+                 quote.usdt_subtotal if external_usdt or usdt_paid else None, now, now))
             if local_quantity:
                 self.inventory.allocate(item['id'], quote.product_id, local_quantity)
             self.inventory.reserve(order_id, quote.product_id, quote.quantity)
@@ -229,7 +268,10 @@ class CheckoutService:
             refresh_shared_wallet_after_commit(supplier_ids, using=self.using)
         order_status = 'pending_payment'
         if is_balance:
-            self.balance.debit_purchase(request.customer_id, order_id)
+            if usdt_paid:
+                self.usdt_balance.debit_purchase(request.customer_id, order_id)
+            else:
+                self.balance.debit_purchase(request.customer_id, order_id)
             result = OrderLifecycle(using=self.using, encrypter=self.supplier_encrypter).balance_paid_locked(order_id, payment_id)
             order_status = result.order['order_status']
         self.db.execute("UPDATE public.carts SET status='checked_out',updated_at=%s WHERE id=%s", (now, request.cart_id))

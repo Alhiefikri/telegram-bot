@@ -1162,3 +1162,53 @@ Context7's Django 5.2 transaction guidance was consulted: keep synchronous
 `transaction.atomic()` boundaries around the complete database operation and
 discard `on_commit` wakeups when a transaction rolls back. Redis wakeups are not
 the durable source of money or notification state.
+
+## P16: USDT ledger, wallet selection and receipt ownership (#700)
+
+`lhie_candidate/usdt/ledger.py` posts source-bound purchase debits and linked
+full reversal debits to the existing USDT account, entries and accounting event
+tables. `checkout/refunds.py` remains the original-currency refund owner.
+Matching source/fingerprint replay resolves the existing posting; changed
+payloads conflict. `ApprovedUsdtReversal` mirrors the PHP internal source:
+its reference is supplied by an already-authorized caller, not proof of
+approval. No operator or customer endpoint invokes it. A future caller must
+provide and verify its own durable approval authority.
+
+For preference checkout, `BalanceCheckoutRequest` validates all supplied
+candidate price consents before selecting a single full-payment wallet. Both
+automatic candidates are checked under locks in IDR-before-USDT order;
+frozen or drifted accounts, spending pauses and an open/missing restore gate
+fail closed. USDT totals and snapshots are integer micro-USDT, never converted
+from the IDR Order economics. Raw token units reject sub-micro remainders and
+BIGINT overflow. Reconciliation compares signed entries and projection/cursor
+in one snapshot; drift freezing is an explicit, locked recheck. Accounting
+aggregation uses the existing per-event consumer claims and leg tables.
+
+The existing receipt owner also accepts verified USDT top-up identities and
+checks BSC parent claims before consumption. Receiver address claims remain
+permanent and channel-exclusive; the ownership lookup includes retired Customer
+bindings. These are registry interfaces, not evidence of provider verification,
+custody, receiver provisioning or authorization to activate a funding rail.
+Verified funding, provider observation, settlement and their durable resolution
+remain P17; no arbitrary USDT funding credit is exposed here. Explicit local
+`checkout/grants.sql`, `payments/grants.sql` and `usdt/grants.sql` provisioning
+is required and never runs at startup.
+
+Local proof: `python3 tools/migration_harness/smoke_checkout.py --p16` uses the
+existing disposable harness, PHP-generated synthetic ledger entries and PostgreSQL
+16.15. `.local/migration-p16/verification.json` binds the dataset, schema,
+dependencies and source hashes. It exercises USDT purchase and original-currency
+refund replay, reversal replay, aggregation, rolled-back drift injection and
+freeze, stale consent, frozen secondary wallet, competing wallet debits,
+cross-target BSC parent/receipt claims, Binance aliases and receiver ownership
+races. The focused candidate regression command covers 40 tests. Neither
+synthetic execution nor available registry code qualifies real custody,
+historical production data, external providers or funding activation. Python
+advisory locks do not fence PHP processes; the approved cutover must maintain
+one writer authority.
+
+Context7 guidance: Django 5.2
+[atomic error boundaries](https://docs.djangoproject.com/en/5.2/topics/db/transactions/)
+require handling database errors outside the relevant atomic/savepoint block;
+PostgreSQL 16 [explicit locking](https://www.postgresql.org/docs/16/explicit-locking.html#LOCKING-DEADLOCKS)
+requires consistent lock order. No provider I/O belongs in these money closures.

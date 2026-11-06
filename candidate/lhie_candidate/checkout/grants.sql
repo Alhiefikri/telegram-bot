@@ -148,3 +148,10 @@ GRANT INSERT (payment_id,receiver_id,receiver_address,chain_id,token_contract,to
     ON public.payment_bsc_details TO candidate_runtime;
 GRANT UPDATE (last_assigned_at) ON public.bsc_payment_receivers TO candidate_runtime;
 GRANT INSERT (usdt_unit_price,usdt_subtotal) ON public.order_items TO candidate_runtime;
+
+-- P16: separate USDT ledger, explicit local provisioning only.
+GRANT SELECT (balance_payment_preference) ON public.customers TO candidate_runtime;
+GRANT SELECT (usdt_unit_price) ON public.order_items TO candidate_runtime;
+GRANT INSERT (customer_id,currency,balance_micro,version,created_at,updated_at)
+    ON public.customer_usdt_balance_accounts TO candidate_runtime;
+GRANT USAGE ON SEQUENCE public.customer_usdt_balance_accounts_id_seq TO candidate_runtime;

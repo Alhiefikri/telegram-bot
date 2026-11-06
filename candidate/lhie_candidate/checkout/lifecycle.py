@@ -163,14 +163,25 @@ class OrderLifecycle:
         order, payment, payments, _ = self.lock_payment(payment_id)
         if str(order['id']) != str(order_id) or len(payments) != 1:
             raise CheckoutError('payment_snapshot_mismatch')
-        if (payment['provider'], payment['method'], payment['currency']) != ('store_balance', 'STORE_BALANCE', 'IDR'):
+        identity = (payment['provider'], payment['method'], payment['currency'])
+        if identity == ('store_balance', 'STORE_BALANCE', 'IDR'):
+            debit = self.db.one("""SELECT e.id FROM public.store_balance_entries e
+                JOIN public.customer_balance_accounts a ON a.id=e.customer_balance_account_id
+                WHERE e.kind='purchase_debit' AND e.source_type='order' AND e.source_id=%s
+                  AND a.customer_id=%s AND e.amount=%s""",
+                (str(order_id), order['customer_id'], payment['amount']))
+        elif identity == ('usdt_balance', 'USDT_BALANCE', 'USDT'):
+            debit = self.db.one("""SELECT e.id FROM public.customer_usdt_balance_entries e
+                JOIN public.customer_usdt_balance_accounts a ON a.id=e.customer_usdt_balance_account_id
+                WHERE e.kind='purchase_debit' AND e.source_type='order' AND e.source_id=%s
+                  AND a.customer_id=%s AND e.amount_micro=%s""",
+                (str(order_id), order['customer_id'], payment['amount']))
+        else:
+            raise CheckoutError('balance_payment_snapshot_invalid')
+        if order['currency'] != payment['currency']:
             raise CheckoutError('balance_payment_snapshot_invalid')
         if payment['status'] != 'pending' or order['order_status'] != 'pending_payment':
             raise CheckoutError('invalid_order_transition')
-        debit = self.db.one("""SELECT e.id FROM public.store_balance_entries e
-            JOIN public.customer_balance_accounts a ON a.id=e.customer_balance_account_id
-            WHERE e.kind='purchase_debit' AND e.source_type='order' AND e.source_id=%s
-              AND a.customer_id=%s AND e.amount=%s""", (str(order_id), order['customer_id'], payment['amount']))
         if debit is None:
             raise CheckoutError('balance_purchase_debit_missing')
         fulfillments = self.fulfillment.lock(order_id)

@@ -77,6 +77,22 @@ class StoreBalancePreparation:
         return PaymentPlan(self.provider, self.method, pricing.idr_total,
                            now + timedelta(minutes=15), balance_paid=True)
 
+class UsdtBalancePreparation:
+    provider = 'usdt_balance'
+    method = 'USDT_BALANCE'
+
+    def preflight(self, setting):
+        return PaymentPreflight(self.provider, self.method, setting)
+
+    def prepare(self, pricing, setting, preflight, now):
+        if pricing.usdt_total is None:
+            raise CheckoutError('usdt_price_unavailable')
+        require_integer(pricing.usdt_total, minimum=1)
+        if (preflight.provider, preflight.method, preflight.setting) != (self.provider, self.method, setting):
+            raise CheckoutError('stale_preflight')
+        return PaymentPlan(self.provider, self.method, pricing.usdt_total,
+                           now + timedelta(minutes=15), balance_paid=True, currency='USDT')
+
 
 def telegram_checkout_key(key: str, customer_id: int, telegram_id: int, chat_id: str,
                           message_id: int, data: str) -> str:

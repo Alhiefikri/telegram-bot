@@ -10,6 +10,9 @@ CHECKOUT_INSERT = {
     'inventory_movements': set('product_id order_id type quantity stock_before became_unavailable notes created_at'.split()),
     'customer_balance_accounts': set('customer_id balance created_at updated_at'.split()),
     'store_balance_entries': set('customer_balance_account_id kind amount balance_after source_type source_id idempotency_key created_at refund_order_id'.split()),
+    'customer_usdt_balance_accounts': set('customer_id currency balance_micro version created_at updated_at'.split()),
+    'customer_usdt_balance_entries': set('customer_usdt_balance_account_id account_sequence kind amount_micro balance_after_micro source_type source_id idempotency_key request_fingerprint original_entry_id refund_order_id created_at'.split()),
+    'customer_usdt_balance_accounting_events': set('customer_usdt_balance_entry_id currency amount_micro debit_account credit_account source_fingerprint created_at'.split()),
     'payment_bsc_details': set('payment_id receiver_id receiver_address chain_id token_contract token_decimals base_amount_micro payable_amount_micro expected_token_units verification_status verification_mode required_confirmations requires_finalized_block confirmation_grace_minutes created_at updated_at'.split()),
 }
 CHECKOUT_UPDATE = {
@@ -18,6 +21,7 @@ CHECKOUT_UPDATE = {
     'products': {'stock', 'reserved_stock', 'updated_at'},
     'product_stock_items': {'order_item_id', 'retired_at', 'retired_reason', 'updated_at'},
     'customer_balance_accounts': {'balance', 'updated_at'},
+    'customer_usdt_balance_accounts': {'balance_micro', 'version', 'last_entry_id', 'updated_at'},
     'orders': {'order_status', 'payment_status', 'updated_at'},
     'payments': set('status paid_at updated_at binance_verification_status'.split()),
     'bsc_payment_receivers': {'last_assigned_at'},

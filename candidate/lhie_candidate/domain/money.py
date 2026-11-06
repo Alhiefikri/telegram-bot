@@ -52,6 +52,22 @@ class Money:
         units = int(whole) * 1_000_000 + int(fraction[:6].ljust(6, "0"))
         return cls(currency, units)
 
+    @classmethod
+    def from_raw_usdt_units(cls, raw_units: str, token_decimals: int) -> "Money":
+        if (type(raw_units) is not str or len(raw_units) > 78
+                or re.fullmatch(r"(?:0|[1-9][0-9]*)", raw_units, re.ASCII) is None
+                or type(token_decimals) is not int or not 0 <= token_decimals <= 36):
+            raise ValueError("Invalid raw USDT token units")
+        raw = int(raw_units)
+        if token_decimals >= 6:
+            units, remainder = divmod(raw, 10 ** (token_decimals - 6))
+            if remainder:
+                raise ValueError("USDT cannot represent sub-micro units")
+        else:
+            units = raw * 10 ** (6 - token_decimals)
+        require_integer(units, minimum=1)
+        return cls(Currency.USDT, units)
+
     def format_decimal(self) -> str:
         if self.currency is Currency.IDR:
             return str(self.units)

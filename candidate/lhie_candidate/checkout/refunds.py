@@ -244,6 +244,10 @@ class OrderRefunds:
             FROM public.customer_usdt_balance_accounts WHERE id=%s FOR UPDATE""", (account["id"],))
         if current["frozen_reason"] is not None:
             raise CheckoutError("usdt_balance_frozen")
+        from lhie_candidate.usdt.reconciliation import account_health
+        health = account_health(self.db, account_id=current["id"])
+        if health is None or health["issues"]:
+            raise CheckoutError("usdt_balance_projection_mismatch")
         latest = self.db.one("""SELECT id,account_sequence,balance_after_micro FROM
             public.customer_usdt_balance_entries WHERE customer_usdt_balance_account_id=%s
             ORDER BY account_sequence DESC LIMIT 1""", (account["id"],))
