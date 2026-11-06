@@ -38,14 +38,16 @@ def _event(db, *, provider, merchant_ref, reference, status, evidence):
     return response(200, 'accepted')
 
 
-def receive_klikqris(request, *, environment='production', payments=None, limits=None):
+def receive_klikqris(request, *, environment='production', payments=None, limits=None, funding_klik=None):
     if request.method != 'POST':
         return response(405, 'method_not_allowed')
     try:
         body = _body(request)
         rails = payments if payments is not None else payment_services()
         lifecycle = rails.lifecycles.get('klikqris')
-        if lifecycle is None or lifecycle.adapter.config.environment != environment:
+        if lifecycle is None and funding_klik is None:
+            return response(503, 'unavailable')
+        if lifecycle is not None and lifecycle.adapter.config.environment != environment:
             return response(503, 'unavailable')
         from .klikqris import callback_identity, authenticate_callback
         ref = callback_identity(body)
@@ -55,7 +57,15 @@ def receive_klikqris(request, *, environment='production', payments=None, limits
             provider_reference,klikqris_transaction_signature FROM public.payments
             WHERE provider='klikqris' AND merchant_ref=%s''', (ref,))
         if payment is None:
-            return response(404, 'not_found')
+            if funding_klik is None:
+                return response(404, 'not_found')
+            event_id = funding_klik.receive_callback(body, environment=environment)
+            if event_id is None:
+                return response(404, 'not_found')
+            wakeup.enqueue('funding.klikqris', event_id)
+            return response(200, 'accepted')
+        if lifecycle is None:
+            return response(503, 'unavailable')
         payment['klikqris_environment'] = lifecycle.adapter.config.environment
         facts = authenticate_callback(body, environment=environment, payment=payment, encrypter=lifecycle.encrypter)
         return _event(rails.db, provider='klikqris', merchant_ref=ref,

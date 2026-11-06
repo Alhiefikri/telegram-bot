@@ -7,7 +7,8 @@ GRANT SELECT (id,order_id,provider,method,currency,amount,merchant_ref,sakurupia
     ON public.payments TO candidate_runtime;
 GRANT SELECT (id,provider,event_type,merchant_ref,provider_reference,provider_status,
     idempotency_key,received_count,processed_at) ON public.payment_events TO candidate_runtime;
-GRANT SELECT (id,canonical_key,fingerprint,status,target_type,target_id) ON public.external_money_receipts TO candidate_runtime;
+GRANT SELECT (id,canonical_key,provider,identity_kind,account_namespace,reference,fingerprint,status,target_type,target_id)
+    ON public.external_money_receipts TO candidate_runtime;
 GRANT SELECT (alias_key,external_money_receipt_id) ON public.external_money_receipt_aliases TO candidate_runtime;
 GRANT SELECT (id,order_id,payment_id,state) ON public.manual_fulfillment_reviews TO candidate_runtime;
 GRANT INSERT (provider,event_type,merchant_ref,provider_reference,provider_status,raw_payload,

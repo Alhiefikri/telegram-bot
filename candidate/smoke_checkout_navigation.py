@@ -61,13 +61,13 @@ class FakeProvider:
         self.success_observed_ns = None
 
     @staticmethod
-    def _outside_locks():
+    def _outside_locks(*, single_flight=False):
         from django.db import connection
         assert connection.get_autocommit() and not connection.in_atomic_block
         with connection.cursor() as cursor:
             cursor.execute("SELECT count(*) FROM pg_locks WHERE pid=pg_backend_pid() "
                            "AND locktype='advisory' AND granted")
-            assert cursor.fetchone()[0] == 0, 'Provider I/O held an advisory lock'
+            assert cursor.fetchone()[0] == int(single_flight), 'Unexpected provider coordination locks'
 
     def list_channels(self):
         self._outside_locks()
@@ -78,7 +78,7 @@ class FakeProvider:
         return (Channel('QRIS', True, 1, 10_000_000_000),)
 
     def create(self, request):
-        self._outside_locks()
+        self._outside_locks(single_flight=True)
         with self.lock:
             self.creates += 1
         return ProviderOutcome(
@@ -88,7 +88,7 @@ class FakeProvider:
             QRIS)
 
     def status(self, identity, provider_ref, *, provider_total):
-        self._outside_locks()
+        self._outside_locks(single_flight=True)
         if self.block_status:
             self.status_entered.set()
             if not self.release_status.wait(15):
@@ -516,6 +516,8 @@ def run():
         raise RuntimeError('Explicit disposable checkout-navigation opt-in required')
     from lhie_candidate.startup import configure_django
     configure_django()
+    sys.excepthook = sys.__excepthook__
+    sys.tracebacklimit = 50
     from django.db import DatabaseError
     from lhie_candidate.checkout.db import Database
     from lhie_candidate.navigation.presentation import CatalogPresenter
@@ -562,7 +564,6 @@ def run():
         'UPDATE public.orders SET total_amount=1 WHERE FALSE',
         'UPDATE public.payments SET amount=1 WHERE FALSE',
         'UPDATE public.products SET price_amount=1 WHERE FALSE',
-        'UPDATE public.external_money_receipts SET status=status WHERE FALSE',
         'DELETE FROM public.store_balance_entries WHERE FALSE',
         'UPDATE public.cart_items SET quantity=quantity WHERE FALSE',
     )

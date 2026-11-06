@@ -3,6 +3,7 @@ import ast
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
+from unittest.mock import Mock
 
 from lhie_candidate.funding.policy import (FundingPolicy, PolicyError, callback_identity,
                                            parse_amount, parse_preset_callback, preset_callback)
@@ -224,7 +225,7 @@ class FundingPresentationTests(unittest.TestCase):
         identity = InvoiceIdentity('BAL-1-x', 5000, 'QRIS')
         request = CreateRequest(identity, '08123456789', 'https://sakurupiah.id/cb',
                                 'https://sakurupiah.id/return')
-        topup = {'amount': 5000}
+        topup = {'amount': 5000, 'merchant_ref': 'BAL-1-x', 'sakurupiah_channel': 'QRIS'}
         good = ProviderOutcome(identity, OutcomeState.CREATED, 'trx-1', 5200, 200,
                                (NOW + timedelta(minutes=10)).isoformat(),
                                'https://sakurupiah.id/qr.png')
@@ -238,6 +239,55 @@ class FundingPresentationTests(unittest.TestCase):
         self.assertFalse(service._valid_created(
             ProviderOutcome(identity, OutcomeState.CREATED, 'trx-1', 5200, 200,
                             (NOW - timedelta(seconds=1)).isoformat(), good.qr), topup, request))
+
+    def test_provider_invoice_is_bound_to_persisted_topup(self):
+        service = FundingService(clock=lambda: NOW)
+        identity = InvoiceIdentity('BAL-other', 5000, 'QRIS')
+        request = CreateRequest(identity, '08123456789', 'https://sakurupiah.id/cb',
+                                'https://sakurupiah.id/return')
+        outcome = ProviderOutcome(identity, OutcomeState.CREATED, 'trx-1', 5200, 200,
+                                  (NOW + timedelta(minutes=10)).isoformat(),
+                                  'https://sakurupiah.id/qr.png')
+        self.assertFalse(service._valid_created(outcome, {
+            'merchant_ref': 'BAL-original', 'amount': 5000, 'sakurupiah_channel': 'QRIS',
+        }, request))
+
+    def test_success_requires_exact_recorded_total_and_provider(self):
+        service = FundingService(clock=lambda: NOW)
+        identity = InvoiceIdentity('BAL-1-x', 5000, 'QRIS')
+        topup = {'provider': 'sakurupiah', 'merchant_ref': 'BAL-1-x', 'amount': 5000,
+                 'currency': 'IDR', 'sakurupiah_channel': 'QRIS', 'provider_reference': 'trx-1',
+                 'provider_payment_method': 'QRIS', 'provider_total_payment': 5200, 'provider_fee': 200}
+        self.assertTrue(service._observation_matches(
+            topup, ProviderOutcome(identity, OutcomeState.SUCCESS, 'trx-1', 5200)))
+        self.assertFalse(service._observation_matches(
+            topup, ProviderOutcome(identity, OutcomeState.SUCCESS, 'trx-1')))
+        self.assertFalse(service._observation_matches(
+            dict(topup, provider='manual'), ProviderOutcome(identity, OutcomeState.SUCCESS, 'trx-1', 5200)))
+
+
+    def test_compensated_evidence_must_match_original_target(self):
+        service = FundingService(clock=lambda: NOW)
+        identity = InvoiceIdentity('BAL-1-x', 5000, 'QRIS')
+        topup = {'provider': 'sakurupiah', 'currency': 'IDR', 'merchant_ref': 'BAL-1-x',
+                 'amount': 5000, 'sakurupiah_channel': 'QRIS', 'provider_reference': 'trx-1'}
+        self.assertTrue(service._compensated_observation_matches(
+            topup, ProviderOutcome(identity, OutcomeState.SUCCESS, 'trx-1', 5200)))
+        self.assertFalse(service._compensated_observation_matches(
+            topup, ProviderOutcome(identity, OutcomeState.SUCCESS, 'trx-other', 5200)))
+        self.assertFalse(service._compensated_observation_matches(
+            topup, ProviderOutcome(identity, OutcomeState.SUCCESS, 'trx-1', 4999)))
+
+
+    def test_rail_requires_explicit_registration_and_readiness(self):
+        service = FundingService()
+        setting = {'is_active': True, 'payment_mode': 'manual'}
+        policy = FundingPolicy(1, 5000, (10000,))
+        self.assertFalse(service._available(policy, setting))
+        service.register_rail('manual', Mock(), ready=lambda: False)
+        self.assertFalse(service._available(policy, setting))
+        service.register_rail('manual', Mock(), ready=lambda: True)
+        self.assertTrue(service._available(policy, setting))
 
 
 if __name__ == '__main__':

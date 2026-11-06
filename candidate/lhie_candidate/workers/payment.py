@@ -4,6 +4,7 @@ Provider observations happen outside database transactions; settlement
 relocks and revalidates the original payment snapshot.
 """
 
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -16,10 +17,20 @@ def _now():
 
 
 class PaymentHandler:
-    def __init__(self, lifecycle, db, *, processor=None):
+    def __init__(self, lifecycle, db, *, processor=None, funding_klik=None, funding=None):
         self.lifecycle = lifecycle
         self.db = db
         self.processor = processor
+        self.funding_klik = funding_klik
+        self.funding = funding or (funding_klik.funding if funding_klik is not None else None)
+        self.funding_providers = tuple(
+            provider for provider, enabled in (
+                ('klikqris', funding_klik is not None),
+                ('sakurupiah', self.funding is not None and getattr(self.funding, 'provider', None) is not None),
+                ('manual', self.funding is not None and 'manual' in getattr(self.funding, 'rails', {})),
+            ) if enabled)
+        self._funding_cursor = None
+        self._funding_recovery_cursor = None
         self.spec = queue_spec("payment")
         self._sweep_start = 0
         self._payment_cursors = {"hints": None, "ambiguous": None, "expiry": None}
@@ -52,6 +63,10 @@ class PaymentHandler:
             if self.processor is None:
                 raise wakeup.InvalidWakeup("Navigation processor unavailable")
             return self.processor.process(identity)
+        if kind == "funding.klikqris":
+            if self.funding_klik is None:
+                return "ignored"
+            return self.funding_klik.consume_callback(identity).state
         if kind != "payment.event":
             raise wakeup.InvalidWakeup("Invalid wakeup family")
         payment_id = self._payment_for_event(identity)
@@ -187,11 +202,78 @@ class PaymentHandler:
         )
         return rows[0]["update_id"] if rows else None
 
+    def _funding_events(self, limit):
+        query = """SELECT e.id FROM public.store_balance_top_up_events e
+            WHERE e.provider='klikqris' AND e.event_type='callback' AND e.processed_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM public.store_balance_top_up_events p
+                WHERE p.store_balance_top_up_id=e.store_balance_top_up_id
+                AND p.event_type='reconciliation' AND p.provider_status='candidate_poll'
+                AND p.received_at>%s - interval '24 seconds')"""
+        if self._funding_cursor is not None:
+            rows = self.db.rows(query + " AND e.id>%s ORDER BY e.id LIMIT %s",
+                                (_now(), self._funding_cursor, limit))
+            if rows:
+                return [row['id'] for row in rows]
+            self._funding_cursor = None
+        return [row['id'] for row in self.db.rows(query + " ORDER BY e.id LIMIT %s", (_now(), limit))]
+    def _funding_recoveries(self, limit):
+        query = """SELECT t.id FROM public.store_balance_top_ups t
+            WHERE t.provider=ANY(%s) AND t.provider IN ('klikqris','sakurupiah')
+              AND t.status IN ('pending','payable','expired')
+              AND t.provider_create_attempted_at IS NOT NULL
+              AND t.provider_create_attempted_at<=%s
+              AND NOT EXISTS (SELECT 1 FROM public.store_balance_top_up_events e
+                  WHERE e.store_balance_top_up_id=t.id AND e.event_type='reconciliation'
+                  AND e.provider_status='candidate_poll' AND e.received_at>%s - interval '24 seconds')"""
+        cutoff = _now() - timedelta(seconds=10)
+        if self._funding_recovery_cursor is not None:
+            rows = self.db.rows(query + " AND t.id>%s ORDER BY t.id LIMIT %s",
+                                (list(self.funding_providers), cutoff, _now(), self._funding_recovery_cursor, limit))
+            if rows:
+                return [row['id'] for row in rows]
+            self._funding_recovery_cursor = None
+        return [row['id'] for row in self.db.rows(query + " ORDER BY t.id LIMIT %s",
+                                                  (list(self.funding_providers), cutoff, _now(), limit))]
+
+    def _funding_expiries(self, limit):
+        return [row['id'] for row in self.db.rows(
+            """SELECT id FROM public.store_balance_top_ups WHERE provider=ANY(%s)
+               AND status IN ('pending','payable','awaiting_confirmation')
+               AND (expires_at<=%s OR provider_expires_at<=%s)
+               ORDER BY LEAST(expires_at,provider_expires_at),id LIMIT %s""",
+            (list(self.funding_providers), _now(), _now(), limit))]
+
+    def _mark_funding_poll(self, identity):
+        topup = self.funding.top_up_by_id(identity)
+        if topup is None or topup['provider'] not in self.funding_providers:
+            return
+        now = _now()
+        key = uuid.uuid4().hex
+        self.db.execute("""INSERT INTO public.store_balance_top_up_events
+            (store_balance_top_up_id,provider,event_type,merchant_ref,provider_status,raw_payload,
+             idempotency_key,received_count,received_at,last_received_at,processed_at)
+            VALUES (%s,%s,'reconciliation',%s,'candidate_poll','{}'::jsonb,%s,1,%s,%s,%s)""",
+            (identity, topup['provider'], topup['merchant_ref'], key, now, now, now))
+
+    def _recover_funding(self, identity):
+        topup = self.funding.top_up_by_id(identity)
+        if topup is None or topup['provider'] not in self.funding_providers:
+            return
+        if self.funding.expire_if_due(identity):
+            return
+        self._mark_funding_poll(identity)
+        if topup['provider'] == 'klikqris':
+            return self.funding_klik.recover(identity)
+        if topup['provider'] == 'sakurupiah':
+            return self.funding.check(topup)
+
+
     def sweep(self, limit):
         return self.sweep_bounded(limit, lambda function, *args: function(*args), lambda: False)
 
     def sweep_bounded(self, limit, bounded, stopped):
         result = {"hints": 0, "ambiguous": 0, "active": 0, "expiry": 0, "cancellations": 0, "failures": 0}
+        expired_funding = set()
         if self.processor:
             result.update(navigation=0, recovered=0)
 
@@ -237,6 +319,46 @@ class PaymentHandler:
                     result['failures'] += 1
                 yield
 
+        def funding_events():
+            for identity in bounded(self._funding_events, limit):
+                if stopped():
+                    break
+                self._funding_cursor = identity
+                try:
+                    event = self.db.one('SELECT store_balance_top_up_id FROM public.store_balance_top_up_events WHERE id=%s', (identity,))
+                    if event is not None:
+                        bounded(self._mark_funding_poll, event['store_balance_top_up_id'])
+                    bounded(self.funding_klik.consume_callback, identity)
+                    result['funding_hints'] += 1
+                except Exception:
+                    result['failures'] += 1
+                yield
+
+        def funding_recoveries():
+            for identity in bounded(self._funding_recoveries, limit):
+                if stopped():
+                    break
+                self._funding_recovery_cursor = identity
+                try:
+                    if identity not in expired_funding:
+                        bounded(self._recover_funding, identity)
+                    result['funding_recoveries'] += 1
+                except Exception:
+                    result['failures'] += 1
+                yield
+
+        def funding_expiries():
+            for identity in bounded(self._funding_expiries, limit):
+                if stopped():
+                    break
+                try:
+                    if bounded(self.funding.expire_if_due, identity):
+                        expired_funding.add(identity)
+                    result['funding_expiries'] += 1
+                except Exception:
+                    result['failures'] += 1
+                yield
+
         phases = [
             iter(recover_navigation()),
             iter(navigation()),
@@ -249,6 +371,14 @@ class PaymentHandler:
         ]
         if self.external_methods:
             phases.append(iter(payments("external", self._external_payments, self._external_reconcile)))
+        if self.funding_klik is not None:
+            result['funding_hints'] = 0
+            phases.append(iter(funding_events()))
+        if self.funding_providers:
+            result['funding_recoveries'] = 0
+            result['funding_expiries'] = 0
+            phases.append(iter(funding_recoveries()))
+            phases.append(iter(funding_expiries()))
         start = self._sweep_start
         self._sweep_start = (start + 1) % len(phases)
         phases = phases[start:] + phases[:start]

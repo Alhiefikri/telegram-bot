@@ -18,7 +18,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(contract.QUEUES, ("interaction", "payment", "receipt"))
         self.assertEqual(len({spec.wakeup_queue for spec in contract.TOPOLOGY.values()}), 3)
         self.assertEqual(contract.TOPOLOGY["receipt"].kinds, ("effect", "order"))
-        self.assertEqual(contract.TOPOLOGY["payment"].kinds, ("payment.event", "payment.navigation"))
+        self.assertEqual(contract.TOPOLOGY["payment"].kinds, ("payment.event", "payment.navigation", "funding.klikqris"))
         self.assertEqual(contract.TOPOLOGY["interaction"].kinds, ("navigation.update",))
         families = [kind for spec in contract.TOPOLOGY.values() for kind in spec.kinds]
         self.assertEqual(len(families), len(set(families)))

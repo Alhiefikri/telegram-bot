@@ -55,7 +55,7 @@ def interaction_handler():
     return InteractionHandler(_navigation_processor(key=key, family="interaction"))
 
 
-def payment_handler():
+def payment_handler(*, funding_klik=None, funding=None):
     from ..checkout.db import Database
     from ..runtime import application_key
     from .payment import PaymentHandler
@@ -64,7 +64,7 @@ def payment_handler():
     from ..payments.runtime import payment_services
     lifecycle = payment_services()
     processor = _navigation_processor(lifecycle=lifecycle, key=key, family="payment")
-    return PaymentHandler(lifecycle, Database(), processor=processor)
+    return PaymentHandler(lifecycle, Database(), processor=processor, funding_klik=funding_klik, funding=funding)
 
 
 def receipt_handler():
@@ -74,10 +74,10 @@ def receipt_handler():
     return ReceiptHandler(receipt_service(lease_seconds=LEASE_SECONDS))
 
 
-def build_handler(queue):
+def build_handler(queue, *, funding_klik=None, funding=None):
     validate_queue_name(queue)
     if queue == "interaction":
         return interaction_handler()
     if queue == "payment":
-        return payment_handler()
+        return payment_handler(funding_klik=funding_klik, funding=funding)
     return receipt_handler()

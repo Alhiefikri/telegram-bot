@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import json
 import multiprocessing
 import os
+import sys
 from zoneinfo import ZoneInfo
 
 from lhie_candidate.payments.sakurupiah import CreateRequest, InvoiceIdentity, OutcomeState, ProviderOutcome
@@ -43,7 +44,7 @@ class FakeProvider:
         self.checks += 1
         state = self.state
         return ProviderOutcome(InvoiceIdentity(identity.merchant_ref, self.amount, identity.channel),
-                               state, provider_ref, reason=state.value)
+                               state, provider_ref, total=provider_total, reason=state.value)
 
     def recover(self, identity, *, provider_total):
         return self.status(identity, self.reference, provider_total=provider_total)
@@ -141,6 +142,8 @@ def run():
         raise RuntimeError('Explicit disposable funding opt-in required')
     from lhie_candidate.startup import configure_django
     configure_django()
+    sys.excepthook = sys.__excepthook__
+    sys.tracebacklimit = 50
     from django.db import connection
     from lhie_candidate.readiness import verify_dependencies
     verify_dependencies()
@@ -195,8 +198,8 @@ def run():
     assert held['status'] == 'invalid_provider_result', held['status']
     assert counts() == (1, AMOUNT, opening_balance + AMOUNT, 1), counts()
 
-    # The active runtime role cannot read provider payloads / QR ciphertext,
-    # alter a top-up identity/amount, or write the ledger outside the owner.
+    # The active runtime role cannot read provider payloads, alter a top-up
+    # identity/amount, or write the ledger outside the owner.
     from django.db import DatabaseError
     denied = (
         'SELECT provider_payload FROM public.store_balance_top_ups',

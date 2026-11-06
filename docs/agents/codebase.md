@@ -145,6 +145,17 @@ including real PostgreSQL settlement/reversed-alias races and receipt delivery.
 Default composition admits neither external adapter nor USDT funding. Live
 qualification, actual history and dashboard composition retain H2/HD/P23 owners.
 
+P15 [IDR funding and Owner adjustments](../migration/python-django/p05/README.md#p15-idr-funding-adjustments-and-reconciliation-699)
+owns `candidate/lhie_candidate/funding/` and `adjustments/`: DB-versioned funding
+policy, IDR top-up resolution, fresh Owner password leases, source-bound
+compensation/refund recovery and reversal. All reuse the existing IDR ledger,
+receipt registry, audit and outbound-effect tables. Projection drift blocks
+money movement; `candidate/check_store_balance.py` reports it read-only.
+`tools/migration_harness/smoke_navigation.py --p15` exercises synthetic local
+PostgreSQL and fake-provider boundaries. Explicit grant files are never applied
+at startup. Unqualified funding providers remain disabled by default; browser
+and Dashboard presentation and notification delivery remain downstream work.
+
 P18 [supplier acquisition and historical entitlement](../migration/python-django/p05/README.md#p18-supplier-acquisition-and-historical-entitlements-698)
 owns `candidate/lhie_candidate/suppliers/`: private supplier catalog, pricing,
 capacity, checkout holds, durable purchase claims/dispatch evidence and

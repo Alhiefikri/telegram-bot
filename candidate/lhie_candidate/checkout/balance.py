@@ -36,8 +36,13 @@ class StoreBalanceLedger:
             raise CheckoutError("balance_account_unavailable")
         history = self.db.one(
             """SELECT COALESCE(SUM(CASE
-                         WHEN kind IN ('purchase_debit', 'admin_adjustment_reversal')
-                         THEN -amount ELSE amount END), 0) AS ledger_balance,
+                         WHEN kind IN ('purchase_debit', 'admin_adjustment_reversal') THEN -amount
+                         WHEN kind IN ('top_up_credit', 'admin_adjustment_credit',
+                                       'owner_compensation_credit', 'refund_credit') THEN amount
+                         ELSE 0 END), 0) AS ledger_balance,
+                      COUNT(*) FILTER (WHERE kind NOT IN ('purchase_debit', 'admin_adjustment_reversal',
+                          'top_up_credit', 'admin_adjustment_credit', 'owner_compensation_credit',
+                          'refund_credit')) AS unknown_entries,
                       (SELECT balance_after FROM public.store_balance_entries
                        WHERE customer_balance_account_id = %s ORDER BY id DESC LIMIT 1)
                           AS cursor_balance
@@ -54,7 +59,7 @@ class StoreBalanceLedger:
         cursor_balance = history["cursor_balance"]
         if cursor_balance is None:
             cursor_balance = 0
-        if (type(ledger_balance) is not int or not 0 <= ledger_balance <= MAX_UNITS
+        if (history["unknown_entries"] != 0 or type(ledger_balance) is not int or not 0 <= ledger_balance <= MAX_UNITS
                 or type(cursor_balance) is not int or not 0 <= cursor_balance <= MAX_UNITS
                 or balance != ledger_balance or balance != cursor_balance):
             raise CheckoutError("balance_projection_mismatch")
@@ -95,39 +100,8 @@ class StoreBalanceLedger:
                           source_type="balance_top_up")
 
     def lock_for_top_up(self, customer_id):
-        """Lock the account and require only the newest cursor to agree.
-
-        PHP ``creditTopUp`` intentionally skips the full-history scan; a
-        mismatched cursor still blocks mutation, while independent operator
-        reconciliation remains the full-history check.
-        """
-        self.db.require_transaction()
-        customer_id = require_integer(customer_id, minimum=1)
-        account = self.db.one(
-            "SELECT id,balance FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
-            (customer_id,))
-        if account is None:
-            self.db.execute(
-                """INSERT INTO public.customer_balance_accounts
-                       (customer_id, balance, created_at, updated_at)
-                   VALUES (%s, 0, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta',
-                           CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')
-                   ON CONFLICT (customer_id) DO NOTHING""",
-                (customer_id,))
-            account = self.db.one(
-                "SELECT id,balance FROM public.customer_balance_accounts WHERE customer_id = %s FOR UPDATE",
-                (customer_id,))
-        if account is None:
-            raise CheckoutError("balance_account_unavailable")
-        latest = self.db.one(
-            """SELECT balance_after FROM public.store_balance_entries
-               WHERE customer_balance_account_id = %s ORDER BY id DESC LIMIT 1""",
-            (account["id"],))
-        balance = require_integer(account["balance"])
-        expected = 0 if latest is None else require_integer(latest["balance_after"])
-        if balance != expected:
-            raise CheckoutError("balance_projection_mismatch")
-        return account
+        """Use the same full-history projection check as other IDR writers."""
+        return self.lock_for_purchase(customer_id)
 
     def refund_order(self, customer_id, order_id):
         """Post the original IDR debit remainder through the refund authority."""
@@ -207,9 +181,12 @@ class StoreBalanceLedger:
 
     def _post(self, account, kind, amount, source_id, key, source_type="order",
               refund_order_id=None):
+        if kind not in ("purchase_debit", "admin_adjustment_reversal", "top_up_credit",
+                        "admin_adjustment_credit", "owner_compensation_credit", "refund_credit"):
+            raise CheckoutError("balance_kind_invalid")
         amount = require_integer(amount, minimum=1)
         balance = require_integer(account["balance"])
-        if kind == "purchase_debit":
+        if kind in ("purchase_debit", "admin_adjustment_reversal"):
             if amount > balance:
                 raise CheckoutError("insufficient_store_balance")
             balance_after = balance - amount

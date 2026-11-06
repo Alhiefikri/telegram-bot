@@ -57,21 +57,42 @@ P09_UPDATE = {
 
 FUNDING_INSERT = {
     'store_balance_funding_intents': set('customer_id telegram_navigation_root_id chat_id canonical_message_id policy_version amount nonce status expires_at claimed_at created_at updated_at'.split()),
-    'store_balance_top_ups': set('customer_id store_balance_funding_intent_id telegram_navigation_root_id chat_id canonical_message_id locale provider payment_setting_id payment_provider_version merchant_ref idempotency_key currency amount sakurupiah_channel status provider_create_state provider_create_attempted_at expires_at created_at updated_at'.split()),
+    'store_balance_top_ups': set('customer_id store_balance_funding_intent_id telegram_navigation_root_id chat_id canonical_message_id locale provider payment_setting_id payment_provider_version merchant_ref idempotency_key currency amount sakurupiah_channel status provider_create_state provider_create_attempted_at expires_at created_at updated_at provider_payment_method provider_payload provider_fee provider_total_payment provider_created_at provider_expires_at'.split()),
     'store_balance_top_up_events': set('store_balance_top_up_id provider event_type merchant_ref provider_reference provider_status raw_payload idempotency_key received_count received_at last_received_at processed_at'.split()),
     'external_money_receipts': set('canonical_key provider identity_kind account_namespace reference beneficiary currency amount_units decimals status target_type target_id fingerprint evidence_payload claimed_at created_at updated_at'.split()),
     'external_money_receipt_aliases': set('external_money_receipt_id alias_key alias_type created_at'.split()),
     'customer_balance_accounts': set('customer_id balance created_at updated_at'.split()),
     'store_balance_entries': set('customer_balance_account_id kind amount balance_after source_type source_id idempotency_key created_at refund_order_id'.split()),
+    'audit_logs': set('action subject_type subject_id old_values new_values created_at'.split()),
 }
 FUNDING_UPDATE = {
     'store_balance_funding_policies': {'updated_at'},
     'manual_payment_settings': {'updated_at'},
     'store_balance_funding_intents': {'status', 'claimed_at', 'updated_at'},
-    'store_balance_top_ups': set('status provider_reference provider_payload provider_qris_url provider_fee provider_total_payment provider_payment_method provider_created_at provider_expires_at provider_create_state provider_create_attempted_at provider_create_last_error paid_at settled_at updated_at'.split()),
+    'store_balance_top_ups': set('status provider_reference provider_payload provider_signature provider_qris_url provider_fee provider_total_payment provider_payment_method provider_created_at provider_expires_at provider_create_state provider_create_attempted_at provider_create_last_error paid_at settled_at updated_at payment_proof_file_id payment_proof_submitted_at payment_proof_admin_chat_id'.split()),
+    'store_balance_top_up_events': {'received_count', 'last_received_at', 'processed_at'},
     'external_money_receipts': {'updated_at'},
+    'external_money_receipt_reservations': {'resolved_at', 'updated_at'},
     'customer_balance_accounts': {'balance', 'updated_at'},
     'customers': {'updated_at'},
+}
+
+ADJUSTMENT_INSERT = {
+    'balance_adjustment_requests': set('id customer_id owner_user_id telegram_id username session_binding credential_binding mode currency amount reason category source_id receipt_fingerprint fingerprint version state expires_at created_at updated_at'.split()),
+    'balance_adjustment_accounting_events': set('request_id ledger_entry_id currency amount debit_account credit_account source_fingerprint created_at'.split()),
+    'balance_adjustment_auth_states': {'user_id', 'failed_at'},
+    'store_balance_compensations': set('store_balance_top_up_id customer_id owner_user_id ledger_entry_id resolution_type idempotency_key provider_reference reason amount resolved_at created_at'.split()),
+    'external_money_receipt_reservations': set('source legacy_type legacy_id provider reason details reserved_at created_at updated_at'.split()),
+    'external_money_receipts': set('canonical_key provider identity_kind account_namespace reference chain_id tx_hash log_index beneficiary currency amount_units decimals status target_type target_id fingerprint evidence_payload claimed_at created_at updated_at'.split()),
+    'external_money_receipt_aliases': set('external_money_receipt_id alias_key alias_type created_at'.split()),
+    'external_money_receipt_parent_claims': set('chain_id tx_hash external_money_receipt_id status target_type target_id created_at updated_at'.split()),
+    'audit_logs': set('user_id action subject_type subject_id old_values new_values created_at'.split()),
+}
+ADJUSTMENT_UPDATE = {
+    'balance_adjustment_requests': {'state', 'ledger_entry_id', 'resolved_at', 'updated_at'},
+    'balance_adjustment_auth_states': set('failed_at locked_until episode verified_request_id verified_fingerprint lease_token lease_until'.split()),
+    'external_money_receipts': {'updated_at', 'status', 'review_reason', 'claimed_at'},
+    'external_money_receipt_parent_claims': {'status', 'review_reason', 'updated_at'},
 }
 
 
@@ -173,6 +194,18 @@ def verify_public_writes(cursor):
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, FUNDING_INSERT)
         allowed_update = _merge(allowed_update, FUNDING_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.store_balance_funding_policies','minimum_amount','UPDATE')")
+    if cursor.fetchone()[0]:
+        allowed_update = _merge(allowed_update, {
+            'store_balance_funding_policies': {'minimum_amount', 'preset_amounts', 'version', 'updated_at'},
+            'users': {'updated_at'}})
+        allowed_insert = _merge(allowed_insert, {'audit_logs': {
+            'user_id', 'action', 'subject_type', 'subject_id', 'old_values', 'new_values',
+            'ip_address', 'created_at'}})
+    cursor.execute("SELECT has_column_privilege(current_user,'public.balance_adjustment_requests','id','INSERT')")
+    if cursor.fetchone()[0]:
+        allowed_insert = _merge(allowed_insert, ADJUSTMENT_INSERT)
+        allowed_update = _merge(allowed_update, ADJUSTMENT_UPDATE)
     cursor.execute("SELECT has_column_privilege(current_user,'public.audit_logs','action','INSERT')")
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, LIFECYCLE_INSERT)
