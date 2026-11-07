@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
 
@@ -17,6 +18,7 @@ final class PaymentProviderSwitcher
     public function __construct(
         private readonly KlikQrisProviderReadiness $klikQrisReadiness,
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
+        private readonly WijayaPayProviderReadiness $wijayapayReadiness,
         private readonly AuditLogger $auditLogger,
     ) {}
 
@@ -128,5 +130,13 @@ final class PaymentProviderSwitcher
             return;
         }
 
+        if ($provider === PaymentProvider::WIJAYAPAY) {
+            $readiness = $this->wijayapayReadiness->observe();
+            if (! $readiness->isReady()) {
+                throw new PaymentProviderNotReady(
+                    'Provider WijayaPay belum bisa diaktifkan. '.$readiness->configurationMessage(),
+                );
+            }
+        }
     }
 }

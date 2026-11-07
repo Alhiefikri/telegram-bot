@@ -114,6 +114,7 @@ class RecoverTelegramOutboundEffects extends Command
                     TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
                     TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
                     TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,
+                    TelegramOutboundEffectService::TYPE_WIJAYAPAY_CHECKOUT,
                     TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT,
                     TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
                     TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,

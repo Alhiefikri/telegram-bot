@@ -808,6 +808,7 @@ final class StoreBalanceTopUpService
         return match ($provider) {
             PaymentProvider::MANUAL => 'QR_MANUAL',
             PaymentProvider::SAKURUPIAH => 'QRIS',
+            PaymentProvider::WIJAYAPAY => 'QRIS',
             default => 'qris',
         };
     }

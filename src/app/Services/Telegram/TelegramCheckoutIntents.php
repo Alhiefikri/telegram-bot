@@ -22,6 +22,9 @@ use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahQrisImage;
 use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\WijayaPay\WijayaPayInvoiceLifecycleService;
+use App\Services\WijayaPay\WijayaPayInvoiceOutcome;
+use App\Services\WijayaPay\WijayaPayQrisImage;
 use App\Support\DogfoodTiming;
 use App\Support\PakasirCheckoutFlow;
 use InvalidArgumentException;
@@ -40,6 +43,8 @@ class TelegramCheckoutIntents
         private KlikQrisQrisImage $klikQrisImages,
         private SakurupiahInvoiceLifecycleService $sakurupiah,
         private SakurupiahQrisImage $sakurupiahImages,
+        private WijayaPayInvoiceLifecycleService $wijayapay,
+        private WijayaPayQrisImage $wijayapayImages,
         private PaymentProviderResolver $providerResolver,
         private BscReadiness $bscReadiness,
         private QrPresentation $qrPresentation,
@@ -212,6 +217,72 @@ class TelegramCheckoutIntents
         string $locale,
     ): array {
         return $this->bot->sendMessage($chatId, $this->paymentInstructions->sakurupiahRetry($order, $outcome, $locale), [
+            'inline_keyboard' => [
+                [['text' => $this->locale->translate($order->customer, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
+                [['text' => $this->locale->translate($order->customer, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
+            ],
+        ]);
+    }
+
+    public function sendWijayaPayPaymentInstructions(string $chatId, Order $order, Payment $payment): array
+    {
+        $order->loadMissing('customer');
+        $locale = $this->locale->code($order->customer);
+
+        try {
+            $result = $this->wijayapay->lifecycle($payment);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->sendWijayaPayRetryState(
+                $chatId,
+                $order,
+                WijayaPayInvoiceOutcome::InvalidProviderResult,
+                $locale,
+            );
+        }
+
+        $payable = $result->payable();
+        if ($payable === null) {
+            return $this->sendWijayaPayRetryState($chatId, $order, $result->outcome(), $locale);
+        }
+
+        if ($payable->isQrisImage()) {
+            try {
+                $imageContents = $this->wijayapayImages->contents($payable);
+
+                return $this->sendPaymentInstruction(
+                    $chatId,
+                    $this->paymentInstructions->wijayaPayQrisImage($order, $payable, $this->qrPresentation->image($imageContents), $locale),
+                );
+            } catch (Throwable) {
+                return $this->sendWijayaPayRetryState(
+                    $chatId,
+                    $order,
+                    WijayaPayInvoiceOutcome::ProviderPresentationPending,
+                    $locale,
+                );
+            }
+        }
+
+        return $this->sendPaymentInstruction(
+            $chatId,
+            $this->paymentInstructions->wijayaPay(
+                $order,
+                $payable,
+                $locale,
+                $this->qrPresentation->payload((string) $payable->qrisPayload),
+            ),
+        );
+    }
+
+    private function sendWijayaPayRetryState(
+        string $chatId,
+        Order $order,
+        WijayaPayInvoiceOutcome $outcome,
+        string $locale,
+    ): array {
+        return $this->bot->sendMessage($chatId, $this->paymentInstructions->wijayaPayRetry($order, $outcome, $locale), [
             'inline_keyboard' => [
                 [['text' => $this->locale->translate($order->customer, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
                 [['text' => $this->locale->translate($order->customer, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],

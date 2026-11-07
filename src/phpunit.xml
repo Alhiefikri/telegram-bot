@@ -41,6 +41,8 @@
         <env name="SAKURUPIAH_SANDBOX_API_KEY" value="" force="true"/>
         <env name="SAKURUPIAH_PRODUCTION_API_ID" value="" force="true"/>
         <env name="SAKURUPIAH_PRODUCTION_API_KEY" value="" force="true"/>
+        <env name="WIJAYAPAY_CODE_MERCHANT" value="" force="true"/>
+        <env name="WIJAYAPAY_API_KEY" value="" force="true"/>
         <env name="TELESCOPE_ENABLED" value="false" force="true"/>
         <env name="NIGHTWATCH_ENABLED" value="false" force="true"/>
         <server name="APP_ENV" value="testing" force="true"/>
@@ -59,6 +61,8 @@
         <server name="SAKURUPIAH_SANDBOX_API_KEY" value="" force="true"/>
         <server name="SAKURUPIAH_PRODUCTION_API_ID" value="" force="true"/>
         <server name="SAKURUPIAH_PRODUCTION_API_KEY" value="" force="true"/>
+        <server name="WIJAYAPAY_CODE_MERCHANT" value="" force="true"/>
+        <server name="WIJAYAPAY_API_KEY" value="" force="true"/>
         <server name="DB_FOREIGN_KEYS" value="true" force="true"/>
         <server name="MAIL_MAILER" value="array" force="true"/>
         <server name="QUEUE_CONNECTION" value="sync" force="true"/>

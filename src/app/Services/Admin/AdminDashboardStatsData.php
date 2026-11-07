@@ -21,6 +21,7 @@ use App\Services\StoreBalance\StoreBalanceFundingPolicyManager;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtFunding\CustomerUsdtFundingGate;
 use App\Services\UsdtFunding\CustomerUsdtFundingPolicyManager;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Support\Money;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Carbon;
@@ -42,6 +43,7 @@ final class AdminDashboardStatsData
         private readonly AdminDashboardOverviewData $overview,
         private readonly CustomerApiAvailability $customerApiAvailability,
         private readonly SakurupiahChannelSettings $sakurupiahChannels,
+        private readonly WijayaPayProviderReadiness $wijayapayReadiness,
     ) {}
 
     /**
@@ -253,11 +255,17 @@ final class AdminDashboardStatsData
         $isSakurupiahConfigured = $sakurupiahReadiness->isReady();
         $isSakurupiahEnabled = $requestedMode === PaymentProvider::SAKURUPIAH && $isSakurupiahConfigured;
         $isSakurupiahRequestedButUnavailable = $requestedMode === PaymentProvider::SAKURUPIAH && ! $isSakurupiahConfigured;
+        $wijayapayReadiness = $this->wijayapayReadiness->observe();
+        $isWijayaPayConfigured = $wijayapayReadiness->isReady();
+        $isWijayaPayEnabled = $requestedMode === PaymentProvider::WIJAYAPAY && $isWijayaPayConfigured;
+        $isWijayaPayRequestedButUnavailable = $requestedMode === PaymentProvider::WIJAYAPAY && ! $isWijayaPayConfigured;
         $isPakasirRequested = $requestedMode === PaymentProvider::PAKASIR;
         $effectiveMode = $requestedMode;
 
         $label = match (true) {
             $isPakasirRequested => 'Pakasir retired — checkout blocked',
+            $isWijayaPayEnabled => 'WijayaPay aktif',
+            $isWijayaPayRequestedButUnavailable => 'WijayaPay aktif — belum siap',
             $isSakurupiahEnabled => 'Sakurupiah aktif',
             $isSakurupiahRequestedButUnavailable => 'Sakurupiah aktif — belum siap',
             $isKlikQrisRequested => $isKlikQrisConfigured ? 'KlikQRIS aktif' : 'KlikQRIS aktif · belum siap',
@@ -265,6 +273,8 @@ final class AdminDashboardStatsData
         };
         $hint = match (true) {
             $isPakasirRequested => 'Setting lama Pakasir dipertahankan tanpa fallback. Selesaikan cutover provider sebelum membuka checkout baru.',
+            $isWijayaPayEnabled => 'Provider WijayaPay untuk checkout baru. Payment lama tetap diproses berdasarkan provider yang tersimpan.',
+            $isWijayaPayRequestedButUnavailable => 'WijayaPay tetap menjadi provider aktif dan tidak dialihkan otomatis. Perbaiki readiness sebelum checkout baru dibuka.',
             $isSakurupiahEnabled => 'Provider Sakurupiah untuk checkout baru. Payment lama tetap diproses berdasarkan provider yang tersimpan.',
             $isSakurupiahRequestedButUnavailable => 'Sakurupiah tetap menjadi provider aktif dan tidak dialihkan otomatis. Perbaiki readiness sebelum checkout baru dibuka.',
             $isKlikQrisRequested => $isKlikQrisConfigured
@@ -274,6 +284,8 @@ final class AdminDashboardStatsData
         };
         $statusBadge = match (true) {
             $isPakasirRequested => 'PAKASIR RETIRED',
+            $isWijayaPayEnabled => 'WIJAYAPAY',
+            $isWijayaPayRequestedButUnavailable => 'WIJAYAPAY BELUM SIAP',
             $isSakurupiahEnabled => 'SAKURUPIAH',
             $isSakurupiahRequestedButUnavailable => 'SAKURUPIAH BELUM SIAP',
             $isKlikQrisRequested => $isKlikQrisConfigured ? 'KLIKQRIS' : 'KLIKQRIS BELUM SIAP',
@@ -298,6 +310,12 @@ final class AdminDashboardStatsData
                 'reason' => $isSakurupiahConfigured ? null : $sakurupiahReadiness->configurationMessage(),
                 'can_activate' => $isSakurupiahConfigured,
             ],
+            PaymentProvider::WIJAYAPAY => [
+                'label' => PaymentProvider::label(PaymentProvider::WIJAYAPAY),
+                'ready' => $isWijayaPayConfigured,
+                'reason' => $isWijayaPayConfigured ? null : $wijayapayReadiness->configurationMessage(),
+                'can_activate' => $isWijayaPayConfigured,
+            ],
         ];
         $pending = $this->pendingPayments();
         $sakurupiahBacklog = $this->sakurupiahMetrics->pendingVerification();
@@ -321,6 +339,12 @@ final class AdminDashboardStatsData
             'is_sakurupiah_configured' => $isSakurupiahConfigured,
             'can_enable_sakurupiah' => $isSakurupiahConfigured,
             'can_enable_klikqris' => $isKlikQrisConfigured,
+            'can_enable_wijayapay' => $isWijayaPayConfigured,
+            'wijayapay_guard_message' => $isWijayaPayConfigured
+                ? null
+                : 'Provider WijayaPay belum siap. '.$wijayapayReadiness->configurationMessage(),
+            'wijayapay_config_missing' => $wijayapayReadiness->missing(),
+            'wijayapay_config_invalid' => array_keys($wijayapayReadiness->invalid()),
             'klikqris_guard_message' => $isKlikQrisConfigured
                 ? null
                 : 'Provider KlikQRIS belum siap. '.$klikQrisReadiness->configurationMessage(),
@@ -336,7 +360,7 @@ final class AdminDashboardStatsData
             'switch_audit' => $this->switchAudits(),
             'label' => $label,
             'hint' => $hint,
-            'tone' => $isPakasirRequested ? 'rose' : (($isSakurupiahEnabled || ($isKlikQrisRequested && $isKlikQrisConfigured)) ? 'purple' : 'amber'),
+            'tone' => $isPakasirRequested ? 'rose' : (($isSakurupiahEnabled || $isWijayaPayEnabled || ($isKlikQrisRequested && $isKlikQrisConfigured)) ? 'purple' : 'amber'),
             'is_pakasir_retired' => $isPakasirRequested,
             'source' => $settings ? 'dashboard_setting' : 'dashboard_default',
             'can_manage' => (bool) $user->role?->canManagePaymentSettings(),

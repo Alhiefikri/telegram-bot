@@ -188,7 +188,7 @@ class AdminOrderDetailController extends Controller
 
         return [
             'provider' => strtolower((string) $payment->provider),
-            'merchant_ref_short' => $payment->provider === PaymentProvider::SAKURUPIAH
+            'merchant_ref_short' => in_array($payment->provider, [PaymentProvider::SAKURUPIAH, PaymentProvider::WIJAYAPAY], true)
                 ? $this->maskIdentifier((string) $payment->merchant_ref)
                 : $this->bounded((string) $payment->merchant_ref, 8),
             'merchant_ref_hash' => hash('sha256', (string) $payment->merchant_ref),

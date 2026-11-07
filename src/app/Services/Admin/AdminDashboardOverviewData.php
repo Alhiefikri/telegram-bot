@@ -8,6 +8,7 @@ use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\PaymentReceiptReport;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Support\Money;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Carbon;
@@ -36,6 +37,7 @@ final class AdminDashboardOverviewData
         private readonly CheckoutMaintenance $maintenance,
         private readonly KlikQrisProviderReadiness $klikQrisReadiness,
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
+        private readonly WijayaPayProviderReadiness $wijayapayReadiness,
         private readonly AdminBalanceOperationsData $balanceOperations,
     ) {}
 
@@ -560,7 +562,8 @@ final class AdminDashboardOverviewData
         $provider = ManualPaymentSetting::current()?->paymentProvider() ?? PaymentProvider::MANUAL;
         if ($canManage && ($provider === PaymentProvider::PAKASIR
             || ($provider === PaymentProvider::KLIKQRIS && ! $this->klikQrisReadiness->checkout()->isReady())
-            || ($provider === PaymentProvider::SAKURUPIAH && ! $this->sakurupiahReadiness->observe()->isReady()))) {
+            || ($provider === PaymentProvider::SAKURUPIAH && ! $this->sakurupiahReadiness->observe()->isReady())
+            || ($provider === PaymentProvider::WIJAYAPAY && ! $this->wijayapayReadiness->observe()->isReady()))) {
             $items[] = [
                 'title' => 'Provider pembayaran perlu diperiksa',
                 'detail' => $provider === PaymentProvider::PAKASIR

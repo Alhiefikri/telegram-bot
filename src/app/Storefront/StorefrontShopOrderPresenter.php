@@ -37,6 +37,7 @@ class StorefrontShopOrderPresenter
         $paymentDeadline = $invoice->qrisEffectiveExpiresAt
             ?? $this->localPaymentDeadline($invoice);
         $isSakurupiah = strtolower((string) $invoice->payment?->provider) === PaymentProvider::SAKURUPIAH;
+        $isWijayaPay = strtolower((string) $invoice->payment?->provider) === PaymentProvider::WIJAYAPAY;
         $bscStatus = $this->bscStatus($invoice->bscVerificationStatus);
         $paymentKind = match (strtoupper((string) $invoice->payment?->method)) {
             'BINANCE_PAY_ID' => 'binance',
@@ -111,6 +112,7 @@ class StorefrontShopOrderPresenter
             'isBscPayment' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'USDT_BEP20',
             'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
             'isSakurupiah' => $isSakurupiah,
+            'isWijayaPay' => $isWijayaPay,
             'isHostedSakurupiah' => $isSakurupiah && $invoice->isPendingPayment() && filled($invoice->hostedPaymentUrl) && ! filled($invoice->qrisImageSource),
             'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
             'qrisFeePayer' => $invoice->qrisFeePayer,
@@ -233,6 +235,7 @@ class StorefrontShopOrderPresenter
         if ($payment !== null && in_array(strtolower((string) $payment->provider), [
             PaymentProvider::KLIKQRIS,
             PaymentProvider::SAKURUPIAH,
+            PaymentProvider::WIJAYAPAY,
         ], true)) {
             return $payment->expired_at ?? $payment->provider_expires_at ?? $invoice->order->expires_at;
         }

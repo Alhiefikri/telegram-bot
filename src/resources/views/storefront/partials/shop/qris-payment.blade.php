@@ -5,11 +5,13 @@
     $isManualQris = $isManualQris ?? false;
     $isHostedPakasir = $isHostedPakasir ?? false;
     $isSakurupiah = $isSakurupiah ?? strtolower((string) $payment?->provider) === 'sakurupiah';
+    $isWijayaPay = $isWijayaPay ?? strtolower((string) $payment?->provider) === 'wijayapay';
+    $isAutomaticQris = $isSakurupiah || $isWijayaPay;
     $isHostedSakurupiah = $isHostedSakurupiah ?? ($isSakurupiah && ! $hasNativeQris && filled($hostedPaymentUrl));
     $paymentDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
     $customerPaysQrisFee = isset($qrisFeePayer)
         ? $qrisFeePayer === 'customer'
-        : (! $isSakurupiah && config('services.pakasir.qris_fee.payer', 'customer') === 'customer');
+        : (! $isAutomaticQris && config('services.pakasir.qris_fee.payer', 'customer') === 'customer');
 @endphp
 
 <x-storefront.panel as="section" padding="none" class="invoice-payment-panel mt-5 overflow-hidden" aria-label="{{ __('storefront.invoice.qris.aria_label', [], $storefrontLocale) }}">
@@ -74,9 +76,11 @@
                                 ? 'storefront.invoice.qris.description.hosted'
                                 : ($isSakurupiah
                                     ? 'storefront.invoice.qris.description.sakurupiah'
-                                    : ($isQrisPayable
-                                        ? 'storefront.invoice.qris.description.payable'
-                                        : 'storefront.invoice.qris.description.not_ready')), [], $storefrontLocale) }}
+                                    : ($isWijayaPay
+                                        ? 'storefront.invoice.qris.description.wijayapay'
+                                        : ($isQrisPayable
+                                            ? 'storefront.invoice.qris.description.payable'
+                                            : 'storefront.invoice.qris.description.not_ready'))), [], $storefrontLocale) }}
                     </p>
                 </div>
                 <span class="inline-flex shrink-0 rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">
@@ -116,7 +120,7 @@
                 <div class="mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-muted)]"
                      data-shop-payment-status
                      data-payment-kind="qris"
-                     data-qris-waiting="{{ $isSakurupiah && ! $isQrisPayable ? 'true' : 'false' }}"
+                     data-qris-waiting="{{ $isAutomaticQris && ! $isQrisPayable ? 'true' : 'false' }}"
                      data-status-url="{{ $statusUrl }}"
                      data-redirect-url="{{ $redirectUrl }}"
                      data-terminal="{{ $isTerminal ? 'true' : 'false' }}"

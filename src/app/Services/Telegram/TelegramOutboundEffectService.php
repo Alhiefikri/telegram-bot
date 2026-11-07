@@ -60,6 +60,8 @@ class TelegramOutboundEffectService
 
     public const TYPE_SAKURUPIAH_CHECKOUT = TelegramOutboundEffectType::SakurupiahCheckoutInstructions->value;
 
+    public const TYPE_WIJAYAPAY_CHECKOUT = TelegramOutboundEffectType::WijayaPayCheckoutInstructions->value;
+
     public const TYPE_PAKASIR_CHECKOUT = TelegramOutboundEffectType::PakasirCheckoutInstructions->value;
 
     public const TYPE_BINANCE_CHECKOUT = TelegramOutboundEffectType::BinanceCheckoutInstructions->value;
@@ -134,6 +136,8 @@ class TelegramOutboundEffectService
 
     public const TEMPLATE_SAKURUPIAH_CHECKOUT = 'sakurupiah-payment-v1';
 
+    public const TEMPLATE_WIJAYAPAY_CHECKOUT = 'wijayapay-payment-v1';
+
     public const TEMPLATE_PAKASIR_CHECKOUT = 'pakasir-payment-v1';
 
     public const TEMPLATE_BINANCE_CHECKOUT = 'binance-payment-v1';
@@ -143,6 +147,8 @@ class TelegramOutboundEffectService
     public const TEMPLATE_BALANCE_TOP_UP = 'balance-top-up-klikqris-v1';
 
     public const TEMPLATE_BALANCE_TOP_UP_SAKURUPIAH = 'balance-top-up-sakurupiah-v1';
+
+    public const TEMPLATE_BALANCE_TOP_UP_WIJAYAPAY = 'balance-top-up-wijayapay-v1';
 
     public const TEMPLATE_BALANCE_TOP_UP_MANUAL = 'balance-top-up-manual-v1';
 
@@ -241,6 +247,7 @@ class TelegramOutboundEffectService
         self::TYPE_MANUAL_CHECKOUT,
         self::TYPE_KLIKQRIS_CHECKOUT,
         self::TYPE_SAKURUPIAH_CHECKOUT,
+        self::TYPE_WIJAYAPAY_CHECKOUT,
         self::TYPE_PAKASIR_CHECKOUT,
         self::TYPE_BINANCE_CHECKOUT,
         self::TYPE_BSC_CHECKOUT,
@@ -834,6 +841,39 @@ class TelegramOutboundEffectService
                 'telegram_method' => 'sendPhoto',
                 'locale' => $customer->locale,
                 'template_version' => self::TEMPLATE_SAKURUPIAH_CHECKOUT,
+                'state' => TelegramOutboundEffectState::Pending->value,
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+            ],
+        );
+    }
+
+    public function recordWijayaPayPresentationRecovery(
+        Order $order,
+        Payment $payment,
+        ?Customer $customer = null,
+    ): ?TelegramOutboundEffect {
+        $customer ??= $order->customer;
+        if ($customer?->telegram_id === null || self::typeForPayment($payment) !== self::TYPE_WIJAYAPAY_CHECKOUT) {
+            return null;
+        }
+
+        $effectKey = self::wijayapayPresentationRecoveryEffectKey((string) $payment->getKey());
+
+        return TelegramOutboundEffect::query()->firstOrCreate(
+            ['effect_key' => $effectKey],
+            [
+                'effect_group_key' => self::checkoutEffectKey((string) $order->getKey(), self::TYPE_WIJAYAPAY_CHECKOUT),
+                'sequence' => 2,
+                'effect_type' => self::TYPE_WIJAYAPAY_CHECKOUT,
+                'source_type' => Order::class,
+                'source_id' => (string) $order->getKey(),
+                'target_type' => 'customer',
+                'telegram_chat_id' => (string) $customer->telegram_id,
+                'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE,
+                'telegram_method' => 'sendPhoto',
+                'locale' => $customer->locale,
+                'template_version' => self::TEMPLATE_WIJAYAPAY_CHECKOUT,
                 'state' => TelegramOutboundEffectState::Pending->value,
                 'attempts' => 0,
                 'next_attempt_at' => now(),
@@ -1892,6 +1932,7 @@ class TelegramOutboundEffectService
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'QR_MANUAL' => self::TYPE_MANUAL_CHECKOUT,
             $payment->provider === PaymentProvider::KLIKQRIS => self::TYPE_KLIKQRIS_CHECKOUT,
             $payment->provider === PaymentProvider::SAKURUPIAH => self::TYPE_SAKURUPIAH_CHECKOUT,
+            $payment->provider === PaymentProvider::WIJAYAPAY => self::TYPE_WIJAYAPAY_CHECKOUT,
             $payment->provider === PaymentProvider::PAKASIR => self::TYPE_PAKASIR_CHECKOUT,
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID' => self::TYPE_BINANCE_CHECKOUT,
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20' => self::TYPE_BSC_CHECKOUT,
@@ -1912,6 +1953,11 @@ class TelegramOutboundEffectService
     public static function sakurupiahPresentationRecoveryEffectKey(string $paymentId): string
     {
         return 'payment:'.$paymentId.':'.self::TYPE_SAKURUPIAH_CHECKOUT.':presentation-recovery:v1';
+    }
+
+    public static function wijayapayPresentationRecoveryEffectKey(string $paymentId): string
+    {
+        return 'payment:'.$paymentId.':'.self::TYPE_WIJAYAPAY_CHECKOUT.':presentation-recovery:v1';
     }
 
     public static function adminOrderEffectKey(string $orderId, string $effectType): string
@@ -1995,6 +2041,7 @@ class TelegramOutboundEffectService
     {
         return match (strtolower(trim($provider))) {
             PaymentProvider::SAKURUPIAH => self::TEMPLATE_BALANCE_TOP_UP_SAKURUPIAH,
+            PaymentProvider::WIJAYAPAY => self::TEMPLATE_BALANCE_TOP_UP_WIJAYAPAY,
             PaymentProvider::MANUAL => self::TEMPLATE_BALANCE_TOP_UP_MANUAL,
             default => self::TEMPLATE_BALANCE_TOP_UP,
         };
@@ -2004,6 +2051,7 @@ class TelegramOutboundEffectService
     {
         return match (strtolower(trim($provider))) {
             PaymentProvider::SAKURUPIAH => PaymentProvider::SAKURUPIAH,
+            PaymentProvider::WIJAYAPAY => PaymentProvider::WIJAYAPAY,
             PaymentProvider::MANUAL => PaymentProvider::MANUAL,
             default => PaymentProvider::KLIKQRIS,
         };
@@ -3184,6 +3232,7 @@ class TelegramOutboundEffectService
             self::TYPE_MANUAL_CHECKOUT => self::TEMPLATE_MANUAL_CHECKOUT,
             self::TYPE_KLIKQRIS_CHECKOUT => self::TEMPLATE_KLIKQRIS_CHECKOUT,
             self::TYPE_SAKURUPIAH_CHECKOUT => self::TEMPLATE_SAKURUPIAH_CHECKOUT,
+            self::TYPE_WIJAYAPAY_CHECKOUT => self::TEMPLATE_WIJAYAPAY_CHECKOUT,
             self::TYPE_PAKASIR_CHECKOUT => self::TEMPLATE_PAKASIR_CHECKOUT,
             self::TYPE_BINANCE_CHECKOUT => self::TEMPLATE_BINANCE_CHECKOUT,
             self::TYPE_BSC_CHECKOUT => self::TEMPLATE_BSC_CHECKOUT,

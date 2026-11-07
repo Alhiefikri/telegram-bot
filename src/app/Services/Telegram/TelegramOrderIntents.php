@@ -21,6 +21,10 @@ use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahReconciliationOutcome;
 use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Services\WijayaPay\WijayaPayCallbackProcessor;
+use App\Services\WijayaPay\WijayaPayInvoiceLifecycleService;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
+use App\Services\WijayaPay\WijayaPayReconciliationOutcome;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Support\Money;
 use App\Support\PaymentProvider;
@@ -44,6 +48,9 @@ class TelegramOrderIntents
         private SakurupiahInvoiceLifecycleService $sakurupiahLifecycle,
         private SakurupiahCallbackProcessor $sakurupiahProcessor,
         private SakurupiahProviderReadiness $sakurupiahReadiness,
+        private WijayaPayInvoiceLifecycleService $wijayapayLifecycle,
+        private WijayaPayCallbackProcessor $wijayapayProcessor,
+        private WijayaPayProviderReadiness $wijayapayReadiness,
         private TelegramLocale $locale,
         private TelegramMenuIntents $menu,
         private CredentialDeliveryPresentation $credentialPresentation,
@@ -345,8 +352,10 @@ class TelegramOrderIntents
 
         $payment = $order->payments->first();
         $sakurupiahWasPayable = $this->isSakurupiahPayable($payment);
+        $wijayapayWasPayable = $this->isWijayaPayPayable($payment);
         $refreshNotice = $this->refreshProviderPaymentStatus($customer, $order, $payment);
         $sakurupiahPresentationRecovered = false;
+        $wijayapayPresentationRecovered = false;
         if ($refreshNotice !== null) {
             $order = $order->fresh([
                 'orderItems.stockItems',
@@ -356,6 +365,8 @@ class TelegramOrderIntents
             $payment = $order->payments->first();
             $sakurupiahPresentationRecovered = ! $sakurupiahWasPayable
                 && $this->isSakurupiahPayable($payment);
+            $wijayapayPresentationRecovered = ! $wijayapayWasPayable
+                && $this->isWijayaPayPayable($payment);
         }
         $paymentStatus = $payment?->status ?? $order->payment_status;
         $orderStatusLabel = $this->locale->orderStatus($customer, $order->order_status);
@@ -442,6 +453,12 @@ class TelegramOrderIntents
         }
         if ($sakurupiahPresentationRecovered) {
             $effect = $this->outboundEffects->recordSakurupiahPresentationRecovery($order, $payment, $customer);
+            if ($effect !== null) {
+                $this->outboundEffectDispatcher->dispatch($effect);
+            }
+        }
+        if ($wijayapayPresentationRecovered) {
+            $effect = $this->outboundEffects->recordWijayaPayPresentationRecovery($order, $payment, $customer);
             if ($effect !== null) {
                 $this->outboundEffectDispatcher->dispatch($effect);
             }
@@ -537,6 +554,7 @@ class TelegramOrderIntents
             PaymentProvider::PAKASIR => $this->refreshPendingPakasirPayment($customer, $order, $payment),
             PaymentProvider::KLIKQRIS => $this->refreshEligibleKlikQrisPayment($customer, $payment),
             PaymentProvider::SAKURUPIAH => $this->refreshPendingSakurupiahPresentation($customer, $order, $payment),
+            PaymentProvider::WIJAYAPAY => $this->refreshPendingWijayaPayPresentation($customer, $order, $payment),
             default => null,
         };
     }
@@ -553,6 +571,20 @@ class TelegramOrderIntents
         return $payment !== null
             && strtolower(trim((string) $payment->provider)) === PaymentProvider::SAKURUPIAH
             && $this->sakurupiahLifecycle->classify($payment)->isPayable();
+    }
+
+    private function isWijayaPayRefreshable(?Payment $payment): bool
+    {
+        return $payment !== null
+            && strtolower(trim((string) $payment->provider)) === PaymentProvider::WIJAYAPAY
+            && $this->wijayapayLifecycle->isCustomerStatusRefreshable($payment);
+    }
+
+    private function isWijayaPayPayable(?Payment $payment): bool
+    {
+        return $payment !== null
+            && strtolower(trim((string) $payment->provider)) === PaymentProvider::WIJAYAPAY
+            && $this->wijayapayLifecycle->classify($payment)->isPayable();
     }
 
     private function refreshEligibleKlikQrisPayment(Customer $customer, ?Payment $payment): ?string
@@ -650,6 +682,48 @@ class TelegramOrderIntents
         }
 
         if ($result === SakurupiahReconciliationOutcome::Busy) {
+            return $this->locale->translate($customer, 'order.refresh.unavailable');
+        }
+        if ($payment->fresh()->status === PaymentStatus::Paid) {
+            return $this->locale->translate($customer, 'order.refresh.verified');
+        }
+
+        return $this->locale->translate($customer, 'order.refresh.not_paid');
+    }
+
+    private function refreshPendingWijayaPayPresentation(Customer $customer, Order $order, ?Payment $payment): ?string
+    {
+        if (! $this->isWijayaPayRefreshable($payment)
+            || $order->order_status !== OrderStatus::PendingPayment
+            || ! $this->wijayapayReadiness->checkout()->isReady()
+        ) {
+            return null;
+        }
+
+        $key = 'wijayapay:status-refresh:'.$customer->id.':'.$payment->id;
+        $maxAttempts = max(1, (int) config('services.wijayapay.status_refresh_rate_limit_per_minute', 3));
+        if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
+            $seconds = RateLimiter::availableIn($key);
+
+            return $this->locale->translate($customer, 'order.refresh.rate_limited', ['seconds' => $seconds]);
+        }
+
+        RateLimiter::hit($key, 60);
+
+        try {
+            $result = ProviderVerificationProfiles::using(
+                ProviderVerificationProfile::Interactive,
+                fn () => $this->isWijayaPayPayable($payment)
+                    ? $this->wijayapayProcessor->reconcilePayment($payment)
+                    : $this->wijayapayLifecycle->tryRefreshStatus($payment),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->locale->translate($customer, 'order.refresh.unavailable');
+        }
+
+        if ($result === null || $result === WijayaPayReconciliationOutcome::Busy) {
             return $this->locale->translate($customer, 'order.refresh.unavailable');
         }
         if ($payment->fresh()->status === PaymentStatus::Paid) {

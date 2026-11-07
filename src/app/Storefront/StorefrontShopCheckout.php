@@ -26,6 +26,7 @@ use App\Services\OrderCheckoutService;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\WijayaPay\WijayaPayInvoiceLifecycleService;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Session\Session;
@@ -41,6 +42,7 @@ class StorefrontShopCheckout
         private readonly OrderCheckoutService $orders,
         private readonly KlikQrisNativeQrisService $klikQrisNativeQris,
         private readonly SakurupiahInvoiceLifecycleService $sakurupiahLifecycle,
+        private readonly WijayaPayInvoiceLifecycleService $wijayapayLifecycle,
         private readonly PaymentProviderResolver $providerResolver,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontOrderAccess $orderAccess,
@@ -412,6 +414,12 @@ class StorefrontShopCheckout
 
         if ($payment->provider === PaymentProvider::SAKURUPIAH) {
             $this->sakurupiahLifecycle->lifecycle($payment);
+
+            return;
+        }
+
+        if ($payment->provider === PaymentProvider::WIJAYAPAY) {
+            $this->wijayapayLifecycle->lifecycle($payment);
         }
     }
 
@@ -420,6 +428,7 @@ class StorefrontShopCheckout
         return in_array($payment?->provider, [
             PaymentProvider::KLIKQRIS,
             PaymentProvider::SAKURUPIAH,
+            PaymentProvider::WIJAYAPAY,
         ], true);
     }
 
@@ -427,6 +436,10 @@ class StorefrontShopCheckout
     {
         if ($payment->provider === PaymentProvider::KLIKQRIS) {
             return $this->klikQrisNativeQris->classify($payment)->outcome() === KlikQrisNativeQrisOutcome::Payable;
+        }
+
+        if ($payment->provider === PaymentProvider::WIJAYAPAY) {
+            return $this->wijayapayLifecycle->classify($payment)->isPayable();
         }
 
         return $payment->provider === PaymentProvider::SAKURUPIAH

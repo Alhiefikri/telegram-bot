@@ -46,6 +46,7 @@ final class TelegramOutboundEffectReviewProjection
             TelegramOutboundEffectType::ManualCheckoutInstructions->value,
             TelegramOutboundEffectType::KlikQrisCheckoutInstructions->value,
             TelegramOutboundEffectType::SakurupiahCheckoutInstructions->value,
+            TelegramOutboundEffectType::WijayaPayCheckoutInstructions->value,
             TelegramOutboundEffectType::PakasirCheckoutInstructions->value,
             TelegramOutboundEffectType::BinanceCheckoutInstructions->value,
             TelegramOutboundEffectType::BscCheckoutInstructions->value => $this->checkout($effect, $messageId, $at),

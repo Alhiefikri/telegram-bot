@@ -39,6 +39,21 @@ evidence. Test entry points: `SakurupiahProviderReadinessTest`,
 `SakurupiahCheckoutRecoveryPostgresConcurrencyTest` (explicit isolated Redis opt-in).
 Worker counts and resource limits are intentionally unchanged.
 
+## WijayaPay provider
+
+`App\Services\WijayaPay\*` owns the QRIS-only provider contract: MD5 reference
+signature, typed create/status/callback DTOs, sanitized evidence, the
+single-flight invoice lifecycle, callback verification and the reconciliation
+query. `WijayaPayClient` is bound to `WijayaPayProviderAdapter`; add its
+`CheckoutPaymentPreparation` identity and `StoreBalanceTopUpLifecycle` in
+`AppServiceProvider`, never in checkout or top-up services. Provider HTTP stays
+outside database transactions. The published signature does not cover amount or
+status, so paid/expired callbacks are always re-read from `/api/get-status`
+before `OrderLifecycle` is called. `WijayaPayProviderReadiness` caches one
+channel observation with a single-flight lock; do not add per-checkout
+`get-payment` calls. Tests: `WijayaPayGatewayTest`, `WijayaPayTopUpRailTest`.
+Guide: [wijayapay-payment-provider-guide.md](wijayapay-payment-provider-guide.md).
+
 ## Local credential completion
 
 The paid Order lifecycle marks a local-only Order completed when every Order

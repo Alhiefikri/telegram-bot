@@ -23,6 +23,7 @@ use App\Jobs\SendBscCheckoutInstructions;
 use App\Jobs\SendKlikQrisCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendSakurupiahCheckoutInstructions;
+use App\Jobs\SendWijayaPayCheckoutInstructions;
 use App\Models\Cart;
 use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
@@ -1261,6 +1262,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             $payment->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20' => SendBscCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             $payment->provider === PaymentProvider::KLIKQRIS => SendKlikQrisCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             $payment->provider === PaymentProvider::SAKURUPIAH => SendSakurupiahCheckoutInstructions::dispatch($order->id, now()->toISOString()),
+            $payment->provider === PaymentProvider::WIJAYAPAY => SendWijayaPayCheckoutInstructions::dispatch($order->id, now()->toISOString()),
             default => SendManualCheckoutNotifications::dispatch($order->id, now()->toISOString()),
         };
 
@@ -1295,6 +1297,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             CheckoutPostCreationBehavior::ManualQrisInstructions,
             CheckoutPostCreationBehavior::KlikQrisInstructions,
             CheckoutPostCreationBehavior::SakurupiahInstructions,
+            CheckoutPostCreationBehavior::WijayaPayInstructions,
             CheckoutPostCreationBehavior::StoreBalancePaid,
             CheckoutPostCreationBehavior::UsdtBalancePaid => null,
         };

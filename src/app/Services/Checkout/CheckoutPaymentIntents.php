@@ -104,4 +104,9 @@ final class CheckoutPaymentIntents
     {
         return new SakurupiahCheckoutIntent;
     }
+
+    public static function wijayaPay(): WijayaPayCheckoutIntent
+    {
+        return new WijayaPayCheckoutIntent;
+    }
 }

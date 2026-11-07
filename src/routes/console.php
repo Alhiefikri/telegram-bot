@@ -4,11 +4,13 @@ use App\Console\Commands\ReconcileKlikQrisPayments;
 use App\Console\Commands\ReconcilePakasirPayments;
 use App\Console\Commands\ReconcileSakurupiahPayments;
 use App\Console\Commands\ReconcileStoreBalanceTopUps;
+use App\Console\Commands\ReconcileWijayaPayPayments;
 use App\Enums\KlikQrisEnvironment;
 use App\Enums\SakurupiahEnvironment;
 use App\Jobs\SendDailyAdminStatsNotification;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use Illuminate\Support\Facades\Schedule;
 
 // Supplier observations and fulfillment are recoverable from PostgreSQL. The
@@ -81,6 +83,18 @@ if (app(SakurupiahProviderReadiness::class)->scheduleRegistrationEnabledFor($sak
         ->withoutOverlapping(2)
         ->runInBackground()
         ->sendOutputTo(storage_path('logs/sakurupiah-top-up-reconciliation.log'));
+}
+if (app(WijayaPayProviderReadiness::class)->configurationReport()->isReady()) {
+    Schedule::command((string) config('services.wijayapay.reconciliation_command', 'wijayapay:reconcile --chunk=100'))
+        ->everyMinute()
+        ->withoutOverlapping(ReconcileWijayaPayPayments::schedulerMutexMinutes())
+        ->runInBackground()
+        ->sendOutputTo(storage_path('logs/wijayapay-reconciliation.log'));
+    Schedule::command('wijayapay:reconcile-balance-top-ups --chunk=100 --max-top-ups=10')
+        ->everyMinute()
+        ->withoutOverlapping(2)
+        ->runInBackground()
+        ->sendOutputTo(storage_path('logs/wijayapay-top-up-reconciliation.log'));
 }
 Schedule::command('pakasir:reconcile --chunk=100')->everyMinute()->withoutOverlapping(ReconcilePakasirPayments::schedulerMutexMinutes())
     ->runInBackground()->sendOutputTo(storage_path('logs/pakasir-reconciliation.log'));

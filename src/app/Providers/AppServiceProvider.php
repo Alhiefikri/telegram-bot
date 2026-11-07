@@ -34,6 +34,7 @@ use App\Services\Checkout\ManualQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\SakurupiahCheckoutPaymentPreparation;
 use App\Services\Checkout\StoreBalanceCheckoutPaymentPreparation;
 use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
+use App\Services\Checkout\WijayaPayCheckoutPaymentPreparation;
 use App\Services\Customer\CustomerAccountOverviewReader;
 use App\Services\Customer\CustomerBalanceOverview;
 use App\Services\EloquentInventoryLedger;
@@ -53,6 +54,7 @@ use App\Services\StoreBalance\TopUp\KlikQrisStoreBalanceTopUpLifecycle;
 use App\Services\StoreBalance\TopUp\ManualStoreBalanceTopUpLifecycle;
 use App\Services\StoreBalance\TopUp\SakurupiahStoreBalanceTopUpLifecycle;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResolver;
+use App\Services\StoreBalance\TopUp\WijayaPayStoreBalanceTopUpLifecycle;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramAdminStatsCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBalanceActivityCallbackHandler;
@@ -88,6 +90,9 @@ use App\Services\UsdtReceivers\UsdtDepositReceiverProvisioners;
 use App\Services\UsdtTopUps\BscUsdtTopUpRail;
 use App\Services\UsdtTopUps\UsdtTopUpRail;
 use App\Services\UsdtTreasury\UsdtTreasuryAssetRegistry;
+use App\Services\WijayaPay\WijayaPayClient;
+use App\Services\WijayaPay\WijayaPayProviderAdapter;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Support\DogfoodTiming;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
@@ -128,6 +133,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PakasirProviderAdapter::class, PakasirClient::class);
         $this->app->bind(SakurupiahProviderAdapter::class, SakurupiahClient::class);
         $this->app->singleton(SakurupiahProviderReadiness::class);
+        $this->app->bind(WijayaPayProviderAdapter::class, WijayaPayClient::class);
+        $this->app->singleton(WijayaPayProviderReadiness::class);
         // USDT treasury asset providers are approved adapters: an implementation
         // may be tagged only after the H1 custody/capacity/provider gates pass.
         // Until then the registry is intentionally empty and reconciliation
@@ -167,6 +174,7 @@ class AppServiceProvider extends ServiceProvider
                 BinanceCheckoutPaymentPreparation::IDENTITY => $app->make(BinanceCheckoutPaymentPreparation::class),
                 BscCheckoutPaymentPreparation::IDENTITY => $app->make(BscCheckoutPaymentPreparation::class),
                 SakurupiahCheckoutPaymentPreparation::IDENTITY => $app->make(SakurupiahCheckoutPaymentPreparation::class),
+                WijayaPayCheckoutPaymentPreparation::IDENTITY => $app->make(WijayaPayCheckoutPaymentPreparation::class),
                 StoreBalanceCheckoutPaymentPreparation::IDENTITY => $app->make(StoreBalanceCheckoutPaymentPreparation::class),
                 UsdtBalanceCheckoutPaymentPreparation::IDENTITY => $app->make(UsdtBalanceCheckoutPaymentPreparation::class),
             ]);
@@ -177,6 +185,7 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(KlikQrisStoreBalanceTopUpLifecycle::class),
                 $app->make(ManualStoreBalanceTopUpLifecycle::class),
                 $app->make(SakurupiahStoreBalanceTopUpLifecycle::class),
+                $app->make(WijayaPayStoreBalanceTopUpLifecycle::class),
             ]);
         });
         $this->app->singleton(PaidInvoiceRenderer::class);

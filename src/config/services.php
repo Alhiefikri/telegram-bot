@@ -30,6 +30,16 @@ $sakurupiahSandboxApplicationHosts = $sakurupiahApplicationOrigin === null
     ? []
     : [$sakurupiahApplicationHost];
 
+$wijayapayApplicationHosts = $sakurupiahRuntime === 'production'
+    ? ['lhiestore.web.id']
+    : ($sakurupiahApplicationHost !== '' ? [$sakurupiahApplicationHost] : []);
+$wijayapayCallbackUrl = $sakurupiahRuntime === 'production'
+    ? 'https://lhiestore.web.id/api/webhook/wijayapay'
+    : $sakurupiahApplicationUrl.'/api/webhook/wijayapay';
+$wijayapayReturnUrl = $sakurupiahRuntime === 'production'
+    ? 'https://lhiestore.web.id/shop/orders'
+    : $sakurupiahApplicationUrl.'/shop/orders';
+
 $sakurupiahSandboxRuntimeEnabled = in_array($sakurupiahRuntime, ['local', 'testing'], true);
 $sakurupiahProductionApiId = env('SAKURUPIAH_PRODUCTION_API_ID');
 $sakurupiahProductionApiKey = env('SAKURUPIAH_PRODUCTION_API_KEY');
@@ -263,6 +273,53 @@ return [
         'reconcile_max_execution_seconds' => 45,
         // The existing default worker is supervised in production. Do not
         // introduce a queue name whose worker is not served by the release.
+        'verification_queue' => 'default',
+    ],
+
+    'wijayapay' => [
+        // WijayaPay publishes one gateway environment. Only the merchant
+        // credential pair is deployment input; endpoints, callback/return
+        // routes and safety budgets stay pinned in application configuration.
+        'base_url' => 'https://gateway.wijayapay.com',
+        'code_merchant' => env('WIJAYAPAY_CODE_MERCHANT'),
+        'api_key' => env('WIJAYAPAY_API_KEY'),
+        'callback_url' => $wijayapayCallbackUrl,
+        'return_url' => $wijayapayReturnUrl,
+        'allowed_hosts' => ['gateway.wijayapay.com', 'wijayapay.com', 'www.wijayapay.com'],
+        'callback_allowed_hosts' => $wijayapayApplicationHosts,
+        'return_allowed_hosts' => $wijayapayApplicationHosts,
+        // Provider-published callback source. Enforcement is opt-in because
+        // the origin may sit behind a reverse proxy that is not covered by the
+        // application trusted-proxy configuration; the signed callback stays
+        // the primary authentication boundary.
+        'callback_allowed_ips' => ['172.235.245.77'],
+        'callback_enforce_ip_allowlist' => false,
+        'timezone' => 'Asia/Jakarta',
+        'qris_contract' => [
+            'currency' => 'IDR',
+            'currency_confirmed' => true,
+            // WijayaPay decides the QRIS fee payer per merchant contract and
+            // echoes it in the create response. The payable total is validated
+            // per transaction; this cap only rejects an absurd provider fee.
+            'max_fee_bps' => 500,
+            'expiry_confirmed' => true,
+        ],
+        'http_timeout_seconds' => 10.0,
+        'http_connect_timeout_seconds' => 3.0,
+        'lookup_max_attempts' => 3,
+        'lookup_retry_delay_ms' => 250,
+        'lookup_retry_max_delay_ms' => 1000,
+        'lock_lease_seconds' => 90,
+        // A duplicate ref_id is documented to return the existing transaction
+        // instead of creating a second one. The interval still bounds how
+        // often a rejected or ambiguous create is retried.
+        'create_retry_min_interval_seconds' => 60,
+        'webhook_rate_limit_per_minute' => 30,
+        'status_refresh_rate_limit_per_minute' => 3,
+        'readiness_cache_seconds' => 60,
+        'reconciliation_command' => 'wijayapay:reconcile --chunk=100',
+        'reconcile_terminal_lookback_hours' => 72,
+        'reconcile_max_execution_seconds' => 45,
         'verification_queue' => 'default',
     ],
 

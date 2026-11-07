@@ -16,6 +16,7 @@ use App\Services\KlikQris\KlikQrisCheckoutSelector;
 use App\Services\Pricing\ProductPriceTierQuote;
 use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Support\PaymentProvider;
 
 class StorefrontProductPresenter
@@ -39,6 +40,7 @@ class StorefrontProductPresenter
         private readonly BscReadiness $bscReadiness,
         private readonly KlikQrisCheckoutSelector $klikQrisCheckout,
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
+        private readonly WijayaPayProviderReadiness $wijayapayReadiness,
         private readonly StorefrontProductPlaceholder $placeholder,
         private readonly ProductQuantityPricing $pricing,
         private readonly CatalogFamilyIconResolver $familyIcons,
@@ -278,6 +280,21 @@ class StorefrontProductPresenter
             $readiness = $observeExternalReadiness
                 ? $this->sakurupiahReadiness->observe()
                 : $this->sakurupiahReadiness->configurationReport();
+
+            return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
+                provider: $provider,
+                ready: $readiness->isReady(),
+                label: $readiness->isReady() ? 'QRIS otomatis' : 'QRIS otomatis belum siap',
+                notice: $readiness->isReady()
+                    ? 'QRIS otomatis dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.'
+                    : 'QRIS otomatis sedang belum siap. Coba lagi nanti atau hubungi admin.',
+            );
+        }
+
+        if ($provider === PaymentProvider::WIJAYAPAY) {
+            $readiness = $observeExternalReadiness
+                ? $this->wijayapayReadiness->observe()
+                : $this->wijayapayReadiness->configurationReport();
 
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,

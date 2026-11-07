@@ -185,7 +185,7 @@ An Owner-managed public BNB Smart Chain address that can be assigned to a new US
 _Avoid_: Binance Pay ID, wallet credential, private key
 
 **Payment Provider Switch**:
-The owner-controlled store setting selects Manual, KlikQRIS, or Sakurupiah for new checkouts without changing Payments already created with another provider. A provider must pass its readiness gate before selection; Sakurupiah production requires both production credentials. Pakasir is not selectable for new checkout; historical Pakasir Payments remain on their original provider.
+The owner-controlled store setting selects Manual, KlikQRIS, Sakurupiah, or WijayaPay for new checkouts without changing Payments already created with another provider. A provider must pass its readiness gate before selection; Sakurupiah production requires both production credentials and WijayaPay requires its merchant credential pair plus an active QRIS channel. Pakasir is not selectable for new checkout; historical Pakasir Payments remain on their original provider.
 _Avoid_: Customer provider choice, automatic provider fallback
 
 **Sakurupiah Channel Selection**:

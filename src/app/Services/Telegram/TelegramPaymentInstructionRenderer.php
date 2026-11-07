@@ -15,6 +15,8 @@ use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahPayableInvoice;
 use App\Services\StoreBalance\StoreBalanceTopUpService;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpPayable;
+use App\Services\WijayaPay\WijayaPayInvoiceOutcome;
+use App\Services\WijayaPay\WijayaPayPayableInvoice;
 use App\Support\DogfoodTiming;
 use Carbon\CarbonInterface;
 
@@ -352,6 +354,112 @@ class TelegramPaymentInstructionRenderer
             'text' => implode("\n", $this->sakurupiahLines($order, $payable, $locale)),
             'reply_markup' => $this->sakurupiahPaymentActions($order, $paymentUrl, $locale),
         ];
+    }
+
+    public function wijayaPay(
+        Order $order,
+        WijayaPayPayableInvoice $payable,
+        string $locale = 'id',
+        ?string $photoContents = null,
+    ): TelegramPaymentInstruction {
+        if (! $payable->isDirectQris() || $payable->qrisPayload === null) {
+            throw new \RuntimeException('WijayaPay direct QRIS invoice has no QRIS payload.');
+        }
+
+        return new TelegramPaymentInstruction(
+            photoContents: $photoContents ?? $this->qrCodes->png($payable->qrisPayload),
+            filename: 'wijayapay-'.$order->invoice_number.'.png',
+            captionLines: $this->wijayaPayLines($order, $payable, $locale),
+            replyMarkup: $this->sakurupiahPaymentActions($order, null, $locale),
+        );
+    }
+
+    public function wijayaPayQrisImage(
+        Order $order,
+        WijayaPayPayableInvoice $payable,
+        string $photoContents,
+        string $locale = 'id',
+    ): TelegramPaymentInstruction {
+        if (! $payable->isQrisImage()) {
+            throw new \RuntimeException('WijayaPay invoice has no provider QR image.');
+        }
+
+        return new TelegramPaymentInstruction(
+            photoContents: $photoContents,
+            filename: 'wijayapay-'.$order->invoice_number.'.png',
+            captionLines: $this->wijayaPayLines($order, $payable, $locale),
+            replyMarkup: $this->sakurupiahPaymentActions($order, null, $locale),
+        );
+    }
+
+    /** @return list<string> */
+    private function wijayaPayLines(Order $order, WijayaPayPayableInvoice $payable, string $locale): array
+    {
+        $order->loadMissing('orderItems');
+
+        return [
+            $this->text($locale, 'payment.wijayapay.checkout_created'),
+            '━━━━━━━━━━━━━━',
+            $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            $this->text($locale, 'payment.products', ['items' => $this->orderItemsSummary($order)]),
+            $this->text($locale, 'payment.product_total', ['amount' => $this->formatRupiah($order->total_amount)]),
+            $this->text($locale, 'payment.qris_fee', ['fee' => $this->formatRupiah($payable->providerFee)]),
+            $this->text($locale, 'payment.qris_total', ['amount' => $payable->totalAmountDisplay()]),
+            $this->text($locale, $payable->customerPaysFee ? 'payment.qris_fee_customer' : 'payment.qris_fee_store'),
+            '',
+            $this->text($locale, 'payment.wijayapay.exact_amount'),
+            $this->text($locale, 'payment.wijayapay.scan'),
+            '',
+            $this->text($locale, 'payment.qris_deadline', [
+                'date' => $this->formatDate($payable->effectiveExpiresAt, $locale),
+            ]),
+            $this->text($locale, 'payment.qris_deadline_guidance'),
+            $this->text($locale, 'payment.wijayapay.expiry_warning'),
+            '',
+            $this->text($locale, 'payment.auto_delivery'),
+            $this->text($locale, 'payment.check_if_missing'),
+        ];
+    }
+
+    public function wijayaPayRetry(Order $order, WijayaPayInvoiceOutcome $outcome, string $locale = 'id'): string
+    {
+        if ($outcome === WijayaPayInvoiceOutcome::Expired) {
+            return implode("\n", [
+                $this->text($locale, 'payment.wijayapay.retry.expired_title'),
+                '━━━━━━━━━━━━━━',
+                $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+                '',
+                $this->text($locale, 'payment.wijayapay.retry.expired_body'),
+            ]);
+        }
+
+        if ($outcome === WijayaPayInvoiceOutcome::Paid) {
+            return implode("\n", [
+                $this->text($locale, 'payment.wijayapay.retry.paid_lead'),
+                '━━━━━━━━━━━━━━',
+                $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+                '',
+                $this->text($locale, 'payment.wijayapay.retry.paid_body'),
+            ]);
+        }
+
+        $keySuffix = match ($outcome) {
+            WijayaPayInvoiceOutcome::Creating => 'creating',
+            WijayaPayInvoiceOutcome::RecoveryPending => 'recovery_pending',
+            WijayaPayInvoiceOutcome::ProviderTotalPending => 'total_pending',
+            WijayaPayInvoiceOutcome::ProviderPresentationPending => 'presentation_pending',
+            WijayaPayInvoiceOutcome::InvalidProviderResult => 'invalid',
+            WijayaPayInvoiceOutcome::Payable => 'ready',
+            WijayaPayInvoiceOutcome::Expired, WijayaPayInvoiceOutcome::Paid => 'expired',
+        };
+
+        return implode("\n", [
+            $this->text($locale, 'payment.wijayapay.retry.'.$keySuffix.'_lead'),
+            '━━━━━━━━━━━━━━',
+            $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            '',
+            $this->text($locale, 'payment.wijayapay.retry.'.$keySuffix.'_body'),
+        ]);
     }
 
     /** @return list<string> */

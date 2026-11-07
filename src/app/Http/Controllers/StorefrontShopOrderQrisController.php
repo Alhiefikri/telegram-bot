@@ -10,6 +10,8 @@ use App\Services\KlikQris\KlikQrisQrisImage;
 use App\Services\Payments\QrPresentation;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahQrisImage;
+use App\Services\WijayaPay\WijayaPayInvoiceLifecycleService;
+use App\Services\WijayaPay\WijayaPayQrisImage;
 use App\Support\PaymentProvider;
 use Illuminate\Http\Response;
 use InvalidArgumentException;
@@ -22,6 +24,8 @@ class StorefrontShopOrderQrisController extends Controller
         KlikQrisQrisImage $images,
         SakurupiahInvoiceLifecycleService $sakurupiah,
         SakurupiahQrisImage $sakurupiahImages,
+        WijayaPayInvoiceLifecycleService $wijayapay,
+        WijayaPayQrisImage $wijayapayImages,
         QrPresentation $qrPresentation,
     ): Response {
         $payment = $order->payments()->latest('created_at')->first();
@@ -65,6 +69,29 @@ class StorefrontShopOrderQrisController extends Controller
             if ($payable->isQrisImage()) {
                 try {
                     return $this->imageResponse($qrPresentation->image($sakurupiahImages->contents($payable)));
+                } catch (InvalidArgumentException) {
+                    abort(404);
+                }
+            }
+
+            abort(404);
+        }
+
+        if (strtolower((string) $payment?->provider) === PaymentProvider::WIJAYAPAY) {
+            $payable = $wijayapay->classify($payment)->payable();
+            abort_unless($payable !== null, 404);
+
+            if ($payable->isDirectQris()) {
+                try {
+                    return $this->imageResponse($qrPresentation->payload((string) $payable->qrisPayload));
+                } catch (InvalidArgumentException) {
+                    abort(404);
+                }
+            }
+
+            if ($payable->isQrisImage()) {
+                try {
+                    return $this->imageResponse($qrPresentation->image($wijayapayImages->contents($payable)));
                 } catch (InvalidArgumentException) {
                     abort(404);
                 }

@@ -30,6 +30,7 @@ use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Jobs\SendTelegramReceiptTxt;
 use App\Jobs\SendUsdtTopUpReceipt;
+use App\Jobs\SendWijayaPayCheckoutInstructions;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\StockNotificationRecipient;
 use App\Models\TelegramBroadcastRecipient;
@@ -78,6 +79,11 @@ final class TelegramOutboundEffectDispatcher
                 (string) $effect->getKey(),
             ),
             TelegramOutboundEffectType::SakurupiahCheckoutInstructions->value => SendSakurupiahCheckoutInstructions::dispatch(
+                (string) $effect->source_id,
+                $jobEnqueuedAt,
+                (string) $effect->getKey(),
+            ),
+            TelegramOutboundEffectType::WijayaPayCheckoutInstructions->value => SendWijayaPayCheckoutInstructions::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,
                 (string) $effect->getKey(),

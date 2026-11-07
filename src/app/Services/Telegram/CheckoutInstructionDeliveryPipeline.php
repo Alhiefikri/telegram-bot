@@ -11,6 +11,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
 use App\Services\Sakurupiah\SakurupiahCreateInvoice;
+use App\Services\WijayaPay\WijayaPayCreateInvoice;
 use App\Support\DogfoodTiming;
 use App\Support\PaymentProvider;
 use Carbon\CarbonInterface;
@@ -35,6 +36,7 @@ final class CheckoutInstructionDeliveryPipeline
         TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
         TelegramOutboundEffectService::TYPE_BSC_CHECKOUT,
         TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,
+        TelegramOutboundEffectService::TYPE_WIJAYAPAY_CHECKOUT,
     ];
 
     public function __construct(
@@ -215,6 +217,8 @@ final class CheckoutInstructionDeliveryPipeline
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::KLIKQRIS,
             TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::SAKURUPIAH
                 && strtoupper((string) $payment->method) === SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS,
+            TelegramOutboundEffectService::TYPE_WIJAYAPAY_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::WIJAYAPAY
+                && strtoupper((string) $payment->method) === WijayaPayCreateInvoice::PAYMENT_METHOD_QRIS,
             TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::PAKASIR,
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => static fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL
                 && $payment->method === 'BINANCE_PAY_ID',
@@ -252,6 +256,11 @@ final class CheckoutInstructionDeliveryPipeline
                 $order,
                 $payment,
             ),
+            TelegramOutboundEffectService::TYPE_WIJAYAPAY_CHECKOUT => $checkoutIntents->sendWijayaPayPaymentInstructions(
+                (string) $effect->telegram_chat_id,
+                $order,
+                $payment,
+            ),
             TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => $checkoutIntents->sendPakasirPaymentInstructions(
                 (string) $effect->telegram_chat_id,
                 $order,
@@ -281,6 +290,7 @@ final class CheckoutInstructionDeliveryPipeline
         if (! in_array($effect->effect_type, [
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
             TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,
+            TelegramOutboundEffectService::TYPE_WIJAYAPAY_CHECKOUT,
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT,
         ], true)) {
             return [];
@@ -308,6 +318,7 @@ final class CheckoutInstructionDeliveryPipeline
             TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT => 'manual_payment_instructions',
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT => 'klikqris_payment_instructions',
             TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT => 'sakurupiah_payment_instructions',
+            TelegramOutboundEffectService::TYPE_WIJAYAPAY_CHECKOUT => 'wijayapay_payment_instructions',
             TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => 'pakasir_payment_instructions',
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => 'binance_payment_instructions',
             TelegramOutboundEffectService::TYPE_BSC_CHECKOUT => 'bsc_payment_instructions',
@@ -321,6 +332,7 @@ final class CheckoutInstructionDeliveryPipeline
             TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT => PaymentProvider::MANUAL,
             TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT => PaymentProvider::KLIKQRIS,
             TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT => PaymentProvider::SAKURUPIAH,
+            TelegramOutboundEffectService::TYPE_WIJAYAPAY_CHECKOUT => PaymentProvider::WIJAYAPAY,
             TelegramOutboundEffectService::TYPE_PAKASIR_CHECKOUT => PaymentProvider::PAKASIR,
             TelegramOutboundEffectService::TYPE_BINANCE_CHECKOUT => 'binance',
             TelegramOutboundEffectService::TYPE_BSC_CHECKOUT => 'bsc',

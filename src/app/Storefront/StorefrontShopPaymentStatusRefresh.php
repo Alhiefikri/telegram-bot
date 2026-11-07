@@ -24,6 +24,10 @@ use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahInvoiceOutcome;
 use App\Services\Sakurupiah\SakurupiahReconciliationOutcome;
+use App\Services\WijayaPay\WijayaPayCallbackProcessor;
+use App\Services\WijayaPay\WijayaPayInvoiceLifecycleService;
+use App\Services\WijayaPay\WijayaPayInvoiceOutcome;
+use App\Services\WijayaPay\WijayaPayReconciliationOutcome;
 use App\Support\PaymentProvider;
 use Throwable;
 
@@ -37,6 +41,8 @@ class StorefrontShopPaymentStatusRefresh
         private readonly KlikQrisCallbackProcessor $klikQrisProcessor,
         private readonly SakurupiahInvoiceLifecycleService $sakurupiahLifecycle,
         private readonly SakurupiahCallbackProcessor $sakurupiahProcessor,
+        private readonly WijayaPayInvoiceLifecycleService $wijayapayLifecycle,
+        private readonly WijayaPayCallbackProcessor $wijayapayProcessor,
         private readonly StorefrontInvoiceUrl $invoiceUrls,
         private readonly StorefrontFunnelEvents $events,
         private readonly OrderLifecycle $orders,
@@ -146,9 +152,10 @@ class StorefrontShopPaymentStatusRefresh
 
         $projection = $this->orders->project($order, $payment);
         $recoveryOutcome = null;
-        // Browser polling reads persisted Sakurupiah state only. Callbacks and
-        // the bounded sweep perform provider I/O; the explicit check remains interactive.
-        $localOnly = $automatic && $this->isSakurupiahPayment($payment);
+        // Browser polling reads persisted WijayaPay/Sakurupiah state only.
+        // Callbacks and the bounded sweep perform provider I/O; the explicit
+        // check remains interactive.
+        $localOnly = $automatic && ($this->isSakurupiahPayment($payment) || $this->isWijayaPayPayment($payment));
         if (! $localOnly && $this->shouldRecoverQris($projection, $payment)) {
             try {
                 $recoveryOutcome = $this->attemptNativeQrisRecovery($payment);
@@ -167,7 +174,7 @@ class StorefrontShopPaymentStatusRefresh
             }
 
             if (! $qrisRecoveryFailed
-                && ($this->isKlikQrisPayment($payment) || $this->isSakurupiahPayment($payment))
+                && ($this->isKlikQrisPayment($payment) || $this->isSakurupiahPayment($payment) || $this->isWijayaPayPayment($payment))
                 && $recoveryOutcome !== null
                 && ! in_array($recoveryOutcome, ['payable', 'provider_total_pending', 'provider_presentation_pending'], true)) {
                 $qrisRecoveryFailed = true;
@@ -218,6 +225,23 @@ class StorefrontShopPaymentStatusRefresh
                     );
 
                     if ($lookupResult === SakurupiahReconciliationOutcome::Busy) {
+                        $this->events->checkoutSubmitted(null, $order, [
+                            'status_endpoint_result' => 'in_progress',
+                        ]);
+
+                        return StorefrontShopSignedStatusRefreshResult::inProgress(
+                            $this->coordinator->retryAfterSeconds(),
+                        );
+                    }
+
+                    $this->coordinator->markRecentlyRefreshed($payment);
+                } elseif (! $skipProviderLookup && $this->isWijayaPayPayment($payment)) {
+                    $lookupResult = ProviderVerificationProfiles::using(
+                        ProviderVerificationProfile::Interactive,
+                        fn (): WijayaPayReconciliationOutcome => $this->wijayapayProcessor->reconcilePayment($payment),
+                    );
+
+                    if ($lookupResult === WijayaPayReconciliationOutcome::Busy) {
                         $this->events->checkoutSubmitted(null, $order, [
                             'status_endpoint_result' => 'in_progress',
                         ]);
@@ -314,7 +338,8 @@ class StorefrontShopPaymentStatusRefresh
 
         return ($this->isPakasirPayment($payment) && $payment->method === 'hosted')
             || $this->isNativeQrisPayable($payment)
-            || $this->isSakurupiahPresentationPending($payment);
+            || $this->isSakurupiahPresentationPending($payment)
+            || $this->isWijayaPayPresentationPending($payment);
     }
 
     private function shouldRecoverQris(OrderLifecycleProjection $projection, Payment $payment): bool
@@ -331,11 +356,23 @@ class StorefrontShopPaymentStatusRefresh
             && $this->sakurupiahLifecycle->classify($payment)->outcome() === SakurupiahInvoiceOutcome::ProviderPresentationPending;
     }
 
+    private function isWijayaPayPresentationPending(Payment $payment): bool
+    {
+        return $this->isWijayaPayPayment($payment)
+            && filled($payment->merchant_ref)
+            && in_array($this->wijayapayLifecycle->classify($payment)->outcome(), [
+                WijayaPayInvoiceOutcome::ProviderPresentationPending,
+                WijayaPayInvoiceOutcome::RecoveryPending,
+                WijayaPayInvoiceOutcome::Creating,
+            ], true);
+    }
+
     private function isAutomaticQrisPayment(?Payment $payment): bool
     {
         return $this->isPakasirPayment($payment)
             || $this->isKlikQrisPayment($payment)
-            || $this->isSakurupiahPayment($payment);
+            || $this->isSakurupiahPayment($payment)
+            || $this->isWijayaPayPayment($payment);
     }
 
     private function isPakasirPayment(?Payment $payment): bool
@@ -353,9 +390,15 @@ class StorefrontShopPaymentStatusRefresh
         return strtolower((string) $payment?->provider) === PaymentProvider::SAKURUPIAH;
     }
 
+    private function isWijayaPayPayment(?Payment $payment): bool
+    {
+        return strtolower((string) $payment?->provider) === PaymentProvider::WIJAYAPAY;
+    }
+
     private function hasNativeQrisRail(?Payment $payment): bool
     {
         return $this->isSakurupiahPayment($payment)
+            || $this->isWijayaPayPayment($payment)
             || $this->isKlikQrisPayment($payment)
             || ($this->isPakasirPayment($payment) && $payment?->method === 'api_qris');
     }
@@ -389,6 +432,10 @@ class StorefrontShopPaymentStatusRefresh
     {
         if ($this->isSakurupiahPayment($payment)) {
             return $this->sakurupiahLifecycle->classify($payment)->isPayable();
+        }
+
+        if ($this->isWijayaPayPayment($payment)) {
+            return $this->wijayapayLifecycle->classify($payment)->isPayable();
         }
 
         return $payment?->isPayableNativePakasirQris() === true;
@@ -427,6 +474,10 @@ class StorefrontShopPaymentStatusRefresh
             return $this->sakurupiahLifecycle->lifecycle($payment)->outcome()->value;
         }
 
+        if ($this->isWijayaPayPayment($payment)) {
+            return $this->wijayapayLifecycle->lifecycle($payment)->outcome()->value;
+        }
+
         if ($this->isPakasirPayment($payment) && $payment->method === 'api_qris') {
             $this->nativeQris->ensureCreated($payment);
         }
@@ -438,6 +489,12 @@ class StorefrontShopPaymentStatusRefresh
     {
         if ($this->isKlikQrisPayment($payment)) {
             $this->klikQrisProcessor->reconcilePayment($payment);
+
+            return;
+        }
+
+        if ($this->isWijayaPayPayment($payment)) {
+            $this->wijayapayProcessor->reconcilePayment($payment);
 
             return;
         }

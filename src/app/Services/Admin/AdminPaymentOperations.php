@@ -18,6 +18,10 @@ use App\Services\Sakurupiah\SakurupiahCallbackProcessor;
 use App\Services\Sakurupiah\SakurupiahInvoiceLifecycleService;
 use App\Services\Sakurupiah\SakurupiahPaymentEventLogger;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\WijayaPay\WijayaPayCallbackProcessor;
+use App\Services\WijayaPay\WijayaPayInvoiceLifecycleService;
+use App\Services\WijayaPay\WijayaPayPaymentEventLogger;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Support\PaymentProvider;
 use InvalidArgumentException;
 
@@ -40,6 +44,9 @@ class AdminPaymentOperations
         private readonly SakurupiahCallbackProcessor $sakurupiahProcessor,
         private readonly SakurupiahProviderReadiness $sakurupiahReadiness,
         private readonly SakurupiahPaymentEventLogger $sakurupiahEvents,
+        private readonly WijayaPayCallbackProcessor $wijayapayProcessor,
+        private readonly WijayaPayProviderReadiness $wijayapayReadiness,
+        private readonly WijayaPayPaymentEventLogger $wijayapayEvents,
     ) {}
 
     public function canReconcile(Payment $payment): bool
@@ -53,6 +60,7 @@ class AdminPaymentOperations
             PaymentProvider::PAKASIR => $this->pakasirReadiness->verification()->isReady(),
             PaymentProvider::KLIKQRIS => $this->klikQrisReadiness->checkout()->isReady(),
             PaymentProvider::SAKURUPIAH => $this->sakurupiahCanReconcile($payment),
+            PaymentProvider::WIJAYAPAY => $this->wijayapayCanReconcile($payment),
             default => false,
         };
     }
@@ -67,6 +75,7 @@ class AdminPaymentOperations
             PaymentProvider::PAKASIR => $this->pakasirProcessor->processReconciliationForPayment($payment, $this->pakasirClient->transactionDetail($payment)),
             PaymentProvider::KLIKQRIS => $this->klikQrisProcessor->processReconciliationForPayment($payment, $this->klikQrisClient->transactionStatus($payment)),
             PaymentProvider::SAKURUPIAH => $this->reconcileSakurupiah($payment),
+            PaymentProvider::WIJAYAPAY => $this->reconcileWijayaPay($payment),
             default => throw new InvalidArgumentException('Only supported payment providers with provider identifiers can be reconciled.'),
         };
         $this->audit->log('payment.manually_reconciled', $payment, null, ['payment_event_id' => $event->id], $user, $ip);
@@ -98,6 +107,32 @@ class AdminPaymentOperations
         return $this->sakurupiahEvents->logRecoveryObservation(
             $payment,
             SakurupiahInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED,
+            'manual_reconcile:'.$outcome->value,
+        );
+    }
+
+    private function wijayapayCanReconcile(Payment $payment): bool
+    {
+        return filled($payment->merchant_ref)
+            && $this->wijayapayReadiness->configurationReport()->isReady();
+    }
+
+    private function reconcileWijayaPay(Payment $payment): PaymentEvent
+    {
+        $outcome = $this->wijayapayProcessor->reconcilePayment($payment);
+        $latest = $payment->paymentEvents()
+            ->where('provider', PaymentProvider::WIJAYAPAY)
+            ->where('event_type', PaymentEventType::Reconciliation->value)
+            ->latest('received_at')
+            ->first();
+
+        if ($latest !== null) {
+            return $latest;
+        }
+
+        return $this->wijayapayEvents->logRecoveryObservation(
+            $payment,
+            WijayaPayInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED,
             'manual_reconcile:'.$outcome->value,
         );
     }

@@ -1193,12 +1193,13 @@ final class StorefrontFunnelReport
     private function qrisOutcome(string $provider, string $state): string
     {
         return match (strtolower($state)) {
-            'created', 'provider_success' => 'created',
+            'created', 'provider_success', 'provider_paid' => 'created',
             'creating' => 'creating',
 
             'outcome_unknown', 'recovery_unconfirmed' => 'recovery_pending',
             'transient_qris_image', 'provider_total_pending' => 'provider_total_pending',
-            'provider_qris_unusable' => $provider === PaymentProvider::SAKURUPIAH
+            'provider_presentation_pending' => 'provider_presentation_pending',
+            'provider_qris_unusable' => in_array($provider, [PaymentProvider::SAKURUPIAH, PaymentProvider::WIJAYAPAY], true)
                 ? 'provider_presentation_pending'
                 : 'failed',
             'provider_expired' => 'expired',

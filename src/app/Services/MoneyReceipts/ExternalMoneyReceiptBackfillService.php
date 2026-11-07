@@ -527,7 +527,7 @@ final class ExternalMoneyReceiptBackfillService
                 ->whereNotNull('provider_reference')
                 ->where('provider_reference', '!=', ''),
             self::SOURCE_QRIS_PAYMENTS => Payment::query()
-                ->whereIn('provider', [PaymentProvider::KLIKQRIS, PaymentProvider::SAKURUPIAH, PaymentProvider::PAKASIR])
+                ->whereIn('provider', [PaymentProvider::KLIKQRIS, PaymentProvider::SAKURUPIAH, PaymentProvider::WIJAYAPAY, PaymentProvider::PAKASIR])
                 ->where('status', PaymentStatus::Paid->value),
             self::SOURCE_MANUAL_PAYMENTS => Payment::query()
                 ->where('provider', PaymentProvider::MANUAL)

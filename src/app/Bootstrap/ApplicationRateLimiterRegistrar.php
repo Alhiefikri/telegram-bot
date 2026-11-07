@@ -68,6 +68,13 @@ class ApplicationRateLimiterRegistrar
             return Limit::perMinute($limit)->by('sakurupiah:webhook:source:'.$source);
         });
 
+        $this->rateLimiter->for('wijayapay-webhook', function (Request $request) {
+            $limit = max(1, (int) $this->config->get('services.wijayapay.webhook_rate_limit_per_minute', 30));
+            $source = $request->ip() ?: 'unknown';
+
+            return Limit::perMinute($limit)->by('wijayapay:webhook:source:'.$source);
+        });
+
         $this->rateLimiter->for('sakurupiah-status-refresh', function (Request $request) {
             $limit = max(1, (int) $this->config->get('services.sakurupiah.status_refresh_rate_limit_per_minute', 3));
             $routeOrder = $request->route('order');

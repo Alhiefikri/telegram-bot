@@ -239,6 +239,40 @@ class ProductionConfigurationValidatorTest extends TestCase
         ];
     }
 
+    public function test_wijayapay_requires_a_complete_credential_pair(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['wijayapay']['code_merchant'] = 'WP-merchant';
+        $configuration['services']['wijayapay']['api_key'] = '';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('WIJAYAPAY_CODE_MERCHANT and WIJAYAPAY_API_KEY must be configured together.');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_wijayapay_rejects_an_unqualified_qris_contract(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['wijayapay']['qris_contract']['currency_confirmed'] = false;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('WIJAYAPAY_QRIS_CURRENCY_CONTRACT must be qualified');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
+    public function test_wijayapay_rejects_callback_hosts_outside_the_allowlist(): void
+    {
+        $configuration = $this->validConfiguration();
+        $configuration['services']['wijayapay']['callback_url'] = 'https://evil.example.test/api/webhook/wijayapay';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('WIJAYAPAY_CALLBACK_URL must use a safe HTTPS host');
+
+        (new ProductionConfigurationValidator(new Repository($configuration)))->validate();
+    }
+
     private function validConfiguration(): array
     {
         return [
@@ -268,6 +302,25 @@ class ProductionConfigurationValidatorTest extends TestCase
                     'api_key' => '',
                     'api_secret' => '',
                     'base_url' => 'https://api.binance.com',
+                ],
+                'wijayapay' => [
+                    'code_merchant' => '',
+                    'api_key' => '',
+                    'base_url' => 'https://gateway.wijayapay.com',
+                    'callback_url' => 'https://store.example.test/api/webhook/wijayapay',
+                    'return_url' => 'https://store.example.test/shop/orders',
+                    'callback_allowed_hosts' => ['store.example.test'],
+                    'http_timeout_seconds' => 10,
+                    'http_connect_timeout_seconds' => 3,
+                    'lookup_max_attempts' => 3,
+                    'readiness_cache_seconds' => 60,
+                    'timezone' => 'Asia/Jakarta',
+                    'qris_contract' => [
+                        'currency' => 'IDR',
+                        'currency_confirmed' => true,
+                        'max_fee_bps' => 500,
+                        'expiry_confirmed' => true,
+                    ],
                 ],
                 'dogfood_timing' => [
                     'enabled' => false,

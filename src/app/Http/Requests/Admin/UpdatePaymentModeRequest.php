@@ -4,6 +4,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\Admin\Concerns\RedirectsWithValidationErrors;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -87,6 +88,16 @@ class UpdatePaymentModeRequest extends FormRequest
                         $validator->errors()->add(
                             'payment_mode',
                             'Provider Sakurupiah belum bisa diaktifkan. '.$readiness->configurationMessage(),
+                        );
+                    }
+                }
+
+                if ($this->input('payment_mode') === PaymentProvider::WIJAYAPAY) {
+                    $readiness = app(WijayaPayProviderReadiness::class)->observe();
+                    if (! $readiness->isReady()) {
+                        $validator->errors()->add(
+                            'payment_mode',
+                            'Provider WijayaPay belum bisa diaktifkan. '.$readiness->configurationMessage(),
                         );
                     }
                 }

@@ -10,6 +10,7 @@ use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\QueueDepthInspector;
 use App\Services\Sakurupiah\SakurupiahOperationalMetrics;
 use App\Services\Sakurupiah\SakurupiahProviderReadiness;
+use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Process;
@@ -26,6 +27,7 @@ class HealthCheck extends Command
         {--image-pipeline : Check GD capabilities used by invoice rendering and product image processing.}
         {--bsc : Check enabled BSC readiness and pending verification backlog.}
         {--sakurupiah : Check enabled Sakurupiah readiness, schedule, and bounded verification backlog.}
+        {--wijayapay : Check WijayaPay readiness and channel observation.}
         {--scheduler-heartbeat= : Maximum scheduler heartbeat age in seconds.}
         {--outbound-recovery-heartbeat= : Maximum outbound recovery heartbeat age in seconds.}';
 
@@ -38,6 +40,7 @@ class HealthCheck extends Command
         BscOperationalAlertNotifier $bscAlerts,
         SakurupiahProviderReadiness $sakurupiahReadiness,
         SakurupiahOperationalMetrics $sakurupiahMetrics,
+        WijayaPayProviderReadiness $wijayapayReadiness,
         PaidInvoiceRenderer $invoiceRenderer,
         ProductImageOptimizer $imageOptimizer,
     ): int {
@@ -145,6 +148,22 @@ class HealthCheck extends Command
             } catch (Throwable $exception) {
                 $healthy = false;
                 $this->error('BSC: failed safely - '.$exception->getMessage());
+            }
+        }
+
+        if ($this->option('wijayapay')) {
+            try {
+                $report = $wijayapayReadiness->observe();
+                if ($report->isReady()) {
+                    $channel = $report->qrisChannel();
+                    $this->info('WijayaPay: ready channel='.($channel?->code ?? '-').' fee_payer='.($channel?->feePayer ?? '-'));
+                } else {
+                    $healthy = false;
+                    $this->error('WijayaPay: failed - '.$report->configurationMessage());
+                }
+            } catch (Throwable $exception) {
+                $healthy = false;
+                $this->error('WijayaPay: failed safely - '.$exception->getMessage());
             }
         }
 

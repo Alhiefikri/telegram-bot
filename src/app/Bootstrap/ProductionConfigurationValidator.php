@@ -110,6 +110,109 @@ class ProductionConfigurationValidator
             throw new RuntimeException('BSC_USDT_DECIMALS must be 18 for the approved BNB Smart Chain USDT contract.');
         }
         $this->validateSakurupiah();
+        $this->validateWijayaPay();
+    }
+
+    private function validateWijayaPay(): void
+    {
+        $codeMerchant = $this->config->get('services.wijayapay.code_merchant');
+        $apiKey = $this->config->get('services.wijayapay.api_key');
+        $codeConfigured = is_string($codeMerchant) && filled($codeMerchant);
+        $keyConfigured = is_string($apiKey) && filled($apiKey);
+        if ($codeConfigured !== $keyConfigured) {
+            throw new RuntimeException('WIJAYAPAY_CODE_MERCHANT and WIJAYAPAY_API_KEY must be configured together.');
+        }
+        if ($codeConfigured && trim((string) $codeMerchant) !== $codeMerchant) {
+            throw new RuntimeException('WIJAYAPAY_CODE_MERCHANT must not contain surrounding whitespace.');
+        }
+        if ($keyConfigured && trim((string) $apiKey) !== $apiKey) {
+            throw new RuntimeException('WIJAYAPAY_API_KEY must not contain surrounding whitespace.');
+        }
+
+        $baseUrl = (string) $this->config->get('services.wijayapay.base_url', '');
+        if ($baseUrl !== '') {
+            $parts = parse_url($baseUrl);
+            if (! is_array($parts)
+                || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+                || strtolower(rtrim((string) ($parts['host'] ?? ''), '.')) !== 'gateway.wijayapay.com'
+                || array_key_exists('user', $parts)
+                || array_key_exists('pass', $parts)
+                || array_key_exists('port', $parts)
+                || array_key_exists('query', $parts)
+                || array_key_exists('fragment', $parts)
+                || trim((string) ($parts['path'] ?? ''), '/') !== ''
+            ) {
+                throw new RuntimeException('WIJAYAPAY base URL must be HTTPS on gateway.wijayapay.com.');
+            }
+        }
+
+        foreach ([
+            'callback_url' => ['WIJAYAPAY_CALLBACK_URL', '/api/webhook/wijayapay'],
+            'return_url' => ['WIJAYAPAY_RETURN_URL', null],
+        ] as $field => [$label, $path]) {
+            $value = $this->config->get('services.wijayapay.'.$field);
+            if (blank($value)) {
+                continue;
+            }
+            $this->assertSakurupiahUrl(
+                $value,
+                $label,
+                $path,
+                $this->wijayapayHosts('callback_allowed_hosts'),
+            );
+        }
+
+        $contract = (array) $this->config->get('services.wijayapay.qris_contract', []);
+        if (($contract['currency'] ?? null) !== 'IDR' || ($contract['currency_confirmed'] ?? false) !== true) {
+            throw new RuntimeException('WIJAYAPAY_QRIS_CURRENCY_CONTRACT must be qualified before production use.');
+        }
+        if (($contract['expiry_confirmed'] ?? false) !== true) {
+            throw new RuntimeException('WIJAYAPAY_QRIS_EXPIRY_CONTRACT must be qualified before production use.');
+        }
+        if (! $this->validNonNegativeSakurupiahInt($contract['max_fee_bps'] ?? null, 10_000)) {
+            throw new RuntimeException('WIJAYAPAY_QRIS_MAX_FEE_BPS must be an integer between 0 and 10000.');
+        }
+
+        $timeout = $this->config->get('services.wijayapay.http_timeout_seconds', 10);
+        $connectTimeout = $this->config->get('services.wijayapay.http_connect_timeout_seconds', 3);
+        if (! is_numeric($timeout) || ! is_finite((float) $timeout) || (float) $timeout <= 0 || (float) $timeout > 60) {
+            throw new RuntimeException('WIJAYAPAY_HTTP_TIMEOUT_SECONDS must be between 0 and 60 seconds.');
+        }
+        if (! is_numeric($connectTimeout) || ! is_finite((float) $connectTimeout) || (float) $connectTimeout <= 0 || (float) $connectTimeout > (float) $timeout) {
+            throw new RuntimeException('WIJAYAPAY_HTTP_CONNECT_TIMEOUT_SECONDS must be positive and no greater than the HTTP timeout.');
+        }
+
+        if (! $this->validSakurupiahInt($this->config->get('services.wijayapay.lookup_max_attempts', 3), 1, 5)) {
+            throw new RuntimeException('WIJAYAPAY_LOOKUP_MAX_ATTEMPTS must be an integer between 1 and 5.');
+        }
+        if (! $this->validSakurupiahInt($this->config->get('services.wijayapay.readiness_cache_seconds', 60), 1, 300)) {
+            throw new RuntimeException('WIJAYAPAY_READINESS_CACHE_SECONDS must be an integer between 1 and 300.');
+        }
+        $timezone = $this->config->get('services.wijayapay.timezone', 'Asia/Jakarta');
+        try {
+            if (! is_string($timezone) || trim($timezone) === '') {
+                throw new \InvalidArgumentException('Invalid timezone.');
+            }
+            new \DateTimeZone($timezone);
+        } catch (\Throwable) {
+            throw new RuntimeException('WIJAYAPAY_TIMEZONE must be a valid timezone identifier.');
+        }
+    }
+
+    /** @return list<string> */
+    private function wijayapayHosts(string $field): array
+    {
+        $value = $this->config->get('services.wijayapay.'.$field, []);
+        if (is_string($value)) {
+            $value = explode(',', $value);
+        }
+
+        return array_values(array_filter(array_map(
+            static fn (mixed $entry): ?string => is_string($entry)
+                ? strtolower(rtrim(trim($entry), '.'))
+                : null,
+            (array) $value,
+        ), static fn (mixed $entry): bool => is_string($entry) && $entry !== ''));
     }
 
     private function validateSakurupiah(): void
