@@ -102,6 +102,19 @@ class ProductionReleaseHardeningTest extends TestCase
         $this->assertStringStartsWith('http://localhost:8080/', URL::to('/build/assets/app.js'));
     }
 
+    public function test_production_compose_forwards_optional_wijayapay_credentials_to_shared_app_environment(): void
+    {
+        $compose = file_get_contents(base_path('../docker-compose.yml'));
+        $sharedEnvironment = explode("\nservices:", $compose, 2)[0];
+
+        foreach (['WIJAYAPAY_CODE_MERCHANT', 'WIJAYAPAY_API_KEY'] as $credential) {
+            $this->assertStringContainsString(
+                '  '.$credential.': ${'.$credential.':-}',
+                $sharedEnvironment,
+            );
+        }
+    }
+
     public function test_logging_defaults_to_daily_rotation_and_env_example_exposes_only_optional_mail_backup_inputs(): void
     {
         $logging = file_get_contents(config_path('logging.php'));
