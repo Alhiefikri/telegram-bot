@@ -312,8 +312,11 @@ return [
         'lock_lease_seconds' => 90,
         // A duplicate ref_id is documented to return the existing transaction
         // instead of creating a second one. The interval still bounds how
-        // often a rejected or ambiguous create is retried.
+        // often a rejected or ambiguous create is retried, and an ambiguous
+        // recovery keeps retrying the same reference only inside this window.
         'create_retry_min_interval_seconds' => 60,
+        'create_recovery_window_seconds' => 900,
+        'reconcile_cursor_scan_cap' => 500,
         'webhook_rate_limit_per_minute' => 30,
         'status_refresh_rate_limit_per_minute' => 3,
         'readiness_cache_seconds' => 60,

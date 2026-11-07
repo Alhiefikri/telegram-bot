@@ -242,9 +242,49 @@ final readonly class WijayaPayPayableInvoice
         );
     }
 
+    public function merchantRef(): string
+    {
+        return $this->merchantRef;
+    }
+
+    public function providerReference(): string
+    {
+        return $this->providerReference;
+    }
+
+    public function paymentMethod(): string
+    {
+        return $this->paymentMethod;
+    }
+
+    public function totalAmount(): int
+    {
+        return $this->totalAmount;
+    }
+
     public function totalAmountDisplay(): string
     {
         return 'Rp'.number_format($this->totalAmount, 0, ',', '.');
+    }
+
+    public function providerFee(): int
+    {
+        return $this->providerFee;
+    }
+
+    /**
+     * Whether the channel fee is charged to the customer on top of the order
+     * amount. This matches the storefront payable-invoice contract used by the
+     * other automatic QRIS rails.
+     */
+    public function customerPaysFee(): bool
+    {
+        return $this->customerPaysFee;
+    }
+
+    public function effectiveExpiresAt(): CarbonImmutable
+    {
+        return $this->effectiveExpiresAt;
     }
 
     public function isDirectQris(): bool

@@ -142,7 +142,23 @@ final class WijayaPayCallbackProcessor
 
         try {
             $status = $this->fetchStatus($payment);
-        } catch (WijayaPayStatusUnavailableException) {
+        } catch (WijayaPayStatusUnavailableException $exception) {
+            $previous = $exception->getPrevious();
+            if (blank($payment->provider_reference)
+                && $previous instanceof WijayaPayProviderException
+                && $previous->isNotFound()
+            ) {
+                // An explicit not-found answer proves that no provider
+                // transaction exists for this reference yet. Recover the
+                // ambiguous create on the same reference inside its bounded
+                // window instead of waiting for a manual retry.
+                $recovered = $this->lifecycle->recoverAfterNotFoundWhileLocked($payment);
+
+                return $recovered->outcome() === WijayaPayInvoiceOutcome::RecoveryPending
+                    ? WijayaPayReconciliationOutcome::VerificationPending
+                    : WijayaPayReconciliationOutcome::Pending;
+            }
+
             if (! $this->lifecycle->classify($payment)->isPayable()) {
                 $this->lifecycle->persistRecoveryUnconfirmed($payment, 'status_unavailable');
             }

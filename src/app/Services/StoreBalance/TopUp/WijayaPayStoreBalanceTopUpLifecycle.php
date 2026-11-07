@@ -190,7 +190,6 @@ final class WijayaPayStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLife
 
         if (in_array($topUp->status, [
             StoreBalanceTopUpStatus::Paid,
-            StoreBalanceTopUpStatus::Expired,
             StoreBalanceTopUpStatus::InvalidProviderResult,
             StoreBalanceTopUpStatus::Compensated,
         ], true)) {
@@ -277,7 +276,10 @@ final class WijayaPayStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLife
             );
         }
 
-        if ($status->isPending() && ! $this->classify($topUp)->isPayable()) {
+        if ($status->isPending()
+            && ! $this->deadlinePassed($topUp)
+            && ! $this->classify($topUp)->isPayable()
+        ) {
             $this->persistStatusPresentation($topUp, $status);
         }
 
@@ -722,6 +724,14 @@ final class WijayaPayStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLife
                 self::STATE_CREATING,
                 'create_failed',
             ], true)
+        ) {
+            return false;
+        }
+
+        $windowSeconds = max(0, (int) config('services.wijayapay.create_recovery_window_seconds', 900));
+        if ($windowSeconds > 0
+            && $topUp->created_at !== null
+            && $topUp->created_at->addSeconds($windowSeconds)->isPast()
         ) {
             return false;
         }

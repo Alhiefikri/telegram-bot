@@ -6,6 +6,7 @@ use App\Services\WijayaPay\WijayaPayCallback;
 use App\Services\WijayaPay\WijayaPayCallbackProcessor;
 use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Services\WijayaPay\WijayaPaySchemaException;
+use App\Services\WijayaPay\WijayaPayStoreBalanceTopUpCallbackProcessor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use JsonException;
@@ -24,6 +25,7 @@ final class WijayaPayWebhookController
     public function __invoke(
         Request $request,
         WijayaPayCallbackProcessor $processor,
+        WijayaPayStoreBalanceTopUpCallbackProcessor $topUpProcessor,
         WijayaPayProviderReadiness $readiness,
     ): JsonResponse {
         if (! $readiness->configurationReport()->isReady()) {
@@ -75,7 +77,9 @@ final class WijayaPayWebhookController
             throw new UnauthorizedHttpException('WijayaPay', 'Invalid WijayaPay callback signature.');
         }
 
-        $processor->processCallback($callback);
+        if ($topUpProcessor->processCallback($callback) === null) {
+            $processor->processCallback($callback);
+        }
 
         // The provider's documented acknowledgement contract.
         return response()->json(['status' => true]);

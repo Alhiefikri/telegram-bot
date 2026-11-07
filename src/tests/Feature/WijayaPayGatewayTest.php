@@ -30,6 +30,7 @@ use App\Services\WijayaPay\WijayaPayProviderReadiness;
 use App\Services\WijayaPay\WijayaPaySignature;
 use App\Services\WijayaPay\WijayaPayStatus;
 use App\Services\WijayaPay\WijayaPayStatusResponse;
+use App\Storefront\StorefrontShopSignedInvoice;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -482,6 +483,140 @@ class WijayaPayGatewayTest extends TestCase
         $this->assertFalse(WijayaPayCallback::hasDuplicateKeys(
             '{"status":"paid","data":{"ref_id":"A","total_dibayar":1000}}',
         ));
+    }
+
+    public function test_storefront_invoice_renders_amount_fee_deadline_and_qr_without_runtime_error(): void
+    {
+        Queue::fake();
+        $this->withoutVite();
+        ManualPaymentSetting::create(['payment_mode' => PaymentProvider::WIJAYAPAY, 'is_active' => true]);
+        $payment = $this->pendingPayment(prepared: true);
+        Http::fake([
+            'wijayapay.com/qris/*' => Http::response("\x89PNG\r\n\x1A\n".str_repeat('x', 64), 200, [
+                'Content-Type' => 'image/png',
+            ]),
+        ]);
+
+        $invoice = app(StorefrontShopSignedInvoice::class)->read($payment->order->fresh());
+
+        $this->assertTrue($invoice->isQrisPayable);
+        $this->assertSame(12_000, $invoice->payableAmount);
+        $this->assertSame('Rp12.000', $invoice->payableAmountDisplay);
+        $this->assertSame('store', $invoice->qrisFeePayer);
+        $this->assertSame(
+            $payment->provider_expires_at?->toIso8601String(),
+            $invoice->qrisEffectiveExpiresAt?->toIso8601String(),
+        );
+        $this->assertNotNull($invoice->qrisImageSource);
+
+        $deadlineLabel = $payment->provider_expires_at
+            ?->copy()
+            ->timezone((string) config('app.timezone'))
+            ->format('d M Y H:i T');
+        $html = $this->get($invoice->redirectUrl)->assertOk()->getContent();
+        $this->assertStringContainsString('Rp12.000', $html);
+        $this->assertStringContainsString('Rp84', $html);
+        $this->assertStringContainsString((string) $deadlineLabel, $html);
+        $this->assertStringContainsString('QRIS', $html);
+
+        $image = $this->get($invoice->qrisImageSource)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png')
+            ->assertHeader('Cache-Control', 'no-store, private');
+        $this->assertSame("\x89PNG\r\n\x1A\n", substr($image->getContent(), 0, 8));
+    }
+
+    public function test_scheduler_recovers_ambiguous_create_on_the_same_reference_after_not_found(): void
+    {
+        Queue::fake();
+        ManualPaymentSetting::create(['payment_mode' => PaymentProvider::WIJAYAPAY, 'is_active' => true]);
+        $payment = $this->pendingPayment(prepared: false);
+        $payment->forceFill([
+            'provider_create_state' => WijayaPayInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
+            'provider_create_attempted_at' => now()->subMinutes(2),
+        ])->save();
+        $provider = Mockery::mock(WijayaPayProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()
+            ->with((string) $payment->merchant_ref)
+            ->andThrow(new WijayaPayProviderException(
+                'WijayaPay transactionStatus request failed.',
+                operation: 'transactionStatus',
+                providerMessage: 'Transaksi tidak ditemukan',
+                reason: 'application_rejection',
+            ));
+        $provider->shouldReceive('createInvoice')->once()
+            ->with(Mockery::on(fn ($request): bool => $request->refId === (string) $payment->merchant_ref))
+            ->andReturn($this->invoice($payment));
+        $this->app->instance(WijayaPayProviderAdapter::class, $provider);
+
+        $this->artisan('wijayapay:reconcile --chunk=10')
+            ->expectsOutputToContain('recovered=1')
+            ->assertSuccessful();
+
+        $payment->refresh();
+        $this->assertSame('WPTRX-1', $payment->provider_reference);
+        $this->assertSame(WijayaPayInvoiceLifecycleService::STATE_CREATED, $payment->provider_create_state);
+        $this->assertSame(1, Payment::query()->count());
+    }
+
+    public function test_scheduler_does_not_recreate_on_a_provider_outage(): void
+    {
+        Queue::fake();
+        ManualPaymentSetting::create(['payment_mode' => PaymentProvider::WIJAYAPAY, 'is_active' => true]);
+        $payment = $this->pendingPayment(prepared: false);
+        $payment->forceFill([
+            'provider_create_state' => WijayaPayInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
+            'provider_create_attempted_at' => now()->subMinutes(2),
+        ])->save();
+        $provider = Mockery::mock(WijayaPayProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()
+            ->with((string) $payment->merchant_ref)
+            ->andThrow(new WijayaPayProviderException(
+                'WijayaPay transactionStatus request failed.',
+                operation: 'transactionStatus',
+                httpStatus: 503,
+                reason: 'http_503',
+            ));
+        $provider->shouldNotReceive('createInvoice');
+        $this->app->instance(WijayaPayProviderAdapter::class, $provider);
+
+        $this->artisan('wijayapay:reconcile --chunk=10')->assertSuccessful();
+
+        $payment->refresh();
+        $this->assertNull($payment->provider_reference);
+        $this->assertSame(WijayaPayInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED, $payment->provider_create_state);
+        $this->assertSame(1, Payment::query()->count());
+    }
+
+    public function test_ambiguous_create_retry_stops_after_its_bounded_recovery_window(): void
+    {
+        Queue::fake();
+        config()->set('services.wijayapay.create_recovery_window_seconds', 60);
+        ManualPaymentSetting::create(['payment_mode' => PaymentProvider::WIJAYAPAY, 'is_active' => true]);
+        $payment = $this->pendingPayment(prepared: false);
+        $payment->forceFill([
+            'created_at' => now()->subMinutes(5),
+            'provider_create_state' => WijayaPayInvoiceLifecycleService::STATE_OUTCOME_UNKNOWN,
+            'provider_create_attempted_at' => now()->subMinutes(2),
+        ])->save();
+        $provider = Mockery::mock(WijayaPayProviderAdapter::class);
+        $provider->shouldReceive('transactionStatus')->once()
+            ->with((string) $payment->merchant_ref)
+            ->andThrow(new WijayaPayProviderException(
+                'WijayaPay transactionStatus request failed.',
+                operation: 'transactionStatus',
+                providerMessage: 'Transaksi tidak ditemukan',
+                reason: 'application_rejection',
+            ));
+        $provider->shouldNotReceive('createInvoice');
+        $this->app->instance(WijayaPayProviderAdapter::class, $provider);
+
+        $this->artisan('wijayapay:reconcile --chunk=10')->assertSuccessful();
+
+        $payment->refresh();
+        $this->assertNull($payment->provider_reference);
+        $this->assertSame(WijayaPayInvoiceLifecycleService::STATE_RECOVERY_UNCONFIRMED, $payment->provider_create_state);
+        $this->assertSame(1, Payment::query()->count());
     }
 
     private function pendingPayment(bool $managed = false, bool $prepared = true): Payment

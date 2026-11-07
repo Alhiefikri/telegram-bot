@@ -26,12 +26,27 @@ class WijayaPayProviderException extends RuntimeException
         return $this->reason === 'application_rejection';
     }
 
+    /**
+     * A transaction lookup that the provider explicitly answered as missing.
+     *
+     * This is intentionally narrower than "any 404": only the documented
+     * status lookup may prove that no transaction exists for a merchant
+     * reference. HTTP failures, malformed responses, merchant/credential
+     * errors and callbacks remain provider outages or invalid evidence and
+     * must never authorize a second create.
+     */
     public function isNotFound(): bool
     {
+        if ($this->operation !== 'transactionStatus' || $this->reason !== 'application_rejection') {
+            return false;
+        }
+
         $message = strtolower($this->providerMessage ?? '');
-        if ($this->reason !== 'application_rejection'
-            || $message === ''
+        if ($message === ''
             || str_contains($message, 'merchant')
+            || str_contains($message, 'api key')
+            || str_contains($message, 'kredensial')
+            || str_contains($message, 'credential')
         ) {
             return false;
         }

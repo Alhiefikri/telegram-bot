@@ -202,6 +202,36 @@ final class WijayaPayInvoiceLifecycleService
     }
 
     /**
+     * The caller already received an explicit "transaction not found" answer
+     * from the status endpoint. Retry the original create on the same merchant
+     * reference when the bounded recovery window still allows it.
+     */
+    public function recoverAfterNotFoundWhileLocked(Payment $payment): WijayaPayInvoiceLifecycleResult
+    {
+        $payment->refresh();
+
+        $localOutcome = $this->classifyLocalState($payment);
+        if ($localOutcome !== null) {
+            return WijayaPayInvoiceLifecycleResult::state($localOutcome);
+        }
+
+        if (! $this->canRetryCreate($payment)) {
+            $this->markRecoveryUnconfirmed($payment, 'transaction_not_found');
+
+            return WijayaPayInvoiceLifecycleResult::state(WijayaPayInvoiceOutcome::RecoveryPending);
+        }
+
+        $this->resetPreRequestFailure($payment);
+        $payment->refresh();
+
+        if ($this->markCreationAttempted($payment)) {
+            return $this->attemptCreateLocked($payment);
+        }
+
+        return $this->classifyPersisted($payment->refresh());
+    }
+
+    /**
      * Reuse a pending observation already obtained by the sweep without
      * making a second provider request.
      */
@@ -355,14 +385,8 @@ final class WijayaPayInvoiceLifecycleService
         } catch (WijayaPayProviderException $exception) {
             if ($exception->isNotFound()
                 && blank($payment->provider_reference)
-                && $this->canRetryCreate($payment)
             ) {
-                $this->resetPreRequestFailure($payment);
-                $payment->refresh();
-
-                if ($this->markCreationAttempted($payment)) {
-                    return $this->attemptCreateLocked($payment);
-                }
+                return $this->recoverAfterNotFoundWhileLocked($payment);
             }
 
             $this->markRecoveryUnconfirmed($payment, $this->exceptionCode($exception));
@@ -952,9 +976,33 @@ final class WijayaPayInvoiceLifecycleService
     private function canRetryCreate(Payment $payment): bool
     {
         return blank($payment->provider_reference)
+            && ! $this->recoveryWindowExhausted($payment)
             && $this->createRetryAllowed($payment)
             && $payment->order !== null
             && $this->canCreate($payment->order, $payment);
+    }
+
+    /**
+     * Ambiguous create/recovery may retry the same reference only inside a
+     * bounded window. A definitive provider rejection keeps its existing
+     * correction-and-retry behavior because no transaction can exist yet.
+     */
+    private function recoveryWindowExhausted(Payment $payment): bool
+    {
+        if (! in_array($payment->provider_create_state, [
+            self::STATE_OUTCOME_UNKNOWN,
+            self::STATE_RECOVERY_UNCONFIRMED,
+            self::STATE_CREATING,
+        ], true)) {
+            return false;
+        }
+
+        $windowSeconds = max(0, (int) config('services.wijayapay.create_recovery_window_seconds', 900));
+        if ($windowSeconds === 0 || $payment->created_at === null) {
+            return false;
+        }
+
+        return $payment->created_at->addSeconds($windowSeconds)->isPast();
     }
 
     private function createRetryAllowed(Payment $payment): bool

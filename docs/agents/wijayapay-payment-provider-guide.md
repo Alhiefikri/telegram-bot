@@ -96,6 +96,12 @@ Verifikasi callback selalu:
 5. cocokkan `ref_id`, `trx_reference`, total, fee, dan amount evidence;
 6. baru delegasikan `paid`/`expired` ke `OrderLifecycle`.
 
+Callback yang `ref_id`-nya bukan Payment tetapi cocok dengan
+`StoreBalanceTopUp` dirutekan ke rail top-up. Callback hanya menjadi wakeup dan
+klaim reference tersegel; rail tetap membaca `/api/get-status` sebelum settle.
+Top-up `expired` masih boleh late settle, sedangkan `invalid_provider_result`
+tetap manual review.
+
 `callback_enforce_ip_allowlist` default `false` karena origin dapat berada di
 belakang reverse proxy yang tidak tercakup trusted-proxy. Bila dinyalakan,
 `callback_allowed_ips` berisi IP publik provider (`172.235.245.77`).
@@ -109,6 +115,13 @@ belakang reverse proxy yang tidak tercakup trusted-proxy. Bila dinyalakan,
   Kegagalan transport/schema menjadi `outcome_unknown`; tidak pernah membuat
   Payment atau reference kedua. Retry create memakai reference yang sama
   karena provider mendokumentasikan deduplikasi `ref_id`.
+- **Ambiguous create recovery**: jawaban `transaksi tidak ditemukan` dari
+  `/api/get-status` membuktikan belum ada transaksi dan boleh memicu create
+  ulang pada reference yang sama. HTTP/transport failure, error kredensial,
+  dan response rusak tidak pernah dianggap not-found. Retry dibatasi interval
+  `create_retry_min_interval_seconds` dan window
+  `create_recovery_window_seconds`; sweep Payment maupun top-up memakai jalur
+  ini, sehingga customer tidak perlu menekan retry manual.
 - **Callback/reconciliation race**: `OrderLifecycle` tetap pemilik transisi.
   Receipt global (`ExternalMoneyReceiptWriter`) mencegah satu pembayaran
   diklaim dua kali.
@@ -123,6 +136,17 @@ belakang reverse proxy yang tidak tercakup trusted-proxy. Bila dinyalakan,
   checkout atau per request admin.
 - **No N+1 on read paths**: status lookup dilakukan per Payment, bukan per
   Order Item. Daftar channel hanya diambil saat readiness cache miss.
+- **Late top-up payment**: deadline lokal hanya menutup presentasi payable,
+  bukan bukti bahwa pelanggan belum membayar. Sweep tetap membaca status
+  authoritative untuk top-up `expired` dalam
+  `reconcile_terminal_lookback_hours` (default 72 jam), dan callback selalu
+  memverifikasi ulang. Hanya provider `paid` yang cocok dengan
+  amount/fee/total/reference yang boleh late settle; evidence yang tidak cocok
+  tetap manual review.
+- **Fair top-up sweep**: kursor `created_at`+`id` yang persisten berputar
+  melalui seluruh target unresolved, sehingga target lama yang terus pending
+  tidak memblokir target berikutnya. `chunk`, `max-top-ups`, cooldown 429, dan
+  execution budget tetap menjadi batas per sweep.
 - **Active poll**: `PollActiveWijayaPayPayment` berjalan tiap ~20 detik untuk
   checkout aktif; sweep menit tetap menjadi jalur pemulihan jika wakeup
   hilang.
@@ -163,9 +187,12 @@ Tidak ada migration baru: kolom generik `payments` dan
 
 - `WijayaPayGatewayTest` — signature, create header/body, duplicate ref,
   lifecycle snapshot, callback verification, signature rejection, duplicate
-  callback, status outage.
+  callback, status outage, storefront invoice presentation, scheduler
+  ambiguous-create recovery vs provider outage, bounded recovery window.
 - `WijayaPayTopUpRailTest` — payable top-up, QR attachment, trusted paid
-  evidence, expired status.
+  evidence, expired status, scheduler late settlement after local expiry,
+  signed top-up callback, no-credit contradiction/manual review, and fair
+  cursor rotation beyond one sweep.
 - `ProductionConfigurationValidatorTest` — production config safety.
 
 ## Framework references
