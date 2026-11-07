@@ -72,7 +72,7 @@ final readonly class WijayaPayInvoice
         $feePayer = self::feePayer($request->amount, $totalBayar, $totalFee);
         self::assertFeeWithinCap($totalFee, $request->amount);
 
-        [$qrString, $qrImageUrl] = self::presentationValues($data);
+        [$qrString, $qrImageUrl] = self::presentationValues($data, $totalBayar);
         $status = self::status($payload, $data, default: WijayaPayStatus::Pending);
 
         return new self(
@@ -195,13 +195,21 @@ final readonly class WijayaPayInvoice
      * @param  array<mixed>  $data
      * @return array{0: ?string, 1: ?string}
      */
-    private static function presentationValues(array $data): array
+    public static function presentationValues(array $data, ?int $total): array
     {
         $qrString = WijayaPayPayloadReader::optionalString($data, 'qr_string', 1_000_000);
         $qrImageUrl = WijayaPayPayloadReader::optionalString($data, 'qr_image', 2048);
 
         if ($qrImageUrl !== null && ! WijayaPayProviderUrl::isAllowed($qrImageUrl)) {
-            throw new WijayaPaySchemaException('presentation');
+            // Some live responses include a third-party QR renderer alongside
+            // the QRIS payload. Never fetch or retain that URL; an independently
+            // validated, amount-matched payload is sufficient for local rendering.
+            if ($qrString === null || $total === null
+                || ! WijayaPayPayableInvoice::isValidQrisPayload($qrString, $total)) {
+                throw new WijayaPaySchemaException('presentation');
+            }
+
+            $qrImageUrl = null;
         }
 
         return [$qrString, $qrImageUrl];

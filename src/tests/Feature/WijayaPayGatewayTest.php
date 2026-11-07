@@ -24,9 +24,11 @@ use App\Services\WijayaPay\WijayaPayCreateInvoice;
 use App\Services\WijayaPay\WijayaPayInvoice;
 use App\Services\WijayaPay\WijayaPayInvoiceLifecycleService;
 use App\Services\WijayaPay\WijayaPayInvoiceOutcome;
+use App\Services\WijayaPay\WijayaPayPayableInvoice;
 use App\Services\WijayaPay\WijayaPayProviderAdapter;
 use App\Services\WijayaPay\WijayaPayProviderException;
 use App\Services\WijayaPay\WijayaPayProviderReadiness;
+use App\Services\WijayaPay\WijayaPaySchemaException;
 use App\Services\WijayaPay\WijayaPaySignature;
 use App\Services\WijayaPay\WijayaPayStatus;
 use App\Services\WijayaPay\WijayaPayStatusResponse;
@@ -273,6 +275,79 @@ class WijayaPayGatewayTest extends TestCase
 
         $this->assertSame('WPTRX825528', $invoice->trxReference);
         $this->assertSame('store', $invoice->feePayer);
+    }
+
+    public function test_external_qr_image_does_not_block_validated_qris_on_create_or_status(): void
+    {
+        $payment = $this->pendingPayment(prepared: false);
+        $qr = '00020101021253033605405101705802ID6304789A';
+        $payload = [
+            'success' => true,
+            'status_pembayaran' => 'pending',
+            'data' => [
+                'ref_id' => $payment->merchant_ref,
+                'trx_reference' => 'WP-EXTERNAL-IMAGE',
+                'payment_method' => 'QRIS',
+                'total_bayar' => 10_170,
+                'total_fee' => 170,
+                'total_diterima' => 10_000,
+                'expired' => now()->addMinutes(15)->format('Y-m-d H:i:s'),
+                'qr_string' => $qr,
+                'qr_image' => 'https://api.qrserver.com/v1/create-qr-code/?data=fixture',
+            ],
+        ];
+        Http::fake([
+            'gateway.wijayapay.com/api/transaction/create' => Http::response($payload),
+            'gateway.wijayapay.com/api/get-status*' => Http::response($payload),
+        ]);
+
+        $provider = app(WijayaPayProviderAdapter::class);
+        $invoice = $provider->createInvoice(new WijayaPayCreateInvoice(
+            self::CODE_MERCHANT, self::API_KEY, 'QRIS', $payment->merchant_ref,
+            10_000, 'https://store.example.test/api/webhook/wijayapay',
+        ));
+        $status = $provider->transactionStatus($payment->merchant_ref);
+        $payable = WijayaPayPayableInvoice::fromInvoice(
+            $payment, $invoice, now()->addMinutes(10),
+        );
+
+        $this->assertSame($qr, $payable->qrisPayload);
+        $this->assertSame(10_170, $payable->totalAmount);
+        $this->assertNull($invoice->qrImageUrl());
+        $this->assertSame($qr, $status->qrPayload());
+        $this->assertNull($status->qrImageUrl());
+        Http::assertSentCount(2);
+    }
+
+    public function test_external_qr_image_still_fails_without_a_valid_amount_matched_qris_payload(): void
+    {
+        foreach ([null, 'invalid', '00020101021253033605405101705802ID6304789A'] as $qr) {
+            $payload = ['status_pembayaran' => 'pending', 'data' => [
+                'ref_id' => 'TEST-UNSAFE-QR',
+                'trx_reference' => 'WP-UNSAFE-QR',
+                'payment_method' => 'QRIS',
+                'total_bayar' => 12_000,
+                'total_fee' => 0,
+                'qr_string' => $qr,
+                'qr_image' => 'https://api.qrserver.com/v1/create-qr-code/?data=fixture',
+            ]];
+
+            foreach (['create', 'status'] as $operation) {
+                try {
+                    if ($operation === 'create') {
+                        WijayaPayInvoice::fromPayload($payload, new WijayaPayCreateInvoice(
+                            self::CODE_MERCHANT, self::API_KEY, 'QRIS', 'TEST-UNSAFE-QR',
+                            12_000, 'https://store.example.test/api/webhook/wijayapay',
+                        ));
+                    } else {
+                        WijayaPayStatusResponse::fromPayload($payload, 'TEST-UNSAFE-QR');
+                    }
+                    $this->fail('An untrusted image must not bypass QRIS validation.');
+                } catch (WijayaPaySchemaException) {
+                    $this->addToAssertionCount(1);
+                }
+            }
+        }
     }
 
     public function test_lifecycle_persists_safe_snapshot_and_reuses_it_without_second_create(): void

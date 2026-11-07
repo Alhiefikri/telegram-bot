@@ -68,6 +68,8 @@ final readonly class WijayaPayStatusResponse
             }
         }
 
+        [$qrString, $qrImageUrl] = WijayaPayInvoice::presentationValues($data, $totalBayar ?? $totalDibayar);
+
         return new self(
             refId: $refId,
             trxReference: WijayaPayPayloadReader::requiredString($data, 'trx_reference', 255),
@@ -80,8 +82,8 @@ final readonly class WijayaPayStatusResponse
             expiresAt: WijayaPayPayloadReader::optionalTimestamp($data, 'expired'),
             updatedAt: WijayaPayPayloadReader::optionalTimestamp($data, 'updated_at'),
             sanitizedPayload: WijayaPayPayloadSanitizer::sanitize($payload),
-            qrString: WijayaPayPayloadReader::optionalString($data, 'qr_string', 1_000_000),
-            qrImageUrl: self::optionalImageUrl($data),
+            qrString: $qrString,
+            qrImageUrl: $qrImageUrl,
         );
     }
 
@@ -93,17 +95,6 @@ final readonly class WijayaPayStatusResponse
     public function qrImageUrl(): ?string
     {
         return $this->qrImageUrl;
-    }
-
-    /** @param array<mixed> $data */
-    private static function optionalImageUrl(array $data): ?string
-    {
-        $url = WijayaPayPayloadReader::optionalString($data, 'qr_image', 2048);
-        if ($url !== null && ! WijayaPayProviderUrl::isAllowed($url)) {
-            throw new WijayaPaySchemaException('transactionStatus');
-        }
-
-        return $url;
     }
 
     public function isPending(): bool
