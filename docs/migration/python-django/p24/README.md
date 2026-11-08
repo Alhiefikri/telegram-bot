@@ -68,7 +68,9 @@ menu/message icon capture:
   bound to the exact text. Saves lock the Product row, compare the old text
   and metadata, enforce the 3000 UTF-16 unit Product Details + Refund Policy
   budget, then write one audit row. A changed row is rejected instead of
-  overwriting newer work.
+  overwriting newer work. The relay returns only a message identity, so the
+  admin preview cannot assert Telegram's echoed custom-emoji entities;
+  persisted metadata and the P06 delivery entity checks remain authoritative.
 - Icons accept one custom-emoji entity (identifier plus API-provided glyph)
   or one plain Unicode emoji. The update compares the old icon/custom values
   so a concurrent edit cannot be silently replaced. `clear` restores the
