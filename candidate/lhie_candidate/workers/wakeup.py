@@ -15,8 +15,9 @@ from .contract import IDLE_POLL_SECONDS, KIND_TO_QUEUE, WAKEUP_QUEUES
 
 MAX_JOB_BYTES = 160
 SOCKET_TIMEOUT = 1.0
-_INTEGER_KINDS = frozenset({"navigation.update", "payment.event", "payment.navigation", "funding.klikqris"})
-_UUID_KINDS = frozenset({"effect", "order"})
+_INTEGER_KINDS = frozenset({"navigation.update", "payment.event", "payment.navigation", "funding.klikqris",
+                            'credential.mail', 'waitlist.confirmation', 'waitlist.delivery'})
+_UUID_KINDS = frozenset({"effect", "order", 'notification.effect', 'bulk.effect'})
 
 
 class InvalidWakeup(ValueError):

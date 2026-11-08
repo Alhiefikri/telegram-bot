@@ -8,26 +8,34 @@ from ..receipt.protocol import ReceiptProtocol, _now
 from ..receipt.transport import ReceiptPreSendError
 from . import broadcast, price
 from .rate import BroadcastRate
+from .proof_publication import PublicationUnavailable
 from .policy import (ADJUSTMENT, BROADCAST, LIMITS, MANUAL, PRICE, PROOF, STOCK,
-                     TERMINAL_CODES, NotEligible, TestRecipients)
+                     ORDER_TYPES, TERMINAL_CODES, NotEligible, TestRecipients)
 
 
 MODELS = {BROADCAST: 'TelegramBroadcastRecipient', STOCK: 'StockNotificationRecipient',
           PRICE: 'ProductPriceChangeNotificationRecipient', PROOF: 'Order',
-          MANUAL: 'Payment', ADJUSTMENT: 'BalanceAdjustmentRequest'}
+          MANUAL: 'Payment', ADJUSTMENT: 'BalanceAdjustmentRequest',
+          **{kind: 'Order' for kind in ORDER_TYPES[:-1]}, ORDER_TYPES[-1]: 'ManualFulfillmentReview'}
 RECIPIENT_TABLES = {BROADCAST: 'telegram_broadcast_recipients',
                     STOCK: 'stock_notification_recipients',
                     PRICE: 'product_price_change_notification_recipients'}
 
 
 class Notifications:
-    def __init__(self, transport, *, recipients=None, using='default', proof=None, rate=None):
+    def __init__(self, transport, *, recipients=None, using='default', proof=None, rate=None, families=None, order_notices=None):
         self.recipients = recipients if recipients is not None else TestRecipients()
-        active = {kind: limit for kind, limit in LIMITS.items() if kind != PROOF or proof is not None}
+        active = {kind: limit for kind, limit in LIMITS.items() if (kind != PROOF or proof is not None)
+                  and (kind not in ORDER_TYPES or order_notices is not None)}
+        if families is not None:
+            if not families or not set(families) <= set(active):
+                raise ValueError('Invalid notification worker families')
+            active = {kind: limit for kind, limit in active.items() if kind in families}
         self.protocol = ReceiptProtocol(using, lease_seconds=180, family_limits=active,
                                         terminal_codes=TERMINAL_CODES)
         self.db = self.protocol.db
         self.transport, self.proof = transport, proof
+        self.order_notices = order_notices
         self.rate = rate if rate is not None else BroadcastRate()
         self._projection_cursor = None
 
@@ -37,9 +45,9 @@ class Notifications:
             raise RuntimeError('Notification transport requires an outermost boundary')
 
     def record(self, *, key, kind, model, source, chat, target, locale, template,
-               method='sendMessage', legacy=None):
+               method='sendMessage', legacy=None, supersedes=None):
         self.db.require_transaction()
-        if (kind not in LIMITS or MODELS[kind] != model or not self.recipients.permits(chat)
+        if (kind not in self.protocol.effect_types or MODELS[kind] != model or not self.recipients.permits(chat)
                 or method not in ('sendMessage', 'sendPhoto')):
             raise NotEligible()
         legacy = legacy or {}
@@ -47,20 +55,22 @@ class Notifications:
         # Import retained delivery history conservatively. An old in-flight
         # claim must not become a new pending send after migration.
         state = ('sent' if legacy.get('sent_at') else 'unknown' if
+                 legacy.get('status') in ('sending', 'unknown', 'manual_review') or
                  legacy.get('send_started_at') or legacy.get('claim_expires_at') else
-                 'failed' if legacy.get('terminal_failed_at') or legacy.get('failed_at') else 'pending')
+                  'failed' if legacy.get('terminal_failed_at') or legacy.get('failed_at') or legacy.get('status') == 'failed' else 'pending')
         terminal = bool(legacy.get('terminal_failed_at'))
         self.db.execute('''INSERT INTO public.telegram_outbound_effects
             (id,effect_key,effect_group_key,sequence,effect_type,source_type,source_id,target_type,
              telegram_chat_id,queue,telegram_method,locale,template_version,state,attempts,
-             next_attempt_at,sent_at,unknown_at,failed_at,last_error_code,outcome_metadata,created_at,updated_at)
-            VALUES (%s,%s,%s,1,%s,%s,%s,%s,%s,'notifications',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'{}',%s,%s)
+              next_attempt_at,sent_at,unknown_at,failed_at,last_error_code,telegram_message_id,supersedes_effect_id,outcome_metadata,created_at,updated_at)
+             VALUES (%s,%s,%s,1,%s,%s,%s,%s,%s,'notifications',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)
             ON CONFLICT (effect_key) DO NOTHING''',
             (str(uuid4()), key, key, kind, 'App\\Models\\' + model, str(source), target, str(chat), method,
              locale, template, state, legacy.get('attempts', 0),
              legacy.get('retry_at') or at if state in ('pending', 'failed') and not terminal else None,
              legacy.get('sent_at'), at if state == 'unknown' else None, legacy.get('failed_at'),
-             'legacy_notification_terminal' if terminal else None, at, at))
+              'legacy_notification_terminal' if terminal else None, legacy.get('telegram_message_id'), supersedes,
+              json.dumps({'delivery_context': 'order_lifecycle'} if kind in ORDER_TYPES else {}), at, at))
         return self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE effect_key=%s', (key,))
 
     def _recipient(self, effect, table):
@@ -75,6 +85,8 @@ class Notifications:
         if (kind not in MODELS or effect['source_type'] != 'App\\Models\\' + MODELS[kind]
                 or not self.recipients.permits(effect['telegram_chat_id'])):
             raise NotEligible()
+        if kind in ORDER_TYPES and self.order_notices is not None:
+            return self.order_notices.payload(effect)
         if kind == BROADCAST:
             row = self._recipient(effect, RECIPIENT_TABLES[kind])
             source = self.db.one('SELECT * FROM public.telegram_broadcasts WHERE id=%s', (row['broadcast_id'],))
@@ -128,6 +140,12 @@ class Notifications:
         if (not preview or preview['effect_type'] not in self.protocol.effect_types
                 or not self.recipients.permits(preview['telegram_chat_id'])):
             return 'disabled'
+        if preview['effect_type'] == PROOF and self.proof is not None:
+            self.proof.prepare(effect_id)
+        if preview['effect_type'] in ORDER_TYPES and self.order_notices is not None:
+            pending = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id=%s', (effect_id,))
+            if not self.order_notices.prepare(pending):
+                return 'waiting_outcome'
         if preview['effect_type'] in (BROADCAST, STOCK, PRICE) and not self.rate.acquire():
             return 'rate_limited'
         effect = self.protocol.claim(effect_id)
@@ -136,12 +154,17 @@ class Notifications:
         token = effect['claim_token']
         try:
             payload = self.payload(effect)
+        except PublicationUnavailable:
+            self.protocol.finalize_failed(effect_id, token, 'telegram_delivery_failed', retry_after_seconds=60)
+            return 'deferred'
         except NotEligible:
             self.protocol.finalize_failed(effect_id, token, 'notification_not_eligible')
             return 'ineligible'
         except Exception:
             self.protocol.finalize_failed(effect_id, token, 'notification_render_invalid')
             return 'render_failed'
+        if effect['effect_type'] in ORDER_TYPES[1:3] and self.order_notices is not None:
+            self.order_notices.cleanup(effect['source_id'])
         try:
             result = self.transport.execute(effect['telegram_method'], payload)
         except ReceiptPreSendError:
@@ -160,6 +183,9 @@ class Notifications:
             return 'fenced'
         self.project(row)
         self._aggregate(row)
+        if (row['state'] == 'sent' and row['effect_type'] in ORDER_TYPES[1:3]
+                and self.order_notices is not None):
+            self.order_notices.cleanup(row['source_id'])
         return row['state']
 
     def _aggregate(self, effect):
@@ -175,6 +201,8 @@ class Notifications:
         if effect['source_type'] != 'App\\Models\\' + MODELS.get(kind, ''):
             return 0
         at = _now()
+        if kind in ORDER_TYPES and self.order_notices is not None:
+            return self.order_notices.project(effect)
         if kind in RECIPIENT_TABLES:
             table = RECIPIENT_TABLES[kind]
             if effect['state'] == 'sent':
@@ -199,9 +227,22 @@ class Notifications:
         if kind == PROOF and effect['state'] in ('sent', 'unknown', 'manual_review'):
             return self.db.execute('''UPDATE public.sales_proof_posts SET status=%s,
                 telegram_message_id=%s,sent_at=%s,attempts=%s,last_error=%s,updated_at=%s
-                WHERE order_id=%s AND status<>'sent' ''',
+                WHERE order_id=%s AND (status,telegram_message_id,sent_at,attempts,last_error)
+                  IS DISTINCT FROM (%s,%s,%s,%s,%s)
+                AND NOT EXISTS (SELECT 1 FROM public.telegram_outbound_effects newer
+                    WHERE newer.source_type=%s AND newer.source_id=%s AND newer.effect_type=%s
+                      AND newer.sequence>%s AND newer.state='sent') ''',
                 (effect['state'], effect['telegram_message_id'], effect['sent_at'], effect['attempts'],
-                 None if effect['state'] == 'sent' else 'Delivery outcome requires review.', at, effect['source_id']))
+                 None if effect['state'] == 'sent' else 'Delivery outcome requires review.', at, effect['source_id'],
+                 effect['state'], effect['telegram_message_id'], effect['sent_at'], effect['attempts'],
+                 None if effect['state'] == 'sent' else 'Delivery outcome requires review.',
+                 effect['source_type'], effect['source_id'], kind, effect['sequence']))
+        if kind == PROOF and effect['state'] == 'failed':
+            return self.db.execute('''UPDATE public.sales_proof_posts SET status='failed',attempts=%s,
+                last_error=%s,updated_at=%s WHERE order_id=%s AND status NOT IN ('sent','unknown','manual_review')
+                  AND (status,attempts,last_error) IS DISTINCT FROM ('failed',%s,%s)''',
+                (effect['attempts'], effect['last_error_code'], at, effect['source_id'],
+                 effect['attempts'], effect['last_error_code']))
         return 0
 
     def recover(self, limit=25):
@@ -224,10 +265,15 @@ class Notifications:
             self._aggregate(effect)
         self._projection_cursor = str(rows[-1]['id']) if rows else None
         sources = self.db.rows('''SELECT id FROM public.telegram_broadcasts
-            WHERE recipients_materialized_at IS NULL ORDER BY id LIMIT %s''', (limit,))
+            WHERE recipients_materialized_at IS NULL ORDER BY id LIMIT %s''', (limit,)) if BROADCAST in self.protocol.effect_types else ()
         for source in sources:
             broadcast.materialize(self.db, self.recipients, source['id'], self.record)
         self.materialize_recipients(limit)
+        if PROOF in self.protocol.effect_types and self.proof is not None:
+            self.proof.discover(self.record, limit)
+        if self.order_notices is not None:
+            self.order_notices.discover(self.record, limit)
+            self.order_notices.recover_results(self.record, limit)
         outcomes = {}
         for effect in self.protocol.ready_effects(limit, chats=chats):
             result = self.deliver(effect['id'])
@@ -245,6 +291,8 @@ class Notifications:
     def materialize_recipients(self, limit):
         """Recover missing effects from existing immutable stock/price snapshots."""
         for kind in (STOCK, PRICE):
+            if kind not in self.protocol.effect_types:
+                continue
             table = RECIPIENT_TABLES[kind]
             rows = self.db.rows(f'''SELECT r.* FROM public.{table} r
                 WHERE r.telegram_id=ANY(%s) AND NOT EXISTS (

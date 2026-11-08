@@ -7,7 +7,9 @@ import sys
 
 def _worker(queue, metrics_path, iterations):
     from lhie_candidate.runtime import load_runtime
-    if not load_runtime().workers:
+    runtime = load_runtime()
+    from lhie_candidate.workers.contract import NOTIFICATION_TOPOLOGY
+    if not runtime.workers or (queue in NOTIFICATION_TOPOLOGY and not runtime.notifications):
         raise RuntimeError("Worker admission refused")
     from lhie_candidate.startup import configure_django
     configure_django()
@@ -33,10 +35,11 @@ def _worker(queue, metrics_path, iterations):
 
 def _supervisor(metrics_dir):
     from lhie_candidate.runtime import load_runtime
-    if not load_runtime().workers:
+    runtime = load_runtime()
+    if not runtime.workers:
         raise RuntimeError("Worker admission refused")
     from lhie_candidate.workers.supervisor import run
-    return run(metrics_dir, include_http=False)
+    return run(metrics_dir, include_http=False, notifications=runtime.notifications)
 
 
 def main(argv=None):

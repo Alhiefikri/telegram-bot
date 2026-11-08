@@ -1,8 +1,12 @@
 from django.urls import path
 
 from . import catalog
+from . import waitlist
 
 urlpatterns = [
+    path('produk/<int:product_id>/waitlist', waitlist.subscribe),
+    path('waitlist/confirm/<int:subscription_id>', waitlist.resolve, {'purpose': 'confirm'}),
+    path('waitlist/unsubscribe/<int:subscription_id>', waitlist.resolve, {'purpose': 'unsubscribe'}),
     path('robots.txt', catalog.robots, name='storefront-robots'),
     path('sitemap.xml', catalog.sitemap, name='storefront-sitemap'),
     path('llms.txt', catalog.llms, name='storefront-llms'),

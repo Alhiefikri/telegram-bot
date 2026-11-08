@@ -19,7 +19,7 @@ def main(argv=None):
         # P05/P06 raw stacks stay HTTP-only; P10 admission enables the workers.
         os.execv(sys.executable, [sys.executable, str(ROOT / "serve.py")])
     from lhie_candidate.workers.supervisor import run
-    return run(args.metrics_dir, include_http=True)
+    return run(args.metrics_dir, include_http=True, notifications=runtime.notifications)
 
 
 if __name__ == "__main__":

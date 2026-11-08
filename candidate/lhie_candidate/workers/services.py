@@ -101,6 +101,9 @@ def receipt_handler():
 
 def build_handler(queue, *, funding_klik=None, funding=None, usdt_funding=None, usdt_settlement=None, reorg_monitor=None):
     validate_queue_name(queue)
+    if queue in ('notice', 'bulk', 'mail'):
+        from .notifications import build_notification_handler
+        return build_notification_handler(queue)
     if queue == "interaction":
         return interaction_handler(usdt_funding=usdt_funding, usdt_settlement=usdt_settlement)
     if queue == "payment":

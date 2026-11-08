@@ -60,7 +60,7 @@ def main():
         (output / 'browser-finished').unlink(missing_ok=True)
         (output / 'browser-fixture.json').unlink(missing_ok=True)
     cli('reset','candidate')
-    harness.candidate_admission(config,harness.STATE / 'candidate')
+    harness.candidate_admission(config,harness.STATE / 'candidate', workers=notifications, notifications=notifications)
     try:
         manifest = cli('start','candidate','--quarantine')
         boundary = container('candidate','boundary')
@@ -75,12 +75,14 @@ def main():
         schema = '\n'.join((ROOT / 'candidate/lhie_candidate/navigation' / name).read_text()
             for name in ('schema.sql','ingress_schema.sql','assets_schema.sql','grants.sql'))
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/checkout/grants.sql').read_text()
-        if lifecycle or supplier or p16 or p17 or api or storefront:
+        if notifications or lifecycle or supplier or p16 or p17 or api or storefront:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
         if receipt or lifecycle or supplier or p16 or p17 or api or storefront:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
         if notifications:
+            schema += '\nALTER ROLE candidate_runtime CONNECTION LIMIT 7;\n'
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/notifications/grants.sql').read_text()
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/notifications/waitlist_grants.sql').read_text()
         if p16 or p17:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/grants.sql').read_text()
         if p17:
@@ -94,9 +96,11 @@ def main():
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
                 '-c',"CREATE ROLE candidate_supplier_operator LOGIN PASSWORD 'candidate-local-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS")
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/operator_grants.sql').read_text()
-        if auth:
+        if auth or notifications:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/schema.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/grants.sql').read_text()
+        if notifications:
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/storefront/catalog_grants.sql').read_text()
         if storefront:
             schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/storefront' / name).read_text()
                                        for name in ('catalog_grants.sql', 'grants.sql', 'account_grants.sql',
@@ -115,6 +119,9 @@ def main():
         if receipt or lifecycle or auth or supplier or p16 or p17 or api:
             oracle_key.write_text('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n')
             oracle_key.chmod(0o600)
+        candidate_image = ('lhie-p13-candidate:local' if notifications or admin or supplier or p17 or api or storefront
+                           else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16
+                           else 'lhie-p05-candidate:1')
         command = ['docker','run','--rm','-i','--network','container:'+boundary,
             '--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true',
             '--user','1000:1000','--cpus','1.25','--memory','1216m','--memory-swap','1216m',
@@ -136,7 +143,7 @@ def main():
             '--env',f'P17_USDT_SMOKE={"1" if p17 else "0"}',
             '--env',f'P20_API_SMOKE={"1" if api else "0"}',
             '--env',f'P18_SUPPLIER_SMOKE={"1" if supplier else "0"}','--entrypoint','python',
-            'lhie-p13-candidate:local' if admin or supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
+            candidate_image,'smoke_checkout.py']
         probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=1200 if browser else 240)
         if probe.returncode:
             if receipt and not notifications:
@@ -160,9 +167,31 @@ def main():
                  'tools/migration_harness/boundary.py', 'tools/migration_harness/harness.py'))
         if notifications:
             sources.extend(sorted((ROOT / 'candidate/lhie_candidate/notifications').glob('*.py')))
+            sources.extend(sorted((ROOT / 'candidate/lhie_candidate/workers').glob('*.py')))
             sources.extend(ROOT / name for name in (
                 'candidate/lhie_candidate/notifications/grants.sql', 'candidate/tests/test_notifications.py',
-                'candidate/tests/test_notifications_postgres.py', 'candidate/notifications.py'))
+                 'candidate/tests/test_notifications_postgres.py', 'candidate/notifications.py'))
+            sources.extend(ROOT / name for name in (
+                'candidate/tests/test_notification_completion.py', 'candidate/tests/test_runtime.py',
+                'candidate/lhie_candidate/runtime.py', 'candidate/workers.py', 'candidate/stack.py'))
+            sources.extend((ROOT / 'candidate/templates/notifications').glob('*.html'))
+            sources.extend(ROOT / name for name in (
+                'candidate/lhie_candidate/notifications/waitlist_grants.sql',
+                'candidate/tests/test_waitlist.py', 'candidate/tests/test_waitlist_postgres.py',
+                'candidate/lhie_candidate/storefront/waitlist.py',
+                'candidate/lhie_candidate/storefront/catalog.py',
+                'candidate/lhie_candidate/storefront/catalog_urls.py',
+                'candidate/lhie_candidate/storefront/catalog_grants.sql',
+                'candidate/lhie_candidate/auth/schema.sql',
+                'candidate/lhie_candidate/auth/grants.sql',
+                'candidate/lhie_candidate/auth/sessions.py',
+                'candidate/lhie_candidate/compat/identity.py',
+                'candidate/lhie_candidate/navigation/repository.py',
+                'src/app/Models/ProductWaitlistNotification.php',
+                'src/tests/Feature/ProductWaitlistTest.php',
+                'candidate/lhie_candidate/checkout/privileges.py'))
+            sources.extend((ROOT / 'candidate/templates/storefront').glob('waitlist*.html'))
+            sources.append(ROOT / 'candidate/templates/storefront/catalog_product.html')
         if lifecycle:
             sources.extend(ROOT / name for name in (
                 'candidate/tests/test_order_lifecycle_postgres.py', 'candidate/tests/test_order_refunds.py',
@@ -241,7 +270,7 @@ def main():
         observed['source_sha256'] = {str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest()
                                       for path in sources if path.is_file()}
         observed['base_revision'] = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-        observed['dependency_image'] = docker('image','inspect','lhie-p13-candidate:local' if supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','--format','{{.Id}}')
+        observed['dependency_image'] = docker('image','inspect',candidate_image,'--format','{{.Id}}')
         if receipt or auth:
             observed['boundary_image'] = docker('image','inspect',harness.IMAGE,'--format','{{.Id}}')
         migration_digest = hashlib.sha256()
@@ -266,6 +295,25 @@ def main():
                     'src/app/Services/Telegram/TelegramOutboundEffectService.php',
                     'src/app/Services/Telegram/TelegramReceiptNotifier.php',
                     'src/app/Services/Telegram/ReceiptDeliveryPipeline.php')})
+        if notifications:
+            observed['legacy_owner_sha256'].update({name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                for name in ('src/app/Services/ProductWaitlistSubscriptionService.php',
+                    'src/app/Services/Telegram/AdminPaidOrderOutcome.php',
+                    'src/app/Services/Telegram/AdminOrderNotificationDeliveryPipeline.php',
+                    'src/app/Services/Telegram/TelegramAdminOrderNotifier.php',
+                    'src/app/Services/Telegram/TelegramAdminPaidOrderNotifier.php',
+                    'src/app/Services/Telegram/SalesProofDeliveryPipeline.php',
+                    'src/app/Services/Telegram/SalesProofPostFormatter.php',
+                    'src/app/Services/Telegram/SalesProofPostNumbering.php',
+                    'src/app/Services/OrderCredentialMailService.php',
+                    'src/resources/views/emails/order-credential.blade.php',
+                    'src/resources/views/emails/order-credential-text.blade.php',
+                    'src/app/Services/ProductWaitlistNotificationService.php',
+                    'src/app/Services/ProductWaitlistEmailHasher.php',
+                    'src/resources/views/emails/product-waitlist-confirmation.blade.php',
+                    'src/resources/views/emails/product-waitlist-restocked.blade.php',
+                    'src/resources/views/emails/product-waitlist-confirmation-text.blade.php',
+                    'src/resources/views/emails/product-waitlist-restocked-text.blade.php')})
         if auth:
             observed['legacy_owner_sha256'].update({name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
                 for name in ('src/app/Services/Customer/CustomerPasswordAuthenticationService.php',
@@ -303,6 +351,15 @@ def main():
             observed['limits'] = ['Synthetic disposable PostgreSQL and Redis; fake relay only, no Telegram',
                 'Injected lost ACK and crash boundaries; no production delivery or history qualification',
                 'Receipt and checkout grants provisioned explicitly, never at startup']
+        if notifications:
+            resources_path = output / 'notification-resources.json'
+            observed['notification_resources'] = json.loads(resources_path.read_text())
+            resources_path.unlink()
+            observed['limits'] = ['Synthetic disposable PostgreSQL/Redis, fake Telegram relay and loopback SMTP sink only',
+                'Waitlist HTTP is exercised through Django request middleware, not a browser/visual qualification',
+                'Waitlist is disabled by default and admits only reserved .invalid mail targets when explicitly provisioned',
+                'Optional eight-process profile: seven runtime connections; cgroup sampling includes probe/harness overhead, not production capacity',
+                'No full P25 parity, P26 acceptance, live delivery, production or CI/CD operation']
         if lifecycle:
             observed['limits'] = ['Synthetic disposable PostgreSQL; no production data or historical key qualification',
                 'Provider observations use the existing Unix-socket fixture, not live provider qualification',

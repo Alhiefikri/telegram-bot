@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from .contract import (QUEUES, RESTART_LIMIT, RESTART_WINDOW_SECONDS,
+from .contract import (QUEUES, NOTIFICATION_TOPOLOGY, RESTART_LIMIT, RESTART_WINDOW_SECONDS,
                        SHUTDOWN_GRACE_SECONDS)
 
 
@@ -30,12 +30,12 @@ def _spawn(command):
     )
 
 
-def commands(metrics_dir, *, include_http):
+def commands(metrics_dir, *, include_http, notifications=False):
     directory = Path(metrics_dir)
     values = {}
     if include_http:
         values["http"] = [sys.executable, str(ROOT / "serve.py")]
-    for queue in QUEUES:
+    for queue in (*QUEUES, *(NOTIFICATION_TOPOLOGY if notifications else ())):
         values[queue] = [
             sys.executable,
             str(ROOT / "workers.py"),
@@ -47,11 +47,11 @@ def commands(metrics_dir, *, include_http):
     return values
 
 
-def run(metrics_dir=DEFAULT_METRICS_DIR, *, include_http=True):
+def run(metrics_dir=DEFAULT_METRICS_DIR, *, include_http=True, notifications=False):
     directory = Path(metrics_dir)
     if not directory.is_dir():
         raise ValueError("Metrics directory is unavailable")
-    planned = commands(directory, include_http=include_http)
+    planned = commands(directory, include_http=include_http, notifications=notifications)
     running = {}
     restarts = {name: [] for name in planned}
     stopping = False

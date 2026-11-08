@@ -48,7 +48,7 @@ def run():
     if os.environ.get('P22_ADMIN_SMOKE') != '1':
         outcomes = exercise(fixtures)
     import django
-    dataset = ('synthetic-p25-notifications-v1' if os.environ.get('P25_NOTIFICATION_SMOKE') == '1'
+    dataset = ('synthetic-p25-notifications-isolation-v3' if os.environ.get('P25_NOTIFICATION_SMOKE') == '1'
                else 'synthetic-p23-admin-v1' if os.environ.get('P22_ADMIN_SMOKE') == '1'
                else 'synthetic-p21-storefront-v1' if os.environ.get('P21_STOREFRONT_SMOKE') == '1'
                else 'synthetic-p20-api-v1' if os.environ.get('P20_API_SMOKE') == '1'

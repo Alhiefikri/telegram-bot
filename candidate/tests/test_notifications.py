@@ -104,8 +104,10 @@ class NotificationTests(unittest.TestCase):
         text = credential_text(source)
         self.assertIn('stock@example.invalid', text)
         self.assertIn('synthetic-password', text)
-        self.assertIn('Auth Token: synthetic-token', text)
-        self.assertNotIn('Recovery Key', text)
+        self.assertIn('auth token : synthetic-token', text)
+        self.assertIn('Jangan bagikan data akun', text)
+        source['recovery_key'] = 'must-never-render-an-ownership-capability'
+        self.assertNotIn(source['recovery_key'], credential_text(source))
 
     def service(self, result):
         from lhie_candidate.notifications.policy import BROADCAST

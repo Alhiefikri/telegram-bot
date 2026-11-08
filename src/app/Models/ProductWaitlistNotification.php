@@ -27,6 +27,8 @@ class ProductWaitlistNotification extends Model
 
     public const STATUS_FAILED = 'failed';
 
+    public const STATUS_UNKNOWN = 'unknown';
+
     public const STATUS_SKIPPED = 'skipped';
 
     protected $hidden = ['last_error'];

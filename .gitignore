@@ -77,3 +77,4 @@ tools/migration_compat/__pycache__/
 !candidate/lhie_candidate/funding/policy_admin_grants.sql
 !candidate/lhie_candidate/navigation/bot_grants.sql
 !candidate/lhie_candidate/navigation/admin_grants.sql
+!candidate/lhie_candidate/notifications/waitlist_grants.sql

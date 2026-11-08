@@ -421,7 +421,7 @@ def manifest(config, directory, command):
     return path
 
 
-def candidate_admission(config, directory, *, workers=False):
+def candidate_admission(config, directory, *, workers=False, notifications=False):
     """Project only non-secret P01 facts into the application's smaller contract."""
     runtime = {
         "version": 1, "identity": "candidate", "dataset": config["dataset"],
@@ -434,6 +434,11 @@ def candidate_admission(config, directory, *, workers=False):
     }
     if workers:
         runtime["workers"] = True
+    if notifications:
+        if workers is not True or notifications is not True:
+            raise Refused('Notification workers require explicit worker admission')
+        runtime['notifications'] = True
+        runtime['limits'] = {'processes': 8, 'threads': 8, 'db_connections': 7}
     if config.get("p08_callback") is not None:
         internal_key = directory / "p08-internal-key"
         try:

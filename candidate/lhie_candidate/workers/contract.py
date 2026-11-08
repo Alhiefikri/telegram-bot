@@ -104,8 +104,14 @@ TOPOLOGY = {
 }
 
 QUEUES = tuple(TOPOLOGY)
-WAKEUP_QUEUES = {spec.wakeup_queue: spec for spec in TOPOLOGY.values()}
-KIND_TO_QUEUE = {kind: spec.wakeup_queue for spec in TOPOLOGY.values() for kind in spec.kinds}
+NOTIFICATION_TOPOLOGY = {
+    'notice': QueueSpec('notice', 'candidate:notices', ('notification.effect',), 10, 5, 10, 3),
+    'bulk': QueueSpec('bulk', 'candidate:bulk', ('bulk.effect',), 10, 5, 10, 5),
+    'mail': QueueSpec('mail', 'candidate:mail', ('credential.mail', 'waitlist.confirmation', 'waitlist.delivery'), 5, 5, 5, 5),
+}
+ALL_TOPOLOGY = {**TOPOLOGY, **NOTIFICATION_TOPOLOGY}
+WAKEUP_QUEUES = {spec.wakeup_queue: spec for spec in ALL_TOPOLOGY.values()}
+KIND_TO_QUEUE = {kind: spec.wakeup_queue for spec in ALL_TOPOLOGY.values() for kind in spec.kinds}
 RUNTIME_PROCESSES = SUPERVISOR_PROCESSES + HTTP_PROCESSES + len(QUEUES)
 RUNTIME_THREADS = RUNTIME_PROCESSES
 RUNTIME_DB_CONNECTIONS = DB_CONNECTIONS_PER_HTTP + DB_CONNECTIONS_PER_WORKER * len(QUEUES)
@@ -113,7 +119,7 @@ RUNTIME_DB_CONNECTIONS = DB_CONNECTIONS_PER_HTTP + DB_CONNECTIONS_PER_WORKER * l
 
 def queue_spec(name: str) -> QueueSpec:
     try:
-        return TOPOLOGY[name]
+        return ALL_TOPOLOGY[name]
     except (KeyError, TypeError):
         raise ValueError("Unknown worker queue") from None
 
@@ -123,12 +129,12 @@ def validate_queue_name(name: str) -> str:
     return name
 
 
-def worker_connection_budget() -> dict[str, int]:
+def worker_connection_budget(*, notifications=False) -> dict[str, int]:
     """The admitted whole-runtime ceilings, not a measured usage claim."""
     return {
-        "processes": RUNTIME_PROCESSES,
-        "threads": RUNTIME_THREADS,
-        "db_connections": RUNTIME_DB_CONNECTIONS,
+        "processes": RUNTIME_PROCESSES + (len(NOTIFICATION_TOPOLOGY) if notifications else 0),
+        "threads": RUNTIME_THREADS + (len(NOTIFICATION_TOPOLOGY) if notifications else 0),
+        "db_connections": RUNTIME_DB_CONNECTIONS + (len(NOTIFICATION_TOPOLOGY) if notifications else 0),
     }
 
 

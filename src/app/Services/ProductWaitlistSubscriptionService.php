@@ -80,6 +80,10 @@ final class ProductWaitlistSubscriptionService
                 return null;
             }
 
+            if ($subscription->confirmation_last_error === 'mail_delivery_unknown') {
+                return null;
+            }
+
             if ($subscription->confirmation_expires_at !== null
                 && $subscription->confirmation_expires_at->isFuture()) {
                 return null;
@@ -117,6 +121,7 @@ final class ProductWaitlistSubscriptionService
             $subscription = ProductWaitlistSubscription::query()->whereKey($subscriptionId)->lockForUpdate()->first();
             if ($subscription === null
                 || $subscription->status !== ProductWaitlistSubscription::STATUS_PENDING_CONFIRMATION
+                || $subscription->confirmation_last_error === 'mail_delivery_unknown'
                 || $subscription->confirmation_sent_at !== null
                 || $subscription->confirmation_expires_at === null
                 || $subscription->confirmation_expires_at->isPast()) {
@@ -275,6 +280,10 @@ final class ProductWaitlistSubscriptionService
         $subscriptions = ProductWaitlistSubscription::query()
             ->where('status', ProductWaitlistSubscription::STATUS_PENDING_CONFIRMATION)
             ->whereNull('confirmation_sent_at')
+            ->where(function ($query): void {
+                $query->whereNull('confirmation_last_error')
+                    ->orWhere('confirmation_last_error', '<>', 'mail_delivery_unknown');
+            })
             ->whereNotNull('confirmation_expires_at')
             ->where('confirmation_expires_at', '>', now())
             ->where(function ($query): void {

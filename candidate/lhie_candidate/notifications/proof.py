@@ -33,7 +33,7 @@ class SalesProofEligibility:
             ORDER BY paid_at,id LIMIT 1''', (order_id,))
         if not payment:
             raise NotEligible()
-        items = self.db.rows('''SELECT i.id,i.product_id,i.product_name,i.product_icon,i.quantity,
+        items = self.db.rows('''SELECT i.id,i.product_id,i.product_name,i.product_icon,i.product_custom_emoji_id,i.quantity,
             i.quantity_price_tier_minimum,i.unit_price,i.subtotal,i.usdt_unit_price,i.usdt_subtotal,
             (SELECT COUNT(*) FROM public.product_stock_items s WHERE s.order_item_id=i.id
               AND s.product_id=i.product_id AND s.retired_at IS NULL) AS allocated,
@@ -55,7 +55,8 @@ class SalesProofEligibility:
         currency = payment['currency']
         if currency not in ('IDR', 'USDT'):
             raise NotEligible()
-        public_items = [{'product_name': i['product_name'], 'icon': i['product_icon'],
+        public_items = [{'product_id': i['product_id'], 'product_name': i['product_name'], 'icon': i['product_icon'],
+                          'custom_emoji_id': i['product_custom_emoji_id'],
                          'quantity': i['quantity'], 'quantity_price_tier_minimum': i['quantity_price_tier_minimum'],
                          'unit_price': i['usdt_unit_price'] if currency == 'USDT' else i['unit_price'],
                          'subtotal': i['usdt_subtotal'] if currency == 'USDT' else i['subtotal']} for i in items]
@@ -68,6 +69,7 @@ class SalesProofEligibility:
         if order['api_order_claim_id'] is not None:
             method += ' · API'
         return {'invoice_number': order['invoice_number'], 'buyer_name': mask(order['first_name'], order['username']),
+                'legacy_buyer': str(order['username'] or order['first_name'] or 'Buyer').strip().lstrip('@')[:2] + '***',
                 'chat_id': None, 'paid_at': paid, 'payment_method': method, 'currency': currency,
                 'items': public_items, 'provider_fee': payment['provider_fee'] or 0,
                 'payment_subtotal': payment['amount'] if currency == 'USDT' else None,

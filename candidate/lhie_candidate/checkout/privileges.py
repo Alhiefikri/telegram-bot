@@ -240,14 +240,30 @@ def verify_public_writes(cursor):
     checkout = cursor.fetchone()[0]
     allowed_insert = NAVIGATION_INSERT | (CHECKOUT_INSERT if checkout else {})
     allowed_update = NAVIGATION_UPDATE | (CHECKOUT_UPDATE if checkout else {})
+    cursor.execute("SELECT has_column_privilege(current_user,'public.product_waitlist_subscriptions','email','INSERT')")
+    if cursor.fetchone()[0]:
+        allowed_insert = _merge(allowed_insert, {
+            'product_waitlist_subscriptions': set('product_id email email_hash status confirmation_expires_at created_at updated_at'.split()),
+            'product_waitlist_events': set('inventory_movement_id product_id available_stock status created_at updated_at'.split()),
+            'product_waitlist_notifications': set('product_waitlist_event_id subscription_id status created_at updated_at'.split()),
+        })
+        allowed_update = _merge(allowed_update, {
+            'product_waitlist_subscriptions': set('email status confirmation_expires_at confirmation_sent_at confirmation_delivery_started_at confirmation_attempts confirmation_last_error confirmed_at unsubscribed_at notified_at updated_at'.split()),
+            'product_waitlist_events': set('materialization_cursor status materialized_at skipped_at updated_at'.split()),
+            'product_waitlist_notifications': set('status attempts delivery_started_at sent_at failed_at next_attempt_at last_error updated_at'.split()),
+        })
     cursor.execute("SELECT has_column_privilege(current_user,'public.order_notification_events','recipient_email','INSERT')")
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, {
-            'telegram_outbound_effects': {'sent_at', 'unknown_at'},
+            'telegram_outbound_effects': {'sent_at', 'unknown_at', 'telegram_message_id'},
+            'sales_proof_posts': set('order_id status created_at updated_at'.split()),
             'order_notification_events': set('order_id event_type recipient_email status attempts next_attempt_at created_at updated_at'.split()),
             'telegram_broadcast_recipients': set('broadcast_id customer_id telegram_id locale created_at updated_at'.split()),
         })
         allowed_update = _merge(allowed_update, {
+            'telegram_outbound_effects': {'telegram_method'},
+            'orders': set('admin_pending_order_notified_at admin_paid_order_notified_at admin_expired_order_notified_at admin_pending_order_notification_chat_id admin_pending_order_notification_message_id admin_pending_order_notification_deleted_at'.split()),
+            'sales_proof_posts': set('status telegram_message_id sent_at attempts last_error updated_at'.split()),
             'payments': {'payment_proof_forwarded_at'},
             'telegram_broadcasts': set('recipient_count sent_count failed_count pending_count terminal_failed_count status completed_at updated_at'.split()),
             'telegram_broadcast_recipients': set('sent_at failed_at terminal_failed_at retry_at last_error attempts updated_at'.split()),

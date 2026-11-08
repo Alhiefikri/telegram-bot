@@ -10,6 +10,9 @@ class NotificationTransport:
     def execute(self, method, payload):
         if method not in ('sendMessage', 'sendPhoto'):
             raise ReceiptPreSendError('Invalid notification method')
+        if method == 'sendPhoto' and isinstance(payload.get('photo'), bytes):
+            from ..receipt.transport import RelayTransport
+            return RelayTransport().execute(method, payload)
         payload = normalize(payload)
         response = self.relay._request(method, payload)
         description = str(response.get('description', '')).lower() if isinstance(response, dict) else ''

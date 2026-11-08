@@ -332,6 +332,43 @@ class ProductWaitlistTest extends TestCase
         Queue::assertPushed(SendProductWaitlistConfirmation::class, 2);
     }
 
+    public function test_python_unknown_mail_is_retained_without_legacy_resend(): void
+    {
+        Queue::fake();
+        Mail::fake();
+        $product = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+        $subscriptions = app(ProductWaitlistSubscriptionService::class);
+        $subscriptions->subscribe($product, 'unknown-confirm@example.test');
+        $confirmation = ProductWaitlistSubscription::query()->sole();
+        $confirmation->forceFill([
+            'confirmation_delivery_started_at' => now()->subMinutes(6),
+            'confirmation_last_error' => 'mail_delivery_unknown',
+        ])->save();
+        $subscriptions->sendConfirmation($confirmation->id);
+        $this->assertSame(0, $subscriptions->reconcileConfirmations());
+        $this->assertNotNull($confirmation->fresh()->confirmation_delivery_started_at);
+
+        $active = $this->activeSubscription($product, 'unknown-restock@example.test');
+        $movementId = app(StockAdjustmentService::class)->adjustWithAvailability(
+            $product, 1, 'unknown waitlist', User::factory()->create(),
+            '203.0.113.25', ['synthetic-unknown-unit'],
+        )['movement_id'];
+        $service = app(ProductWaitlistNotificationService::class);
+        $service->materialize($movementId);
+        $notification = ProductWaitlistNotification::query()->where('subscription_id', $active->id)->sole();
+        $notification->forceFill([
+            'status' => ProductWaitlistNotification::STATUS_UNKNOWN,
+            'delivery_started_at' => now()->subMinutes(6),
+            'last_error' => 'mail_delivery_unknown',
+            'attempts' => 1,
+        ])->save();
+        $service->deliver($notification->id);
+        $this->assertSame(ProductWaitlistNotification::STATUS_UNKNOWN, $notification->fresh()->status);
+        $this->assertSame(1, $notification->fresh()->attempts);
+        $this->assertNotNull($notification->fresh()->delivery_started_at);
+        Mail::assertNothingSent();
+    }
+
     private function activeSubscription(Product $product, string $email): ProductWaitlistSubscription
     {
         $normalized = app(ProductWaitlistEmailHasher::class)->normalize($email);

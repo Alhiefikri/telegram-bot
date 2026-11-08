@@ -8,11 +8,13 @@ from datetime import timedelta
 from django.core.mail import EmailMultiAlternatives
 from django.core.mail.backends.smtp import EmailBackend
 from django.db import connections, transaction
+from django.template.loader import render_to_string
 
 from ..checkout.db import Database
 from ..receipt.protocol import _now
 from ..receipt.source import ReceiptUnavailable
 from .policy import NotEligible, TestRecipients
+from .credential_render import credential_text, presentation
 
 
 class DefiniteMailFailure(Exception):
@@ -21,40 +23,15 @@ class DefiniteMailFailure(Exception):
 
 class SinkMail:
     """Fixed P01 SMTP sink. Never consult EMAIL_BACKEND (console/file are unsafe)."""
-    def send(self, recipient, subject, text):
+    def send(self, recipient, subject, text, *, html=None):
         connection = EmailBackend(host='127.0.0.1', port=1025, username='', password='',
                                   use_tls=False, use_ssl=False, timeout=5, fail_silently=False)
         message = EmailMultiAlternatives(subject, text, 'LhieStore <test@example.invalid>',
-                                         [recipient], connection=connection)
+                                          [recipient], connection=connection)
+        if html is not None:
+            message.attach_alternative(html, 'text/html')
         if message.send(fail_silently=False) != 1:
             raise DefiniteMailFailure()
-
-
-def credential_text(source):
-    lines = [f"Data akun pesanan {source['invoice_number']}", '',
-             'Pembayaran telah dikonfirmasi. Berikut data akun pesanan Anda.', '']
-    for group in source['groups']:
-        lines.append(group['product_name'])
-        for account in group['accounts']:
-            lines.append(f"Akun {account['number']}")
-            if account['format'] == 'legacy':
-                lines.append(account['secret'])
-            else:
-                lines.extend(('Email: ' + account['email'], 'Password: ' + account['password']))
-                method, value = account['access_method'], account['access_value']
-                if method != 'none':
-                    lines.append(('OTP Mail: ' if method == 'otp_mail_link' else 'Auth Token: ') + value)
-                if account.get('reader_mail_link'):
-                    lines.append('Akses Token: ' + account['reader_mail_link'])
-            if account.get('tutorial'):
-                lines.extend(('', account['tutorial']))
-            lines.append('')
-        if group.get('guide'):
-            lines.extend((group['guide']['title'], group['guide']['url'], ''))
-    if source.get('invoice_url'):
-        lines.extend(('Lihat pesanan: ' + source['invoice_url'], ''))
-    # No Recovery Key, bearer key, auth challenge, or customer ownership grant.
-    return '\n'.join(lines)
 
 
 class CredentialMail:
@@ -63,6 +40,7 @@ class CredentialMail:
         self.source, self.encrypter = source, encrypter
         self.transport = transport if transport is not None else SinkMail()
         self.recipients = recipients if recipients is not None else TestRecipients()
+        self._source_cursor = None
 
     def _outside(self):
         if (connections[self.db.using].in_atomic_block
@@ -141,11 +119,12 @@ class CredentialMail:
                 raise ReceiptUnavailable()
             source = self.source.load_customer(str(claim['order_id']), owner['customer_id'], receipt=True)
             text = credential_text(source)
+            html = render_to_string('notifications/credential.html', presentation(source))
         except Exception:
             self._finish(claim, 'cancelled', 'credentials_unavailable')
             return 'ineligible'
         try:
-            self.transport.send(recipient, f"Data akun pesanan {source['invoice_number']} - LhieStore", text)
+            self.transport.send(recipient, f"Data akun pesanan {source['invoice_number']} | LhieStore", text, html=html)
         except DefiniteMailFailure:
             retry = claim['attempts'] < 5
             self._finish(claim, 'pending' if retry else 'failed', 'mail_delivery_failed', retry=retry)
@@ -164,7 +143,9 @@ class CredentialMail:
               AND o.order_status IN ('processing','completed') AND NOT EXISTS (
                 SELECT 1 FROM public.order_notification_events e
                 WHERE e.order_id=o.id AND e.event_type='credentials_ready')
-            ORDER BY o.id LIMIT %s''', (limit,))
+              AND (%s::uuid IS NULL OR o.id>%s::uuid)
+            ORDER BY o.id LIMIT %s''', (self._source_cursor, self._source_cursor, limit))
+        self._source_cursor = str(orders[-1]['id']) if orders else None
         for order in orders:
             self.record(order['id'])
         rows = self.db.rows('''SELECT id FROM public.order_notification_events

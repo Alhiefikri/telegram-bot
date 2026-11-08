@@ -111,6 +111,7 @@ final class ProductWaitlistNotificationService
                         ProductWaitlistNotification::STATUS_PENDING,
                         ProductWaitlistNotification::STATUS_SENDING,
                         ProductWaitlistNotification::STATUS_FAILED,
+                        ProductWaitlistNotification::STATUS_UNKNOWN,
                     ]);
                 })
                 ->where('id', '>', $cursor)
@@ -174,6 +175,8 @@ final class ProductWaitlistNotificationService
             /** @var ProductWaitlistNotification|null $notification */
             $notification = ProductWaitlistNotification::query()->whereKey($notificationId)->lockForUpdate()->first();
             if ($notification === null
+                || $notification->status === ProductWaitlistNotification::STATUS_UNKNOWN
+                || $notification->last_error === 'mail_delivery_unknown'
                 || in_array($notification->status, [
                     ProductWaitlistNotification::STATUS_SENT,
                     ProductWaitlistNotification::STATUS_SKIPPED,

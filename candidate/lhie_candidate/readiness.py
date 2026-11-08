@@ -9,6 +9,9 @@ class ReadinessError(Exception):
 
 
 def verify_database():
+    from django.conf import settings
+    profile = getattr(settings, 'RUNTIME', None) if settings.configured else None
+    role_limit = 7 if getattr(profile, 'notifications', False) is True else 6
     connection = connections["default"]
     try:
         with connection.cursor() as cursor:
@@ -27,7 +30,7 @@ def verify_database():
             observed = cursor.fetchone()
             expected = (
                 "disposable", "candidate_runtime", "127.0.0.1", 5432, False,
-                False, False, False, False, 6, "django_candidate", "candidate_runtime",
+                False, False, False, False, role_limit, "django_candidate", "candidate_runtime",
                 False, False,
             )
             if observed is not None and observed[-2] is True:

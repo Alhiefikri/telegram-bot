@@ -1,0 +1,11 @@
+<section id="waitlist" class="mt-5 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4" aria-labelledby="waitlist-title">
+    {% if waitlist_notice %}<p role="status">{{ waitlist_notice }}</p>{% endif %}
+    <h2 id="waitlist-title" class="font-display text-lg font-black text-[var(--sf-ink)]">Dapatkan kabar saat stok tersedia</h2>
+    <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">Masukkan email Anda. Kami akan mengirim tautan konfirmasi, lalu satu notifikasi saat produk ini tersedia kembali.</p>
+    <form method="post" action="/produk/{{ product.id }}/waitlist" class="mt-4 grid gap-3">
+        {% csrf_token %}
+        <label for="waitlist-email" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">Alamat email</label>
+        <input id="waitlist-email" name="email" type="email" required maxlength="254" autocomplete="email" placeholder="nama@contoh.com" class="neo-input h-12 bg-white px-3 text-base font-bold">
+        <button type="submit" class="neo-button inline-flex h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Kirim permintaan</button>
+    </form>
+</section>

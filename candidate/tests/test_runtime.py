@@ -65,6 +65,15 @@ class AdmissionTests(unittest.TestCase):
             with self.subTest(limits=limits), self.assertRaises(runtime.AdmissionError):
                 runtime.validate_document({**DOCUMENT, "limits": limits})
 
+    def test_notification_profile_requires_explicit_workers_and_larger_exact_budget(self):
+        document = {**DOCUMENT, 'workers': True, 'notifications': True,
+                    'limits': {'processes': 8, 'threads': 8, 'db_connections': 7}}
+        self.assertEqual(runtime.validate_document(document), 'synthetic-empty')
+        for changed in ({'workers': False}, {'notifications': 1}, {'notifications': False},
+                        {'limits': DOCUMENT['limits']}):
+            with self.subTest(changed=changed), self.assertRaises(runtime.AdmissionError):
+                runtime.validate_document({**document, **changed})
+
     def test_fixed_files_private_key_and_duplicate_json_rejection(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "candidate.json"

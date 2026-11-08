@@ -9,7 +9,7 @@ from lhie_candidate.workers.consumer import WorkerTimeout
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--once', action='store_true', required=True)
-    parser.add_argument('--family', choices=('telegram', 'credential-mail'), required=True)
+    parser.add_argument('--family', choices=('telegram', 'credential-mail', 'waitlist'), required=True)
     args = parser.parse_args()
     from lhie_candidate.startup import configure_django
     configure_django()
@@ -27,11 +27,17 @@ def main():
     # enrollment surface and accepts no recipient/content/transport arguments.
     recipients = TestRecipients(frozenset({'1'}))
     if args.family == 'telegram':
-        service = Notifications(NotificationTransport(), recipients=recipients)
-    else:
+        from lhie_candidate.notifications.order_notices import OrderNotices
+        from lhie_candidate.notifications.proof_publication import SalesProofPublication
+        service = Notifications(NotificationTransport(), recipients=recipients,
+                                proof=SalesProofPublication(recipients), order_notices=OrderNotices(recipients))
+    elif args.family == 'credential-mail':
         cipher = LaravelEncrypter(application_key())
         source = ReceiptSource(cipher, signing_key=application_key(), invoice_base_url='http://127.0.0.1:18801')
         service = CredentialMail(source, cipher, recipients=recipients)
+    else:
+        from lhie_candidate.notifications.waitlist import Waitlist
+        service = Waitlist(LaravelEncrypter(application_key()), application_key(), enabled=True)
     previous = signal.signal(signal.SIGALRM, _alarm_handler)
     signal.alarm(60)
     try:
