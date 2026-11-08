@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from functools import cmp_to_key
 import json
+import re
 
 from django.db import connections
 
@@ -74,11 +75,220 @@ class CatalogRepository:
 
     def customer(self, telegram_id):
         return self._one(
-            "SELECT id,telegram_id,first_name,username,locale FROM public.customers WHERE telegram_id=%s",
+            "SELECT id,telegram_id,first_name,username,locale,balance_payment_preference "
+            "FROM public.customers WHERE telegram_id=%s",
             (telegram_id,),
         )
 
-    def order_history(self, customer_id, *, direction=None, created_token=None, order_id=None):
+    def set_locale(self, customer_id, code):
+        if code not in ('id', 'en', 'ms'):
+            raise ValueError('unsupported locale')
+        with connections[self.using].cursor() as cursor:
+            cursor.execute(
+                "UPDATE public.customers SET locale=%s,updated_at=timezone('Asia/Jakarta',clock_timestamp()) "
+                "WHERE id=%s AND locale IS DISTINCT FROM %s",
+                (code, customer_id, code),
+            )
+            return cursor.rowcount == 1
+
+    def support_contact(self):
+        """Resolve the database-backed support destination, never an ENV default."""
+        row = self._one(
+            "SELECT admin_contact_url,admin_username FROM public.manual_payment_settings "
+            "ORDER BY is_active DESC,id LIMIT 1",
+        ) or {}
+        url = (row.get('admin_contact_url') or '').strip()
+        username = (row.get('admin_username') or '').strip().lstrip('@')
+        if url:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            if parsed.scheme == 'https' and parsed.netloc and not any(
+                    ord(char) <= 32 or ord(char) == 127 for char in url):
+                return {'url': url, 'username': username}
+            return {'url': '', 'username': username}
+        if username and len(username) <= 64 and all(
+                char.isascii() and (char.isalnum() or char == '_') for char in username):
+            return {'url': 'https://t.me/' + username, 'username': username}
+        return {'url': '', 'username': ''}
+
+    def admin_chat_id(self):
+        row = self._one(
+            "SELECT admin_telegram_chat_id FROM public.manual_payment_settings "
+            "WHERE is_active=true ORDER BY id LIMIT 1",
+        ) or {}
+        value = str(row.get('admin_telegram_chat_id') or '').strip()
+        return value if re.fullmatch(r'[1-9][0-9]{0,18}', value) else None
+
+    def customer_is_admin(self, customer_id, telegram_id, chat_id):
+        admin = self.admin_chat_id()
+        return (admin is not None and str(telegram_id) == admin
+                and str(chat_id) == admin)
+
+    def account_summary(self, customer_id):
+        row = self._one(
+            "SELECT COUNT(*) AS total_orders FROM public.orders WHERE customer_id=%s",
+            (customer_id,),
+        ) or {'total_orders': 0}
+        latest = self._one(
+            "SELECT invoice_number,payment_status FROM public.orders "
+            "WHERE customer_id=%s ORDER BY created_at DESC,id DESC LIMIT 1",
+            (customer_id,),
+        )
+        return {'total_orders': int(row['total_orders']), 'latest_order': latest}
+
+    def active_cart_exists(self, customer_id):
+        return self._one(
+            "SELECT 1 AS present FROM public.carts WHERE customer_id=%s "
+            "AND origin='customer' AND status='active' LIMIT 1",
+            (customer_id,),
+        ) is not None
+
+    def abandon_customer_carts(self, customer_id):
+        with connections[self.using].cursor() as cursor:
+            cursor.execute(
+                "UPDATE public.carts SET status='abandoned',updated_at=timezone('Asia/Jakarta',clock_timestamp()) "
+                "WHERE customer_id=%s AND origin='customer' AND status='active'",
+                (customer_id,),
+            )
+            return cursor.rowcount
+
+    def latest_order_status(self, customer_id):
+        order = self._one(
+            """SELECT o.id,o.invoice_number,o.order_status,o.payment_status,o.created_at,
+                      o.expires_at,o.total_amount,o.currency,o.telegram_receipt_sent_at,
+                      p.status AS payment_row_status,p.expired_at AS payment_expires_at,
+                      p.paid_at,p.method,p.provider,p.amount AS payment_amount,
+                      p.currency AS payment_currency
+               FROM public.orders o
+               LEFT JOIN LATERAL (
+                   SELECT status,expired_at,paid_at,method,provider,amount,currency
+                   FROM public.payments WHERE order_id=o.id
+                   ORDER BY created_at DESC,id DESC LIMIT 1
+               ) p ON TRUE
+               WHERE o.customer_id=%s
+               ORDER BY o.created_at DESC,o.id DESC LIMIT 1""",
+            (customer_id,),
+        )
+        if order is None:
+            return None
+        order['items'] = self._rows(
+            "SELECT product_name,quantity FROM public.order_items "
+            "WHERE order_id=%s ORDER BY id LIMIT 4",
+            (order['id'],),
+        )
+        order['has_late_review'] = self._one(
+            "SELECT 1 AS present FROM public.manual_fulfillment_reviews "
+            "WHERE order_id=%s AND state IN ('pending','refund_uncertain') "
+            "AND reason='late_payment' LIMIT 1",
+            (order['id'],),
+        ) is not None
+        return order
+
+    def order_month_totals(self, customer_id, start, end):
+        row = self._one(
+            """SELECT COUNT(*) FILTER (WHERE payment_status='paid') AS paid_count,
+                      COALESCE(SUM(CASE WHEN payment_status='paid' AND currency='IDR'
+                          THEN total_amount ELSE 0 END),0) AS paid_idr
+               FROM public.orders
+               WHERE customer_id=%s AND created_at >= %s::timestamp AND created_at < %s::timestamp""",
+            (customer_id, start, end),
+        ) or {'paid_count': 0, 'paid_idr': 0}
+        usdt = self._one(
+            """SELECT COALESCE(SUM(p.amount),0) AS paid_usdt
+               FROM public.payments p JOIN public.orders o ON o.id=p.order_id
+               WHERE o.customer_id=%s AND p.status='paid' AND p.paid_at IS NOT NULL
+                 AND p.paid_at >= %s::timestamp AND p.paid_at < %s::timestamp
+                 AND UPPER(p.currency)='USDT'
+                 AND NOT EXISTS (SELECT 1 FROM public.payments earlier
+                     WHERE earlier.order_id=p.order_id AND earlier.status='paid'
+                       AND (earlier.paid_at,earlier.id) < (p.paid_at,p.id))""",
+            (customer_id, start, end),
+        ) or {'paid_usdt': 0}
+        return {'paid_count': int(row['paid_count']), 'paid_idr': int(row['paid_idr']),
+                'paid_usdt': int(usdt['paid_usdt'])}
+
+    def order_detail_data(self, customer_id, invoice):
+        order = self._one(
+            """SELECT o.id,o.invoice_number,o.order_status,o.payment_status,o.created_at,
+                      o.expires_at,o.total_amount,o.currency,o.telegram_receipt_sent_at,
+                      p.id AS payment_id,p.status AS payment_row_status,
+                      p.expired_at AS payment_expires_at,p.paid_at,p.method,p.provider,
+                      p.amount AS payment_amount,p.currency AS payment_currency
+               FROM public.orders o
+               LEFT JOIN LATERAL (
+                   SELECT id,status,expired_at,paid_at,method,provider,amount,currency
+                   FROM public.payments WHERE order_id=o.id
+                   ORDER BY created_at DESC,id DESC LIMIT 1
+               ) p ON TRUE
+               WHERE o.customer_id=%s AND o.invoice_number=%s""",
+            (customer_id, invoice),
+        )
+        if order is None:
+            return None
+        order['items'] = self._rows(
+            """SELECT product_name,product_icon,product_custom_emoji_id,quantity,
+                      unit_price,subtotal,usdt_unit_price,usdt_subtotal
+               FROM public.order_items WHERE order_id=%s ORDER BY id""",
+            (order['id'],),
+        )
+        order['has_late_review'] = self._one(
+            "SELECT 1 AS present FROM public.manual_fulfillment_reviews "
+            "WHERE order_id=%s AND state IN ('pending','refund_uncertain') "
+            "AND reason='late_payment' LIMIT 1",
+            (order['id'],),
+        ) is not None
+        return order
+
+    def admin_pending_order(self, invoice):
+        return self._one(
+            """SELECT o.id,o.customer_id,o.invoice_number,o.order_status,o.payment_status
+               FROM public.orders o
+               WHERE o.invoice_number=%s AND o.order_status='pending_payment'
+                 AND o.payment_status='pending'
+                 AND EXISTS (SELECT 1 FROM public.payments p WHERE p.order_id=o.id
+                             AND p.status='pending')
+               ORDER BY o.created_at DESC,o.id DESC LIMIT 1""",
+            (invoice,),
+        )
+
+    def admin_day_stats(self):
+        row = self._one(
+            """WITH bounds AS (
+                   SELECT date_trunc('day',CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta') AS start,
+                          date_trunc('day',CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')
+                              + interval '1 day' AS finish
+               ), canonical AS (
+                   SELECT DISTINCT ON (order_id) order_id,amount,currency
+                   FROM public.payments WHERE status='paid' AND paid_at IS NOT NULL
+                   ORDER BY order_id,paid_at,id
+               )
+               SELECT
+                 (SELECT COUNT(*) FROM public.orders o,bounds b
+                  WHERE o.created_at >= b.start AND o.created_at < b.finish) AS new_orders,
+                 (SELECT COUNT(*) FROM public.orders o,bounds b
+                  WHERE o.created_at >= b.start AND o.created_at < b.finish
+                    AND o.payment_status='paid') AS paid_orders,
+                 (SELECT COALESCE(SUM(i.quantity),0) FROM public.order_items i
+                  JOIN public.orders o ON o.id=i.order_id,bounds b
+                  WHERE o.created_at >= b.start AND o.created_at < b.finish
+                    AND o.payment_status='paid') AS sold_products,
+                 (SELECT COALESCE(SUM(CASE WHEN o.currency='IDR' THEN o.total_amount ELSE 0 END),0)
+                  FROM public.orders o,bounds b
+                  WHERE o.created_at >= b.start AND o.created_at < b.finish
+                    AND o.payment_status='paid') AS sales_idr,
+                 (SELECT COALESCE(SUM(CASE WHEN UPPER(c.currency)='IDR' THEN c.amount ELSE 0 END),0)
+                  FROM canonical c JOIN public.orders o ON o.id=c.order_id,bounds b
+                  WHERE o.created_at >= b.start AND o.created_at < b.finish) AS received_idr,
+                 (SELECT COALESCE(SUM(CASE WHEN UPPER(c.currency)='USDT' THEN c.amount ELSE 0 END),0)
+                  FROM canonical c JOIN public.orders o ON o.id=c.order_id,bounds b
+                  WHERE o.created_at >= b.start AND o.created_at < b.finish) AS received_usdt"""
+        ) or {}
+        return {key: int(row.get(key) or 0) for key in (
+            'new_orders', 'paid_orders', 'sold_products', 'sales_idr',
+            'received_idr', 'received_usdt')}
+
+    def order_history(self, customer_id, *, direction=None, created_token=None, order_id=None,
+                      month_start=None, month_end=None):
         """PHP-equivalent successful Orders page using one bounded keyset read.
 
         ``created_token`` is the stored wall-clock timestamp (YYYYMMDDHHMMSS),
@@ -94,9 +304,14 @@ class CatalogRepository:
                 not created_token or len(created_token) != 14 or not created_token.isdigit()
                 or not order_id):
             raise ValueError('invalid order history cursor')
+        if (month_start is None) != (month_end is None):
+            raise ValueError('invalid order history month')
         where = ("customer_id=%s AND payment_status='paid' "
                  "AND order_status IN ('processing','completed')")
         params = [customer_id]
+        if month_start is not None:
+            where += ' AND created_at >= %s::timestamp AND created_at < %s::timestamp'
+            params += [month_start, month_end]
         if direction is not None:
             operator = '<' if direction == 'older' else '>'
             timestamp = (f'{created_token[0:4]}-{created_token[4:6]}-{created_token[6:8]} '
@@ -466,6 +681,27 @@ class CatalogRepository:
             EXISTS (SELECT 1 FROM public.balance_restore_gates WHERE id=1 AND state='open') AS restoring""")
         return bool(row['has_policy'] and not row['paused'] and not row['restoring'])
 
+    def session_state(self, customer_id):
+        row = self._one(
+            "SELECT state FROM django_candidate.navigation_sessions WHERE customer_id=%s",
+            (customer_id,),
+        )
+        if row is None:
+            return {}
+        state = row['state']
+        return json.loads(state) if isinstance(state, str) else (state or {})
+
+    def save_session_state(self, customer_id, state):
+        with connections[self.using].cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO django_candidate.navigation_sessions (customer_id,state) "
+                "VALUES (%s,%s::jsonb) ON CONFLICT (customer_id) DO UPDATE SET state=EXCLUDED.state",
+                (customer_id, json.dumps(state, ensure_ascii=False)),
+            )
+
+    def clear_session_state(self, customer_id):
+        self.save_session_state(customer_id, {})
+
     def home_data(self, customer_id, bot_scope='synthetic'):
         """Home metrics, wallet, channel and banner/asset in one statement.
 
@@ -509,6 +745,8 @@ class CatalogRepository:
                WHERE singleton_key='checkout_maintenance') AS maintenance_active,
               (SELECT public_note FROM public.checkout_maintenance_settings
                WHERE singleton_key='checkout_maintenance') AS maintenance_note,
+              (SELECT admin_telegram_chat_id FROM public.manual_payment_settings
+               WHERE is_active=true ORDER BY id LIMIT 1) AS admin_telegram_chat_id,
               (SELECT file_id FROM django_candidate.navigation_assets
                WHERE bot_scope=%s AND source_path=(
                  SELECT telegram_welcome_banner_path FROM public.storefront_settings
@@ -540,4 +778,5 @@ class CatalogRepository:
             'banner_asset': asset,
             'maintenance': {'is_active': bool(row['maintenance_active']),
                             'public_note': row['maintenance_note']},
+            'admin_chat_id': row['admin_telegram_chat_id'],
         }

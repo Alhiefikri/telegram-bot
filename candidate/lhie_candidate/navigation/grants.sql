@@ -1,6 +1,6 @@
 -- Explicit disposable provisioning only, after the reviewed repository-schema oracle.
 GRANT USAGE ON SCHEMA public TO candidate_runtime;
-GRANT SELECT (id,telegram_id,first_name,username,locale) ON public.customers TO candidate_runtime;
+GRANT SELECT (id,telegram_id,first_name,username,locale,balance_payment_preference) ON public.customers TO candidate_runtime;
 GRANT SELECT (customer_id,provider) ON public.customer_identities TO candidate_runtime;
 GRANT INSERT (telegram_id,first_name,username,locale,created_at,updated_at) ON public.customers TO candidate_runtime;
 GRANT UPDATE (first_name,username,locale,updated_at) ON public.customers TO candidate_runtime;
@@ -15,10 +15,16 @@ GRANT SELECT (id,name,slug,description,sort_order,is_active,deleted_at) ON publi
 GRANT SELECT (id,name,slug,description,icon,custom_emoji_id,telegram_image_path,sort_order,deleted_at)
     ON public.product_families TO candidate_runtime;
 GRANT SELECT (product_id,supplier_purchase_id,order_item_id,retired_at) ON public.product_stock_items TO candidate_runtime;
-GRANT SELECT (product_id,order_id,quantity) ON public.order_items TO candidate_runtime;
-GRANT SELECT (id,customer_id,invoice_number,payment_status,order_status,created_at,telegram_receipt_sent_at)
+GRANT SELECT (product_id,order_id,quantity,product_name,product_icon,product_custom_emoji_id,
+    unit_price,subtotal,usdt_unit_price,usdt_subtotal) ON public.order_items TO candidate_runtime;
+GRANT SELECT (id,customer_id,invoice_number,payment_status,order_status,created_at,
+    telegram_receipt_sent_at,expires_at,total_amount,currency,updated_at)
     ON public.orders TO candidate_runtime;
-GRANT SELECT (id,order_id,amount,currency,status,paid_at) ON public.payments TO candidate_runtime;
+GRANT SELECT (id,order_id,amount,currency,status,paid_at,provider,method,expired_at)
+    ON public.payments TO candidate_runtime;
+GRANT SELECT (id,order_id,state,reason) ON public.manual_fulfillment_reviews TO candidate_runtime;
+GRANT SELECT (admin_contact_url,admin_username,admin_telegram_chat_id,is_active)
+    ON public.manual_payment_settings TO candidate_runtime;
 GRANT SELECT (id,product_id,minimum_quantity,price_amount,usdt_price_amount)
     ON public.product_quantity_price_tiers TO candidate_runtime;
 GRANT SELECT (key,fallback_emoji,source_emoji,custom_emoji_id,sort_order,label,id) ON public.telegram_ui_icons TO candidate_runtime;

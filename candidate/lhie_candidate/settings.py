@@ -58,6 +58,7 @@ STORAGES = {
 # dataset. Disposable tests inject one with override_settings.
 CANDIDATE_IDENTITY_FINGERPRINT_KEY = None
 CANDIDATE_ADMIN_ALLOWED_LOGINS = ()
+CANDIDATE_ADMIN_DASHBOARD_URL = None
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 TIME_ZONE = "UTC"
