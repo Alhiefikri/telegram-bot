@@ -1,0 +1,92 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Owner only</p><h2>USDT review</h2><p class="admin-help">Settlement/exception USDT hanya dari evidence authoritative. Preview terikat sesi, pekerjaan, checkpoint, nominal, dan password Owner; tidak ada kredit dari screenshot.</p></div>
+  <a class="admin-button" href="/admin?tab=pengaturan">Kontrol operasional</a>
+</section>
+
+<section class="admin-card">
+  <h2>Target yang menunggu review</h2>
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Customer</th><th>Reference</th><th>Rail</th><th>Amount / fee</th><th>State</th><th>Dibuat</th><th>Aksi</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{{ row.customer }}<small><code>{{ row.telegram_id }}</code></small></td>
+        <td><code>{{ row.reference }}</code></td>
+        <td>{{ row.rail }}</td>
+        <td class="admin-money">{{ row.amount_label }} / {{ row.fee_label }} USDT</td>
+        <td><span class="admin-status admin-status-warning">{{ row.state_label }}</span></td>
+        <td>{{ row.created_label }}</td>
+        <td><a class="admin-button admin-button-small" href="{{ row.url }}">Buka</a></td>
+      </tr>
+    {% empty %}<tr><td colspan="7">Tidak ada target USDT dalam review.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+{% if selected %}
+<section class="admin-card">
+  <h2>Target {{ selected.reference }}</h2>
+  <dl class="admin-facts">
+    <div><dt>Customer</dt><dd>{{ selected.customer }} · <code>{{ selected.telegram_id }}</code></dd></div>
+    <div><dt>Rail / state</dt><dd>{{ selected.rail }} · {{ selected.state_label }}</dd></div>
+    <div><dt>Amount</dt><dd class="admin-money">{{ selected.amount_label }} USDT</dd></div>
+    <div><dt>Fee / payable</dt><dd class="admin-money">{{ selected.fee_label }} / {{ selected.payable_label }} USDT</dd></div>
+    <div><dt>Kedaluwarsa</dt><dd>{{ selected.expires_label }}</dd></div>
+    <div><dt>Work version</dt><dd>{{ selected.work_version }} · evidence {{ selected.evidence_version }}</dd></div>
+  </dl>
+  <h3>Snapshot pembayaran tersanitasi</h3>
+  <pre class="admin-json">{{ selected.snapshot|pprint }}</pre>
+  {% if selected.requests %}
+  <h3>Review request</h3>
+  <table class="admin-table"><thead><tr><th>ID</th><th>Decision</th><th>Amount</th><th>Expiry</th></tr></thead><tbody>
+    {% for item in selected.requests %}<tr><td><code>{{ item.id }}</code></td><td>{{ item.decision }}</td><td>{{ item.amount_label }}</td><td>{{ item.expires_label }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+</section>
+
+{% if preview %}
+<section class="admin-card">
+  <h2>Preview {{ preview.decision }}</h2>
+  <dl class="admin-facts">
+    <div><dt>Amount</dt><dd class="admin-money">{{ preview.amount_label }} USDT</dd></div>
+    <div><dt>Transaction hash</dt><dd><code>{{ preview.transaction_hash_masked }}</code></dd></div>
+    <div><dt>Kedaluwarsa</dt><dd>{{ preview.expires_label }}</dd></div>
+    <div><dt>Reason</dt><dd>{{ preview.reason }}</dd></div>
+  </dl>
+  <form method="post" action="/admin/store-balance/usdt-review/previews/{{ preview.id }}/confirm" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="fingerprint" value="{{ preview.fingerprint }}">
+    <input type="hidden" name="version" value="{{ preview.version }}">
+    <div class="admin-field"><label for="id_usdt_password">Password Owner</label><input id="id_usdt_password" name="password" type="password" maxlength="1024" autocomplete="current-password" required></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" data-confirm="Selesaikan review USDT ini?">Konfirmasi</button></div>
+  </form>
+</section>
+{% endif %}
+
+<section class="admin-card">
+  <h2>Buat preview review</h2>
+  <form method="post" action="/admin/store-balance/usdt-review/previews" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="top_up_id" value="{{ selected.id }}">
+    <div class="admin-field"><label for="id_decision">Keputusan</label><select id="id_decision" name="decision"><option value="settled">Settled</option><option value="resolved_by_compensation">Resolved by compensation</option><option value="externally_refunded">Externally refunded</option></select></div>
+    <div class="admin-field"><label for="id_amount_micro">Amount micro-USDT</label><input id="id_amount_micro" name="amount_micro" type="text" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" required><p class="admin-help">Exact positive micro-USDT; bukan float.</p></div>
+    <div class="admin-field"><label for="id_hint">Transaction hash / Binance order identity</label><input id="id_hint" name="hint" type="text" maxlength="255" required></div>
+    <div class="admin-field"><label for="id_reason">Alasan</label><textarea id="id_reason" name="reason" rows="3" maxlength="1000" required></textarea></div>
+    <div class="admin-field"><label for="id_return_hash">Return transaction hash (external refund)</label><input id="id_return_hash" name="return_hash" type="text" maxlength="66"></div>
+    <div class="admin-field"><label for="id_authorization_id">Authorization return ID</label><input id="id_authorization_id" name="authorization_id" type="text" maxlength="36"></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Buat preview</button></div>
+  </form>
+</section>
+{% endif %}
+
+<section class="admin-card">
+  <h2>Reorg incident</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Incident</th><th>Top-up</th><th>Reason</th><th>Exposure</th><th>Dibuat</th></tr></thead><tbody>
+    {% for incident in incidents %}<tr><td>#{{ incident.id }}</td><td><code>{{ incident.top_up_id }}</code></td><td>{{ incident.reason }}</td><td class="admin-money">{{ incident.exposure_label }} USDT</td><td>{{ incident.created_label }}</td></tr>
+    {% empty %}<tr><td colspan="5">Tidak ada incident.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

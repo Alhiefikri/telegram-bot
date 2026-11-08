@@ -1,0 +1,110 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Operasi</p><h2>Supplier</h2><p class="admin-help">Recovery di halaman ini hanya memakai bukti operator. Purchase dispatch/provider read tetap dimiliki worker P18 dan tidak dipicu saat halaman dibuka.</p></div>
+</section>
+
+<section class="admin-card">
+  <h2>Koneksi</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Supplier</th><th>Provider</th><th>Saldo</th><th>Held</th><th>Tersedia</th><th>Sync</th><th>Status</th></tr></thead><tbody>
+    {% for row in connections %}
+    <tr>
+      <td>{{ row.name }}<small>v{{ row.version }} · {{ row.currency }}</small></td>
+      <td>{{ row.provider }}</td>
+      <td class="admin-money">{{ row.balance_label }}</td>
+      <td class="admin-money">{{ row.held_label }}</td>
+      <td class="admin-money">{% if row.low_balance %}<span class="admin-status admin-status-danger">{{ row.available_label }}</span>{% else %}{{ row.available_label }}{% endif %}</td>
+      <td>{{ row.synced_label }}<small>saldo {{ row.observed_label }}</small></td>
+      <td>{% if row.is_active %}<span class="admin-status admin-status-good">Aktif</span>{% else %}<span class="admin-status admin-status-muted">Nonaktif</span>{% endif %}{% if row.error_code != '-' %}<small><code>{{ row.error_code }}</code></small>{% endif %}</td>
+    </tr>
+    {% empty %}<tr><td colspan="7">Belum ada koneksi supplier.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="admin-card">
+  <h2>Kurs supplier</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Mata uang</th><th>Kurs IDR</th><th>Versi</th><th>Update</th></tr></thead><tbody>
+    {% for rate in rates %}<tr><td>{{ rate.currency }}</td><td>{{ rate.rate }}</td><td>{{ rate.version }}</td><td>{{ rate.updated_label }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="admin-card">
+  <h2>Mapping produk</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Produk</th><th>Supplier</th><th>SKU</th><th>Prioritas</th><th>Status</th></tr></thead><tbody>
+    {% for row in mappings %}<tr><td>{{ row.product_name }}</td><td>{{ row.supplier_name }}</td><td>{{ row.external_id }}<small>{{ row.catalog_name }}</small></td><td>{{ row.priority }}</td><td>{% if row.is_active %}Aktif{% else %}Draft{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="5">Belum ada mapping.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="admin-card">
+  <h2>Fulfillment &amp; recovery</h2>
+  <form class="admin-filter" method="get" action="/admin/suppliers">
+    <label>Cari invoice <input type="search" name="invoice" value="{{ purchases.invoice }}" maxlength="80"></label>
+    <div class="admin-filter-actions"><button class="admin-button admin-button-primary" type="submit">Terapkan</button><a class="admin-button" href="/admin/suppliers">Reset</a></div>
+  </form>
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Invoice</th><th>Produk</th><th>State</th><th>Purchase</th><th>Sisa</th><th>Bukti/error</th><th>Recovery</th></tr></thead>
+    <tbody>
+    {% for row in purchases.rows %}
+      <tr>
+        <td><a href="/admin/orders/{{ row.order_id }}">{{ row.invoice_number }}</a><small>{{ row.order_status }} / {{ row.payment_status }}</small></td>
+        <td>{{ row.product_name }}<small>{{ row.supplier_name|default:'Supplier' }}</small></td>
+        <td>{{ row.state_label }}<small>{{ row.purchase_state_label }}</small></td>
+        <td>#{{ row.purchase_id|default:'-' }}<small>{{ row.purchase_quantity|default:0 }} unit · {{ row.expected_cost_label }}</small></td>
+        <td>{{ row.remaining }}</td>
+        <td>{% if row.error_code != '-' %}<code>{{ row.error_code }}</code>{% else %}—{% endif %}</td>
+        <td>
+          {% if row.can_manual %}
+          <details><summary>Kredensial manual</summary>
+            <form method="post" action="/admin/suppliers/fulfillments/{{ row.id }}/operate" data-dirty-guard>{% csrf_token %}<input type="hidden" name="action" value="manual"><label class="admin-field"><span>Kredensial (satu per baris)</span><textarea name="credentials" rows="3" required></textarea></label><button class="admin-button admin-button-small" type="submit" data-confirm="Simpan kredensial manual?">Simpan</button></form>
+          </details>
+          {% endif %}
+          {% if row.can_no_debit %}
+          <details><summary>No-debit</summary>
+            <form method="post" action="/admin/suppliers/fulfillments/{{ row.id }}/operate" data-dirty-guard>{% csrf_token %}<input type="hidden" name="action" value="no_debit"><input type="hidden" name="purchase_id" value="{{ row.purchase_id }}">
+              <label class="admin-field"><span>Sumber bukti</span><select name="evidence_source"><option value="provider_case">Provider case</option><option value="provider_statement">Provider statement</option></select></label>
+              <label class="admin-field"><span>Referensi</span><input type="text" name="provider_reference" maxlength="255" required></label>
+              <label class="admin-field"><span>Catatan</span><textarea name="note" rows="2" maxlength="4000" required></textarea></label>
+              <button class="admin-button admin-button-small" type="submit" data-confirm="Catat no-debit dari bukti operator?">Catat</button>
+            </form>
+            <form method="post" action="/admin/suppliers/fulfillments/{{ row.id }}/operate" data-confirm="Owner attestation no-debit?">{% csrf_token %}<input type="hidden" name="action" value="owner_no_debit"><input type="hidden" name="purchase_id" value="{{ row.purchase_id }}"><button class="admin-button admin-button-small admin-button-danger" type="submit">Owner no-debit</button></form>
+          </details>
+          {% endif %}
+          {% if not row.can_manual and not row.can_no_debit %}—{% endif %}
+        </td>
+      </tr>
+    {% empty %}<tr><td colspan="7">Tidak ada fulfillment.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="admin-card">
+  <h2>Refund eksternal menunggu bukti</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Invoice</th><th>Reason</th><th>Amount</th><th>Provider</th><th>Referensi</th><th>Aksi</th></tr></thead><tbody>
+    {% for refund in refunds %}
+    <tr>
+      <td>{{ refund.invoice_number }}<small>{{ refund.customer.username|default:refund.telegram_id }}</small></td>
+      <td>{{ refund.reason_label }}</td>
+      <td class="admin-money">{{ refund.amount }} {{ refund.currency }}</td>
+      <td>{{ refund.provider }}</td>
+      <td><code>{{ refund.external_reference|default:'-' }}</code></td>
+      <td>
+        <form method="post" action="/admin/suppliers/refunds/{{ refund.id }}/confirm" data-dirty-guard>{% csrf_token %}
+          <input type="hidden" name="amount" value="{{ refund.amount }}"><input type="hidden" name="currency" value="{{ refund.currency }}">
+          <label class="admin-field"><span>Referensi transfer</span><input type="text" name="reference" maxlength="255" required></label>
+          <label class="admin-field"><span>Hasil</span><select name="result"><option value="success">success</option><option value="failure">failure</option><option value="uncertain">uncertain</option></select></label>
+          <button class="admin-button admin-button-small" type="submit" data-confirm="Konfirmasi refund eksternal ini?">Konfirmasi</button>
+        </form>
+      </td>
+    </tr>
+    {% empty %}<tr><td colspan="6">Tidak ada refund eksternal pending.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+{% if handoffs %}
+<section class="admin-card"><h2>Handoff terakhir</h2><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Waktu</th><th>Invoice</th><th>Actor</th><th>Qty</th><th>Catatan</th></tr></thead><tbody>
+  {% for row in handoffs %}<tr><td>{{ row.handed_off_label }}</td><td>{{ row.invoice_number }}</td><td>{{ row.actor }}</td><td>{{ row.quantity }}</td><td>{{ row.note }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endif %}
+{% endblock %}

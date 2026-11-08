@@ -1,0 +1,131 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div>
+    <p class="admin-eyebrow">Pesanan</p>
+    <h2>{{ order.invoice_number }}</h2>
+    <p class="admin-help">{{ order.customer }} · dibuat {{ order.created_label }} · kedaluwarsa {{ order.expires_label }}</p>
+  </div>
+  <div class="admin-hero-actions">
+    <a class="admin-button" href="/admin?tab=pesanan">Kembali</a>
+    {% if order.late_paid %}<span class="admin-status admin-status-warning">Late paid · review/refund manual</span>{% endif %}
+  </div>
+</section>
+
+<div class="admin-detail-grid">
+  <section class="admin-card">
+    <h2>Status</h2>
+    <dl class="admin-facts">
+      <div><dt>Order</dt><dd><span class="admin-status admin-status-{{ order.order_status_tone }}">{{ order.order_status_label }}</span></dd></div>
+      <div><dt>Payment</dt><dd><span class="admin-status admin-status-{{ order.payment_status_tone }}">{{ order.payment_status_label }}</span></dd></div>
+      <div><dt>Nilai</dt><dd class="admin-money">{% if order.currency == 'USDT' %}{{ order.total_amount|usdt }} USDT{% else %}{{ order.total_amount|idr }}{% endif %}</dd></div>
+      <div><dt>Receipt Telegram</dt><dd>{{ order.receipt_sent_label }}</dd></div>
+    </dl>
+  </section>
+  <section class="admin-card">
+    <h2>Tindakan aman</h2>
+    <div class="admin-action-grid">
+      {% if order.can_complete_manual %}
+      <form method="post" action="/admin/orders/{{ order.id }}/complete-manual" data-confirm="Setujui pembayaran manual ini?">{% csrf_token %}<button class="admin-button admin-button-primary" type="submit">Setujui pembayaran</button></form>
+      {% endif %}
+      {% if order.can_reject_manual %}
+      <form method="post" action="/admin/orders/{{ order.id }}/reject-manual" data-confirm="Tolak pembayaran dan lepas stok?">{% csrf_token %}<button class="admin-button admin-button-danger" type="submit">Tolak pembayaran</button></form>
+      {% endif %}
+      {% if order.can_cancel_release %}
+      <form method="post" action="/admin/orders/{{ order.id }}/cancel-release" data-confirm="Batalkan order pending dan lepas stok?">{% csrf_token %}<button class="admin-button admin-button-danger" type="submit">Batalkan &amp; lepas stok</button></form>
+      {% endif %}
+      {% if order.can_resend_mail %}
+      <form method="post" action="/admin/orders/{{ order.id }}/credential-email">{% csrf_token %}<button class="admin-button" type="submit">Kirim ulang email akun</button></form>
+      {% endif %}
+      <form method="post" action="/admin/orders/{{ order.id }}/sales-proof/retry">{% csrf_token %}<button class="admin-button" type="submit" disabled title="Sales Proof retry dimiliki P25">Retry Sales Proof</button></form>
+    </div>
+    <p class="admin-help">Tombol setujui/tolak hanya muncul saat Payment Binance manual menyimpan bukti mismatch. Approval manual biasa dilakukan di Manual Fulfillment Review.</p>
+  </section>
+</div>
+
+<section class="admin-card">
+  <h2>Item</h2>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead><tr><th>Produk</th><th>Qty</th><th>Subtotal</th><th>Sumber</th><th>Status fulfillment</th></tr></thead>
+      <tbody>
+      {% for item in order.items %}
+        <tr><td>{{ item.product_name }}{% if item.product_icon %} <span aria-hidden="true">{{ item.product_icon }}</span>{% endif %}</td><td>{{ item.quantity }}</td><td class="admin-money">{% if order.currency == 'USDT' %}{{ item.subtotal|usdt }}{% else %}{{ item.subtotal|idr }}{% endif %}</td><td>{{ item.local_quantity|default:0 }} lokal · {{ item.supplier_quantity }} supplier</td><td>{{ item.fulfillment_label }}{% if item.fulfillment_state %} · sisa {{ item.remaining_quantity }}{% endif %}</td></tr>
+      {% empty %}<tr><td colspan="5">Tidak ada item.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="admin-card">
+  <h2>Payment</h2>
+  {% for payment in order.payments %}
+  <article class="admin-subcard" id="payment-{{ payment.id }}">
+    <header class="admin-subcard-head">
+      <div><strong>{{ payment.provider }} · {{ payment.method }}</strong><small>{{ payment.status_label }} · {{ payment.currency }}</small></div>
+      <span class="admin-badge">{{ payment.create_state }}</span>
+    </header>
+    <dl class="admin-facts">
+      <div><dt>Amount</dt><dd class="admin-money">{% if payment.currency == 'USDT' %}{{ payment.amount|usdt }}{% else %}{{ payment.amount|idr }}{% endif %}</dd></div>
+      <div><dt>Final provider</dt><dd class="admin-money">{{ payment.gross }}</dd></div>
+      <div><dt>Fee</dt><dd class="admin-money">{{ payment.fee }}</dd></div>
+      <div><dt>Net receipt</dt><dd class="admin-money">{{ payment.net }}</dd></div>
+      <div><dt>Merchant ref</dt><dd><code>{{ payment.merchant_ref_masked }}</code> · hash {{ payment.merchant_ref_hash }}</dd></div>
+      <div><dt>Provider ref</dt><dd><code>{{ payment.provider_reference_masked }}</code></dd></div>
+      <div><dt>Paid / Expiry</dt><dd>{{ payment.paid_label }} / {{ payment.expires_label }}</dd></div>
+      <div><dt>Events</dt><dd>{{ payment.event_count }}</dd></div>
+    </dl>
+    {% if payment.create_error != '-' %}<p class="admin-error">Create error: {{ payment.create_error }}</p>{% endif %}
+    {% if payment.can_reconcile %}
+    <form method="post" action="/admin/payments/{{ payment.id }}/reconcile" class="admin-inline-form">{% csrf_token %}<button class="admin-button admin-button-small" type="submit">Reconcile provider</button></form>
+    {% endif %}
+    {% if payment.events %}
+    <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Event</th><th>Provider status</th><th>Diterima</th><th>Diproses</th><th>Count</th></tr></thead><tbody>
+      {% for event in payment.events %}<tr><td>{{ event.event_type }}</td><td>{{ event.provider_status }}</td><td>{{ event.received_label }}</td><td>{{ event.processed_label }}</td><td>{{ event.received_count }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% endif %}
+  </article>
+  {% empty %}<p>Tidak ada Payment.</p>{% endfor %}
+</section>
+
+{% if order.review %}
+<section class="admin-card">
+  <h2>Manual Fulfillment Review</h2>
+  <dl class="admin-facts">
+    <div><dt>Reason</dt><dd>{{ order.review.reason }}</dd></div>
+    <div><dt>State</dt><dd>{{ order.review.state }}</dd></div>
+    <div><dt>Amount</dt><dd class="admin-money">{{ order.review.amount }} {{ order.review.currency }}</dd></div>
+    <div><dt>Provider ref</dt><dd><code>{{ order.review.provider_reference }}</code></dd></div>
+  </dl>
+  <a class="admin-button" href="/admin/manual-fulfillment-reviews/{{ order.review.id }}">Buka review</a>
+</section>
+{% endif %}
+
+<section class="admin-card">
+  <h2>Outbound effect</h2>
+  <div class="admin-table-wrap">
+    <table class="admin-table"><thead><tr><th>Effect</th><th>State</th><th>Attempts</th><th>Update</th><th>Error</th></tr></thead><tbody>
+      {% for effect in order.effects %}<tr><td>{{ effect.effect_type }}<small>sequence {{ effect.sequence }}</small></td><td>{{ effect.state_label }}</td><td>{{ effect.attempts }}</td><td>{{ effect.updated_label }}</td><td>{% if effect.error_code != '-' %}<code>{{ effect.error_code }}</code>{% else %}-{% endif %}</td></tr>
+      {% empty %}<tr><td colspan="5">Belum ada effect.</td></tr>{% endfor %}
+    </tbody></table>
+  </div>
+</section>
+
+{% if order.supplier %}
+<section class="admin-card">
+  <h2>Supplier fulfillment</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Fulfillment</th><th>Produk</th><th>State</th><th>Qty</th><th>Purchase</th><th>Handoff</th></tr></thead><tbody>
+    {% for row in order.supplier %}<tr><td>#{{ row.id }}</td><td>{{ row.product_name }}</td><td>{{ row.state }}</td><td>{{ row.quantity }}</td><td>{{ row.purchase_count }}</td><td>{{ row.handoff_count }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
+<section class="admin-card">
+  <h2>Audit terbaru</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Waktu</th><th>Actor</th><th>Action</th><th>Values</th></tr></thead><tbody>
+    {% for entry in order.audit %}<tr><td>{{ entry.created_label }}</td><td>{{ entry.actor }}</td><td>{{ entry.action }}</td><td><pre class="admin-json">{{ entry.new_values|pprint }}</pre></td></tr>
+    {% empty %}<tr><td colspan="4">Belum ada audit.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

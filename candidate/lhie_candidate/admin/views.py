@@ -49,10 +49,15 @@ def _flash_pop(request):
 
 
 def _page(request, template, title, nav, status=200, **extra):
+    admin = access.identity(request)
+    if admin["role"] != "owner":
+        for group in nav.get("groups", ()):
+            group["items"] = [item for item in group["items"]
+                              if not item.get("owner_only")]
     response = render(request, template, {
         "title": title,
         "navigation": nav,
-        "admin": access.identity(request),
+        "admin": admin,
         "flash": _flash_pop(request),
         "csrf_token": get_token(request),
         **extra,
@@ -484,9 +489,32 @@ def dashboard(request):
 @access.guard
 def _dashboard(request):
     tab = navigation.normalize_tab(request.GET.get("tab"))
+    if tab == "laporan":
+        from . import operations_views
+        return operations_views.reports(request)
+    if tab == "pengaturan":
+        from . import operations_views
+        return operations_views.settings_tab(request)
+    if tab == "supplier":
+        from . import operations_views
+        return operations_views.suppliers(request)
+    if tab == "saldo":
+        from . import operations_views
+        return operations_views.balance_adjustments(request)
+    if tab == "pesanan":
+        from .orders import OrderReads
+        data = OrderReads().list_orders(
+            request.GET, min(10_000, max(1, int(request.GET.get("page", 1)
+                                                  if str(request.GET.get("page", "1")).isdigit()
+                                                  else 1))))
+        return _page(request, "admin/orders.html", "Pesanan",
+                     navigation.navigation("pesanan", "pesanan"), **data)
     nav = navigation.navigation(tab, tab)
     service = CatalogService()
     context = {"stats": service.dashboard_stats(), "tab": tab}
+    if tab == "stats":
+        from .reporting import Reporting
+        context["overview"] = Reporting().overview(request.GET)
     if tab == "produk":
         try:
             page = min(10_000, max(1, int(request.GET.get("products_page", 1))))

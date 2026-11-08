@@ -1,0 +1,39 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Operasi</p><h2>Audit</h2><p class="admin-help">Audit ditampilkan dari tabel audit_logs. Nilai sensitif disamarkan dan IP dipotong sebelum ditampilkan.</p></div>
+  <a class="admin-button" href="/admin/laporan">Laporan</a>
+</section>
+<form class="admin-card admin-filter" method="get" action="/admin/audit">
+  <label>Action prefix <input type="search" name="action" value="{{ request.GET.action }}" maxlength="80" placeholder="order.">
+  </label>
+  <label>Subject <input type="search" name="subject" value="{{ request.GET.subject }}" maxlength="80" placeholder="App\Models\Order">
+  </label>
+  <div class="admin-filter-actions"><button class="admin-button admin-button-primary" type="submit">Terapkan</button><a class="admin-button" href="/admin/audit">Reset</a></div>
+</form>
+<p class="admin-result-note" role="status">{{ total }} entri · halaman {{ page }} dari {{ pages }}</p>
+<section class="admin-card">
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Waktu</th><th>Actor</th><th>Action</th><th>Subject</th><th>Perubahan</th><th>IP</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{{ row.created_at }}</td>
+        <td>{{ row.actor }}<small>{{ row.actor_role }}</small></td>
+        <td>{{ row.action }}</td>
+        <td>{{ row.subject_type }}<small>{{ row.subject_id|default:'-' }}</small></td>
+        <td>{% if row.old_values %}<pre class="admin-json">old: {{ row.old_values|pprint }}</pre>{% endif %}{% if row.new_values %}<pre class="admin-json">new: {{ row.new_values|pprint }}</pre>{% endif %}</td>
+        <td>{{ row.ip_address|default:'-' }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="6">Tidak ada audit.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% if pages > 1 %}
+<nav class="admin-pagination" aria-label="Halaman audit">
+  {% if has_previous %}<a class="admin-button" href="/admin/audit?page={{ previous }}&action={{ request.GET.action|default:'' }}&subject={{ request.GET.subject|default:'' }}">← Sebelumnya</a>{% else %}<span class="admin-button admin-button-disabled">← Sebelumnya</span>{% endif %}
+  <span>Halaman {{ page }} dari {{ pages }}</span>
+  {% if has_next %}<a class="admin-button" href="/admin/audit?page={{ next }}&action={{ request.GET.action|default:'' }}&subject={{ request.GET.subject|default:'' }}">Berikutnya →</a>{% else %}<span class="admin-button admin-button-disabled">Berikutnya →</span>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

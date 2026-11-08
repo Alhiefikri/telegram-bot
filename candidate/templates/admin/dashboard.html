@@ -4,11 +4,24 @@
 {% if tab == 'stats' %}
 <section class="admin-hero">
   <div>
-    <p class="admin-eyebrow">Katalog lokal</p>
-    <h2>Ringkasan katalog</h2>
-    <p class="admin-help">Angka di sini hanya membaca katalog dan stok lokal. Operasi pesanan, pembayaran, saldo, dan supplier tetap menjadi tiket terpisah.</p>
+    <p class="admin-eyebrow">Operasional</p>
+    <h2>Ringkasan</h2>
+    <p class="admin-help">Receipt, order, dan saldo dibaca dari authority yang tersimpan. Angka katalog di bawah tetap terpisah dari laporan keuangan.</p>
   </div>
-  <a class="admin-button admin-button-primary" href="/admin/produk/baru">Tambah produk</a>
+  <div class="admin-hero-actions">
+    <a class="admin-button" href="/admin/laporan">Laporan lengkap</a>
+    <a class="admin-button admin-button-primary" href="/admin?tab=pesanan">Pesanan</a>
+  </div>
+</section>
+<div class="admin-stat-grid">
+  <article class="admin-card admin-stat"><span>Hari ini</span><strong>{% if overview.currency == 'USDT' %}{{ overview.today_amount|usdt }}{% else %}{{ overview.today_amount|idr }}{% endif %}</strong><small>{{ overview.today_orders }} order sukses · {{ overview.currency }}</small></article>
+  <article class="admin-card admin-stat"><span>Perlu diproses</span><strong>{{ overview.processing }}</strong><small>order status processing</small></article>
+  <article class="admin-card admin-stat"><span>Net periode</span><strong>{% if overview.currency == 'USDT' %}{{ overview.series.total|usdt }}{% else %}{{ overview.series.total|idr }}{% endif %}</strong><small>{{ overview.period }} · {{ overview.series.start }} – {{ overview.series.end }}</small></article>
+  <article class="admin-card admin-stat"><span>Updated</span><strong>{{ overview.updated_at }}</strong><small>Asia/Jakarta</small></article>
+</div>
+<section class="admin-card">
+  <h2>Ringkasan katalog</h2>
+  <p class="admin-help">Angka ini hanya membaca katalog dan stok lokal.</p>
 </section>
 <div class="admin-stat-grid">
   <article class="admin-card admin-stat"><span>Produk aktif</span><strong>{{ stats.active_product_count }}</strong><small>dari {{ stats.product_count }} produk tidak diarsipkan</small></article>

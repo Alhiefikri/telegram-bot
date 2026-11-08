@@ -11,19 +11,31 @@ class NavItem:
     glyph: str
     group: str
     tab: str | None = None
+    owner_only: bool = False
 
 
-TABS = ("stats", "produk")
+TABS = ("stats", "pesanan", "produk", "saldo", "supplier", "laporan", "pengaturan")
 
 _ITEMS = (
     NavItem("stats", "Ringkasan", "/admin?tab=stats", "⌂", "utama", "stats"),
+    NavItem("pesanan", "Pesanan", "/admin?tab=pesanan", "▤", "utama", "pesanan"),
     NavItem("produk", "Produk", "/admin?tab=produk", "▦", "utama", "produk"),
+    NavItem("laporan", "Laporan", "/admin/laporan", "◔", "utama", "laporan"),
+    NavItem("adjustments", "Saldo & adjustment", "/admin/store-balance/adjustments", "◫", "operasi", owner_only=True),
+    NavItem("usdt", "USDT review", "/admin/store-balance/usdt-review", "◇", "operasi", owner_only=True),
+    NavItem("topups", "Top-up IDR", "/admin/store-balance/reports", "↧", "operasi"),
+    NavItem("suppliers", "Supplier", "/admin/suppliers", "⇄", "operasi"),
+    NavItem("reviews", "Manual fulfillment", "/admin/manual-fulfillment-reviews", "☑", "operasi"),
+    NavItem("delivery", "Manual delivery", "/admin/telegram-outbound-effects", "✈", "operasi"),
+    NavItem("audit", "Audit", "/admin/audit", "⟳", "operasi"),
+    NavItem("settings", "Pengaturan", "/admin?tab=pengaturan", "⚙", "toko", "pengaturan"),
     NavItem("categories", "Kategori", "/admin/kategori", "☷", "katalog"),
     NavItem("families", "Product Family", "/admin/family", "◫", "katalog"),
     NavItem("banners", "Banner beranda", "/admin/banner", "▭", "katalog"),
 )
 
-_GROUPS = (("utama", "Utama"), ("katalog", "Katalog"))
+_GROUPS = (("utama", "Utama"), ("operasi", "Operasi"), ("toko", "Toko"),
+           ("katalog", "Katalog"))
 
 
 def normalize_tab(value):
@@ -47,6 +59,7 @@ def navigation(requested_tab=None, active=None):
                 "glyph": item.glyph,
                 "active": item.id == active,
                 "aria_current": "page" if item.id == active else None,
+                "owner_only": item.owner_only,
             })
         groups.append({"id": group_id, "label": label, "items": items})
     label = next((item.label for item in _ITEMS if item.id == active), "Ringkasan")

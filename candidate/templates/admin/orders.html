@@ -1,0 +1,66 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div>
+    <p class="admin-eyebrow">Operasi</p>
+    <h2>Pesanan</h2>
+    <p class="admin-help">Pembayaran, pengiriman, dan review ditampilkan dari status Order/Payment yang tersimpan. Tidak ada saldo atau status yang dihitung ulang di browser.</p>
+  </div>
+  <div class="admin-hero-actions">
+    <a class="admin-button" href="/admin/manual-fulfillment-reviews">Manual fulfillment</a>
+    <a class="admin-button" href="/admin/telegram-outbound-effects">Manual delivery</a>
+  </div>
+</section>
+
+<div class="admin-filter-chips" role="navigation" aria-label="Filter pesanan">
+  {% for filter in filters %}
+  <a class="admin-chip{% if filter.active %} admin-chip-active{% endif %}" href="{{ filter.url }}">{{ filter.label }} <span>{{ filter.count }}</span></a>
+  {% endfor %}
+</div>
+
+<form class="admin-card admin-filter" method="get" action="/admin">
+  <input type="hidden" name="tab" value="pesanan">
+  <input type="hidden" name="sales_filter" value="{{ active_filter }}">
+  <label>Cari invoice
+    <input type="search" name="invoice" value="{{ invoice }}" maxlength="80" placeholder="INV-...">
+  </label>
+  <div class="admin-filter-actions">
+    <button class="admin-button admin-button-primary" type="submit">Terapkan</button>
+    <a class="admin-button" href="/admin?tab=pesanan">Reset</a>
+  </div>
+</form>
+{% if invoice_too_short %}<p class="admin-error" role="alert">Invoice search minimal 3 karakter.</p>{% endif %}
+<p class="admin-result-note" role="status">{{ pagination.total }} pesanan · halaman {{ pagination.current }} dari {{ pagination.pages }}</p>
+
+<section class="admin-card">
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead><tr><th scope="col">Invoice</th><th scope="col">Customer</th><th scope="col">Produk</th><th scope="col">Nilai</th><th scope="col">Order</th><th scope="col">Payment</th><th scope="col">Perhatian</th><th scope="col">Aksi</th></tr></thead>
+      <tbody>
+      {% for order in rows %}
+        <tr>
+          <td><strong>{{ order.invoice_number }}</strong><small>{{ order.created_label }}</small><small>{{ order.provider }} · {{ order.method }}</small></td>
+          <td>{{ order.customer }}<small>Telegram ID tersimpan</small></td>
+          <td>{{ order.item_label }}<small>{{ order.item_count }} item</small></td>
+          <td class="admin-money">{% if order.currency == 'USDT' %}{{ order.total_amount|usdt }} USDT{% else %}{{ order.total_amount|idr }}{% endif %}</td>
+          <td><span class="admin-status admin-status-{{ order.order_status_tone }}">{{ order.order_status_label }}</span></td>
+          <td><span class="admin-status admin-status-{{ order.payment_status_tone }}">{{ order.payment_status_label }}</span><small>{{ order.latest_payment_status_label }}</small></td>
+          <td>{% if order.open_reviews %}<span class="admin-status admin-status-warning">Review</span>{% endif %}{% if order.delivery_reviews %}<span class="admin-status admin-status-warning">Delivery</span>{% endif %}{% if not order.open_reviews and not order.delivery_reviews %}—{% endif %}</td>
+          <td class="admin-row-actions"><a class="admin-button admin-button-small" href="{{ order.url }}">Buka</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8">Tidak ada pesanan untuk filter ini.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% if pagination.pages > 1 %}
+<nav class="admin-pagination" aria-label="Halaman pesanan">
+  {% if pagination.previous_url %}<a class="admin-button" href="{{ pagination.previous_url }}">← Sebelumnya</a>{% else %}<span class="admin-button admin-button-disabled">← Sebelumnya</span>{% endif %}
+  <span>Halaman {{ pagination.current }} dari {{ pagination.pages }}</span>
+  {% if pagination.next_url %}<a class="admin-button" href="{{ pagination.next_url }}">Berikutnya →</a>{% else %}<span class="admin-button admin-button-disabled">Berikutnya →</span>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Operasi</p><h2>Manual Delivery Review</h2><p class="admin-help">Outcome Telegram yang tidak pasti tidak dikirim ulang otomatis. Periksa chat Telegram terlebih dahulu, lalu tandai sent atau buat resend eksplisit dengan risiko duplikasi.</p></div>
+</section>
+<section class="admin-card">
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Effect</th><th>Sumber</th><th>Target</th><th>State</th><th>Attempts</th><th>Update</th><th>Aksi</th></tr></thead>
+    <tbody>
+    {% for effect in rows %}
+      <tr>
+        <td>{{ effect.effect_type }}<small>sequence {{ effect.sequence }} · {{ effect.telegram_method }}</small></td>
+        <td>{{ effect.source_label }}</td>
+        <td><code>{{ effect.target_mask }}</code></td>
+        <td><span class="admin-status admin-status-warning">{{ effect.state_label }}</span></td>
+        <td>{{ effect.attempts }}</td>
+        <td>{{ effect.updated_label }}{% if effect.error_code != '-' %}<small><code>{{ effect.error_code }}</code></small>{% endif %}</td>
+        <td class="admin-row-actions"><a class="admin-button admin-button-small" href="{{ effect.url }}">Buka</a></td>
+      </tr>
+    {% empty %}<tr><td colspan="7">Tidak ada effect yang menunggu review.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% if pages > 1 %}
+<nav class="admin-pagination" aria-label="Halaman delivery review">
+  {% if has_previous %}<a class="admin-button" href="/admin/telegram-outbound-effects?page={{ previous }}">← Sebelumnya</a>{% else %}<span class="admin-button admin-button-disabled">← Sebelumnya</span>{% endif %}
+  <span>Halaman {{ page }} dari {{ pages }} · {{ total }} effect</span>
+  {% if has_next %}<a class="admin-button" href="/admin/telegram-outbound-effects?page={{ next }}">Berikutnya →</a>{% else %}<span class="admin-button admin-button-disabled">Berikutnya →</span>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

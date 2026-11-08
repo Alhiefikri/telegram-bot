@@ -1,0 +1,55 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Operasi</p><h2>Top-up IDR</h2><p class="admin-help">Report read-only dari top-up yang tersimpan. Bukti pembayaran hanya ditampilkan sebagai status; file provider tidak pernah diteruskan ke browser dari halaman ini.</p></div>
+  <a class="admin-button" href="/admin/store-balance/adjustments">Saldo &amp; adjustment</a>
+</section>
+<form class="admin-card admin-filter" method="get" action="/admin/store-balance/reports">
+  <label>Status
+    <select name="status">
+      <option value="">Semua</option>
+      <option value="pending"{% if request.GET.status == 'pending' %} selected{% endif %}>Menunggu</option>
+      <option value="paid"{% if request.GET.status == 'paid' %} selected{% endif %}>Lunas</option>
+      <option value="settled"{% if request.GET.status == 'settled' %} selected{% endif %}>Settled</option>
+      <option value="expired"{% if request.GET.status == 'expired' %} selected{% endif %}>Kedaluwarsa</option>
+      <option value="failed"{% if request.GET.status == 'failed' %} selected{% endif %}>Gagal</option>
+      <option value="recovery_pending"{% if request.GET.status == 'recovery_pending' %} selected{% endif %}>Recovery</option>
+      <option value="invalid_provider_result"{% if request.GET.status == 'invalid_provider_result' %} selected{% endif %}>Review</option>
+      <option value="compensated"{% if request.GET.status == 'compensated' %} selected{% endif %}>Kompensasi</option>
+    </select>
+  </label>
+  <label>Telegram ID <input type="text" name="telegram_id" value="{{ request.GET.telegram_id }}" inputmode="numeric" maxlength="19"></label>
+  <div class="admin-filter-actions"><button class="admin-button admin-button-primary" type="submit">Terapkan</button><a class="admin-button" href="/admin/store-balance/reports">Reset</a></div>
+</form>
+<section class="admin-card">
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Customer</th><th>Nominal</th><th>Status</th><th>Provider</th><th>Merchant ref</th><th>Bukti</th><th>Waktu</th><th>Kompensasi</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{{ row.first_name|default:row.username }}<small><code>{{ row.telegram_id }}</code></small></td>
+        <td class="admin-money">{{ row.amount|idr }}</td>
+        <td><span class="admin-status {% if row.status == 'settled' or row.status == 'paid' %}admin-status-good{% elif row.status == 'expired' or row.status == 'failed' %}admin-status-danger{% else %}admin-status-warning{% endif %}">{{ row.status_label }}</span></td>
+        <td>{{ row.provider }}<small>{{ row.provider_create_state|default:'-' }}</small></td>
+        <td><code>{{ row.merchant_ref_masked }}</code></td>
+        <td>{{ row.proof_label }}</td>
+        <td>{{ row.created_label }}<small>paid {{ row.paid_label }}</small></td>
+        <td>
+          {% if row.status == 'expired' or row.status == 'failed' or row.status == 'recovery_pending' or row.status == 'invalid_provider_result' %}
+          <form method="post" action="/admin/store-balance/top-ups/{{ row.id }}/compensate" data-confirm="Buat preview pemulihan saldo untuk top-up ini?">{% csrf_token %}<input type="hidden" name="reason" value="Pemulihan top-up IDR yang tidak terselesaikan."><button class="admin-button admin-button-small" type="submit">Pemulihan</button></form>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+    {% empty %}<tr><td colspan="8">Tidak ada top-up.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% if pages > 1 %}
+<nav class="admin-pagination" aria-label="Halaman top-up">
+  {% if has_previous %}<a class="admin-button" href="/admin/store-balance/reports?page={{ previous }}&status={{ request.GET.status|default:'' }}&telegram_id={{ request.GET.telegram_id|default:'' }}">← Sebelumnya</a>{% else %}<span class="admin-button admin-button-disabled">← Sebelumnya</span>{% endif %}
+  <span>Halaman {{ page }} dari {{ pages }} · {{ total }} top-up</span>
+  {% if has_next %}<a class="admin-button" href="/admin/store-balance/reports?page={{ next }}&status={{ request.GET.status|default:'' }}&telegram_id={{ request.GET.telegram_id|default:'' }}">Berikutnya →</a>{% else %}<span class="admin-button admin-button-disabled">Berikutnya →</span>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

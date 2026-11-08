@@ -1,0 +1,83 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Owner only</p><h2>Saldo &amp; adjustment IDR</h2><p class="admin-help">Adjustment dan reversal selalu membuat ledger entry baru. Preview terikat sesi, nominal, Customer, dan versi; konfirmasi memakai password Owner.</p></div>
+  <a class="admin-button" href="/admin/store-balance/reports">Top-up IDR</a>
+</section>
+
+<form class="admin-card admin-filter" method="get" action="/admin/store-balance/adjustments">
+  <label>Telegram ID Customer
+    <input type="text" name="telegram_id" value="{{ telegram_id }}" inputmode="numeric" maxlength="19" placeholder="123456789" required>
+  </label>
+  <div class="admin-filter-actions"><button class="admin-button admin-button-primary" type="submit">Cari Customer</button></div>
+</form>
+{% if lookup_error %}<p class="admin-error" role="alert">{{ lookup_error }}</p>{% endif %}
+
+{% if customer %}
+<section class="admin-card">
+  <h2>{{ customer.first_name|default:customer.username }} · <code>{{ customer.telegram_id }}</code></h2>
+  <dl class="admin-facts">
+    <div><dt>Saldo IDR</dt><dd class="admin-money">{{ balance|idr }}</dd></div>
+    <div><dt>Customer ID</dt><dd>{{ customer.id }}</dd></div>
+  </dl>
+  <form method="post" action="/admin/store-balance/adjustments/previews" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="telegram_id" value="{{ customer.telegram_id }}">
+    <div class="admin-field"><label for="id_amount">Nominal IDR</label><input id="id_amount" name="amount" type="number" min="1" step="1" required></div>
+    <div class="admin-field"><label for="id_category">Kategori</label><select id="id_category" name="category"><option value="owner_attested">Owner attested</option><option value="promotional_grant">Promosi</option><option value="correction">Koreksi</option></select></div>
+    <div class="admin-field"><label for="id_reason">Alasan</label><textarea id="id_reason" name="reason" rows="3" maxlength="500" required></textarea></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Buat preview</button></div>
+  </form>
+</section>
+
+{% if preview %}
+<section class="admin-card">
+  <h2>Preview {{ preview.state_label }}</h2>
+  <dl class="admin-facts">
+    <div><dt>Customer</dt><dd>{{ preview_customer.telegram_id }} · {{ preview_customer.username|default:'-' }}</dd></div>
+    <div><dt>Nominal</dt><dd class="admin-money">{{ preview.amount|idr }}</dd></div>
+    <div><dt>Kategori / alasan</dt><dd>{{ preview.category }} · {{ preview.reason }}</dd></div>
+    <div><dt>Kedaluwarsa</dt><dd>{{ preview.expires_label }}</dd></div>
+    {% if preview_original %}<div><dt>Adjustment asal</dt><dd>{{ preview_original.id }} · {{ preview_original.amount|idr }} · {{ preview_original.reason }}</dd></div>{% endif %}
+  </dl>
+  {% if preview.state == 'pending' %}
+  <form method="post" action="/admin/store-balance/adjustments/previews/{{ preview.id }}/confirm" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="fingerprint" value="{{ preview.fingerprint }}">
+    <input type="hidden" name="version" value="{{ preview.version }}">
+    <div class="admin-field"><label for="id_password">Password Owner</label><input id="id_password" name="password" type="password" maxlength="1024" autocomplete="current-password" required></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" data-confirm="Terapkan adjustment ini ke ledger?">Konfirmasi adjustment</button></div>
+  </form>
+  <form method="post" action="/admin/store-balance/adjustments/previews/{{ preview.id }}/cancel" data-confirm="Batalkan preview ini?">{% csrf_token %}<input type="hidden" name="fingerprint" value="{{ preview.fingerprint }}"><input type="hidden" name="version" value="{{ preview.version }}"><button class="admin-button admin-button-danger" type="submit">Batalkan preview</button></form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if history %}
+<section class="admin-card">
+  <h2>Riwayat adjustment</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Waktu</th><th>Nominal</th><th>Kategori</th><th>Alasan</th><th>State</th><th>Aksi</th></tr></thead><tbody>
+    {% for entry in history.rows %}
+    <tr>
+      <td>{{ entry.created_label }}</td>
+      <td class="admin-money">{{ entry.amount|idr }}</td>
+      <td>{{ entry.category_label }}</td>
+      <td>{{ entry.reason }}</td>
+      <td>{{ entry.state_label }}</td>
+      <td>{% if entry.id in reversible %}<form method="post" action="/admin/store-balance/adjustments/reversals" data-confirm="Buat preview reversal penuh?">{% csrf_token %}<input type="hidden" name="telegram_id" value="{{ customer.telegram_id }}"><input type="hidden" name="source_id" value="{{ entry.id }}"><button class="admin-button admin-button-small" type="submit">Reversal</button></form>{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+{% endif %}
+
+<section class="admin-card">
+  <h2>Customer dengan saldo positif</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Customer</th><th>Telegram ID</th><th>Saldo</th></tr></thead><tbody>
+    {% for row in positive_balances %}<tr><td>{{ row.label }}</td><td><code>{{ row.telegram_id }}</code></td><td class="admin-money">{{ row.balance|idr }}</td></tr>
+    {% empty %}<tr><td colspan="3">Belum ada saldo positif.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}
