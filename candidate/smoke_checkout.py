@@ -10,7 +10,10 @@ def run():
     from lhie_candidate.startup import configure_django
     configure_django()
     fixtures = json.load(sys.stdin)
-    if os.environ.get('P22_ADMIN_SMOKE') == '1':
+    if os.environ.get('P25_NOTIFICATION_SMOKE') == '1':
+        from tests.test_notifications_postgres import exercise_notifications
+        exercise = exercise_notifications
+    elif os.environ.get('P22_ADMIN_SMOKE') == '1':
         from tests.test_admin_postgres import exercise_admin
         from tests.test_admin_operations_postgres import exercise_admin_operations
         outcomes = exercise_admin(fixtures)
@@ -45,7 +48,8 @@ def run():
     if os.environ.get('P22_ADMIN_SMOKE') != '1':
         outcomes = exercise(fixtures)
     import django
-    dataset = ('synthetic-p23-admin-v1' if os.environ.get('P22_ADMIN_SMOKE') == '1'
+    dataset = ('synthetic-p25-notifications-v1' if os.environ.get('P25_NOTIFICATION_SMOKE') == '1'
+               else 'synthetic-p23-admin-v1' if os.environ.get('P22_ADMIN_SMOKE') == '1'
                else 'synthetic-p21-storefront-v1' if os.environ.get('P21_STOREFRONT_SMOKE') == '1'
                else 'synthetic-p20-api-v1' if os.environ.get('P20_API_SMOKE') == '1'
                else 'synthetic-p17-usdt-funding-v1' if os.environ.get('P17_USDT_SMOKE') == '1'
@@ -70,7 +74,7 @@ if __name__ == '__main__':
             details.update(file=frame.tb_frame.f_code.co_filename.rsplit('/', 1)[-1],
                            line=frame.tb_lineno, function=frame.tb_frame.f_code.co_name)
         print(json.dumps(details),file=sys.stderr)
-        if os.environ.get('P07_RECEIPT_SMOKE') != '1':
+        if os.environ.get('P07_RECEIPT_SMOKE') != '1' or os.environ.get('P25_NOTIFICATION_SMOKE') == '1':
             import traceback
             from pathlib import Path
             diagnostic = Path('/evidence/probe-failure.txt')

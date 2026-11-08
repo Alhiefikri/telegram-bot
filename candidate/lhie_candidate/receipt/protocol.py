@@ -79,10 +79,19 @@ def _safe_units(units, text_fallback):
 
 
 class ReceiptProtocol:
-    def __init__(self, using='default', lease_seconds=600):
+    def __init__(self, using='default', lease_seconds=600, *, family_limits=None, terminal_codes=()):
         self.using = using
         self.db = Database(using)
         self.lease_seconds = max(60, int(lease_seconds))
+        # Family adapters select policy, never implement a second claim machine.
+        self.family_limits = dict(family_limits if family_limits is not None else
+                                  {kind: 3 for kind in RECEIPT_TYPES})
+        if (not self.family_limits or any(not isinstance(kind, str) or not kind or
+                type(limit) is not int or not 1 <= limit <= 5
+                for kind, limit in self.family_limits.items())):
+            raise ValueError('Invalid outbound family policy')
+        self.effect_types = tuple(self.family_limits)
+        self.terminal_codes = _NON_RETRYABLE | frozenset(terminal_codes)
 
     def _require_postgres(self):
         if connections[self.using].vendor != 'postgresql':
@@ -195,7 +204,8 @@ class ReceiptProtocol:
             WHERE effect_type = %s AND effect_group_key = %s ORDER BY sequence''', (EFFECT_TYPE, group_key))
 
     def _ready(self, row, at):
-        if row['state'] not in ('pending', 'failed') or row['attempts'] >= 3:
+        if (row['effect_type'] not in self.family_limits or row['state'] not in ('pending', 'failed')
+                or row['attempts'] >= self.family_limits[row['effect_type']]):
             return False
         if row['effect_type'] in (REFUND_TYPE, TOPUP_TYPE) and self.db.one(
                 "SELECT id FROM public.customer_usdt_funding_pauses WHERE scope='delivery' LIMIT 1"):
@@ -203,7 +213,7 @@ class ReceiptProtocol:
         if (row['effect_type'] == EFFECT_TYPE and row['template_version'] == PHOTO_TEMPLATE
                 and row['sequence'] == 1 and row['state'] == 'failed'):
             return False
-        if row['last_error_code'] in _NON_RETRYABLE:
+        if row['last_error_code'] in self.terminal_codes:
             return False
         if row['next_attempt_at'] is not None and row['next_attempt_at'] > at:
             return False
@@ -235,7 +245,7 @@ class ReceiptProtocol:
     def claim(self, effect_id):
         self._require_postgres()
         with transaction.atomic(using=self.using):
-            row = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id = %s AND effect_type = ANY(%s) FOR UPDATE', (effect_id, list(RECEIPT_TYPES)))
+            row = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id = %s AND effect_type = ANY(%s) FOR UPDATE', (effect_id, list(self.effect_types)))
             now = _now()
             if row is None or not self._ready(row, now):
                 return None
@@ -253,7 +263,7 @@ class ReceiptProtocol:
     def _locked_claim(self, effect_id, token):
         if not isinstance(token, str) or not token:
             return None
-        row = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id = %s AND effect_type = ANY(%s) FOR UPDATE', (effect_id, list(RECEIPT_TYPES)))
+        row = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id = %s AND effect_type = ANY(%s) FOR UPDATE', (effect_id, list(self.effect_types)))
         if (row is None or row['state'] != 'sending' or not row['claim_token']
                 or row['lease_until'] is None or row['lease_until'] <= _now()
                 or not secrets.compare_digest(row['claim_token'], token)):
@@ -279,7 +289,7 @@ class ReceiptProtocol:
         """Record a *definite* failure; ambiguous transport must use finalize_unknown."""
         self._require_postgres()
         http = re.fullmatch(r'telegram_http_([0-9]{3})', code) if isinstance(code, str) else None
-        if code not in _FAILURE_CODES and not (http and 400 <= int(http.group(1)) < 500 and int(http.group(1)) != 408):
+        if code not in _FAILURE_CODES | self.terminal_codes and not (http and 400 <= int(http.group(1)) < 500 and int(http.group(1)) != 408):
             raise ValueError('Failure code is not a definite safe failure')
         if retry_after_seconds is not None:
             if type(retry_after_seconds) is not int:
@@ -290,14 +300,16 @@ class ReceiptProtocol:
             if row is None:
                 return None
             now = _now()
-            terminal = code in _NON_RETRYABLE or row['attempts'] >= 3
+            maximum = self.family_limits[row['effect_type']]
+            terminal = code in self.terminal_codes or row['attempts'] >= maximum
             delay = retry_after_seconds if retry_after_seconds is not None else (5 if row['attempts'] <= 1 else 30 if row['attempts'] == 2 else 120)
             exhausted = {EFFECT_TYPE: 'receipt_attempts_exhausted', ACTION_TYPE: 'receipt_actions_attempts_exhausted',
                          TXT_TYPE: 'receipt_txt_download_attempts_exhausted',
                          REFUND_TYPE: 'usdt_refund_receipt_attempts_exhausted',
                          TOPUP_TYPE: 'usdt_top_up_receipt_attempts_exhausted',
-                         BALANCE_ALERT_TYPE: 'balance_operations_alert_attempts_exhausted'}[row['effect_type']]
-            stored_code = code if code in _NON_RETRYABLE or row['attempts'] < 3 else exhausted
+                          BALANCE_ALERT_TYPE: 'balance_operations_alert_attempts_exhausted'}.get(
+                              row['effect_type'], 'notification_attempts_exhausted')
+            stored_code = code if code in self.terminal_codes or row['attempts'] < maximum else exhausted
             return self.db.one('''UPDATE public.telegram_outbound_effects SET state = 'failed',
                 lease_until = NULL, claim_token = NULL, sent_at = NULL, failed_at = %s,
                 unknown_at = NULL, manual_review_at = NULL, next_attempt_at = %s,
@@ -318,21 +330,23 @@ class ReceiptProtocol:
                 last_error = 'Telegram delivery outcome is unknown and requires review.',
                 updated_at = %s WHERE id = %s RETURNING *''', (now, now, effect_id))
 
-    def recover_expired_leases(self, limit=100):
+    def recover_expired_leases(self, limit=100, *, chats=None):
         self._require_postgres()
         limit = max(1, min(1000, int(limit)))
         with transaction.atomic(using=self.using):
             now = _now()
             rows = self.db.rows('''WITH expired AS (
                 SELECT id FROM public.telegram_outbound_effects WHERE effect_type = ANY(%s) AND state = 'sending'
-                  AND lease_until IS NOT NULL AND lease_until <= %s ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED
+                  AND lease_until IS NOT NULL AND lease_until <= %s
+                  AND (%s::text[] IS NULL OR telegram_chat_id=ANY(%s))
+                  ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED
                 ) UPDATE public.telegram_outbound_effects AS effects SET state = 'unknown', lease_until = NULL,
                   claim_token = NULL, next_attempt_at = NULL, unknown_at = %s, manual_review_at = NULL,
                   last_error_code = 'lease_expired',
                   last_error = 'Worker lease expired before Telegram delivery was finalized.',
                   outcome_metadata = (COALESCE(effects.outcome_metadata::jsonb, '{}'::jsonb) || '{"reason":"worker_lease_expired"}'::jsonb)::json,
                   updated_at = %s FROM expired WHERE effects.id = expired.id RETURNING effects.id''',
-                (list(RECEIPT_TYPES), now, limit, now, now))
+                (list(self.effect_types), now, chats, chats, limit, now, now))
             return len(rows)
 
     def completed_receipts_needing_projection(self, limit):
@@ -351,11 +365,13 @@ class ReceiptProtocol:
                     AND later.sequence>e.sequence AND later.state='sent')
             ORDER BY e.id LIMIT %s''', (EFFECT_TYPE, 'App\\Models\\Order', LEGACY_INVOICE_TEMPLATE, limit))
 
-    def ready_effects(self, limit):
+    def ready_effects(self, limit, *, chats=None):
         """Return only due units whose ordered predecessors are resolved."""
         self._require_postgres()
         return self.db.rows('''SELECT e.id FROM public.telegram_outbound_effects e
-            WHERE e.effect_type=ANY(%s) AND e.state IN ('pending','failed') AND e.attempts<3
+            WHERE e.effect_type=ANY(%s) AND e.state IN ('pending','failed')
+              AND e.attempts < (%s::jsonb ->> e.effect_type)::int
+              AND (%s::text[] IS NULL OR e.telegram_chat_id=ANY(%s))
               AND (e.effect_type NOT IN ('usdt.refund_receipt','usdt.top_up_receipt') OR NOT EXISTS (
                   SELECT 1 FROM public.customer_usdt_funding_pauses WHERE scope='delivery'))
               AND (e.next_attempt_at IS NULL OR e.next_attempt_at<=%s)
@@ -366,5 +382,5 @@ class ReceiptProtocol:
                   WHERE p.effect_group_key=e.effect_group_key AND p.sequence<e.sequence
                     AND p.state <> 'sent' AND NOT COALESCE((p.sequence=1 AND p.state IN ('failed','unknown')
                       AND p.telegram_method='sendPhoto' AND p.template_version=%s),false)))
-            ORDER BY e.id LIMIT %s''', (list(RECEIPT_TYPES), _now(), list(_NON_RETRYABLE),
+            ORDER BY e.id LIMIT %s''', (list(self.effect_types), json.dumps(self.family_limits), chats, chats, _now(), list(self.terminal_codes),
                 EFFECT_TYPE, PHOTO_TEMPLATE, EFFECT_TYPE, LEGACY_INVOICE_TEMPLATE, limit))

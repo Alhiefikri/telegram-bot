@@ -240,6 +240,21 @@ def verify_public_writes(cursor):
     checkout = cursor.fetchone()[0]
     allowed_insert = NAVIGATION_INSERT | (CHECKOUT_INSERT if checkout else {})
     allowed_update = NAVIGATION_UPDATE | (CHECKOUT_UPDATE if checkout else {})
+    cursor.execute("SELECT has_column_privilege(current_user,'public.order_notification_events','recipient_email','INSERT')")
+    if cursor.fetchone()[0]:
+        allowed_insert = _merge(allowed_insert, {
+            'telegram_outbound_effects': {'sent_at', 'unknown_at'},
+            'order_notification_events': set('order_id event_type recipient_email status attempts next_attempt_at created_at updated_at'.split()),
+            'telegram_broadcast_recipients': set('broadcast_id customer_id telegram_id locale created_at updated_at'.split()),
+        })
+        allowed_update = _merge(allowed_update, {
+            'payments': {'payment_proof_forwarded_at'},
+            'telegram_broadcasts': set('recipient_count sent_count failed_count pending_count terminal_failed_count status completed_at updated_at'.split()),
+            'telegram_broadcast_recipients': set('sent_at failed_at terminal_failed_at retry_at last_error attempts updated_at'.split()),
+            'stock_notification_recipients': set('sent_at failed_at terminal_failed_at last_error attempts updated_at'.split()),
+            'product_price_change_notification_recipients': set('sent_at failed_at last_error attempts updated_at'.split()),
+            'order_notification_events': set('status attempts delivery_started_at next_attempt_at sent_at failed_at last_error updated_at'.split()),
+        })
     cursor.execute("SELECT has_column_privilege(current_user,'public.payments','provider_reference','UPDATE')")
     if cursor.fetchone()[0]:
         allowed_insert = {**allowed_insert, **P08_INSERT}
@@ -248,7 +263,7 @@ def verify_public_writes(cursor):
         }}
     cursor.execute("SELECT has_column_privilege(current_user,'public.telegram_outbound_effects','effect_key','INSERT')")
     if cursor.fetchone()[0]:
-        allowed_insert = {**allowed_insert, **P09_INSERT}
+        allowed_insert = _merge(allowed_insert, P09_INSERT)
         allowed_update = {**allowed_update, **{
             table: allowed_update.get(table, set()) | columns for table, columns in P09_UPDATE.items()
         }}

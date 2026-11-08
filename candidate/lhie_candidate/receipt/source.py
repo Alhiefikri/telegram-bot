@@ -132,9 +132,9 @@ class ReceiptSource:
         order, payment = self.authorize(order_id, chat_id, lock=lock, receipt=receipt)
         return self._load(order_id, order, payment, locale=locale, receipt=receipt)
 
-    def load_customer(self, order_id, customer_id, *, locale=None, lock=False):
-        order, payment = self.authorize_customer(order_id, customer_id, lock=lock)
-        return self._load(order_id, order, payment, locale=locale, receipt=False)
+    def load_customer(self, order_id, customer_id, *, locale=None, lock=False, receipt=False):
+        order, payment = self.authorize_customer(order_id, customer_id, lock=lock, receipt=receipt)
+        return self._load(order_id, order, payment, locale=locale, receipt=receipt)
 
     def validate_allocation(self, order, payment, items, allocated, *, require_complete=False):
         """Validate retained ownership and return only non-retired allocated rows."""
