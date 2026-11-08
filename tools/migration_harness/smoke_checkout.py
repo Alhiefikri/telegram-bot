@@ -29,7 +29,8 @@ def cli(*args):
 
 
 def main():
-    receipt = sys.argv[1:] == ['--receipt']
+    notifications = sys.argv[1:] == ['--notifications']
+    receipt = sys.argv[1:] == ['--receipt'] or notifications
     lifecycle = sys.argv[1:] == ['--lifecycle']
     browser = sys.argv[1:] == ['--storefront-browser']
     storefront = sys.argv[1:] in (['--storefront'], ['--storefront-browser'])
@@ -39,12 +40,12 @@ def main():
     p16 = sys.argv[1:] == ['--p16']
     p17 = sys.argv[1:] == ['--p17']
     api = sys.argv[1:] == ['--api']
-    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api'], ['--admin']):
-        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api|--admin]')
+    if sys.argv[1:] not in ([], ['--notifications'], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api'], ['--admin']):
+        raise ValueError('Usage: smoke_checkout.py [--notifications|--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api|--admin]')
     os.umask(0o077)
-    scope = 'migration-p22' if admin else 'migration-p21' if storefront else 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
+    scope = 'migration-p25' if notifications else 'migration-p22' if admin else 'migration-p21' if storefront else 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
     harness.STATE = ROOT / '.local' / scope / 'lifecycle'
-    harness.PREFIX = 'lhie-p22-' if admin else 'lhie-p21-' if storefront else 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
+    harness.PREFIX = 'lhie-p25-' if notifications else 'lhie-p22-' if admin else 'lhie-p21-' if storefront else 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
     harness.IMAGE = 'lhie-p19-boundary:local' if auth or api else 'lhie-p09-boundary:local' if receipt or lifecycle or supplier or p16 or p17 else 'lhie-p01-boundary:1'
     if not (harness.STATE / 'candidate/config.json').exists():
         cli('init','candidate')
@@ -78,6 +79,8 @@ def main():
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
         if receipt or lifecycle or supplier or p16 or p17 or api or storefront:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
+        if notifications:
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/notifications/grants.sql').read_text()
         if p16 or p17:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/grants.sql').read_text()
         if p17:
@@ -123,6 +126,7 @@ def main():
             '--mount',f'type=bind,src={output},dst=/evidence',
             '--env','P07_CHECKOUT_SMOKE=disposable-local-only',
             '--env',f'P07_RECEIPT_SMOKE={"1" if receipt else "0"}',
+            '--env',f'P25_NOTIFICATION_SMOKE={"1" if notifications else "0"}',
             '--env',f'P12_LIFECYCLE_SMOKE={"1" if lifecycle else "0"}',
             '--env',f'P19_AUTH_SMOKE={"1" if auth else "0"}',
             '--env',f'P21_STOREFRONT_SMOKE={"1" if storefront else "0"}',
@@ -135,7 +139,7 @@ def main():
             'lhie-p13-candidate:local' if admin or supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
         probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=1200 if browser else 240)
         if probe.returncode:
-            if receipt:
+            if receipt and not notifications:
                 diagnostic = [json.loads(line) for line in probe.stderr.splitlines() if line.startswith('{')]
                 raise RuntimeError('P09 probe failed: ' + json.dumps(diagnostic))
             (output / 'probe-failure.stderr').write_text(probe.stderr)
@@ -153,7 +157,12 @@ def main():
                 'candidate/tests/test_receipt_transport.py', 'candidate/lhie_candidate/receipt/assets/lhie-store-logo.png',
                 'candidate/lhie_candidate/navigation/processor.py', 'candidate/lhie_candidate/payments/lifecycle.py',
                 'candidate/receipt.py', 'tests/migration_harness/test_p09_relay.py',
-                'tools/migration_harness/boundary.py', 'tools/migration_harness/harness.py'))
+                 'tools/migration_harness/boundary.py', 'tools/migration_harness/harness.py'))
+        if notifications:
+            sources.extend(sorted((ROOT / 'candidate/lhie_candidate/notifications').glob('*.py')))
+            sources.extend(ROOT / name for name in (
+                'candidate/lhie_candidate/notifications/grants.sql', 'candidate/tests/test_notifications.py',
+                'candidate/tests/test_notifications_postgres.py', 'candidate/notifications.py'))
         if lifecycle:
             sources.extend(ROOT / name for name in (
                 'candidate/tests/test_order_lifecycle_postgres.py', 'candidate/tests/test_order_refunds.py',
