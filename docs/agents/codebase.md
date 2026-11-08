@@ -143,7 +143,8 @@ on that worker instead of blocking interaction. `smoke_qris.py --external`
 extends the existing runner with `.local/migration-p14/verification.json`,
 including real PostgreSQL settlement/reversed-alias races and receipt delivery.
 Default composition admits neither external adapter nor USDT funding. Live
-qualification, actual history and dashboard composition retain H2/HD/P23 owners.
+qualification and actual history retain H2/HD owners; full presentation stays
+P24/P27.
 
 P15 [IDR funding and Owner adjustments](../migration/python-django/p05/README.md#p15-idr-funding-adjustments-and-reconciliation-699)
 owns `candidate/lhie_candidate/funding/` and `adjustments/`: DB-versioned funding
@@ -2599,10 +2600,10 @@ dashboard; JSON-compatible requests without HTML keep the P19 admin-current
 contract. Django admin and Django User are not installed or used as authority.
 P22 owns category/Product Family/Product CRUD, localized content, icons and
 DB media paths, reseller/quantity-tier pricing, banners with version fencing,
-and legacy/structured stock intake/edit/delete/bulk deletion. P23 still owns
-order/payment/balance/supplier operations and reporting, P24 owns full bot/admin
-presentation, P25 owns notification delivery and P27 owns upload/browser visual
-acceptance.
+and legacy/structured stock intake/edit/delete/bulk deletion. P23 owns
+order/payment/balance/supplier operations and reporting (see below), P24 owns
+full bot/admin presentation, P25 owns notification delivery and P27 owns
+upload/browser visual acceptance.
 
 `admin/stock.py` is the only new admin writer of stock projections: one
 transaction writes stock rows, `inventory_movements`, the durable intake
@@ -2635,3 +2636,28 @@ Sebelum membuka patch:
 - [ ] README/runbook/ADR diperbarui jika command, flow, atau operational invariant berubah.
 - [ ] Telegram Outbound Effect changes preserve the sole ledger seam, explicit Ambiguous Telegram Delivery review, and the deferred Admin Broadcast handoff documented in [`telegram-outbound-effect-architecture.md`](../../docs/telegram-outbound-effect-architecture.md).
 - [ ] Test/lint/build yang relevan dijalankan dan hasilnya dicatat.
+
+### Django admin operations and reporting (#705)
+
+`candidate/lhie_candidate/admin/` now separates read models from owners:
+`orders.py` (invoice search, status filters, Order/Payment/effect/audit reads,
+manual-mismatch decisions, cancel/reconcile/mail rearm), `reviews.py` (Manual
+Fulfillment Review resolve/handoff and Manual Delivery Review mark-sent/resend),
+`balance.py` (Owner IDR adjustment preview/reversal, USDT review, funding policy,
+pauses and restore-gate reads), `settings.py` (provider/channel, Checkout
+Maintenance, Customer API and BSC receiver state), `suppliers.py` (operator
+evidence, manual credentials, handoff and external refund confirmation) and
+`reporting.py` (canonical paid receipts, earnings, history, CSV, audit). Every
+mutation delegates to the existing P12/P15/P17/P18 owner and repeats its role
+guard; rendering never dispatches a provider or supplier request.
+
+`reporting.py` owns the canonical receipt definition used by the new pages: one
+paid Payment per successful Order (earliest `paid_at`/`id`), successful Orders
+only, exact integer IDR/micro-USDT, separated currencies and production
+provider-fee snapshots. It never reads a Store Balance projection as revenue.
+`admin/grants.sql` is the explicit disposable provisioning seam; startup never
+grants. New admin smoke evidence is produced by
+`candidate/tests/test_admin_operations_postgres.py`; pure masking/filter proofs
+are in `candidate/tests/test_admin_operations.py`. Sales Proof retry and
+receipt-group resend remain P25, provider qualification remains P13/P14/P17 and
+browser/visual parity remains P27.
