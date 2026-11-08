@@ -33,17 +33,18 @@ def main():
     lifecycle = sys.argv[1:] == ['--lifecycle']
     browser = sys.argv[1:] == ['--storefront-browser']
     storefront = sys.argv[1:] in (['--storefront'], ['--storefront-browser'])
-    auth = sys.argv[1:] == ['--auth'] or storefront
+    admin = sys.argv[1:] == ['--admin']
+    auth = sys.argv[1:] == ['--auth'] or storefront or admin
     supplier = sys.argv[1:] == ['--supplier']
     p16 = sys.argv[1:] == ['--p16']
     p17 = sys.argv[1:] == ['--p17']
     api = sys.argv[1:] == ['--api']
-    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api']):
-        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api]')
+    if sys.argv[1:] not in ([], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api'], ['--admin']):
+        raise ValueError('Usage: smoke_checkout.py [--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api|--admin]')
     os.umask(0o077)
-    scope = 'migration-p21' if storefront else 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
+    scope = 'migration-p22' if admin else 'migration-p21' if storefront else 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
     harness.STATE = ROOT / '.local' / scope / 'lifecycle'
-    harness.PREFIX = 'lhie-p21-' if storefront else 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
+    harness.PREFIX = 'lhie-p22-' if admin else 'lhie-p21-' if storefront else 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
     harness.IMAGE = 'lhie-p19-boundary:local' if auth or api else 'lhie-p09-boundary:local' if receipt or lifecycle or supplier or p16 or p17 else 'lhie-p01-boundary:1'
     if not (harness.STATE / 'candidate/config.json').exists():
         cli('init','candidate')
@@ -97,6 +98,8 @@ def main():
             schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/storefront' / name).read_text()
                                        for name in ('catalog_grants.sql', 'grants.sql', 'account_grants.sql',
                                                     'balance_idr_grants.sql', 'balance_usdt_grants.sql'))
+        if admin:
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/admin/grants.sql').read_text()
         if api:
             schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/customer_api' / name).read_text()
                                        for name in ('credential_grants.sql','orders_grants.sql','reads_grants.sql'))
@@ -120,12 +123,13 @@ def main():
             '--env',f'P12_LIFECYCLE_SMOKE={"1" if lifecycle else "0"}',
             '--env',f'P19_AUTH_SMOKE={"1" if auth else "0"}',
             '--env',f'P21_STOREFRONT_SMOKE={"1" if storefront else "0"}',
+            '--env',f'P22_ADMIN_SMOKE={"1" if admin else "0"}',
             '--env',f'P21_BROWSER_SMOKE={"1" if browser else "0"}',
             '--env',f'P16_USDT_SMOKE={"1" if p16 else "0"}',
             '--env',f'P17_USDT_SMOKE={"1" if p17 else "0"}',
             '--env',f'P20_API_SMOKE={"1" if api else "0"}',
             '--env',f'P18_SUPPLIER_SMOKE={"1" if supplier else "0"}','--entrypoint','python',
-            'lhie-p13-candidate:local' if supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
+            'lhie-p13-candidate:local' if admin or supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
         probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=1200 if browser else 240)
         if probe.returncode:
             if receipt:
@@ -178,6 +182,18 @@ def main():
                 ROOT / 'candidate/static/storefront') for path in sorted(directory.rglob('*'))
                 if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc')
             sources.append(ROOT / 'candidate/tests/test_storefront_postgres.py')
+        if admin:
+            sources.extend(path for directory in (
+                ROOT / 'candidate/lhie_candidate/admin', ROOT / 'candidate/templates/admin',
+                ROOT / 'candidate/static/admin') for path in sorted(directory.rglob('*'))
+                if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc')
+            sources.extend(ROOT / name for name in (
+                'candidate/tests/test_admin_postgres.py', 'candidate/tests/test_admin_pricing.py',
+                'candidate/lhie_candidate/settings.py',
+                'candidate/lhie_candidate/urls.py', 'candidate/lhie_candidate/auth/admin.py',
+                'candidate/lhie_candidate/auth/http.py', 'candidate/lhie_candidate/compat/crypto.py',
+                'candidate/lhie_candidate/compat/identity.py', 'candidate/lhie_candidate/checkout/db.py',
+                'candidate/lhie_candidate/checkout/privileges.py'))
         if p16:
             sources.extend(sorted((ROOT / 'candidate/lhie_candidate/usdt').glob('*.py')))
             sources.append(ROOT / 'candidate/lhie_candidate/usdt/grants.sql')
@@ -249,6 +265,20 @@ def main():
                     'src/app/Services/Telegram/TelegramBotIdentity.php',
                     'src/app/Storefront/StorefrontOrderAccess.php',
                     'src/app/Http/Controllers/Admin/AdminLoginController.php')})
+        if admin:
+            observed['legacy_owner_sha256'].update({name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                for name in ('src/app/Services/ProductStockIntake.php',
+                    'src/app/Services/ProductStockItemManager.php',
+                    'src/app/Services/Admin/ProductFamilyManagementService.php',
+                    'src/app/Services/Admin/AdminProductQuantityPricing.php',
+                    'src/app/Services/Admin/ProductFamilyCategoryCoherence.php',
+                    'src/app/Services/Admin/AdminProductWorkspaceData.php',
+                    'src/app/Services/Admin/CategoryManagementService.php',
+                    'src/app/Http/Controllers/Admin/AdminProductCreateController.php',
+                    'src/app/Http/Controllers/Admin/AdminProductUpdateController.php',
+                    'src/app/Http/Controllers/Admin/AdminProductStockController.php',
+                    'src/app/Http/Controllers/Admin/AdminProductAccountStockController.php',
+                    'src/app/Storefront/StorefrontBanners.php')})
         observed['postgres_version'] = docker('exec',database,'postgres','--version')
         observed['harness_manifest'] = str(Path(manifest).relative_to(ROOT))
         observed['limits'] = ['Synthetic local data/test keys only; no production schema/history qualification',
@@ -274,6 +304,11 @@ def main():
             observed['limits'] = ['Synthetic disposable PostgreSQL/Redis and local fixture transports only',
                 'Source mounted over cached dependency image; explicit grants, no production activation',
                 'No live providers, real customers, production data, deployment or CI/CD operations']
+        if admin:
+            observed['limits'] = ['Synthetic disposable PostgreSQL/Redis only; no production data, uploads or live services',
+                'Admin routes use explicit disposable grants and a synthetic credential identity key injected by the proof',
+                'P23 order/payment/reporting surfaces, P24 bot/admin presentation, asset uploads and P27 browser parity remain downstream',
+                'No production, deployment or CI/CD operations']
         if supplier:
             observed['limits'] = ['Synthetic disposable PostgreSQL and Redis, injected supplier/Telegram fixtures only',
                 'No live supplier targets, actual historical data or production provider qualification',

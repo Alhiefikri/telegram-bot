@@ -1,0 +1,112 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+{% if tab == 'stats' %}
+<section class="admin-hero">
+  <div>
+    <p class="admin-eyebrow">Katalog lokal</p>
+    <h2>Ringkasan katalog</h2>
+    <p class="admin-help">Angka di sini hanya membaca katalog dan stok lokal. Operasi pesanan, pembayaran, saldo, dan supplier tetap menjadi tiket terpisah.</p>
+  </div>
+  <a class="admin-button admin-button-primary" href="/admin/produk/baru">Tambah produk</a>
+</section>
+<div class="admin-stat-grid">
+  <article class="admin-card admin-stat"><span>Produk aktif</span><strong>{{ stats.active_product_count }}</strong><small>dari {{ stats.product_count }} produk tidak diarsipkan</small></article>
+  <article class="admin-card admin-stat"><span>Product Family</span><strong>{{ stats.family_count }}</strong><small>{{ stats.category_count }} kategori</small></article>
+  <article class="admin-card admin-stat"><span>Stok akun tersedia</span><strong>{{ stats.available_item_count }}</strong><small>{{ stats.retired_item_count }} retired, tidak kembali ke stok</small></article>
+  <article class="admin-card admin-stat"><span>Produk habis</span><strong>{{ stats.sold_out_product_count }}</strong><small>produk aktif tanpa stok lokal</small></article>
+</div>
+<section class="admin-card">
+  <h2>Alur kerja</h2>
+  <div class="admin-action-grid">
+    <a href="/admin?tab=produk">Kelola produk dan stok</a>
+    <a href="/admin/family">Atur Product Family</a>
+    <a href="/admin/kategori">Atur kategori</a>
+    <a href="/admin/banner">Atur banner beranda</a>
+  </div>
+</section>
+{% else %}
+<section class="admin-hero">
+  <div>
+    <p class="admin-eyebrow">Katalog</p>
+    <h2>Produk dan stok</h2>
+    <p class="admin-help">Cari produk atau family, lalu buka workspace untuk detail, harga, tampilan, dan stok. Semua mutasi tetap memakai pemilik transaksi yang sama.</p>
+  </div>
+  <div class="admin-hero-actions">
+    <a class="admin-button" href="/admin/family">Product Family</a>
+    <a class="admin-button" href="/admin/kategori">Kategori</a>
+    <a class="admin-button admin-button-primary" href="/admin/produk/baru">Tambah produk</a>
+  </div>
+</section>
+<form class="admin-card admin-filter" method="get" action="/admin">
+  <input type="hidden" name="tab" value="produk">
+  <label>Cari produk / family
+    <input type="search" name="product_search" value="{{ catalog.search }}" maxlength="255" placeholder="Nama produk, pilihan, kategori, atau family">
+  </label>
+  <label>Urutkan
+    <select name="product_sort">
+      {% for value, label in catalog.sorts.items %}<option value="{{ value }}"{% if value == catalog.sort %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  <div class="admin-filter-actions">
+    <button class="admin-button admin-button-primary" type="submit">Terapkan</button>
+    <a class="admin-button" href="/admin?tab=produk">Reset</a>
+  </div>
+</form>
+<p class="admin-result-note" role="status">{{ catalog.pagination.total }} family/produk · halaman {{ catalog.pagination.current }} dari {{ catalog.pagination.pages }}</p>
+{% for group in catalog.groups %}
+<article class="admin-card admin-group" id="grup-{{ group.key }}">
+  <header class="admin-group-head">
+    <div>
+      <div class="admin-group-title">
+        <h2>{{ group.name }}</h2>
+        <span class="admin-badge">{{ group.category }}</span>
+        {% if group.family_id %}<span class="admin-badge admin-badge-muted">Family</span>{% endif %}
+      </div>
+      <p>{{ group.member_count }} produk · {{ group.available_sum }} stok tersedia · {{ group.sold_out_count }} habis</p>
+      <p class="admin-money">{{ group.minimum_price|idr }}{% if group.minimum_price != group.maximum_price %} – {{ group.maximum_price|idr }}{% endif %}</p>
+    </div>
+    <div class="admin-group-actions">
+      {% if group.family_id %}<a class="admin-button admin-button-small" href="/admin/family/{{ group.family_id }}">Edit family</a>{% endif %}
+      <a class="admin-button admin-button-small" href="/admin/produk/baru">Tambah produk</a>
+    </div>
+  </header>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead><tr><th scope="col">Produk</th><th scope="col">Harga</th><th scope="col">Stok</th><th scope="col">Status</th><th scope="col">Aksi</th></tr></thead>
+      <tbody>
+      {% for member in group.members %}
+        <tr>
+          <td>
+            <strong>{{ member.name }}</strong>
+            {% if member.family_option_label %}<small>{{ member.family_option_label }}</small>{% endif %}
+            {% if member.icon %}<span class="admin-member-icon" aria-hidden="true">{{ member.icon }}</span>{% endif %}
+          </td>
+          <td class="admin-money">{{ member.price_amount|idr }}{% if member.usdt_price_amount %} <small>{{ member.usdt_price_amount|usdt }} USDT</small>{% endif %}</td>
+          <td><strong>{{ member.available }}</strong><small>tersedia · proyeksi {{ member.stock }} / reserved {{ member.reserved_stock }}</small></td>
+          <td>{% if member.is_active %}<span class="admin-status admin-status-good">Aktif</span>{% else %}<span class="admin-status admin-status-muted">Pause</span>{% endif %}</td>
+          <td class="admin-row-actions">
+            <a class="admin-button admin-button-small" href="/admin/produk/{{ member.id }}">Kelola</a>
+            <a class="admin-button admin-button-small" href="/admin/produk/{{ member.id }}?section=stock">Stok</a>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5">Belum ada produk pada family ini.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if group.truncated %}<p class="admin-help">Menampilkan {{ group.shown_members }} dari {{ group.member_count }} produk. Gunakan pencarian untuk mempersempit.</p>{% endif %}
+</article>
+{% empty %}
+<section class="admin-card admin-empty"><h2>Tidak ada produk atau family yang cocok.</h2><p>Ubah pencarian atau reset filter.</p></section>
+{% endfor %}
+{% if catalog.pagination.pages > 1 %}
+<nav class="admin-pagination" aria-label="Halaman produk">
+  {% if catalog.pagination.previous %}<a class="admin-button" href="{{ catalog.pagination.previous }}">← Sebelumnya</a>{% else %}<span class="admin-button admin-button-disabled">← Sebelumnya</span>{% endif %}
+  <span>Halaman {{ catalog.pagination.current }} dari {{ catalog.pagination.pages }}</span>
+  {% if catalog.pagination.next %}<a class="admin-button" href="{{ catalog.pagination.next }}">Berikutnya →</a>{% else %}<span class="admin-button admin-button-disabled">Berikutnya →</span>{% endif %}
+</nav>
+{% endif %}
+{% endif %}
+{% endblock %}

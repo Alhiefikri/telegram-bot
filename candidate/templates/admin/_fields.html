@@ -1,0 +1,19 @@
+{% for field in fields %}
+<div class="admin-field{% if field.kind == 'checkbox' %} admin-field-checkbox{% endif %}">
+  <label for="id_{{ field.name }}">{{ field.label }}{% if field.required %} <span class="admin-required" aria-hidden="true">*</span>{% endif %}</label>
+  {% if field.kind == 'textarea' %}
+    <textarea id="id_{{ field.name }}" name="{{ field.name }}" rows="{{ field.rows }}"{% if field.maximum %} maxlength="{{ field.maximum }}"{% endif %}{% if field.required %} required{% endif %}{% if field.readonly %} readonly{% endif %}>{{ field.value }}</textarea>
+  {% elif field.kind == 'select' %}
+    <select id="id_{{ field.name }}" name="{{ field.name }}"{% if field.required %} required{% endif %}>
+      {% for option in field.options %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+    </select>
+  {% elif field.kind == 'checkbox' %}
+    <input type="hidden" name="{{ field.name }}" value="0">
+    <input id="id_{{ field.name }}" name="{{ field.name }}" type="checkbox" value="1"{% if field.value %} checked{% endif %}>
+  {% else %}
+    <input id="id_{{ field.name }}" name="{{ field.name }}" type="{{ field.kind }}" value="{{ field.value }}"{% if field.kind == 'text' and field.maximum %} maxlength="{{ field.maximum }}"{% endif %}{% if field.kind == 'number' and field.maximum %} max="{{ field.maximum }}"{% endif %}{% if field.minimum is not None %} min="{{ field.minimum }}"{% endif %}{% if field.step %} step="{{ field.step }}"{% endif %}{% if field.required %} required{% endif %}{% if field.readonly %} readonly{% endif %}>
+  {% endif %}
+  {% if field.help %}<p class="admin-help">{{ field.help }}</p>{% endif %}
+  {% for message in field.errors %}<p class="admin-error" role="alert">{{ message }}</p>{% endfor %}
+</div>
+{% endfor %}

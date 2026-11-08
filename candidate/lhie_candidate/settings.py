@@ -10,7 +10,7 @@ DEBUG = False
 ALLOWED_HOSTS = ["127.0.0.1", "localhost", "[::1]"]
 ROOT_URLCONF = "lhie_candidate.urls"
 WSGI_APPLICATION = "lhie_candidate.wsgi.application"
-INSTALLED_APPS = ["django.contrib.staticfiles"]
+INSTALLED_APPS = ["django.contrib.staticfiles", "lhie_candidate.admin.apps.AdminWorkspaceConfig"]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "lhie_candidate.http.PayloadSafeMiddleware",
@@ -53,15 +53,22 @@ STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"},
 }
+# P22 accepts only an explicitly configured credential identity key. Never
+# derive it from another secret; P02 transfers the canonical key for a real
+# dataset. Disposable tests inject one with override_settings.
+CANDIDATE_IDENTITY_FINGERPRINT_KEY = None
+CANDIDATE_ADMIN_ALLOWED_LOGINS = ()
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 TIME_ZONE = "UTC"
 LANGUAGE_CODE = "en-us"
 APPEND_SLASH = False
 PREPEND_WWW = False
-DATA_UPLOAD_MAX_MEMORY_SIZE = 16384
-FILE_UPLOAD_MAX_MEMORY_SIZE = 16384
-DATA_UPLOAD_MAX_NUMBER_FIELDS = 32
+# Admin Account Input is bounded to 20 rows; the request remains a small,
+# explicitly admitted form. Uploads stay disabled.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 262144
+FILE_UPLOAD_MAX_MEMORY_SIZE = 262144
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 256
 DATA_UPLOAD_MAX_NUMBER_FILES = 0
 SESSION_COOKIE_NAME = "candidate_browser"
 SESSION_COOKIE_HTTPONLY = True

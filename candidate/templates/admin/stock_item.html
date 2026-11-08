@@ -1,0 +1,22 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">{{ product.name }} · stok #{{ item.id }}</p><h2>Edit stok</h2><p class="admin-help">Perubahan hanya berlaku untuk stok yang belum dipesan dan belum retired. Nilai rahasia tidak masuk audit atau daftar stok.</p></div>
+  <a class="admin-button" href="/admin/produk/{{ product.id }}?section=stock">Kembali</a>
+</section>
+{% if error_messages %}<div class="admin-flash admin-flash-danger" role="alert"><ul>{% for message in error_messages %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}
+<form method="post" action="/admin/produk/{{ product.id }}/stok/{{ item.id }}" class="admin-form admin-card">
+  {% csrf_token %}
+  <input type="hidden" name="credential_format" value="{{ item.format }}">
+  {% if item.format == 'legacy' %}
+    <div class="admin-field"><label for="id_secret">Isi akun legacy</label><textarea id="id_secret" name="secret" rows="4" maxlength="5000" required>{{ item.secret }}</textarea></div>
+  {% else %}
+    <div class="admin-field"><label for="id_email">Email</label><input id="id_email" name="email" type="email" maxlength="254" value="{{ item.email }}" required></div>
+    <div class="admin-field"><label for="id_password">Password baru</label><input id="id_password" name="password" type="password" maxlength="1024" autocomplete="new-password" required><p class="admin-help">Password tidak ditampilkan kembali. Isi ulang untuk menyimpan.</p></div>
+    <div class="admin-field"><label for="id_access_method">Metode akses</label><select id="id_access_method" name="access_method"><option value="none"{% if item.access_method == 'none' %} selected{% endif %}>Tidak ada</option><option value="otp_mail_link"{% if item.access_method == 'otp_mail_link' %} selected{% endif %}>OTP Mail Link</option><option value="auth_token"{% if item.access_method == 'auth_token' %} selected{% endif %}>Auth Token</option></select></div>
+    <div class="admin-field"><label for="id_access_value">Nilai metode akses</label><input id="id_access_value" name="access_value" type="text" maxlength="3500" value="{{ item.access_value|default:'' }}"></div>
+    {% if item.reader_mail_link %}<p class="admin-help">Link reader mail lama dipertahankan dan tidak ditampilkan.</p>{% endif %}
+  {% endif %}
+  <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Simpan stok</button><a class="admin-button" href="/admin/produk/{{ product.id }}?section=stock">Batal</a></div>
+</form>
+{% endblock %}

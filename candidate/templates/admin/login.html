@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>Masuk Admin · LHIE</title>
+  <link rel="icon" href="/static/storefront/favicon.png">
+  <link rel="stylesheet" href="/static/admin/admin.css">
+  <script src="/static/admin/admin.js"></script>
+</head>
+<body class="admin-login-page">
+<main class="admin-login-card">
+  <div class="admin-brand"><span class="admin-brand-mark" aria-hidden="true">L</span><div><strong>LHIE STORE</strong><span>Admin workspace</span></div></div>
+  <h1>Masuk admin</h1>
+  <p class="admin-help">Gunakan akun Owner atau Admin. Sesi pelanggan tidak memberi akses dashboard.</p>
+  {% if error %}<div class="admin-flash admin-flash-danger" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/admin/login" class="admin-form-stack">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="admin-field">
+      <label for="id_email">Email atau nama admin</label>
+      <input id="id_email" name="email" type="text" value="{{ values.email }}" autocomplete="username" maxlength="320" required autofocus>
+    </div>
+    <div class="admin-field">
+      <label for="id_password">Password</label>
+      <input id="id_password" name="password" type="password" autocomplete="current-password" maxlength="4096" required>
+    </div>
+    <button class="admin-button admin-button-primary admin-button-wide" type="submit">Masuk</button>
+  </form>
+  <p class="admin-login-foot"><a href="/">Kembali ke storefront</a></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Katalog</p><h2>Kategori</h2><p class="admin-help">Kategori mengatur tampilan katalog. Menghapus kategori melepas produk tanpa menghapus produk atau riwayat.</p></div>
+  <a class="admin-button admin-button-primary" href="/admin/kategori/baru">Tambah kategori</a>
+</section>
+<section class="admin-card">
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead><tr><th scope="col">Nama</th><th scope="col">Slug</th><th scope="col">Urutan</th><th scope="col">Produk</th><th scope="col">Status</th><th scope="col">Aksi</th></tr></thead>
+      <tbody>
+      {% for category in categories %}
+        <tr>
+          <td><strong>{{ category.name }}</strong>{% if category.description %}<small>{{ category.description }}</small>{% endif %}</td>
+          <td>{{ category.slug }}</td>
+          <td>{{ category.sort_order }}</td>
+          <td>{{ category.product_count }}</td>
+          <td>{% if category.is_active %}<span class="admin-status admin-status-good">Aktif</span>{% else %}<span class="admin-status admin-status-muted">Nonaktif</span>{% endif %}</td>
+          <td class="admin-row-actions"><a class="admin-button admin-button-small" href="/admin/kategori/{{ category.id }}">Edit</a><form method="post" action="/admin/kategori/{{ category.id }}/hapus" data-confirm="Hapus kategori ini? Produk terkait menjadi tanpa kategori.">{% csrf_token %}<button class="admin-button admin-button-small admin-button-danger" type="submit">Hapus</button></form></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6">Belum ada kategori.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

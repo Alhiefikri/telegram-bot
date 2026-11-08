@@ -1,0 +1,10 @@
+{% for group in navigation.groups %}
+<section class="admin-nav-group">
+  <h2>{{ group.label }}</h2>
+  <ul>
+    {% for item in group.items %}
+    <li><a href="{{ item.url }}"{% if item.active %} aria-current="page"{% endif %}><span class="admin-nav-glyph" aria-hidden="true">{{ item.glyph }}</span><span>{{ item.label }}</span></a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endfor %}
