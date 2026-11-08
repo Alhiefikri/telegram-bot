@@ -13,6 +13,15 @@ class Surface:
 
 
 @dataclass(frozen=True, slots=True)
+class Message:
+    """One already-authorized outbound message body."""
+    text: str
+    entities: tuple = ()
+    keyboard: dict = field(default_factory=dict)
+    html: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramResult:
     message_id: int | None
     outcome: Literal["success", "not_modified", "definite", "ambiguous"]

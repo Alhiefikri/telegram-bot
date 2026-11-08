@@ -81,7 +81,7 @@ def run():
     for denied in (
         'SELECT password FROM public.customers',
         'SELECT * FROM public.product_stock_items',
-        'SELECT total_amount FROM public.orders',
+        'SELECT checkout_key FROM public.orders',
         'SELECT idempotency_key FROM public.store_balance_entries',
         'UPDATE public.customer_balance_accounts SET balance=balance',
         'UPDATE public.customer_usdt_balance_accounts SET balance_micro=balance_micro',

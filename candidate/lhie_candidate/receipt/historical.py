@@ -129,7 +129,8 @@ def _header(allocation, detail=False):
     return lines
 
 
-def _account_units(allocation, group, account, *, grouped, first):
+def _account_units(allocation, group, account, *, grouped, first,
+                   otp_key='receipt.otp_button', note_key='receipt.delivery_note'):
     number = account['number']
     label = _translate(allocation, 'receipt.account_label', number=number) if grouped else 'Data akun #' + str(number)
     product = _product(group, allocation)
@@ -154,7 +155,7 @@ def _account_units(allocation, group, account, *, grouped, first):
         if not domain:
             raise ValueError('Invalid historical OTP URL')
         lines.append('OTP Mail: ' + domain)
-        rows = {'inline_keyboard': [[{'text': _translate(allocation, 'receipt.otp_button', number=number), 'url': value}]]}
+        rows = {'inline_keyboard': [[{'text': _translate(allocation, otp_key, number=number), 'url': value}]]}
     elif method not in ('none', 'auth_token') or (method == 'none' and value is not None):
         raise ValueError('Invalid historical access method')
     token = value if method == 'auth_token' else None
@@ -164,7 +165,7 @@ def _account_units(allocation, group, account, *, grouped, first):
     tutorial = account.get('tutorial')
     if grouped and tutorial == group.get('default_tutorial'):
         tutorial = None
-    note = _translate(allocation, 'receipt.delivery_note')
+    note = _translate(allocation, note_key)
     with_token = lines + token_lines
     trial = with_token + (['', note, tutorial] if tutorial is not None else [])
     separate_token = token is not None and len('\n'.join(trial if grouped else with_token)) > 3900
@@ -270,6 +271,33 @@ def render_product_detail(allocation, *, support_url=''):
         guide = group.get('guide')
         if guide and guide not in emitted:
             units.append(_message(_icons('📘 ', allocation) + guide['title'] + '\n' + guide['url'], atomic=True))
+            emitted.append(guide)
+    footer = '\n\n'.join(_translate(allocation, key) for key in
+                         ('receipt.save_details', 'receipt.copy_guidance', 'receipt.thanks'))
+    units.append(_message(footer, markup=markup))
+    return tuple(units)
+
+
+def render_order_credentials(allocation, *, support_url=''):
+    """Credential units for the live Order Detail, with its own OTP/note copy."""
+    groups = _check(allocation)
+    guides = _guides(allocation)
+    markup = _markup(allocation, guides, support_url)
+    units, emitted = [], []
+    for group in groups:
+        for index, account in enumerate(group.get('accounts', ())):
+            units.extend(_account_units(
+                allocation, group, account, grouped=True, first=index == 0,
+                otp_key='order.detail.otp_button', note_key='order.detail.delivery_note'))
+        if group.get('default_tutorial') is not None:
+            units.append(_message('\n'.join([
+                _product(group, allocation), '',
+                _translate(allocation, 'order.detail.delivery_note'),
+                group['default_tutorial']]), atomic=True))
+        guide = group.get('guide')
+        if guide and guide not in emitted:
+            units.append(_message(_icons('📘 ', allocation) + guide['title'] + '\n' + guide['url'],
+                                  atomic=True))
             emitted.append(guide)
     footer = '\n\n'.join(_translate(allocation, key) for key in
                          ('receipt.save_details', 'receipt.copy_guidance', 'receipt.thanks'))

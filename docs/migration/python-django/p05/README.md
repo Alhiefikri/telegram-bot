@@ -1545,3 +1545,25 @@ Known ownership boundaries: Sales Proof retry and receipt-group resend remain
 P25; full provider reconciliation only works when the matching P13/P08 lifecycle
 is registered; BSC receiver challenge verification and supplier network
 recovery remain P14/P18; full browser/visual acceptance remains P27.
+
+## P24: Store Bot commands and admin presentation (#706)
+
+`candidate/lhie_candidate/navigation/` now closes the remaining routine Store
+Bot command families: language, support, account summary, latest Order status,
+successful Order history/month history, invoice detail, public stock, search,
+`/batal`, admin `/cancel`, admin stats/stock, maintenance status, API
+management and Product copy/icon capture. The parser is pure and private-only;
+one-off PHP messages stay one-off, while language/support/orders keep the P06
+canonical root fence. Order detail uses the existing paid `ReceiptSource` gate;
+API key rotation rechecks the current root inside the P20 credential
+transaction and sends the one-time secret without retaining it in the root,
+session state, queue, cache or logs.
+
+Admin/empty presentation uses database settings rather than new catalog ENV.
+Normal navigation grants remain read-only; `navigation/bot_grants.sql` adds the
+Customer cart cancellation write and `navigation/admin_grants.sql` adds only
+the Product/Family/UI-icon/audit writes used by the capture flows. Startup
+installs neither. Waitlist mail/Admin Broadcast remain P25 (#707); this ticket
+does not add a waitlist command. Focused evidence: 99 tests in
+`test_bot_parity`, `test_bot_parity_processor`, catalog/navigation/receipt
+regressions. Full notes: [`../p24/README.md`](../p24/README.md).

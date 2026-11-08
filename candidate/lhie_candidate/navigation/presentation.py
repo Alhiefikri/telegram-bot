@@ -1,7 +1,7 @@
 """PHP-compatible initial catalog surfaces; no Telegram or provider calls."""
 import base64
 import binascii
-from datetime import datetime
+from datetime import datetime, timedelta
 import hmac
 from html import escape, unescape
 import json
@@ -20,7 +20,7 @@ from lhie_candidate.payments.sakurupiah_urls import (
     validate_sakurupiah_checkout_url, validate_sakurupiah_qr_image_url,
 )
 from .roots import fits_caption
-from .types import Surface
+from .types import Message, Surface
 
 
 _LOCALES = {code: json.loads(Path(__file__).with_name(code + '.json').read_text()) for code in ('id','en','ms')}
@@ -28,6 +28,9 @@ _ICON = re.compile(r'<tg-emoji\b[^>]*>(.*?)</tg-emoji>', re.S)
 _TOKEN = r'[a-f0-9]{16}'
 _ORDER_HISTORY = re.compile(
     r'orders:(older|newer):([0-9]{14}):'
+    r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})')
+_ORDER_MONTH_HISTORY = re.compile(
+    r'om:([0-9]{6}):([on]):([0-9]{14}):'
     r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})')
 _ORDER_STATUS_KEYS = {'draft': 'status.order.draft', 'pending_payment': 'status.order.pending_payment',
                       'processing': 'status.order.processing', 'completed': 'status.order.completed',
@@ -106,7 +109,7 @@ def plain(text):
 class CatalogPresenter:
     def __init__(self, repository, *, signing_key=None, custom_emoji=False, media_mapping=None,
                  bot_scope='synthetic', dollar_rail_selectable=False, clock=None, funding=None,
-                 checkout=None, usdt_funding=None, usdt_settlement=None):
+                 checkout=None, usdt_funding=None, usdt_settlement=None, bot_identity=None):
         self.repository = repository
         self.signing_key = signing_key
         self.custom_emoji = custom_emoji
@@ -124,6 +127,7 @@ class CatalogPresenter:
         # The navigation checkout owner is injected explicitly. Without it the
         # existing detail pay callbacks stay an explicit stale acknowledgement.
         self.checkout = checkout
+        self.bot_identity = bot_identity
         self._icon_rows = None
         self.callback_handled = False
         self.callback_notice = None
@@ -202,26 +206,45 @@ class CatalogPresenter:
         return self.t(customer,key) if key else status
 
     @staticmethod
-    def _order_cursor(direction, order):
+    def _order_cursor(direction, order, month=None):
+        if month is not None:
+            return (f"om:{month}:{'o' if direction == 'older' else 'n'}:"
+                    f"{order['created_token']}:{order['id']}")
         return f"orders:{direction}:{order['created_token']}:{order['id']}"
 
-    def orders(self, customer, cursor=None):
+    def orders(self, customer, cursor=None, month=None):
         """PHP-equivalent successful Orders history with bounded keyset pagination."""
         direction = created_token = order_id = None
-        if cursor not in (None,'orders:open'):
-            match = _ORDER_HISTORY.fullmatch(cursor)
-            if match is None:
-                return None
-            direction, created_token, order_id = match.groups()
+        month_start = month_end = None
+        if month is not None:
             try:
-                datetime.strptime(created_token,'%Y%m%d%H%M%S')
+                start, end = self._month_bounds(month)
+            except (TypeError, ValueError):
+                return None
+            month_start, month_end = (start.strftime('%Y-%m-%d %H:%M:%S'),
+                                      end.strftime('%Y-%m-%d %H:%M:%S'))
+        if cursor not in (None, 'orders:open'):
+            if month is not None:
+                match = _ORDER_MONTH_HISTORY.fullmatch(cursor)
+                if match is None or match[1] != str(month):
+                    return None
+                direction = 'older' if match[2] == 'o' else 'newer'
+                created_token, order_id = match[3], match[4]
+            else:
+                match = _ORDER_HISTORY.fullmatch(cursor)
+                if match is None:
+                    return None
+                direction, created_token, order_id = match.groups()
+            try:
+                datetime.strptime(created_token, '%Y%m%d%H%M%S')
             except ValueError:
                 # PHP treats an unparsable cursor as the first page.
                 direction = created_token = order_id = None
                 cursor = None
         orders = self.repository.order_history(
-            value(customer,'id'), direction=direction,
-            created_token=created_token, order_id=order_id)
+            value(customer, 'id'), direction=direction,
+            created_token=created_token, order_id=order_id,
+            month_start=month_start, month_end=month_end)
         has_more = len(orders) > _ORDER_HISTORY_PAGE_SIZE
         if has_more:
             orders = orders[:_ORDER_HISTORY_PAGE_SIZE]
@@ -231,26 +254,53 @@ class CatalogPresenter:
         has_older = (has_more and (cursor is None or direction == 'older')) or (
             cursor is not None and direction == 'newer')
         if not orders:
-            rows = [[self._legacy_button(customer,'order.history.browse_button','katalog')]]
+            rows = [[self._legacy_button(customer, 'order.history.browse_button', 'katalog')]]
             if cursor is not None:
-                rows.append([self._legacy_button(customer,'order.history.previous','orders:open')])
+                rows.append([self._legacy_button(
+                    customer, 'order.history.previous',
+                    ('om:' + str(month)) if month is not None else 'orders:open')])
             rows.append(self._navigation_row(customer))
-            return self._surface(customer,self.t(customer,'order.history.empty'),rows,screen='orders')
+            if month is not None:
+                start, _ = self._month_bounds(month)
+                title = self.t(customer, 'order.status.month_title',
+                               month=self.t(customer, f'date.month.{start.month}')
+                                     + ' ' + str(start.year))
+                return self._surface(customer, title + '\n'
+                                     + self.t(customer, 'order.status.month_empty'),
+                                     rows, screen='orders')
+            return self._surface(customer, self.t(customer, 'order.history.empty'), rows,
+                                 screen='orders')
         rows = [[self._legacy_button(
-                    customer,'order.history.item_button',f"order:{order['invoice_number']}",
-                    invoice=order['invoice_number'],status=self._order_status(customer,order))]
+                    customer, 'order.history.item_button', f"order:{order['invoice_number']}",
+                    invoice=order['invoice_number'], status=self._order_status(customer, order))]
                 for order in orders]
         pagination = []
         if has_newer:
             pagination.append(self._legacy_button(
-                customer,'order.history.previous',self._order_cursor('newer',orders[0])))
+                customer, 'order.history.previous',
+                self._order_cursor('newer', orders[0], month)))
         if has_older:
             pagination.append(self._legacy_button(
-                customer,'order.history.next',self._order_cursor('older',orders[-1])))
+                customer, 'order.history.next',
+                self._order_cursor('older', orders[-1], month)))
         if pagination:
             rows.append(pagination)
         rows.append(self._navigation_row(customer))
-        return self._surface(customer,self.t(customer,'order.history.title'),rows,screen='orders')
+        caption = self.t(customer, 'order.history.title')
+        if month is not None:
+            start, end = self._month_bounds(month)
+            totals = self.repository.order_month_totals(
+                value(customer, 'id'), start.strftime('%Y-%m-%d %H:%M:%S'),
+                end.strftime('%Y-%m-%d %H:%M:%S'))
+            amount = 'Rp ' + number(totals['paid_idr'])
+            if totals['paid_usdt']:
+                amount += ' / ' + usdt(totals['paid_usdt']) + ' USDT'
+            caption = (self.t(customer, 'order.status.month_title',
+                              month=self.t(customer, f'date.month.{start.month}')
+                                    + ' ' + str(start.year))
+                       + '\n' + self.t(customer, 'order.status.month_totals',
+                                       count=totals['paid_count'], amount=amount))
+        return self._surface(customer, caption, rows, screen='orders')
 
     def _balance_header(self, customer, idr, usd, *, include_usd=True):
         balance = ('Rp ' + number(idr['balance'])) if idr['available'] else self.t(
@@ -1341,6 +1391,495 @@ class CatalogPresenter:
     def _icon_fields(self, glyph, identifier):
         return {'icon_custom_emoji_id': identifier} if self.custom_emoji and identifier else {}
 
+    def _date_label(self, customer, value, *, with_time=True):
+        if value is None:
+            return self.t(customer, 'welcome.missing_value')
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo('Asia/Jakarta'))
+        else:
+            parsed = parsed.astimezone(ZoneInfo('Asia/Jakarta'))
+        month = self.t(customer, f'date.month.{parsed.month}')
+        label = f'{parsed.day:02d} {month} {parsed.year}'
+        return f'{label} {parsed:%H:%M}' if with_time else label
+
+    def language(self, customer, *, private=True):
+        rows = [[self._legacy_button(customer, f'language.option.{code}', f'locale:{code}')]
+                for code in ('id', 'en', 'ms')]
+        if private and value(customer, 'locale') is not None:
+            rows.append(self._navigation_row(customer))
+        return self._surface(customer, self.t(customer, 'language.picker.prompt'), rows,
+                             screen='picker')
+
+    def support(self, customer):
+        contact = self.repository.support_contact()
+        rows = []
+        if contact.get('url'):
+            rows.append([{'text': plain(self.t(customer, 'support.contact')),
+                          'url': contact['url'], 'style': 'primary'}])
+        rows.append(self._navigation_row(customer))
+        return self._surface(customer, self.t(customer, 'support.message'), rows,
+                             screen='support')
+
+    def account(self, customer):
+        summary = self.repository.account_summary(value(customer, 'id'))
+        first_name = (value(customer, 'first_name', '') or '').strip() or '-'
+        username = (value(customer, 'username', '') or '').strip().lstrip('@')
+        lines = [
+            self.t(customer, 'account.title'),
+            self.t(customer, 'account.name') + first_name,
+            self.t(customer, 'account.username') + ('@' + username if username else '-'),
+            self.t(customer, 'account.total_orders') + str(summary['total_orders']),
+        ]
+        latest = summary.get('latest_order')
+        if latest:
+            lines.append(self.t(customer, 'account.latest_order') + latest['invoice_number']
+                         + ' · ' + self._account_payment_status(customer, latest['payment_status']))
+        lines += ['', self.t(customer, 'account.follow_up')]
+        rows = [[self._legacy_button(customer, 'account.orders_button', 'status')]]
+        return self._surface(customer, '\n'.join(lines), rows, screen='account', html=False)
+
+    _ACCOUNT_PAYMENT_KEYS = {
+        'pending': 'status.payment.pending', 'paid': 'status.payment.paid',
+        'failed': 'status.payment.failed', 'expired': 'status.payment.expired',
+        'refunded': 'status.payment.refunded',
+    }
+
+    def _account_payment_status(self, customer, status):
+        key = self._ACCOUNT_PAYMENT_KEYS.get(status)
+        return self.t(customer, key) if key else str(status)
+
+    def _order_status_label(self, customer, status):
+        key = _ORDER_STATUS_KEYS.get(status)
+        return self.t(customer, key) if key else str(status)
+
+    def _payment_status_label(self, customer, status):
+        key = ('status.payment.order.' + status) if status in self._ACCOUNT_PAYMENT_KEYS else None
+        return self.t(customer, key) if key else str(status)
+
+    def _payment_method_label(self, customer, method):
+        normalized = str(method or '').strip().lower()
+        labels = {'qris': 'QRIS', 'api_qris': 'QRIS', 'hosted': 'QRIS',
+                  'binance_pay_id': 'Binance Pay', 'usdt_bep20': 'USDT BEP20 (BSC)'}
+        if normalized in labels:
+            return labels[normalized]
+        keys = {'store_balance': 'payment.method.store_balance',
+                'usdt_balance': 'payment.method.usdt_balance',
+                'qr_manual': 'payment.method.manual',
+                'bank_transfer': 'payment.method.bank_transfer'}
+        return self.t(customer, keys[normalized]) if normalized in keys else str(method or '-')
+
+    def _order_amount(self, customer, order):
+        if str(order.get('payment_currency') or order.get('currency') or '').upper() == 'USDT':
+            return usdt(int(order.get('payment_amount') or 0)) + ' USDT'
+        return 'Rp ' + number(int(order.get('total_amount') or 0))
+
+    def _order_instruction(self, customer, order):
+        order_status = order.get('order_status')
+        payment_status = order.get('payment_row_status') or order.get('payment_status')
+        provider = str(order.get('provider') or '').strip().lower()
+        if order.get('has_late_review'):
+            return self.t(customer, 'order.guidance.manual_review_cancelled'
+                          if order_status == 'cancelled' else 'order.guidance.manual_review')
+        if payment_status == 'refunded':
+            if provider == 'usdt_balance':
+                return self.t(customer, 'order.guidance.usdt_balance_refunded',
+                              amount=usdt(int(order.get('payment_amount') or 0)))
+            if provider == 'store_balance':
+                return self.t(customer, 'order.guidance.store_balance_refunded',
+                              amount='Rp ' + number(int(order.get('payment_amount') or 0)))
+            return self.t(customer, 'order.guidance.refunded')
+        if (provider == 'store_balance' and payment_status == 'paid'
+                and order_status == 'processing' and order.get('telegram_receipt_sent_at') is None):
+            return self.t(customer, 'order.guidance.store_balance_pending_delivery')
+        if order_status in ('expired', 'cancelled'):
+            if payment_status == 'paid':
+                return self.t(customer, 'order.guidance.late_payment_cancelled'
+                              if order_status == 'cancelled' else 'order.guidance.late_payment')
+            if payment_status == 'failed':
+                return self.t(customer, 'order.guidance.payment_failed')
+            return self.t(customer, 'order.guidance.expired'
+                          if order_status == 'expired' else 'order.guidance.cancelled')
+        if payment_status == 'failed':
+            return self.t(customer, 'order.guidance.payment_failed')
+        if payment_status == 'expired':
+            return self.t(customer, 'order.guidance.expired')
+        if order_status == 'pending_payment' or payment_status == 'pending':
+            return self.t(customer, 'order.guidance.pending')
+        if order_status == 'processing':
+            return self.t(customer, 'order.guidance.processing')
+        if order_status == 'completed':
+            return self.t(customer, 'order.guidance.completed')
+        if payment_status == 'paid':
+            return self.t(customer, 'order.guidance.processing')
+        return self.t(customer, 'order.guidance.support')
+
+    def _month_start(self, now, offset=0):
+        start = now.astimezone(ZoneInfo('Asia/Jakarta')).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0)
+        for _ in range(offset):
+            start = (start - timedelta(days=1)).replace(day=1, hour=0, minute=0,
+                                                        second=0, microsecond=0)
+        return start
+
+    def _month_bounds(self, month):
+        start = datetime.strptime(str(month), '%Y%m').replace(tzinfo=ZoneInfo('Asia/Jakarta'))
+        end = (start + timedelta(days=32)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start, end
+
+    def _invoice_url(self, order):
+        try:
+            base = (getattr(settings, 'CANDIDATE_LEGACY_APP_URL', '') or '').rstrip('/')
+            ttl = max(1, int(getattr(settings, 'CANDIDATE_INVOICE_URL_TTL_DAYS', 7)))
+        except Exception:
+            return None
+        if not base:
+            return None
+        from urllib.parse import urlparse
+        parsed = urlparse(base)
+        if parsed.scheme != 'https' or not parsed.netloc:
+            return None
+        order_id = order.get('id')
+        created = order.get('created_at')
+        if order_id is None or created is None:
+            return None
+        if not isinstance(created, datetime):
+            created = datetime.fromisoformat(str(created))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=ZoneInfo('Asia/Jakarta'))
+        from ..compat.identity import signed_url_digest
+        key = self.signing_key
+        if key is None:
+            try:
+                from ..runtime import application_key
+                key = application_key()
+            except Exception:
+                return None
+        expires = int((created + timedelta(days=ttl)).timestamp())
+        unsigned = f'/shop/orders/{order_id}?expires={expires}'
+        return base + unsigned + '&signature=' + signed_url_digest(unsigned, key)
+
+    def order_status(self, customer):
+        order = self.repository.latest_order_status(value(customer, 'id'))
+        now = self.clock()
+        current = self._month_start(now)
+        previous = self._month_start(now, 1)
+        lines = [self.t(customer, 'order.status.title'), '']
+        rows = []
+        if order:
+            payment_status = order.get('payment_row_status') or order.get('payment_status')
+            lines += [self.t(customer, 'order.status.latest'),
+                      order['invoice_number'] + ' · ' + self._date_label(
+                          customer, order['created_at'], with_time=False)]
+            items = order.get('items') or []
+            for item in items[:3]:
+                name = re.sub(r'\s+', ' ', str(item.get('product_name') or ''))[:100]
+                lines.append(name + ' × ' + str(item['quantity']))
+            if len(items) > 3:
+                lines.append(self.t(customer, 'order.status.more_items', count=len(items) - 3))
+            lines.append(self.t(customer, 'order.detail.total', amount=self._order_amount(customer, order)))
+            lines += ['', self.t(customer, 'order.status.states',
+                                 payment_status=self._payment_status_label(customer, payment_status),
+                                 order_status=self._order_status_label(customer, order['order_status'])),
+                      self._order_instruction(customer, order)]
+            deadline = order.get('payment_expires_at') or order.get('expires_at')
+            if (order['order_status'] == 'pending_payment' and payment_status == 'pending'
+                    and deadline and self._deadline_future(deadline)):
+                lines.append(self.t(customer, 'order.detail.deadline',
+                                    date=self._date_label(customer, deadline)))
+                invoice_url = self._invoice_url(order)
+                if invoice_url:
+                    rows.append([{'text': plain(self.t(customer, 'order.status.pay_button')),
+                                  'url': invoice_url, 'style': 'primary'}])
+            rows.append([self._legacy_button(customer, 'order.status.detail_button',
+                                             'order:' + order['invoice_number'])])
+        else:
+            lines.append(self.t(customer, 'order.status.empty'))
+        lines += ['', self.t(customer, 'order.status.summary')]
+        for index, period in enumerate((current, previous)):
+            end = (period + timedelta(days=32)).replace(day=1, hour=0, minute=0,
+                                                       second=0, microsecond=0)
+            totals = self.repository.order_month_totals(
+                value(customer, 'id'), period.strftime('%Y-%m-%d %H:%M:%S'),
+                end.strftime('%Y-%m-%d %H:%M:%S'))
+            amount = 'Rp ' + number(totals['paid_idr'])
+            if totals['paid_usdt']:
+                amount += ' / ' + usdt(totals['paid_usdt']) + ' USDT'
+            lines.append(self.t(customer, f'date.month.{period.month}') + ' ' + str(period.year)
+                         + ' · ' + self.t(customer, 'order.status.this_month' if index == 0
+                                          else 'order.status.last_month'))
+            lines.append(self.t(customer, 'order.status.month_totals',
+                                count=totals['paid_count'], amount=amount))
+            if index == 0:
+                lines.append('')
+        lines.append(self.t(customer, 'order.status.summary_basis'))
+        rows.append([
+            self._legacy_button(customer, 'order.status.this_month_button',
+                                'om:' + current.strftime('%Y%m')),
+            self._legacy_button(customer, 'order.status.last_month_button',
+                                'om:' + previous.strftime('%Y%m')),
+        ])
+        rows.append([
+            self._legacy_button(customer, 'order.status.history_button', 'orders:open'),
+            self._legacy_button(customer, 'order.status.home_button', 'status:home'),
+        ])
+        return self._surface(customer, '\n'.join(lines), rows, screen='orders', html=False)
+
+    def _deadline_future(self, value):
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo('Asia/Jakarta'))
+        return parsed > self.clock()
+
+    def order_detail_parts(self, customer, order):
+        """Order-detail header plus its closing guidance, without credentials."""
+        payment_status = order.get('payment_row_status') or order.get('payment_status')
+        created = self._date_label(customer, order.get('created_at'))
+        lines = [
+            self.t(customer, 'order.detail.title'),
+            '━━━━━━━━━━━━━━',
+            self.t(customer, 'order.detail.invoice', invoice=order['invoice_number']),
+            self.t(customer, 'order.detail.status',
+                 order_status=self._order_status_label(customer, order['order_status']),
+                 payment_status=self._payment_status_label(customer, payment_status)),
+            self.t(customer, 'order.detail.created', date=created),
+            '',
+            self.t(customer, 'order.detail.items'),
+        ]
+        for item in order.get('items') or []:
+            name = str(item.get('product_name') or '')
+            icon = (item.get('product_icon') or '').strip()
+            lines.append('- ' + ((icon + ' ') if icon else '') + name
+                         + ' x ' + str(item['quantity']))
+        lines.append(self.t(customer, 'order.detail.total',
+                            amount=self._order_amount(customer, order)))
+        method = order.get('method')
+        if method:
+            lines.append(self.t(customer, 'order.detail.payment',
+                                method=self._payment_method_label(customer, method),
+                                status=self._payment_status_label(customer, payment_status)))
+        if order.get('paid_at'):
+            lines.append(self.t(customer, 'order.detail.paid',
+                                date=self._date_label(customer, order['paid_at'])))
+        deadline = order.get('payment_expires_at') or order.get('expires_at')
+        if (order['order_status'] in ('pending_payment',) or payment_status == 'pending') and deadline:
+            lines.append(self.t(customer, 'order.detail.deadline',
+                                date=self._date_label(customer, deadline)))
+        if payment_status in ('expired', 'failed') and deadline:
+            lines.append(self.t(customer, 'order.detail.expired',
+                                date=self._date_label(customer, deadline)))
+        header = [Message(text) for text in self._chunk_lines(lines)]
+        instruction = Message(self._order_instruction(customer, order))
+        return header, instruction
+
+    def order_detail(self, customer, order):
+        header, instruction = self.order_detail_parts(customer, order)
+        return header + [instruction]
+
+    @staticmethod
+    def _split_text(text, limit=3900):
+        pieces, current, units = [], [], 0
+        for character in str(text):
+            width = len(character.encode('utf-16-le')) // 2
+            if current and units + width > limit:
+                pieces.append(''.join(current))
+                current, units = [], 0
+            current.append(character)
+            units += width
+        if current:
+            pieces.append(''.join(current))
+        return pieces or ['']
+
+    def _chunk_lines(self, lines, limit=3900):
+        texts, current, units = [], [], 0
+        for line in lines:
+            for piece in self._split_text(line, limit):
+                width = len(piece.encode('utf-16-le')) // 2
+                addition = width + (1 if current else 0)
+                if current and units + addition > limit:
+                    texts.append('\n'.join(current))
+                    current, units = [], 0
+                current.append(piece)
+                units += len(piece.encode('utf-16-le')) // 2 + (1 if len(current) > 1 else 0)
+        if current:
+            texts.append('\n'.join(current))
+        return texts
+
+    def stock_messages(self, customer):
+        """Chunked public Stock snapshot; no customer data or financial action."""
+        products = []
+        for entry in self.repository.browse():
+            if entry.get('type') == 'family':
+                products.extend(entry.get('members', []))
+            else:
+                products.append(entry)
+        families = []
+        standalone = []
+        for product in products:
+            if product.get('available_stock', 0) < 1:
+                continue
+            if product.get('family'):
+                families.append(product)
+            else:
+                standalone.append(product)
+        if not families and not standalone:
+            return [Message(self.t(customer, 'stock.empty'), html=True)]
+        username = None
+        if self.bot_identity is not None:
+            try:
+                username = self.bot_identity.username()
+            except Exception:
+                username = None
+        lines = [self.t(customer, 'stock.title'), '━━━━━━━━━━━━━━']
+        grouped = {}
+        for product in families:
+            grouped.setdefault(product['family']['id'], []).append(product)
+        for family_id, members in grouped.items():
+            family = members[0]['family']
+            glyph, identifier = self._product_icon(members[0])
+            lines += ['', self.t(customer, 'stock.family_heading',
+                                 icon=self._emoji(glyph, identifier),
+                                 name=escape(family.get('name') or ''))]
+            for member in sorted(members, key=self.repository.member_key):
+                lines.append(self._stock_line(customer, member, username))
+        if standalone:
+            lines += ['', self.t(customer, 'stock.other_heading')]
+            for product in standalone:
+                lines.append(self._stock_line(customer, product, username))
+        lines += ['', self.t(customer, 'stock.footer')]
+        return [Message(text, html=True) for text in self._chunk_lines(lines)]
+
+    def _stock_line(self, customer, product, username):
+        glyph, identifier = self._product_icon(product)
+        name = escape(str(product.get('family_option_label') or product.get('name') or ''))
+        usdt_price = int(product.get('usdt_price_amount') or 0)
+        price = (self.t(customer, 'stock.price_dual', amount=number(int(product.get('price_amount') or 0)),
+                        usdt=usdt(usdt_price)) if usdt_price > 0
+                 else self.t(customer, 'stock.price', amount=number(int(product.get('price_amount') or 0))))
+        buy = escape(self.t(customer, 'stock.buy'))
+        if username:
+            url = 'https://t.me/' + username + '?start=product_' + str(product['id'])
+            buy = f'<a href="{escape(url, quote=True)}">{buy}</a>'
+        return self.t(customer, 'stock.variant', icon=self._emoji(glyph, identifier),
+                      name=name, price=price, stock=product['available_stock'],
+                      sold=product.get('sold_quantity', 0), buy=buy)
+
+    def api_management(self, customer, summary, notice=None):
+        text = self.t(customer, 'menu.api') + "\n\n" + self.t(customer, 'account.api.backend')
+        if notice:
+            text += "\n\n" + self.t(customer, notice)
+        rows = []
+        if summary.get('active'):
+            created = self._date_label(customer, summary.get('created_at'))
+            last = (self._date_label(customer, summary.get('last_used_at'))
+                    if summary.get('last_used_at') else self.t(customer, 'account.api.no_usage'))
+            text += "\n\n" + self.t(customer, 'account.api.metadata',
+                                    mask=summary.get('masked_identifier') or '-',
+                                    created=created, last=last,
+                                    count=summary.get('account_request_count') or '0')
+            text += "\n" + self.t(customer, 'account.api.usage_note')
+            rows.append([self._button(customer, 'account.api.regenerate', 'api:rotate',
+                                      slot='menu.api')])
+            rows.append([self._button(customer, 'account.api.disable', 'api:disable',
+                                      slot='menu.api')])
+        else:
+            text += "\n\n" + self.t(customer, 'account.api.no_key')
+            rows.append([self._button(customer, 'account.api.generate', 'api:generate',
+                                      slot='menu.api')])
+        preference = value(customer, 'balance_payment_preference') or 'idr_first'
+        text += "\n\n" + self.t(customer, 'account.api.current_preference',
+                                preference=self.t(customer, 'account.api.' + preference))
+        rows.append([self._button(customer, 'account.api.preference', 'api:preferences',
+                                  slot='menu.balance')])
+        docs = self.api_docs_url()
+        if docs:
+            rows.append([{'text': plain(self.t(customer, 'account.api.documentation')),
+                          'url': docs, 'style': 'primary'}])
+        rows.append(self._navigation_row(customer))
+        return self._surface(customer, text, rows, screen='api')
+
+    def api_preferences(self, customer):
+        rows = [[self._button(customer, 'account.api.' + preference,
+                              'api:preference:' + preference, slot='menu.balance')]
+                for preference in ('idr_only', 'usd_only', 'idr_first', 'usd_first')]
+        rows.append([self._button(customer, 'menu.back', 'api:menu', slot='menu.back')])
+        return self._surface(customer, self.t(customer, 'account.api.preference_help'), rows,
+                             screen='api')
+
+    def api_confirmation(self, customer, operation, nonce):
+        key = 'account.api.confirm_rotate' if operation == 'rotate' else 'account.api.confirm_disable'
+        rows = [[self._button(customer, 'account.api.confirm',
+                              f'api:{operation}:{nonce}', slot='menu.api')],
+                [self._button(customer, 'menu.back', 'api:menu', slot='menu.back')]]
+        return self._surface(customer, self.t(customer, key), rows, screen='api')
+
+    def api_maintenance(self, customer):
+        rows = [self._navigation_row(customer)]
+        return self._surface(customer, self.t(customer, 'account.api.maintenance'), rows,
+                             screen='api')
+
+    def api_stale(self, customer):
+        rows = [self._navigation_row(customer)]
+        return self._surface(customer, self.t(customer, 'account.api.stale'), rows,
+                             screen='api')
+
+    def api_secret_message(self, customer, secret):
+        return self.t(customer, 'account.api.save_now') + '\n\n<code>' + escape(secret) + '</code>'
+
+    def api_docs_url(self):
+        try:
+            base = (getattr(settings, 'CANDIDATE_LEGACY_APP_URL', '') or '').rstrip('/')
+        except Exception:
+            return None
+        from urllib.parse import urlparse
+        parsed = urlparse(base)
+        if parsed.scheme != 'https' or not parsed.netloc:
+            return None
+        return base + '/api-docs/'
+
+    def admin_dashboard_url(self):
+        try:
+            base = (getattr(settings, 'CANDIDATE_ADMIN_DASHBOARD_URL', '') or '').rstrip('/')
+        except Exception:
+            return None
+        from urllib.parse import urlparse
+        parsed = urlparse(base)
+        host = (parsed.hostname or '').lower()
+        if (parsed.scheme != 'https' or not host or host in ('localhost', '127.0.0.1')
+                or host.endswith(('.test', '.local'))):
+            return None
+        return base + ('&' if '?' in base else '?') + 'v=' + str(int(self.clock().timestamp()))
+
+    def screen(self, customer, caption, rows, *, screen='admin', html=False):
+        """Build a one-off admin/management screen through the shared renderer."""
+        return self._surface(customer, caption, rows, screen=screen, html=html)
+
+    def button(self, customer, key, callback, *, slot=None):
+        return self._button(customer, key, callback, slot=slot)
+
+    def legacy_button(self, customer, key, callback, **replacements):
+        return self._legacy_button(customer, key, callback, **replacements)
+
+    def raw_button(self, label, callback):
+        return {'text': plain(label), 'callback_data': callback, 'style': 'primary'}
+
+    def icon_slot_fields(self, glyph, identifier):
+        return self._icon_fields(glyph, identifier)
+
+    def icon_glyph(self, glyph, identifier):
+        return self._emoji(glyph, identifier)
+
+    def admin_buttons(self, customer):
+        rows = []
+        dashboard = self.admin_dashboard_url()
+        if dashboard:
+            rows.append([{'text': '🛠️ Admin Dashboard', 'url': dashboard, 'style': 'primary'}])
+        rows.append([{'text': '📊 Statistik', 'callback_data': 'statistik_harian',
+                      'style': 'primary'}])
+        rows.append([{'text': '🎨 Ikon Produk', 'callback_data': 'producticon:list',
+                      'style': 'primary'}])
+        return rows
+
     def _surface(self, customer, caption, rows, *, screen='catalog', html=True, photo_path=None,
                  asset=_UNSET):
         for row in rows:
@@ -1400,6 +1939,14 @@ class CatalogPresenter:
                 button.pop('callback_data')
                 button['url'] = data['channel_url']
                 rows.append([button])
+            try:
+                admin_chat = data.get('admin_chat_id')
+                if (admin_chat is not None
+                        and str(admin_chat) == str(value(customer, 'telegram_id'))):
+                    rows.extend(self.admin_buttons(customer))
+            except Exception:
+                # Admin affordances fail closed; a read failure never widens access.
+                pass
         caption = self.t(customer,'welcome.caption' if private else 'welcome.group_caption', **replacements)
         notice = self._maintenance(customer, data.get('maintenance'))
         if notice:
@@ -1886,9 +2433,23 @@ class CatalogPresenter:
         if data in ('menu','home','start','/start','/menu','menu:home','menu:back','family:back:menu'):
             state.clear()
             return self.home(customer)
+        if data == 'menu:language':
+            state.clear()
+            return self.language(customer)
+        if data == 'menu:support':
+            state.clear()
+            return self.support(customer)
         if data in ('menu:orders','orders:open') or _ORDER_HISTORY.fullmatch(data):
             state.clear()
             return self.orders(customer,None if data in ('menu:orders','orders:open') else data)
+        match = _ORDER_MONTH_HISTORY.fullmatch(data)
+        if match:
+            state.clear()
+            return self.orders(customer, data, month=match[1])
+        match = re.fullmatch(r'om:([0-9]{6})', data)
+        if match:
+            state.clear()
+            return self.orders(customer, month=match[1])
         if data == 'balance':
             state.clear()
             return self.balance(customer)

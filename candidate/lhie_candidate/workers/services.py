@@ -25,6 +25,7 @@ def _navigation_processor(*, lifecycle=None, key=None, family, usdt_funding=None
     from ..navigation.transport import RelayTransport
     from ..usdt.funding import FundingService as UsdtFundingService
     from ..usdt.funding_settlement import FundingSettlement
+    from ..auth.bot_identity import TelegramBotIdentity
 
     repository = CatalogRepository()
     transport = RelayTransport()
@@ -44,7 +45,8 @@ def _navigation_processor(*, lifecycle=None, key=None, family, usdt_funding=None
                                  dollar_rail_selectable=_external_checkout_selectable,
                                  funding=funding, checkout=checkout,
                                  usdt_funding=usdt_funding or UsdtFundingService(),
-                                 usdt_settlement=usdt_settlement or FundingSettlement())
+                                 usdt_settlement=usdt_settlement or FundingSettlement(),
+                                 bot_identity=TelegramBotIdentity())
     return NavigationProcessor(repository, presenter, roots, transport, family=family)
 
 

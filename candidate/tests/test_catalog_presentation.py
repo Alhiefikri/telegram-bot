@@ -101,10 +101,15 @@ class MemoryCatalog(CatalogRepository):
         return {row['id']: row['invoice_number'] for row in self.order_rows
                 if row['customer_id'] == customer_id and row['id'] in wanted}
 
-    def order_history(self, customer_id, *, direction=None, created_token=None, order_id=None):
+    def order_history(self, customer_id, *, direction=None, created_token=None, order_id=None,
+                      month_start=None, month_end=None):
         rows = [copy.deepcopy(row) for row in self.order_rows
                 if row['customer_id'] == customer_id and row['payment_status'] == 'paid'
                 and row['order_status'] in ('processing','completed')]
+        if month_start is not None:
+            start = month_start.replace('-', '').replace(' ', '').replace(':', '')[:14]
+            end = month_end.replace('-', '').replace(' ', '').replace(':', '')[:14]
+            rows = [row for row in rows if start <= row['created_token'] < end]
         if direction is not None:
             compare = (lambda row: (row['created_token'],row['id']) < (created_token,order_id)) if direction == 'older' else (
                 lambda row: (row['created_token'],row['id']) > (created_token,order_id))

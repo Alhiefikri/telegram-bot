@@ -2661,3 +2661,33 @@ grants. New admin smoke evidence is produced by
 are in `candidate/tests/test_admin_operations.py`. Sales Proof retry and
 receipt-group resend remain P25, provider qualification remains P13/P14/P17 and
 browser/visual parity remains P27.
+
+### Django Store Bot command parity (#706)
+
+`navigation/intents.py` owns the remaining message aliases and private-only
+classification. `navigation/processor.py` now routes language, support,
+account, latest status, successful Order history (including month cursors),
+order detail, public `/stock`, search, `/batal`, admin `/cancel`, admin stats/
+stock, maintenance status and the API/admin callback families. Command screens
+that PHP sent as one message stay one-off; root-backed language/support/orders
+screens keep the P06 generation/lease fence. Group updates still stop at the
+private actor/chat check and never render a financial surface.
+
+`navigation/presentation.py` adds the language picker, database-backed support
+contact, account summary, latest/month order status, order-detail header plus
+guidance, chunked public stock with verified bot start links, API management
+screens and admin home affordances. `navigation/admin_capture.py` owns the
+revision-checked `/admin` Product copy editor and Product/Family/menu/message
+icon capture; pending prompts share `navigation_sessions.state` and expire.
+`navigation/api_management.py` wraps the P20 credential/admission owner, checks
+the current root inside the mutation transaction, and sends a new secret once
+without retaining it anywhere else. Order detail reads credentials only through
+the existing paid `ReceiptSource` gate and adds the `order.detail.otp_button`
+and `order.detail.delivery_note` copy through
+`receipt.historical.render_order_credentials()`.
+
+Read authority stays additive in `navigation/grants.sql`; `/batal` writes are in
+`navigation/bot_grants.sql`, and admin capture writes are in
+`navigation/admin_grants.sql`. Startup installs none of them. Waitlist mail and
+Admin Broadcast remain P25 (#707). P24 evidence, Context7 references and the
+99-test focused result are in [`docs/migration/python-django/p24/README.md`](../migration/python-django/p24/README.md).
