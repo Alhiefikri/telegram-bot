@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+from django.core.exceptions import PermissionDenied
+
 
 @dataclass
 class AdminValidationError(Exception):
@@ -18,9 +20,9 @@ class AdminConflict(AdminValidationError):
         super().__init__({}, status=409, message=message)
 
 
-class AdminForbidden(AdminValidationError):
+class AdminForbidden(AdminValidationError, PermissionDenied):
     def __init__(self, message="Akun ini tidak memiliki izin untuk tindakan tersebut."):
-        super().__init__({}, status=403, message=message)
+        AdminValidationError.__init__(self, {}, status=403, message=message)
 
 
 class AdminUnavailable(AdminValidationError):

@@ -100,6 +100,9 @@ def main():
                                                     'balance_idr_grants.sql', 'balance_usdt_grants.sql'))
         if admin:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/admin/grants.sql').read_text()
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/funding/policy_admin_grants.sql').read_text()
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/adjustments/grants.sql').read_text()
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/grants.sql').read_text()
         if api:
             schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/customer_api' / name).read_text()
                                        for name in ('credential_grants.sql','orders_grants.sql','reads_grants.sql'))
@@ -188,7 +191,8 @@ def main():
                 ROOT / 'candidate/static/admin') for path in sorted(directory.rglob('*'))
                 if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc')
             sources.extend(ROOT / name for name in (
-                'candidate/tests/test_admin_postgres.py', 'candidate/tests/test_admin_pricing.py',
+                'candidate/tests/test_admin_postgres.py', 'candidate/tests/test_admin_operations_postgres.py',
+                'candidate/tests/test_admin_pricing.py', 'candidate/tests/test_admin_operations.py',
                 'candidate/lhie_candidate/settings.py',
                 'candidate/lhie_candidate/urls.py', 'candidate/lhie_candidate/auth/admin.py',
                 'candidate/lhie_candidate/auth/http.py', 'candidate/lhie_candidate/compat/crypto.py',
@@ -307,7 +311,7 @@ def main():
         if admin:
             observed['limits'] = ['Synthetic disposable PostgreSQL/Redis only; no production data, uploads or live services',
                 'Admin routes use explicit disposable grants and a synthetic credential identity key injected by the proof',
-                'P23 order/payment/reporting surfaces, P24 bot/admin presentation, asset uploads and P27 browser parity remain downstream',
+                'P23 order/payment/balance/supplier/reporting surfaces are local-only; P24 bot/admin presentation, asset uploads and P27 browser parity remain downstream',
                 'No production, deployment or CI/CD operations']
         if supplier:
             observed['limits'] = ['Synthetic disposable PostgreSQL and Redis, injected supplier/Telegram fixtures only',

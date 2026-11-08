@@ -9,9 +9,12 @@ def run():
         raise RuntimeError('Explicit disposable checkout opt-in required')
     from lhie_candidate.startup import configure_django
     configure_django()
+    fixtures = json.load(sys.stdin)
     if os.environ.get('P22_ADMIN_SMOKE') == '1':
         from tests.test_admin_postgres import exercise_admin
-        exercise = exercise_admin
+        from tests.test_admin_operations_postgres import exercise_admin_operations
+        outcomes = exercise_admin(fixtures)
+        outcomes.update(exercise_admin_operations(fixtures))
     elif os.environ.get('P21_STOREFRONT_SMOKE') == '1':
         from tests.test_storefront_postgres import exercise_storefront
         exercise = exercise_storefront
@@ -39,10 +42,10 @@ def run():
     else:
         from tests.test_checkout_postgres import exercise_checkout_protocol
         exercise = exercise_checkout_protocol
-    fixtures = json.load(sys.stdin)
-    outcomes = exercise(fixtures)
+    if os.environ.get('P22_ADMIN_SMOKE') != '1':
+        outcomes = exercise(fixtures)
     import django
-    dataset = ('synthetic-p22-admin-v1' if os.environ.get('P22_ADMIN_SMOKE') == '1'
+    dataset = ('synthetic-p23-admin-v1' if os.environ.get('P22_ADMIN_SMOKE') == '1'
                else 'synthetic-p21-storefront-v1' if os.environ.get('P21_STOREFRONT_SMOKE') == '1'
                else 'synthetic-p20-api-v1' if os.environ.get('P20_API_SMOKE') == '1'
                else 'synthetic-p17-usdt-funding-v1' if os.environ.get('P17_USDT_SMOKE') == '1'

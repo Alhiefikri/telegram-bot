@@ -65,6 +65,28 @@ def identity(request):
             "role": row["role"]}
 
 
+def role(request):
+    return identity(request)["role"]
+
+
+def require_owner(request):
+    if role(request) != "owner":
+        raise AdminForbidden()
+    return True
+
+
+def can_manage_operations(request):
+    return role(request) in ("owner", "admin")
+
+
+def can_manage_settings(request):
+    return role(request) in ("owner", "admin")
+
+
+def can_owner_controls(request):
+    return role(request) == "owner"
+
+
 def login(request, email, password):
     return _service().login(request, email, password)
 

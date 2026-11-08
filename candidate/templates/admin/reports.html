@@ -1,0 +1,80 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div>
+    <p class="admin-eyebrow">Laporan</p>
+    <h2>Earnings &amp; riwayat</h2>
+    <p class="admin-help">Satu receipt kanonik per Order sukses. IDR dan USDT dipisah; fee memakai snapshot Payment, bukan kurs atau saldo turunan.</p>
+  </div>
+  <a class="admin-button" href="/admin?tab=stats">Ringkasan</a>
+</section>
+
+<form class="admin-card admin-filter" method="get" action="/admin/laporan">
+  <label>Currency <select name="currency"><option value="IDR"{% if filters.currency == 'IDR' %} selected{% endif %}>IDR</option><option value="USDT"{% if filters.currency == 'USDT' %} selected{% endif %}>USDT</option></select></label>
+  <label>Periode <select name="period">{% for option in overview.period_options %}<option value="{{ option.key }}"{% if option.key == filters.period %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+  <label>Hari <select name="days"><option value="7"{% if filters.days == 7 %} selected{% endif %}>7</option><option value="30"{% if filters.days == 30 %} selected{% endif %}>30</option></select></label>
+  <label>Bulan <input type="month" name="month" value="{{ filters.month }}"></label>
+  <label>Provider <select name="provider"><option value="">Semua</option><option value="manual"{% if filters.provider == 'manual' %} selected{% endif %}>manual</option><option value="klikqris"{% if filters.provider == 'klikqris' %} selected{% endif %}>klikqris</option><option value="sakurupiah"{% if filters.provider == 'sakurupiah' %} selected{% endif %}>sakurupiah</option><option value="pakasir"{% if filters.provider == 'pakasir' %} selected{% endif %}>pakasir</option></select></label>
+  <div class="admin-filter-actions"><button class="admin-button admin-button-primary" type="submit">Terapkan</button><a class="admin-button" href="/admin/laporan">Reset</a></div>
+</form>
+
+<div class="admin-stat-grid">
+  <article class="admin-card admin-stat"><span>Hari ini</span><strong>{% if overview.currency == 'USDT' %}{{ overview.today_amount|usdt }}{% else %}{{ overview.today_amount|idr }}{% endif %}</strong><small>{{ overview.today_orders }} order sukses</small></article>
+  <article class="admin-card admin-stat"><span>Periode</span><strong>{% if overview.currency == 'USDT' %}{{ overview.series.total|usdt }}{% else %}{{ overview.series.total|idr }}{% endif %}</strong><small>{{ overview.series.start }} – {{ overview.series.end }}</small></article>
+  <article class="admin-card admin-stat"><span>Rata-rata / puncak</span><strong>{% if overview.currency == 'USDT' %}{{ overview.series.average|usdt }}{% else %}{{ overview.series.average|idr }}{% endif %}</strong><small>puncak {% if overview.currency == 'USDT' %}{{ overview.series.peak|usdt }}{% else %}{{ overview.series.peak|idr }}{% endif %}</small></article>
+  <article class="admin-card admin-stat"><span>Perlu diproses</span><strong>{{ overview.processing }}</strong><small>status processing</small></article>
+</div>
+
+<section class="admin-card">
+  <h2>Earnings {{ overview.currency }}</h2>
+  <div class="admin-stat-grid">
+    <article class="admin-card admin-stat"><span>Gross</span><strong>{% if overview.currency == 'USDT' %}{{ overview.earnings.USDT.gross|usdt }}{% else %}{{ overview.earnings.IDR.gross|idr }}{% endif %}</strong></article>
+    <article class="admin-card admin-stat"><span>Fee</span><strong>{% if overview.currency == 'USDT' %}{{ overview.earnings.USDT.fee|usdt }}{% else %}{{ overview.earnings.IDR.fee|idr }}{% endif %}</strong></article>
+    <article class="admin-card admin-stat"><span>Net</span><strong>{% if overview.currency == 'USDT' %}{{ overview.earnings.USDT.net|usdt }}{% else %}{{ overview.earnings.IDR.net|idr }}{% endif %}</strong><small>{{ overview.earnings.USDT.orders }} USDT · {{ overview.earnings.IDR.orders }} IDR</small></article>
+  </div>
+  <table class="admin-table">
+    <thead><tr><th>Periode</th><th>Net</th><th>Order</th></tr></thead>
+    <tbody>
+      {% for point in overview.series.points %}
+      <tr><td>{{ point.label }}</td><td class="admin-money">{% if overview.currency == 'USDT' %}{{ point.amount|usdt }}{% else %}{{ point.amount|idr }}{% endif %}</td><td>{{ point.orders }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="admin-card">
+  <h2>Bulan terakhir</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Bulan</th><th>Net</th><th>Order</th></tr></thead><tbody>
+    {% for tile in overview.months.tiles %}<tr><td>{{ tile.label }}{% if tile.current %} · berjalan{% endif %}</td><td class="admin-money">{% if overview.currency == 'USDT' %}{{ tile.amount|usdt }}{% else %}{{ tile.amount|idr }}{% endif %}</td><td>{{ tile.orders }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if overview.months.delta != None %}<p class="admin-help">Perubahan vs bulan sebelumnya: {{ overview.months.delta }}%</p>{% endif %}
+</section>
+
+<section class="admin-card">
+  <h2>Riwayat receipt</h2>
+  <form class="admin-filter" method="get" action="/admin/laporan">
+    <input type="hidden" name="currency" value="{{ filters.currency }}">
+    <input type="hidden" name="period" value="{{ filters.period }}">
+    <input type="hidden" name="days" value="{{ filters.days }}">
+    <input type="hidden" name="month" value="{{ filters.month }}">
+    <label>Cari invoice <input type="search" name="invoice" value="{{ filters.invoice }}" maxlength="80"></label>
+    <div class="admin-filter-actions"><button class="admin-button admin-button-primary" type="submit">Cari</button><a class="admin-button" href="/admin/laporan/export?currency={{ filters.currency }}&period={{ filters.period }}&days={{ filters.days }}&month={{ filters.month }}&provider={{ filters.provider }}&invoice={{ filters.invoice }}">Export CSV</a></div>
+  </form>
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Invoice</th><th>Paid</th><th>Provider</th><th>Currency</th><th>Gross</th><th>Fee</th><th>Net</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for row in history.rows %}
+      <tr><td><a href="/admin/orders/{{ row.order_id }}">{{ row.invoice_number }}</a></td><td>{{ row.paid_at }}</td><td>{{ row.provider }}<small>{{ row.method }}</small></td><td>{{ row.currency }}</td><td class="admin-money">{% if row.currency == 'USDT' %}{{ row.gross|usdt }}{% else %}{{ row.gross|idr }}{% endif %}</td><td class="admin-money">{% if row.currency == 'USDT' %}{{ row.fee|usdt }}{% else %}{{ row.fee|idr }}{% endif %}</td><td class="admin-money">{% if row.currency == 'USDT' %}{{ row.net|usdt }}{% else %}{{ row.net|idr }}{% endif %}</td><td>{{ row.order_status }} / {{ row.payment_status }}</td></tr>
+    {% empty %}<tr><td colspan="8">Tidak ada receipt pada filter ini.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% if history.pages > 1 %}
+<nav class="admin-pagination" aria-label="Halaman riwayat">
+  {% if history.has_previous %}<a class="admin-button" href="/admin/laporan?page={{ history.previous }}&currency={{ filters.currency }}&period={{ filters.period }}&days={{ filters.days }}&month={{ filters.month }}&provider={{ filters.provider }}&invoice={{ filters.invoice }}">← Sebelumnya</a>{% else %}<span class="admin-button admin-button-disabled">← Sebelumnya</span>{% endif %}
+  <span>Halaman {{ history.page }} dari {{ history.pages }} · {{ history.total }} receipt</span>
+  {% if history.has_next %}<a class="admin-button" href="/admin/laporan?page={{ history.next }}&currency={{ filters.currency }}&period={{ filters.period }}&days={{ filters.days }}&month={{ filters.month }}&provider={{ filters.provider }}&invoice={{ filters.invoice }}">Berikutnya →</a>{% else %}<span class="admin-button admin-button-disabled">Berikutnya →</span>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,127 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Toko</p><h2>Pengaturan operasional</h2><p class="admin-help">Semua nilai berasal dari database. Perubahan provider/policy tidak mengubah Payment, top-up, atau saldo yang sudah ada. Rail yang belum ready tetap nonaktif.</p></div>
+</section>
+
+<section class="admin-card" id="pembayaran">
+  <h2>Payment provider</h2>
+  {% if payment %}
+  <dl class="admin-facts">
+    <div><dt>Aktif</dt><dd>{{ payment.payment_mode }} · v{{ payment.payment_provider_version }}</dd></div>
+    <div><dt>Channel Sakurupiah</dt><dd>{{ payment.sakurupiah_channel|default:'-' }}</dd></div>
+    <div><dt>QRIS TTL</dt><dd>{{ payment.qris_payment_ttl_minutes }} menit</dd></div>
+    <div><dt>Binance / BSC</dt><dd>{{ payment.binance_pay_enabled|yesno:'aktif,nonaktif' }} / {{ payment.bsc_payment_enabled|yesno:'aktif,nonaktif' }}</dd></div>
+    <div><dt>Admin chat</dt><dd><code>{{ payment.admin_telegram_chat_id_masked|default:'-' }}</code></dd></div>
+  </dl>
+  <form method="post" action="/admin/payment-mode" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="payment_provider_version" value="{{ payment.payment_provider_version }}">
+    <div class="admin-field"><label for="id_payment_mode">Provider checkout baru</label><select id="id_payment_mode" name="payment_mode">
+      <option value="manual">Manual</option>
+      <option value="klikqris">KlikQRIS{% if not payment.readiness.klikqris %} (belum ready){% endif %}</option>
+      <option value="sakurupiah">Sakurupiah{% if not payment.readiness.sakurupiah %} (belum ready){% endif %}</option>
+    </select></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit"{% if not owner %} disabled title="Owner only"{% endif %} data-confirm="Ganti provider checkout baru?">Simpan provider</button>{% if not owner %}<span class="admin-help">Owner only.</span>{% endif %}</div>
+  </form>
+  {% else %}<p>Pengaturan pembayaran tidak tersedia.</p>{% endif %}
+</section>
+
+<section class="admin-card" id="maintenance">
+  <h2>Checkout Maintenance</h2>
+  <form method="post" action="/admin/checkout-maintenance" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="version" value="{{ maintenance.version }}">
+    <label class="admin-field admin-field-checkbox"><input type="checkbox" name="active" value="1"{% if maintenance.active %} checked{% endif %}> Tahan checkout baru</label>
+    <div class="admin-field"><label for="id_public_note">Catatan publik</label><textarea id="id_public_note" name="public_note" rows="2" maxlength="500">{{ maintenance.public_note }}</textarea></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" data-confirm="Simpan status Checkout Maintenance?">Simpan</button><span class="admin-help">v{{ maintenance.version }} · aktif {{ maintenance.activated_label|default:'-' }}</span></div>
+  </form>
+</section>
+
+<section class="admin-card" id="customer-api">
+  <h2>Customer API</h2>
+  <dl class="admin-facts"><div><dt>Status</dt><dd>{{ api.enabled|yesno:'Aktif,Maintenance' }} · v{{ api.version }}</dd></div><div><dt>Berubah</dt><dd>{{ api.changed_label|default:'-' }}</dd></div></dl>
+  <form method="post" action="/admin/customer-api-availability" class="admin-form" data-dirty-guard>
+    {% csrf_token %}<input type="hidden" name="version" value="{{ api.version }}">
+    <label class="admin-field admin-field-checkbox"><input type="checkbox" name="enabled" value="1"{% if api.enabled %} checked{% endif %}> Izinkan Customer API</label>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit"{% if not owner %} disabled{% endif %} data-confirm="Ubah status Customer API?">Simpan</button>{% if not owner %}<span class="admin-help">Owner only.</span>{% endif %}</div>
+  </form>
+</section>
+
+<section class="admin-card" id="funding-policy">
+  <h2>Store Balance funding policy (IDR)</h2>
+  <form method="post" action="/admin/store-balance/funding-policy" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="funding_version" value="{{ funding_policy.version }}">
+    <div class="admin-field"><label for="id_minimum_amount">Minimum top-up</label><input id="id_minimum_amount" name="minimum_amount" type="number" min="1" step="1" value="{{ funding_policy.minimum_amount }}" required></div>
+    <div class="admin-field"><label for="id_preset_amounts">Preset (pisahkan koma)</label><input id="id_preset_amounts" name="preset_amounts" type="text" value="{{ funding_policy.preset_amounts_raw }}" maxlength="500"></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" data-confirm="Simpan kebijakan top-up IDR?">Simpan</button><span class="admin-help">v{{ funding_policy.version }} · {{ funding_policy.updated_label }}</span></div>
+  </form>
+</section>
+
+<section class="admin-card" id="usdt-policy">
+  <h2>Customer USDT funding policy</h2>
+  {% if usdt_policy %}
+  <dl class="admin-facts">
+    <div><dt>Funding</dt><dd>{{ usdt_policy.funding_enabled|yesno:'Aktif,Nonaktif' }} · v{{ usdt_policy.version }}</dd></div>
+    <div><dt>TTL konfirmasi</dt><dd>{{ usdt_policy.confirmation_ttl_seconds }} detik</dd></div>
+    <div><dt>Fee aplikasi</dt><dd>{{ usdt_policy.application_fee_label }} USDT</dd></div>
+    <div><dt>Terms</dt><dd>v{{ usdt_policy.terms_version }}</dd></div>
+    <div><dt>Preset</dt><dd>{{ usdt_policy.presets_label|default:'-' }}</dd></div>
+  </dl>
+  <form method="post" action="/admin/store-balance/usdt-policy" class="admin-form" data-dirty-guard>
+    {% csrf_token %}<input type="hidden" name="usdt_version" value="{{ usdt_policy.version }}">
+    <label class="admin-field admin-field-checkbox"><input type="checkbox" name="funding_enabled" value="1"{% if usdt_policy.funding_enabled %} checked{% endif %}> Aktifkan funding USDT (rail tetap butuh readiness)</label>
+    <div class="admin-field"><label for="id_ttl">TTL konfirmasi (60-3600 detik)</label><input id="id_ttl" name="confirmation_ttl_seconds" type="number" min="60" max="3600" step="1" value="{{ usdt_policy.confirmation_ttl_seconds }}" required></div>
+    <div class="admin-field"><label for="id_fee">Fee aplikasi micro-USDT</label><input id="id_fee" name="application_fee_micro" type="text" inputmode="numeric" pattern="0|[1-9][0-9]*" value="{{ usdt_policy.application_fee_micro }}" required></div>
+    <div class="admin-field"><label for="id_presets">Preset micro-USDT (pisahkan koma, maks 8)</label><input id="id_presets" name="preset_amounts_micro" type="text" value="{{ usdt_policy.presets_raw }}" maxlength="200"></div>
+    <div class="admin-field"><label for="id_terms">Terms USDT</label><textarea id="id_terms" name="terms_body" rows="6" maxlength="20000" required>{{ usdt_policy.terms_body }}</textarea></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit"{% if not owner %} disabled{% endif %} data-confirm="Simpan kebijakan USDT?">Simpan</button></div>
+  </form>
+  {% else %}<p>Kebijakan USDT belum dikonfigurasi.</p>{% endif %}
+</section>
+
+<section class="admin-card" id="usdt-pauses">
+  <h2>Pause &amp; restore gate</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Scope</th><th>Status</th><th>Alasan</th><th>Aksi</th></tr></thead><tbody>
+    {% for pause in pauses %}
+    <tr><td>{{ pause.label }}</td><td>{% if pause.paused %}<span class="admin-status admin-status-warning">Dijeda</span>{% else %}<span class="admin-status admin-status-good">Aktif</span>{% endif %}</td><td>{{ pause.reason|default:'-' }}<small>{{ pause.paused_label }}</small></td><td>
+      {% if pause.paused %}
+      <form method="post" action="/admin/store-balance/usdt-pauses/{{ pause.scope }}/resume" data-confirm="Lanjutkan scope ini?">{% csrf_token %}<button class="admin-button admin-button-small" type="submit"{% if not owner %} disabled{% endif %}>Resume</button></form>
+      {% else %}
+      <form method="post" action="/admin/store-balance/usdt-pauses/{{ pause.scope }}" data-dirty-guard>{% csrf_token %}<input type="text" name="reason" maxlength="191" placeholder="Alasan" required><button class="admin-button admin-button-small" type="submit"{% if not owner %} disabled{% endif %}>Pause</button></form>
+      {% endif %}
+    </td></tr>
+    {% endfor %}
+  </tbody></table></div>
+  <h3>Restore gate</h3>
+  <dl class="admin-facts">
+    <div><dt>State</dt><dd>{{ restore_gate.state|default:'-' }}{% if restore_gate.open %} · Terbuka{% endif %}</dd></div>
+    <div><dt>Window</dt><dd>{{ restore_gate.window_start_label|default:'-' }} – {{ restore_gate.window_end_label|default:'-' }}</dd></div>
+    <div><dt>Replay</dt><dd>{{ restore_gate.replay_completed_label|default:'-' }}</dd></div>
+  </dl>
+  <p class="admin-help">Restore gate hanya ditutup oleh command/evidence owner P17/P26; halaman ini read-only untuk gate.</p>
+  {% if alerts %}
+  <h3>Alert terbuka</h3>
+  <ul class="admin-list">{% for alert in alerts %}<li><strong>{{ alert.severity }}</strong> {{ alert.alert_key }} · {{ alert.summary }} · {{ alert.last_seen_label }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+
+<section class="admin-card" id="bsc-receivers">
+  <h2>Receiver BSC</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Label</th><th>Alamat</th><th>Status</th><th>Verifikasi</th><th>Aksi</th></tr></thead><tbody>
+    {% for row in receivers %}
+    <tr><td>{{ row.label }}</td><td><code>{{ row.address_masked }}</code></td><td>{{ row.status_label }}</td><td>{{ row.verified_label }}</td><td>
+      <form method="post" action="/admin/bsc/receivers/{{ row.id }}/state" data-confirm="Ubah status receiver?">{% csrf_token %}<input type="hidden" name="action" value="{% if row.status_label == 'Terverifikasi' %}deactivate{% else %}activate{% endif %}"><button class="admin-button admin-button-small" type="submit"{% if not owner %} disabled{% endif %}>{% if row.status_label == 'Terverifikasi' %}Deactivate{% else %}Activate{% endif %}</button></form>
+    </td></tr>
+    {% empty %}<tr><td colspan="5">Belum ada receiver BSC.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <form method="post" action="/admin/bsc/receivers" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <div class="admin-field"><label for="id_receiver_label">Label</label><input id="id_receiver_label" name="label" type="text" maxlength="120" required></div>
+    <div class="admin-field"><label for="id_receiver_address">Alamat publik 0x…</label><input id="id_receiver_address" name="address" type="text" maxlength="42" pattern="0x[0-9a-fA-F]{40}" required></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit"{% if not owner %} disabled{% endif %}>Tambah pending</button><span class="admin-help">Tambah hanya membuat baris pending; verifikasi challenge/signature tetap wajib.</span></div>
+  </form>
+</section>
+{% endblock %}

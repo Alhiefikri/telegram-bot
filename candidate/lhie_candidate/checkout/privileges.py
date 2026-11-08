@@ -124,6 +124,25 @@ ADMIN_UPDATE = {
 }
 ADMIN_DELETE = {'product_stock_items', 'product_quantity_price_tiers', 'product_family_slug_redirects'}
 
+P23_INSERT = {
+    'product_stock_items': set('product_id order_item_id secret supplier_purchase_id supplier_unit_index created_at updated_at'.split()),
+    'supplier_manual_handoffs': set('supplier_fulfillment_id actor_user_id idempotency_key quantity note handed_off_at created_at updated_at'.split()),
+    'supplier_purchase_evidence': set('supplier_purchase_id actor_user_id kind evidence_source provider_reference note history_reconciliation_id observed_at created_at updated_at'.split()),
+    'customer_api_settings': set('singleton_key enabled version changed_at created_at updated_at'.split()),
+    'customer_usdt_funding_terms': set('version body created_by_user_id created_at'.split()),
+    'bsc_payment_receivers': set('label address address_normalized chain_id token_contract token_decimals is_active verification_status created_at updated_at'.split()),
+}
+P23_UPDATE = {
+    'product_stock_items': set('secret credential_payload updated_at'.split()),
+    'supplier_fulfillments': set('state last_error next_attempt_at delivered_at refunded_quantity updated_at'.split()),
+    'supplier_purchases': set('state last_error next_attempt_at claim_token lease_expires_at updated_at'.split()),
+    'checkout_maintenance_settings': set('is_active public_note version activated_at updated_at'.split()),
+    'customer_api_settings': set('enabled version changed_at updated_at'.split()),
+    'customer_usdt_funding_policies': set('funding_enabled confirmation_ttl_seconds application_fee_micro preset_amounts_micro terms_version version updated_at'.split()),
+    'bsc_payment_receivers': {'is_active', 'updated_at'},
+    'order_notification_events': set('status attempts next_attempt_at delivery_started_at failed_at last_error updated_at'.split()),
+}
+
 
 LIFECYCLE_INSERT = {
     'audit_logs': set('user_id action subject_type subject_id new_values created_at'.split()),
@@ -292,6 +311,10 @@ def verify_public_writes(cursor):
     if admin:
         allowed_insert = _merge(allowed_insert, ADMIN_INSERT)
         allowed_update = _merge(allowed_update, ADMIN_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.bsc_payment_receivers','address_normalized','INSERT')")
+    if cursor.fetchone()[0]:
+        allowed_insert = _merge(allowed_insert, P23_INSERT)
+        allowed_update = _merge(allowed_update, P23_UPDATE)
     cursor.execute('''SELECT c.relname FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p')

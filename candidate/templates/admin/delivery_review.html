@@ -1,0 +1,43 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">{{ effect.state_label }}</p><h2>{{ effect.effect_type }}</h2><p class="admin-help">{{ effect.source_label }} · {{ effect.telegram_method }} · locale {{ effect.locale|default:'-' }}</p></div>
+  <a class="admin-button" href="/admin/telegram-outbound-effects">Kembali</a>
+</section>
+<div class="admin-detail-grid">
+  <section class="admin-card">
+    <h2>Evidence</h2>
+    <dl class="admin-facts">
+      <div><dt>Target</dt><dd><code>{{ effect.target_mask }}</code></dd></div>
+      <div><dt>State</dt><dd>{{ effect.state_label }}</dd></div>
+      <div><dt>Attempts</dt><dd>{{ effect.attempts }}</dd></div>
+      <div><dt>Dibuat / update</dt><dd>{{ effect.created_label }} / {{ effect.updated_label }}</dd></div>
+      <div><dt>Error</dt><dd><code>{{ effect.last_error_code }}</code></dd></div>
+    </dl>
+    {% if effect.outcome %}<h3>Metadata tersanitasi</h3><pre class="admin-json">{{ effect.outcome|pprint }}</pre>{% endif %}
+  </section>
+  <section class="admin-card">
+    <h2>Tindakan</h2>
+    {% if effect.can_review %}
+    <form method="post" action="/admin/telegram-outbound-effects/{{ effect.id }}/mark-sent" class="admin-form" data-dirty-guard>
+      {% csrf_token %}
+      <div class="admin-field"><label for="id_telegram_message_id">Telegram message ID</label><input id="id_telegram_message_id" name="telegram_message_id" type="text" inputmode="numeric" maxlength="19" required><p class="admin-help">Hanya jika pesan sudah terlihat di Telegram. Tidak ada request dikirim.</p></div>
+      <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" data-confirm="Tandai effect ini sudah terkirim?">Tandai sent</button></div>
+    </form>
+    {% if effect.is_receipt %}
+    <p class="admin-help">Resend receipt group dimiliki flow receipt P25 dan tidak dijalankan dari halaman ini.</p>
+    {% else %}
+    <form method="post" action="/admin/telegram-outbound-effects/{{ effect.id }}/resend" class="admin-form" data-confirm="Buat resend baru? Pesan bisa terkirim dua kali.">
+      {% csrf_token %}
+      <label class="admin-field admin-field-checkbox"><input type="checkbox" name="confirm_duplicate_risk" value="1"> Saya menerima risiko duplikasi</label>
+      <div class="admin-form-actions"><button class="admin-button admin-button-danger" type="submit">Buat resend eksplisit</button></div>
+    </form>
+    {% endif %}
+    {% else %}<p>Effect ini sudah tidak berada dalam antrean review.</p>{% endif %}
+  </section>
+</div>
+<section class="admin-card"><h2>Audit</h2><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Waktu</th><th>Actor</th><th>Action</th><th>Values</th></tr></thead><tbody>
+  {% for entry in effect.audit %}<tr><td>{{ entry.created_label }}</td><td>{{ entry.actor }}</td><td>{{ entry.action }}</td><td><pre class="admin-json">{{ entry.new_values|pprint }}</pre></td></tr>
+  {% empty %}<tr><td colspan="4">Belum ada audit.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

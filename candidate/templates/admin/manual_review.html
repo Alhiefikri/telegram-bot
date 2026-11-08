@@ -1,0 +1,66 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Review #{{ review.id }}</p><h2>{{ review.invoice_number }}</h2><p class="admin-help">{{ review.reason_label }} · {{ review.provider }} · {{ review.method }} · {{ review.order_status }} / {{ review.payment_status }}</p></div>
+  <div class="admin-hero-actions"><a class="admin-button" href="/admin/manual-fulfillment-reviews">Kembali</a><a class="admin-button" href="/admin/orders/{{ review.order_id }}">Order</a></div>
+</section>
+<div class="admin-detail-grid">
+  <section class="admin-card">
+    <h2>Ringkasan</h2>
+    <dl class="admin-facts">
+      <div><dt>State</dt><dd>{{ review.state }}</dd></div>
+      <div><dt>Amount</dt><dd class="admin-money">{{ review.amount }} {{ review.currency }}</dd></div>
+      <div><dt>Provider ref</dt><dd><code>{{ review.provider_reference|default:'-' }}</code></dd></div>
+      <div><dt>Resolution</dt><dd>{{ review.resolution_reason|default:'-' }}</dd></div>
+      <div><dt>Resolved</dt><dd>{{ review.resolved_label }}</dd></div>
+    </dl>
+  </section>
+  <section class="admin-card">
+    <h2>Keputusan</h2>
+    {% if review.state == 'pending' or review.state == 'refund_uncertain' %}
+    <form method="post" action="/admin/manual-fulfillment-reviews/{{ review.id }}/resolve" class="admin-form" data-dirty-guard>
+      {% csrf_token %}
+      <div class="admin-field"><label for="id_action">Tindakan</label><select id="id_action" name="action" required><option value="fulfill">Fulfill</option><option value="refund">Refund</option><option value="reject">Reject</option></select></div>
+      <div class="admin-field"><label for="id_reason">Alasan</label><textarea id="id_reason" name="reason" rows="4" maxlength="2000" required></textarea></div>
+      <div class="admin-field"><label for="id_refund_provider_reference">Referensi transfer refund (opsional)</label><input id="id_refund_provider_reference" name="refund_provider_reference" type="text" maxlength="255"><p class="admin-help">Wajib untuk refund penuh/uncertain sesuai status Payment.</p></div>
+      <div class="admin-field"><label for="id_refund_provider_result">Hasil refund</label><select id="id_refund_provider_result" name="refund_provider_result"><option value="success">success</option><option value="failure">failure</option><option value="uncertain">uncertain</option></select></div>
+      <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" data-confirm="Simpan keputusan review ini?">Simpan keputusan</button></div>
+    </form>
+    {% else %}<p>Review ini sudah selesai dan tidak menerima keputusan baru.</p>{% endif %}
+  </section>
+</div>
+
+<section class="admin-card">
+  <h2>Item &amp; fulfillment supplier</h2>
+  <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Produk</th><th>Qty</th><th>Fulfillment</th><th>State</th><th>Reserved</th><th>Handoff</th></tr></thead><tbody>
+    {% for item in review.items %}<tr><td>{{ item.product_name }}</td><td>{{ item.quantity }}</td><td>#{{ item.fulfillment_id|default:'-' }}</td><td>{{ item.state|default:'lokal' }}</td><td>{{ item.reserved_quantity|default:0 }}</td><td>{{ item.handoff_count|default:0 }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+{% if review.can_handoff %}
+<section class="admin-card">
+  <h2>Handoff eksternal</h2>
+  <p class="admin-help">Gunakan saat akun sudah diserahkan di luar bot. Purchase supplier tetap unresolved sampai debit/no-debit terbukti.</p>
+  <form method="post" action="/admin/manual-fulfillment-reviews/{{ review.id }}/handoff" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <div class="admin-field"><label for="id_fulfillment_id">Fulfillment ID</label><input id="id_fulfillment_id" name="fulfillment_id" type="number" min="1" required></div>
+    <div class="admin-field"><label for="id_quantity">Jumlah</label><input id="id_quantity" name="quantity" type="number" min="1" required></div>
+    <div class="admin-field"><label for="id_handoff_reason">Alasan/notes</label><textarea id="id_handoff_reason" name="reason" rows="3" maxlength="2000" required></textarea></div>
+    <div class="admin-field"><label for="id_handoff_key">Idempotency key (opsional)</label><input id="id_handoff_key" name="handoff_key" type="text" maxlength="64"></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" data-confirm="Catat penyerahan eksternal?">Catat handoff</button></div>
+  </form>
+</section>
+{% endif %}
+
+{% if review.handoffs %}
+<section class="admin-card"><h2>Riwayat handoff</h2><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Waktu</th><th>Actor</th><th>Qty</th><th>Catatan</th></tr></thead><tbody>
+  {% for handoff in review.handoffs %}<tr><td>{{ handoff.handed_off_label }}</td><td>{{ handoff.actor }}</td><td>{{ handoff.quantity }}</td><td>{{ handoff.note }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endif %}
+
+<section class="admin-card"><h2>Audit</h2><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Waktu</th><th>Actor</th><th>Action</th><th>Values</th></tr></thead><tbody>
+  {% for entry in review.audit %}<tr><td>{{ entry.created_label }}</td><td>{{ entry.actor }}</td><td>{{ entry.action }}</td><td><pre class="admin-json">{{ entry.new_values|pprint }}</pre></td></tr>
+  {% empty %}<tr><td colspan="4">Belum ada audit.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

@@ -1472,6 +1472,76 @@ Context7 consulted Django 5.2.18
 including session-bound CSRF and DOM-token reading, and
 [`select_for_update()` transaction boundaries](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update).
 The implementation uses explicit PostgreSQL `FOR UPDATE` SQL because the
-unmanaged legacy tables are not Django models. P23 still owns order/payment/
-balance/supplier operations and reporting; P24 owns full bot/admin presentation;
-P25 owns notification delivery; P27 owns upload/browser visual acceptance.
+unmanaged legacy tables are not Django models. P23 now owns order/payment/
+balance/supplier operations and reporting (see below); P24 owns full bot/admin
+presentation; P25 owns notification delivery; P27 owns upload/browser visual
+acceptance.
+
+## P23: order, payment, balance, supplier and reporting operations (#705)
+
+Implemented on `migration/p23-admin-operations-705`, a child of
+`migration/python-django-experiment`. All blockers were closed. The work keeps
+the P22 custom shell and adds the operational decision surfaces without
+activating any provider, supplier network call or USDT funding rail.
+
+`candidate/lhie_candidate/admin/` now owns:
+
+- `orders.py`: invoice-only search, status filters, canonical Order/Payment
+  read models, masked merchant/provider references, ten-event payment history,
+  bounded audit and outbound-effect state. Manual complete/reject is restricted
+  to the existing Binance-mismatch evidence path and delegates to
+  `OrderLifecycle`. Cancel-release, credential-mail rearm and provider
+  reconciliation use the existing owners; no transition is reimplemented.
+- `reviews.py`: Manual Fulfillment Review index/detail plus
+  fulfil/refund/reject via `OrderLifecycle.resolve_review()` and external
+  handoff via `ManualSupplierRecovery`. Manual Delivery Review records
+  operator-attested `sent` without sending Telegram traffic; generic explicit
+  resend creates a new durable effect with duplicate-risk acknowledgement.
+  Receipt-group resend stays with the P25 receipt flow.
+- `balance.py`: Owner-only IDR adjustment preview/reversal/confirm/cancel around
+  `BalanceAdjustments` and the fresh-password `PasswordConfirmation`; IDR
+  top-up report; USDT review preview/confirm around `UsdtTopUpReview`; USDT
+  funding policy, pauses and restore-gate/alert reads.
+- `settings.py`: DB-backed provider switch, Sakurupiah channel, Checkout
+  Maintenance, Customer API availability and BSC receiver state. Provider
+  selection still requires the existing readiness callback; an unready rail is
+  never written. New BSC receivers remain `pending_verification` and cannot be
+  activated without the existing verified status.
+- `suppliers.py`: connection/balance/rate/mapping reads, purchase and handoff
+  monitor, operator-evidence no-debit, Owner no-debit, manual credentials,
+  explicit handoff and linked external refund confirmation. Provider order
+  reads, retry dispatch and challenge/signature verification remain with their
+  P18/P14 owners instead of being triggered by an admin GET.
+- `reporting.py`: one canonical paid Payment per successful Order (earliest
+  `paid_at`/`id`), exact integer IDR/micro-USDT net receipts, daily/weekly/
+  monthly/month buckets, history filters, bounded CSV export and audit view.
+  Money is never cached, converted or derived from a Store Balance projection.
+- `sanitize.py`: recursive secret-shaped redaction, bounded audit/export text
+  and provider-code allowlisting.
+
+Linked pages and dashboard tabs reuse the P22 shell, CSRF and no-JS fallback.
+Owner-only routes (`store-balance/adjustments`, `store-balance/usdt-review`,
+provider switch, Customer API availability, BSC receivers, USDT policy/pauses,
+balance compensation) repeat the role guard server-side; hidden navigation is
+not authorization. Finance/Support still cannot enter `/admin` at all.
+
+Local verification extends the P22 admin smoke and the normal unit lane:
+
+```sh
+python3 tools/migration_harness/smoke_checkout.py --admin
+(cd candidate && .venv/bin/python -m unittest tests.test_admin_operations tests.test_admin_pricing -v)
+```
+
+The disposable proof created synthetic Order/Payment/review/effect rows,
+verified every operational page, one audited manual rejection with replay
+no-op, operator-attested delivery resolution, canonical reporting/export
+redaction, owner-bound adjustment preview with wrong-password rejection and no
+ledger entry, fail-closed provider switch, maintenance/API version changes,
+and a non-owner admin 403 on Owner-only controls. Evidence is the P22
+verification manifest and `.local/migration-p22/verification.json`; no
+production data, live providers, Telegram sends, deployment or CI/CD were used.
+
+Known ownership boundaries: Sales Proof retry and receipt-group resend remain
+P25; full provider reconciliation only works when the matching P13/P08 lifecycle
+is registered; BSC receiver challenge verification and supplier network
+recovery remain P14/P18; full browser/visual acceptance remains P27.
