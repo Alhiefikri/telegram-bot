@@ -10,6 +10,7 @@ from .storefront.public_media import image as public_image
 
 
 urlpatterns = [
+    path("", include("lhie_candidate.admin.urls")),
     path("", include("lhie_candidate.storefront.account_urls")),
     path("", include("lhie_candidate.storefront.checkout_urls")),
     path("", include("lhie_candidate.auth.urls")),

@@ -1,0 +1,10 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero"><div><p class="admin-eyebrow">Katalog</p><h2>{{ title }}</h2></div><a class="admin-button" href="/admin/kategori">Kembali</a></section>
+{% if error_messages %}<div class="admin-flash admin-flash-danger" role="alert"><ul>{% for message in error_messages %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}
+<form method="post" action="{% if category %}/admin/kategori/{{ category.id }}{% else %}/admin/kategori/baru{% endif %}" class="admin-form admin-card" data-dirty-guard>
+  {% csrf_token %}
+  {% include 'admin/_fields.html' with fields=fields %}
+  <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Simpan</button><a class="admin-button" href="/admin/kategori">Batal</a></div>
+</form>
+{% endblock %}

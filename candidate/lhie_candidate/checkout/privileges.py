@@ -100,6 +100,31 @@ ADJUSTMENT_UPDATE = {
 }
 
 
+ADMIN_INSERT = {
+    'categories': set('name slug description banner_image_path sort_order is_active created_at updated_at'.split()),
+    'product_families': set('name slug description icon custom_emoji_id image_path telegram_image_path sort_order created_at updated_at'.split()),
+    'product_family_slug_redirects': set('old_slug product_family_id created_at updated_at'.split()),
+    'product_quantity_price_tiers': set('product_id minimum_quantity price_amount usdt_price_amount created_at updated_at'.split()),
+    'products': set('category_id product_family_id family_sort_order family_option_label name icon custom_emoji_id description description_ms description_en product_type access_duration region account_type device_limit included_items limitations fulfillment_expectation warranty_policy warranty_policy_ms warranty_policy_en support_policy delivery_note usage_guide_title usage_guide_url price_amount usdt_price_amount reseller_price_amount reseller_usdt_price_amount currency stock reserved_stock image_path telegram_image_path telegram_channel_image_path is_active featured_rank created_at updated_at'.split()),
+    'product_stock_items': set('product_id order_item_id supplier_purchase_id supplier_unit_index credential_format credential_payload secret created_at updated_at'.split()),
+    'credential_identities': set('identity_kind fingerprint product_id product_stock_item_id first_seen_at created_at updated_at'.split()),
+    'product_stock_intake_operations': set('operation_key product_id inventory_movement_id actor_id payload_hash mode item_count stock_before stock_after available_before available_after ip_address created_at updated_at'.split()),
+    'inventory_movements': set('product_id order_id type quantity stock_before became_unavailable available_before available_after notes created_at'.split()),
+    'audit_logs': set('user_id action subject_type subject_id old_values new_values ip_address created_at'.split()),
+}
+ADMIN_UPDATE = {
+    'categories': set('name description sort_order is_active deleted_at updated_at'.split()),
+    'product_families': set('name slug description icon custom_emoji_id image_path telegram_image_path sort_order deleted_at updated_at'.split()),
+    'product_family_slug_redirects': {'product_family_id', 'updated_at'},
+    'products': set('category_id product_family_id family_sort_order family_option_label name icon custom_emoji_id description description_ms description_en product_type access_duration region account_type device_limit included_items limitations fulfillment_expectation warranty_policy warranty_policy_ms warranty_policy_en support_policy delivery_note usage_guide_title usage_guide_url price_amount usdt_price_amount reseller_price_amount reseller_usdt_price_amount stock reserved_stock image_path telegram_image_path telegram_channel_image_path is_active featured_rank deleted_at updated_at'.split()),
+    'product_stock_items': set('credential_payload secret updated_at'.split()),
+    'product_stock_intake_operations': {'inventory_movement_id', 'available_after', 'updated_at'},
+    'credential_identities': {'updated_at'},
+    'storefront_settings': {'homepage_banners', 'homepage_banners_version', 'updated_at'},
+}
+ADMIN_DELETE = {'product_stock_items', 'product_quantity_price_tiers', 'product_family_slug_redirects'}
+
+
 LIFECYCLE_INSERT = {
     'audit_logs': set('user_id action subject_type subject_id new_values created_at'.split()),
     'provider_cancellation_attempts': set('order_id payment_id provider state finished_at created_at updated_at'.split()),
@@ -262,11 +287,18 @@ def verify_public_writes(cursor):
     if cursor.fetchone()[0]:
         allowed_insert = _merge(allowed_insert, API_INSERT)
         allowed_update = _merge(allowed_update, API_UPDATE)
+    cursor.execute("SELECT has_column_privilege(current_user,'public.product_stock_intake_operations','operation_key','INSERT')")
+    admin = cursor.fetchone()[0]
+    if admin:
+        allowed_insert = _merge(allowed_insert, ADMIN_INSERT)
+        allowed_update = _merge(allowed_update, ADMIN_UPDATE)
     cursor.execute('''SELECT c.relname FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p')
         AND (has_table_privilege(current_user,c.oid,'INSERT,UPDATE,TRUNCATE,TRIGGER')
-        OR (has_table_privilege(current_user,c.oid,'DELETE') AND NOT (%s AND c.relname='customer_identities')))''', (auth,))
+        OR (has_table_privilege(current_user,c.oid,'DELETE') AND NOT (
+          (%s AND c.relname='customer_identities')
+          OR (%s AND c.relname = ANY(%s)))))''', (auth, admin, list(ADMIN_DELETE)))
     if cursor.fetchone() is not None:
         return False
     cursor.execute('''SELECT c.relname,a.attname,

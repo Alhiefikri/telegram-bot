@@ -1,0 +1,8 @@
+<fieldset class="admin-account-row" data-account-row>
+  <legend>Akun</legend>
+  <div class="admin-field"><label for="id_account_{{ index }}_email">Email</label><input id="id_account_{{ index }}_email" name="accounts.{{ index }}.email" type="email" maxlength="254" autocomplete="off" required></div>
+  <div class="admin-field"><label for="id_account_{{ index }}_password">Password</label><input id="id_account_{{ index }}_password" name="accounts.{{ index }}.password" type="password" maxlength="1024" autocomplete="new-password" required></div>
+  <div class="admin-field"><label for="id_account_{{ index }}_method">Metode akses</label><select id="id_account_{{ index }}_method" name="accounts.{{ index }}.access_method"><option value="none">Tidak ada</option><option value="otp_mail_link">OTP Mail Link</option><option value="auth_token">Auth Token</option></select></div>
+  <div class="admin-field"><label for="id_account_{{ index }}_value">Nilai metode akses</label><input id="id_account_{{ index }}_value" name="accounts.{{ index }}.access_value" type="text" maxlength="3500" autocomplete="off"><p class="admin-help">Kosongkan untuk “Tidak ada”. OTP Mail Link wajib HTTPS.</p></div>
+  <button class="admin-button admin-button-small admin-button-danger" type="button" data-account-remove hidden>Hapus akun</button>
+</fieldset>

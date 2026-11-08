@@ -1386,3 +1386,92 @@ Context7 `/django/django/5.2.18` and the Django
 [CSRF documentation](https://docs.djangoproject.com/en/5.2/ref/csrf/) were
 consulted for session-bound CSRF and same-origin browser requests. Templates
 retain Django autoescaping; customer and invoice responses are private/no-store.
+
+## P22: admin shell, catalog, pricing and stock workspace (#704)
+
+Implemented on `migration/p22-admin-workspace-704`, a child of
+`migration/python-django-experiment`. Blockers #703 and #698 were closed. The
+work keeps the custom dashboard: Django admin and framework auth are not
+installed. `/admin` with an HTML `Accept` header renders the custom shell; the
+same URL without HTML keeps the P19 JSON contract.
+
+`candidate/lhie_candidate/admin/` owns:
+
+- `access.py`: owner/admin browser guard over the existing P19 admin session,
+  safe `next` handling, and role rechecks on every request. Customer sessions
+  never grant admin authority.
+- `navigation.py`: server-built, permission-filtered sidebar groups, direct
+  Ringkasan/Produk tabs and linked-page active state. Hidden navigation is not
+  authorization; every mutation route repeats the guard.
+- `catalog.py`: category/Product Family/Product reads and mutations, localized
+  product copy, icons, DB media path fields, reseller prices, quantity tiers,
+  storefront banner JSON/version, family-category coherence and audit records.
+- `pricing.py`: exact integer IDR and micro-USDT parsing plus the existing
+  five-tier/2–20 bounds, decreasing price schedule, reseller override rules and
+  quantity-100 bigint limit. No float money.
+- `stock.py`: legacy/bulk-MFA/bulk-access-token/bulk-reader-link/structured
+  intake, operation-key replay, durable operation records, encrypted PHP
+  credential envelopes, Auth Token identity registry claims, available-item
+  edit, delete and bulk delete.
+- `views.py`, `urls.py` and templates: PRG forms, CSRF-protected mutations,
+  native `<dialog>` stock tools, `<details>` no-JavaScript fallbacks, focus/
+  escape/outside-click handling, a mobile drawer, theme state and safe
+  field-indexed errors that never echo credentials.
+- `grants.sql`: explicit disposable column grants, never applied at startup.
+
+Product creation and edits never accept `stock`/`reserved_stock` form fields.
+Stock intake/depletion is the only admin path that changes those projections and
+always writes one `inventory_movements` row and audit record in the same
+transaction. Lock order is Product then available stock rows for deletion, and
+Product then new stock rows/identity claims for intake; the intake operation key
+uses a transaction-scoped advisory lock so replay and conflicting reuse are
+deterministic. Allocated, retired, supplier-owned and reserved stock cannot be
+edited or deleted back into availability. Existing Order/item snapshots are
+never rewritten by a price or presentation edit.
+
+Structured payloads use the P03 Laravel codec and the PHP payload shape
+(`version`, email, password, access method/value, optional tutorial/reader
+link). Email is not a unique credential identity; only Auth Token values claim
+`credential_identities`. Structured input stays disabled unless a private
+`CANDIDATE_IDENTITY_FINGERPRINT_KEY` is injected and the existing readiness row
+is `ready` for that exact key digest. Legacy/quick-input stays compatible without
+the registry key, matching the PHP rollout seam. Tests inject a synthetic key;
+no key is stored in the repository or shell ENV.
+
+Presentation remains DB-backed: `products.icon`, family icons/custom emoji,
+media path references and `storefront_settings.homepage_banners` with its
+version counter. No presentation value moved to ENV. Banner editing accepts only
+stored media paths and internal `/` links in this slice; file upload and full
+visual parity remain P27. Storefront reads are uncached, so catalog edits are
+visible immediately; P25 owns stock/price notifications.
+
+Local verification extends the existing P01/P07 harness:
+
+```sh
+python3 tools/migration_harness/smoke_checkout.py --admin
+(cd candidate && .venv/bin/python -m unittest tests.test_admin_pricing -v)
+```
+
+The smoke uses synthetic PostgreSQL/Redis, the PHP fixture owner/admin identity,
+explicit `auth`, checkout and `admin` grants, and one synthetic credential key
+injected only inside the probe process. It proved owner login/redirect and role
+denial (Finance/Support cannot enter), HTML/no-JS shell markers and P19 JSON
+compatibility, category/family/product creation and edits with family-category
+rejection, detail localization, appearance/media paths, price/tier bounds and
+stale-version fencing, immutable Order snapshots, legacy/MFA/access-token/
+structured intake, operation replay/conflict, encrypted storage, duplicate Auth
+Token rejection including a two-process race, reserved/retired deletion fences,
+single/bulk deletion, item edit without secret audit, DB-backed banner
+versioning, and archived-product history retention. The focused price/credential
+regressions passed. Sanitized source identity and outcomes are
+in `.local/migration-p22/verification.json`; no production data, uploads, live
+providers, deployment or CI/CD were used.
+
+Context7 consulted Django 5.2.18
+[CSRF in templates and AJAX](https://docs.djangoproject.com/en/5.2/howto/csrf/),
+including session-bound CSRF and DOM-token reading, and
+[`select_for_update()` transaction boundaries](https://docs.djangoproject.com/en/5.2/ref/models/querysets/#select-for-update).
+The implementation uses explicit PostgreSQL `FOR UPDATE` SQL because the
+unmanaged legacy tables are not Django models. P23 still owns order/payment/
+balance/supplier operations and reporting; P24 owns full bot/admin presentation;
+P25 owns notification delivery; P27 owns upload/browser visual acceptance.

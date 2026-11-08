@@ -1,0 +1,23 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Katalog</p><h2>Tambah produk</h2><p class="admin-help">Stok awal selalu nol. Tambahkan akun melalui workspace setelah produk dibuat agar intake, identitas, dan audit tetap satu transaksi.</p></div>
+  <a class="admin-button" href="/admin?tab=produk">Kembali</a>
+</section>
+{% if error_messages %}<div class="admin-flash admin-flash-danger" role="alert"><ul>{% for message in error_messages %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}
+<form method="post" action="/admin/produk/baru" class="admin-form" data-dirty-guard>
+  {% csrf_token %}
+  {% include 'admin/_fields.html' with fields=detail_fields %}
+  <div class="admin-form-grid">
+    {% include 'admin/_fields.html' with fields=category_field %}
+    {% include 'admin/_fields.html' with fields=family_field %}
+  </div>
+  <div class="admin-form-grid">
+    <div class="admin-field"><label for="id_family_sort_order">Urutan dalam family</label><input id="id_family_sort_order" name="family_sort_order" type="number" min="0" step="1" value="{{ family_sort_order }}"></div>
+    <div class="admin-field"><label for="id_family_option_label">Label pilihan di family</label><input id="id_family_option_label" name="family_option_label" type="text" maxlength="255" value="{{ family_option_label }}"></div>
+  </div>
+  <fieldset class="admin-fieldset"><legend>Harga</legend>{% include 'admin/_fields.html' with fields=price_fields %}</fieldset>
+  <fieldset class="admin-fieldset"><legend>Ikon</legend>{% include 'admin/_fields.html' with fields=appearance_fields %}</fieldset>
+  <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Buat produk</button><a class="admin-button" href="/admin?tab=produk">Batal</a><span class="admin-dirty-note" data-dirty-note hidden>Belum disimpan</span></div>
+</form>
+{% endblock %}

@@ -2591,6 +2591,34 @@ Local entry points and privilege boundaries are in the
 The synthetic `--storefront` smoke uses the existing disposable P01 harness and
 real PostgreSQL/Redis, not production services.
 
+### Django admin workspace (#704)
+
+`candidate/lhie_candidate/admin/` owns the custom Owner/Admin shell, catalog,
+pricing and local stock workspace. `/admin` negotiates: HTML requests render the
+dashboard; JSON-compatible requests without HTML keep the P19 admin-current
+contract. Django admin and Django User are not installed or used as authority.
+P22 owns category/Product Family/Product CRUD, localized content, icons and
+DB media paths, reseller/quantity-tier pricing, banners with version fencing,
+and legacy/structured stock intake/edit/delete/bulk deletion. P23 still owns
+order/payment/balance/supplier operations and reporting, P24 owns full bot/admin
+presentation, P25 owns notification delivery and P27 owns upload/browser visual
+acceptance.
+
+`admin/stock.py` is the only new admin writer of stock projections: one
+transaction writes stock rows, `inventory_movements`, the durable intake
+operation and audit; replay/conflict keys are transaction-scoped. Structured
+payloads use the P03 Laravel envelope and PHP field shape, and only Auth Token
+values claim `credential_identities`; a private identity fingerprint key plus
+the existing readiness row gates the structured form. Allocated, retired,
+supplier-owned or reserved rows are never returned to available stock. Product
+pricing and presentation edits never rewrite Order snapshots or `stock` /
+`reserved_stock`.
+
+Explicit `admin/grants.sql` column grants are provisioned after the auth,
+checkout and storefront grants; startup never installs them. The synthetic
+`--admin` smoke reuses P01/P07 and real PostgreSQL/Redis and records evidence in
+`.local/migration-p22/verification.json`.
+
 ## 11. Checklist perubahan untuk AI
 
 Sebelum membuka patch:

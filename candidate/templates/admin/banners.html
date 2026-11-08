@@ -1,0 +1,21 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Storefront</p><h2>Banner beranda</h2><p class="admin-help">Lima slot tetap. Hanya path media tersimpan yang diterima; unggahan file dan URL eksternal tidak disediakan di slice ini. Versi mencegah dua tab saling menimpa.</p></div>
+</section>
+{% if error_messages %}<div class="admin-flash admin-flash-danger" role="alert"><ul>{% for message in error_messages %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}
+<form method="post" action="/admin/banner" class="admin-form" data-dirty-guard>
+  {% csrf_token %}
+  <input type="hidden" name="version" value="{{ version }}">
+  {% for slot in slots %}
+  <fieldset class="admin-card admin-banner-slot">
+    <legend>Banner {{ forloop.counter }}</legend>
+    <div class="admin-field"><label for="id_banner_{{ slot.index }}_path">Path media</label><input id="id_banner_{{ slot.index }}_path" name="banners.{{ slot.index }}.path" type="text" maxlength="2048" value="{{ slot.path|default:'' }}"><p class="admin-help">Contoh: banner-beranda.webp. Kosongkan dan centang hapus untuk mengosongkan slot.</p></div>
+    <div class="admin-field"><label for="id_banner_{{ slot.index }}_title">Judul alternatif</label><input id="id_banner_{{ slot.index }}_title" name="banners.{{ slot.index }}.title" type="text" maxlength="160" value="{{ slot.title|default:'' }}"></div>
+    <div class="admin-field"><label for="id_banner_{{ slot.index }}_link">Tautan halaman toko</label><input id="id_banner_{{ slot.index }}_link" name="banners.{{ slot.index }}.link" type="text" maxlength="2048" value="{{ slot.link|default:'' }}"><p class="admin-help">Harus diawali satu /, misalnya /shop atau /pilihan/chatgpt.</p></div>
+    <div class="admin-field admin-field-checkbox"><input type="hidden" name="banners.{{ slot.index }}.remove" value="0"><input id="id_banner_{{ slot.index }}_remove" name="banners.{{ slot.index }}.remove" type="checkbox" value="1"><label for="id_banner_{{ slot.index }}_remove">Hapus isi slot ini</label></div>
+  </fieldset>
+  {% endfor %}
+  <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Simpan banner</button><span class="admin-dirty-note" data-dirty-note hidden>Belum disimpan</span></div>
+</form>
+{% endblock %}

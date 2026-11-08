@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>{{ title }} · Admin LHIE</title>
+  <link rel="icon" href="/static/storefront/favicon.png">
+  <link rel="stylesheet" href="/static/admin/admin.css">
+  <script src="/static/admin/admin.js"></script>
+</head>
+<body class="admin-page">
+<a class="admin-skip" href="#admin-main">Lewati ke konten utama</a>
+<div class="admin-shell">
+  <aside id="admin-desktop-sidebar" class="admin-sidebar" aria-label="Navigasi admin">
+    <div class="admin-brand"><span class="admin-brand-mark" aria-hidden="true">L</span><div><strong>LHIE</strong><span>Admin workspace</span></div></div>
+    {% include 'admin/_nav.html' %}
+    <p class="admin-sidebar-foot">Katalog dan stok lokal. Tampilan pelanggan tetap terpisah.</p>
+  </aside>
+  <div class="admin-frame">
+    <header class="admin-topbar">
+      <button class="admin-icon-button admin-drawer-trigger" type="button" data-admin-drawer-open aria-controls="admin-drawer" aria-expanded="false">
+        <span aria-hidden="true">☰</span><span class="admin-visually-hidden">Buka navigasi</span>
+      </button>
+      <div class="admin-topbar-copy">
+        <p>Admin LHIE</p>
+        <h1>{{ navigation.label }}</h1>
+      </div>
+      <nav class="admin-quick-tabs" aria-label="Tab langsung">
+        {% for tab in navigation.tabs %}<a href="{{ tab.url }}"{% if tab.active %} aria-current="page"{% endif %}><span aria-hidden="true">{{ tab.glyph }}</span>{{ tab.label }}</a>{% endfor %}
+      </nav>
+      <div class="admin-topbar-actions">
+        <button type="button" class="admin-icon-button" data-theme-toggle aria-pressed="false" hidden><span aria-hidden="true">☾</span><span class="admin-visually-hidden">Ganti tema</span></button>
+        <details class="admin-user">
+          <summary><span class="admin-user-initial" aria-hidden="true">{{ admin.name|default:'Admin'|first|upper }}</span><span class="admin-user-copy"><strong>{{ admin.name }}</strong><small>{{ admin.role }}</small></span></summary>
+          <div class="admin-user-menu">
+            <a href="/" target="_blank" rel="noopener noreferrer">Buka storefront</a>
+            <form method="post" action="/admin/logout">{% csrf_token %}<button type="submit">Keluar</button></form>
+          </div>
+        </details>
+      </div>
+    </header>
+    <main id="admin-main" class="admin-main" tabindex="-1">
+      <details class="admin-nojs-nav">
+        <summary>Navigasi admin</summary>
+        {% include 'admin/_nav.html' %}
+      </details>
+      {% if flash %}<div class="admin-flash admin-flash-{{ flash.tone|default:'success' }}" role="status">{{ flash.message }}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+<dialog id="admin-drawer" class="admin-drawer" aria-label="Navigasi admin">
+  <div class="admin-dialog-head">
+    <strong>Navigasi admin</strong>
+    <button class="admin-icon-button" type="button" data-admin-drawer-close><span aria-hidden="true">×</span><span class="admin-visually-hidden">Tutup navigasi</span></button>
+  </div>
+  {% include 'admin/_nav.html' %}
+</dialog>
+{% block dialogs %}{% endblock %}
+</body>
+</html>

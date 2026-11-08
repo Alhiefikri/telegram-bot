@@ -1,0 +1,155 @@
+{% extends 'admin/base.html' %}
+{% load admin_format %}
+{% block content %}
+<section class="admin-hero admin-product-hero">
+  <div>
+    <p class="admin-eyebrow">Produk #{{ product.id }}</p>
+    <h2>{{ product.name }}</h2>
+    <p class="admin-help">{{ product.category_name|default:'Tanpa kategori' }}{% if product.family_name %} · {{ product.family_name }}{% endif %} · {{ product.is_active|yesno:'Aktif,Pause' }}</p>
+    <p class="admin-money">{{ product.price_amount|idr }}{% if product.usdt_price_amount %} · {{ product.usdt_price_amount|usdt }} USDT{% endif %}</p>
+  </div>
+  <div class="admin-hero-actions">
+    <a class="admin-button" href="/admin?tab=produk">Kembali</a>
+    <form method="post" action="/admin/produk/{{ product.id }}/visibilitas">{% csrf_token %}<input type="hidden" name="is_active" value="{% if product.is_active %}0{% else %}1{% endif %}"><button class="admin-button" type="submit">{% if product.is_active %}Pause produk{% else %}Tampilkan produk{% endif %}</button></form>
+    <form method="post" action="/admin/produk/{{ product.id }}/hapus" data-confirm="Arsipkan produk ini? Riwayat dan stok tersimpan tetap dipertahankan.">{% csrf_token %}<button class="admin-button admin-button-danger" type="submit">Arsipkan produk</button></form>
+  </div>
+</section>
+{% if error_messages %}<div class="admin-flash admin-flash-danger" role="alert"><ul>{% for message in error_messages %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}
+
+<details class="admin-section" id="detail"{% if open_section == 'detail' %} open{% endif %}>
+  <summary><span>Detail produk</span><small>Nama, kategori, deskripsi, kebijakan, panduan</small></summary>
+  <form method="post" action="/admin/produk/{{ product.id }}/ubah" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="workspace_section" value="detail">
+    <input type="hidden" name="workspace_version" value="{{ versions.detail }}">
+    {% include 'admin/_fields.html' with fields=detail_fields %}
+    {% include 'admin/_fields.html' with fields=category_field %}
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Simpan detail</button><span class="admin-dirty-note" data-dirty-note hidden>Belum disimpan</span></div>
+  </form>
+</details>
+
+<details class="admin-section" id="harga"{% if open_section == 'price' %} open{% endif %}>
+  <summary><span>Harga dasar, reseller, dan bertingkat</span><small>IDR dan micro-USDT eksak</small></summary>
+  <form method="post" action="/admin/produk/{{ product.id }}/ubah" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="workspace_section" value="price">
+    <input type="hidden" name="workspace_version" value="{{ versions.price }}">
+    <input type="hidden" name="quantity_price_tiers_present" value="1">
+    {% include 'admin/_fields.html' with fields=price_fields %}
+    <fieldset class="admin-fieldset">
+      <legend>Harga bertingkat</legend>
+      <p class="admin-help">Maksimal 5 tingkat. Minimum quantity 2–20 dan naik. Harga per unit harus turun dari tingkat sebelumnya. Harga USDT tingkat wajib lengkap bila harga USDT dasar diisi.</p>
+      {% if tiers_global_errors %}<div class="admin-error" role="alert">{% for message in tiers_global_errors %}<p>{{ message }}</p>{% endfor %}</div>{% endif %}
+      <div class="admin-tier-list" data-tier-list>
+        {% for tier in tier_rows %}
+        <fieldset class="admin-tier" data-tier-row>
+          <legend>Tingkat {{ tier.number }}</legend>
+          {% include 'admin/_fields.html' with fields=tier.fields %}
+          <button class="admin-button admin-button-small admin-button-danger" type="button" data-tier-remove hidden>Hapus tingkat</button>
+        </fieldset>
+        {% endfor %}
+      </div>
+      <button class="admin-button admin-button-small" type="button" data-tier-add>+ Tambah tingkat</button>
+      <template id="tier-row-template">
+        <fieldset class="admin-tier" data-tier-row>
+          <legend>Tingkat baru</legend>
+          <div class="admin-field"><label for="id_tier___INDEX___minimum">Mulai jumlah</label><input id="id_tier___INDEX___minimum" name="quantity_price_tiers.__INDEX__.minimum_quantity" type="number" min="2" max="20" step="1" required></div>
+          <div class="admin-field"><label for="id_tier___INDEX___price">Harga IDR / unit</label><input id="id_tier___INDEX___price" name="quantity_price_tiers.__INDEX__.price_amount" type="number" min="1" step="1" required></div>
+          <div class="admin-field"><label for="id_tier___INDEX___usdt">Harga USDT / unit</label><input id="id_tier___INDEX___usdt" name="quantity_price_tiers.__INDEX__.usdt_price_amount" type="number" min="0.001" step="0.001"></div>
+          <button class="admin-button admin-button-small admin-button-danger" type="button" data-tier-remove>Hapus tingkat</button>
+        </fieldset>
+      </template>
+    </fieldset>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Simpan harga</button><span class="admin-dirty-note" data-dirty-note hidden>Belum disimpan</span></div>
+  </form>
+</details>
+
+<details class="admin-section" id="tampilan"{% if open_section == 'appearance' %} open{% endif %}>
+  <summary><span>Ikon, status, dan gambar</span><small>DB-backed; tidak ada pengaturan presentasi di ENV</small></summary>
+  <form method="post" action="/admin/produk/{{ product.id }}/ubah" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="workspace_section" value="appearance">
+    <input type="hidden" name="workspace_version" value="{{ versions.appearance }}">
+    {% include 'admin/_fields.html' with fields=appearance_fields %}
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Simpan tampilan</button><span class="admin-dirty-note" data-dirty-note hidden>Belum disimpan</span></div>
+  </form>
+</details>
+
+<details class="admin-section" id="family"{% if open_section == 'family' %} open{% endif %}>
+  <summary><span>Family dan grouping</span><small>Hanya tampilan; harga dan stok tetap milik produk</small></summary>
+  <form method="post" action="/admin/produk/{{ product.id }}/family" class="admin-form" data-dirty-guard>
+    {% csrf_token %}
+    <input type="hidden" name="workspace_version" value="{{ versions.family }}">
+    {% include 'admin/_fields.html' with fields=family_fields %}
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Simpan grouping</button><a class="admin-button" href="/admin/family">Kelola family</a><span class="admin-dirty-note" data-dirty-note hidden>Belum disimpan</span></div>
+  </form>
+</details>
+
+<details class="admin-section" id="stok"{% if open_section == 'stock' %} open{% endif %}>
+  <summary><span>Stok lokal</span><small>Intake, edit, hapus, bulk, dan akun terstruktur</small></summary>
+  {% if stock_errors %}<div class="admin-flash admin-flash-danger" role="alert"><ul>{% for message in stock_errors %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}
+  <div class="admin-stat-grid">
+    <article class="admin-card admin-stat"><span>Stok numerik</span><strong>{{ product.stock }}</strong><small>reserved {{ product.reserved_stock }}</small></article>
+    <article class="admin-card admin-stat"><span>Tersedia efektif</span><strong>{{ local_available }}</strong><small>dibatasi baris stok nyata</small></article>
+    <article class="admin-card admin-stat"><span>Akun tersedia</span><strong>{{ stock_summary.available }}</strong><small>{{ stock_summary.retired }} retired</small></article>
+    <article class="admin-card admin-stat"><span>Terjual / terpakai</span><strong>{{ stock_summary.allocated }}</strong><small>tidak dapat diedit</small></article>
+  </div>
+  <div class="admin-stock-actions">
+    <button class="admin-button admin-button-primary" type="button" data-dialog-open="stock-intake-dialog">Tambah stok</button>
+    <button class="admin-button" type="button" data-dialog-open="stock-account-dialog"{% if not structured_enabled %} disabled{% endif %}>Input Akun</button>
+    {% if not structured_enabled %}<span class="admin-help">Input Akun menunggu kesiapan identitas dan kunci fingerprint.</span>{% endif %}
+  </div>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead><tr><th scope="col"><input type="checkbox" data-select-all aria-label="Pilih semua stok yang dapat dihapus"></th><th scope="col">Status</th><th scope="col">Format</th><th scope="col">Invoice</th><th scope="col">Aksi</th></tr></thead>
+      <tbody>
+      {% for item in stock_items %}
+        <tr>
+          <td>{% if item.editable %}<input type="checkbox" name="stock_item_ids" value="{{ item.id }}" form="bulk-stock-delete" data-stock-select aria-label="Pilih stok {{ item.id }}">{% endif %}</td>
+          <td><span class="admin-status{% if item.status == 'available' %} admin-status-good{% elif item.status == 'retired' %} admin-status-muted{% else %} admin-status-warn{% endif %}">{{ item.status_label }}</span></td>
+          <td>{{ item.format }}</td>
+          <td>{{ item.invoice_number|default:'—' }}</td>
+          <td class="admin-row-actions">
+            {% if item.editable %}<a class="admin-button admin-button-small" href="/admin/produk/{{ product.id }}/stok/{{ item.id }}">Edit</a>{% endif %}
+            {% if item.editable %}<form method="post" action="/admin/produk/{{ product.id }}/stok/{{ item.id }}/hapus" data-confirm="Hapus stok ini? Tindakan ini tidak dapat dibatalkan.">{% csrf_token %}<button class="admin-button admin-button-small admin-button-danger" type="submit">Hapus</button></form>{% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5">Belum ada stok lokal.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if stock_items_truncated %}<p class="admin-help">Daftar dibatasi 50 baris terbaru. Ringkasan tetap menghitung seluruh stok.</p>{% endif %}
+  <form id="bulk-stock-delete" method="post" action="/admin/produk/{{ product.id }}/stok/hapus-bulk" class="admin-bulk-actions" data-bulk-delete>{% csrf_token %}<button class="admin-button admin-button-danger" type="submit">Hapus stok terpilih</button><span class="admin-help" data-bulk-count>Pilih stok yang dapat dihapus.</span></form>
+
+  <dialog id="stock-intake-dialog" class="admin-dialog" aria-labelledby="stock-intake-title">
+    <div class="admin-dialog-head"><h3 id="stock-intake-title">Tambah stok</h3><button class="admin-icon-button" type="button" data-dialog-close><span aria-hidden="true">×</span><span class="admin-visually-hidden">Tutup</span></button></div>
+    <form method="post" action="/admin/produk/{{ product.id }}/stok" class="admin-form-stack" data-dirty-guard>
+      {% csrf_token %}
+      <input type="hidden" name="operation_key" value="{{ stock_operation_key }}">
+      <div class="admin-field"><label for="id_stock_format">Format bulk</label><select id="id_stock_format" name="stock_format"><option value="legacy">Legacy manual</option><option value="email_password_mfa_secret">Email|password|MFA secret</option><option value="email_password_access_token">Email|password|akses token</option><option value="email_password_reader_mail_link">Email|password|token|link reader mail</option></select></div>
+      <div class="admin-field"><label for="id_stock_items">Baris stok</label><textarea id="id_stock_items" name="stock_items" rows="8" maxlength="250000" required></textarea><p class="admin-help">Satu baris satu akun. Maksimal 500 baris. Nilai tidak dipertahankan setelah error agar tidak tersimpan sebagai draft rahasia.</p></div>
+      <button class="admin-button admin-button-primary" type="submit">Simpan stok</button>
+    </form>
+  </dialog>
+
+  <dialog id="stock-account-dialog" class="admin-dialog" aria-labelledby="stock-account-title">
+    <div class="admin-dialog-head"><h3 id="stock-account-title">Input Akun terstruktur</h3><button class="admin-icon-button" type="button" data-dialog-close><span aria-hidden="true">×</span><span class="admin-visually-hidden">Tutup</span></button></div>
+    <p class="admin-help">Maksimal 20 akun. Auth Token tidak boleh pernah dipakai; email bukan identitas unik. Nilai rahasia tidak ditampilkan ulang setelah submit.</p>
+    <form method="post" action="/admin/produk/{{ product.id }}/stok/akun" class="admin-form-stack" data-account-form data-dirty-guard>
+      {% csrf_token %}
+      <input type="hidden" name="operation_key" value="{{ stock_operation_key }}">
+      <div data-account-list>
+        {% include 'admin/_account_row.html' with index=0 %}
+      </div>
+      <button class="admin-button admin-button-small" type="button" data-account-add>+ Tambah akun</button>
+      <div class="admin-form-actions"><button class="admin-button" type="button" data-account-review>Review server</button><button class="admin-button admin-button-primary" type="submit">Simpan akun</button></div>
+      <div data-account-review-result role="status" aria-live="polite"></div>
+    </form>
+    <template id="account-row-template">
+      {% include 'admin/_account_row.html' with index='__INDEX__' %}
+    </template>
+  </dialog>
+</details>
+{% endblock %}

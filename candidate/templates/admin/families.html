@@ -1,0 +1,28 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Katalog</p><h2>Product Family</h2><p class="admin-help">Family mengelompokkan produk dengan kategori yang sama. Family dan produk tetap memiliki harga dan stok masing-masing.</p></div>
+  <a class="admin-button admin-button-primary" href="/admin/family/baru">Tambah family</a>
+</section>
+<section class="admin-card">
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead><tr><th scope="col">Nama</th><th scope="col">Slug</th><th scope="col">Kategori</th><th scope="col">Urutan</th><th scope="col">Produk</th><th scope="col">Aksi</th></tr></thead>
+      <tbody>
+      {% for family in families %}
+        <tr>
+          <td><strong>{{ family.name }}</strong>{% if family.description %}<small>{{ family.description }}</small>{% endif %}</td>
+          <td>{{ family.slug }}</td>
+          <td>{{ family.category_name|default:'Campuran / tanpa kategori' }}</td>
+          <td>{{ family.sort_order }}</td>
+          <td>{{ family.product_count }}</td>
+          <td class="admin-row-actions"><a class="admin-button admin-button-small" href="/admin/family/{{ family.id }}">Edit</a><form method="post" action="/admin/family/{{ family.id }}/hapus" data-confirm="Hapus family ini? Produk terkait dilepas dari family.">{% csrf_token %}<button class="admin-button admin-button-small admin-button-danger" type="submit">Hapus</button></form></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6">Belum ada Product Family.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
