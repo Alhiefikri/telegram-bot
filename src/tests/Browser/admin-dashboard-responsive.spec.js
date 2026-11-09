@@ -33,6 +33,8 @@ const customerCheckoutViewports = [
   { width: 1920, height: 1080 },
 ];
 const customerCheckoutTestPrefix = "customer checkout:";
+const customerInvoiceUrlPattern =
+  /\/shop\/orders\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?:\?|$)/i;
 
 const customerBalanceLoginToken = "a".repeat(64);
 
@@ -57,7 +59,8 @@ test.beforeAll(async () => {
 // Rebuild the database and restart the server before every customer test so
 // reservations, checked-out Carts, Orders, payment settings, and in-memory
 // response caches cannot leak between flows.
-test.beforeEach(async ({}, testInfo) => {
+test.beforeEach(async ({ context }, testInfo) => {
+  await fakeCheckoutWidget(context);
   if (!testInfo.title.startsWith(customerCheckoutTestPrefix)) {
     return;
   }
@@ -501,7 +504,7 @@ test("customer checkout: opens the authenticated balance overview across mobile 
   await expectNoDocumentOverflow(page);
 });
 
-test("customer checkout: keeps canonical checkout usable without JavaScript", async ({
+test("customer checkout: keeps no-JavaScript review usable and requires verification to purchase", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -547,17 +550,21 @@ test("customer checkout: keeps canonical checkout usable without JavaScript", as
       .getByRole("button", { name: /Buat invoice/ });
     await submit.focus();
     await expect(submit).toBeFocused();
+    await expect(
+      page.locator('input[name="cf-turnstile-response"]')
+    ).toHaveCount(0);
     await Promise.all([
-      page.waitForURL(/\/shop\/orders\/\d+/, { waitUntil: "domcontentloaded" }),
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
       page.keyboard.press("Enter"),
     ]);
-    await expect(page).toHaveURL(/\/shop\/orders\/\d+/);
+    await expect(page).toHaveURL(new URL(checkoutHref, baseUrl).toString());
+    await expect(page.locator("#checkout-error-summary")).toBeVisible();
+    await expect(page.locator("#checkout-error-summary")).toContainText(
+      /verifikasi keamanan/i
+    );
     await expect(
-      page.getByRole("heading", { name: "Order QRIS dibuat" })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Invoice QRIS" })
-    ).toBeVisible();
+      page.getByRole("textbox", { name: "Nama pembeli" })
+    ).toHaveValue("No JavaScript Buyer");
   } finally {
     await context.close();
   }
@@ -601,6 +608,7 @@ test("customer checkout: keeps the mobile sticky action aligned with the canonic
     await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
       waitUntil: "domcontentloaded",
     });
+    await expectStorefrontPageCheckout(page);
 
     const sticky = page.locator("[data-checkout-sticky-action]");
     const stickySubmit = sticky.locator("[data-checkout-sticky-submit]");
@@ -708,7 +716,7 @@ test("customer checkout: keeps the mobile sticky action aligned with the canonic
       }
     });
     await Promise.all([
-      page.waitForURL(/\/shop\/orders\/\d+/, {
+      page.waitForURL(customerInvoiceUrlPattern, {
         waitUntil: "domcontentloaded",
       }),
       stickySubmit.click(),
@@ -1068,10 +1076,12 @@ test("customer checkout: completes direct purchases from home, shop, Family, and
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await navigateToCheckoutFromProductCard(page, "Browser QA Produk A");
   await completeManualCheckout(page, "Home Direct Buyer");
+  await cancelCurrentManualInvoice(page);
 
   await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   await navigateToCheckoutFromProductCard(page, "Browser QA Produk B");
   await completeManualCheckout(page, "Shop Direct Buyer");
+  await cancelCurrentManualInvoice(page);
 
   await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   const familyCard = page
@@ -1098,6 +1108,8 @@ test("customer checkout: completes direct purchases from home, shop, Family, and
     }),
     familyCheckoutLink.click(),
   ]);
+  await completeManualCheckout(page, "Family Direct Buyer");
+  await cancelCurrentManualInvoice(page);
 
   await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   const productCard = page
@@ -1120,6 +1132,124 @@ test("customer checkout: completes direct purchases from home, shop, Family, and
   await completeManualCheckout(page, "Product Detail Buyer");
 
   expect(retiredRequests).toEqual([]);
+});
+
+test("customer checkout: rejects invalid proof, caps pending invoices, and replays admitted attempts", async ({
+  page,
+}) => {
+  const orderCount = () =>
+    Number(
+      runArtisan([
+        "tinker",
+        "--execute",
+        "echo App\\Models\\Order::query()->count();",
+      ])
+    );
+  const initialOrders = orderCount();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await navigateToCheckoutFromProductCard(page, "Browser QA Produk A");
+  const checkoutUrl = page.url();
+  const attempt = page.locator('input[name="checkout_attempt"]');
+  const firstAttempt = await attempt.inputValue();
+  expect(firstAttempt).toMatch(
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
+  );
+
+  await page.getByRole("textbox", { name: "Nama pembeli" }).fill("Proof Buyer");
+  await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+  await page
+    .locator('input[name="cf-turnstile-response"]')
+    .evaluate((input) => {
+      input.value = "invalid-browser-proof";
+    });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    page.locator("[data-checkout-sticky-submit]:visible").click(),
+  ]);
+  await expect(page).toHaveURL(checkoutUrl);
+  await expect(page.locator("#checkout-error-summary")).toContainText(
+    /verifikasi keamanan/i
+  );
+  await expect(attempt).toHaveValue(firstAttempt);
+  expect(orderCount()).toBe(initialOrders);
+
+  const firstSubmissionPromise = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/shop/checkout"
+  );
+  await completeManualCheckout(page, "First Admitted Buyer");
+  const firstSubmission = await firstSubmissionPromise;
+  const firstInvoiceUrl = page.url();
+  await page.goto(checkoutUrl, { waitUntil: "domcontentloaded" });
+  await expect(attempt).not.toHaveValue(firstAttempt);
+  await completeManualCheckout(page, "Second Admitted Buyer");
+  const secondInvoiceUrl = page.url();
+
+  await page.goto(checkoutUrl, { waitUntil: "domcontentloaded" });
+  await expectStorefrontPageCheckout(page);
+  const blockedAttempt = await attempt.inputValue();
+  await page
+    .getByRole("textbox", { name: "Nama pembeli" })
+    .fill("Capped Buyer");
+  await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    page.locator("[data-checkout-sticky-submit]:visible").click(),
+  ]);
+  await expect(page).toHaveURL(checkoutUrl);
+  await expect(page.locator("#checkout-error-summary")).toBeVisible();
+  await expect(attempt).toHaveValue(blockedAttempt);
+  const pendingLinks = page.locator(
+    'section[aria-labelledby="checkout-pending-invoices-title"] a'
+  );
+  await expect(pendingLinks).toHaveCount(2);
+  expect(
+    await pendingLinks.evaluateAll((links) =>
+      links.map((link) => new URL(link.href).pathname).sort()
+    )
+  ).toEqual(
+    [firstInvoiceUrl, secondInvoiceUrl]
+      .map((url) => new URL(url).pathname)
+      .sort()
+  );
+  expect(orderCount()).toBe(initialOrders + 2);
+
+  // A committed attempt remains replayable at the cap without fresh proof.
+  const replayPayload = new URLSearchParams(firstSubmission.postData());
+  replayPayload.set("cf-turnstile-response", "invalid-browser-proof");
+  const replay = await page.evaluate(
+    async ({ url, payload }) => {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: payload,
+        credentials: "same-origin",
+      });
+      return { status: response.status, url: response.url };
+    },
+    { url: firstSubmission.url(), payload: replayPayload.toString() }
+  );
+  expect(replay.status).toBe(200);
+  const replayUrl = new URL(replay.url);
+  expect(replayUrl.pathname).toBe(new URL(firstInvoiceUrl).pathname);
+  expect(replayUrl.searchParams.get("signature")).not.toBeNull();
+  expect(orderCount()).toBe(initialOrders + 2);
+
+  const invoicePage = await page.context().newPage();
+  try {
+    await invoicePage.goto(firstInvoiceUrl, { waitUntil: "domcontentloaded" });
+    await cancelCurrentManualInvoice(invoicePage);
+  } finally {
+    await invoicePage.close();
+  }
+  await expect(attempt).toHaveValue(blockedAttempt);
+  await completeManualCheckout(page, "Released Capacity Buyer");
+  expect(new URL(page.url()).pathname).not.toBe(
+    new URL(secondInvoiceUrl).pathname
+  );
+  expect(orderCount()).toBe(initialOrders + 3);
 });
 
 test("customer checkout: completes a multi-item Cart purchase through shared review", async ({
@@ -1221,6 +1351,7 @@ test("customer checkout: restores provider and stock failures on canonical pages
   await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
     waitUntil: "domcontentloaded",
   });
+  await expectStorefrontPageCheckout(page);
   const stockFailureUrl = page.url();
   const longProductId = new URL(stockFailureUrl).pathname.split("/").pop();
   await page
@@ -1258,6 +1389,7 @@ test("customer checkout: restores provider and stock failures on canonical pages
   await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
     waitUntil: "domcontentloaded",
   });
+  await expectStorefrontPageCheckout(page);
   const providerFailureUrl = page.url();
   await page
     .getByRole("textbox", { name: "Nama pembeli" })
@@ -1681,10 +1813,11 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
   await expect(terms).toBeChecked();
   await submit.focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/shop\/orders\/\d+/);
-  await expect(
-    page.getByRole("heading", { name: "Invoice QRIS" })
-  ).toBeVisible();
+  await expect(page).toHaveURL(customerInvoiceUrlPattern);
+  await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
+    "data-invoice-state",
+    "pending"
+  );
 
   await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
     waitUntil: "domcontentloaded",
@@ -1747,6 +1880,7 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
     reducedMotion: "reduce",
     viewport: { width: 390, height: 844 },
   });
+  await fakeCheckoutWidget(reducedContext);
   const reducedPage = await reducedContext.newPage();
   try {
     await reducedPage.goto(
@@ -1768,6 +1902,7 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
   const zoomContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
   });
+  await fakeCheckoutWidget(zoomContext);
   const zoomPage = await zoomContext.newPage();
   let zoomScale;
   try {
@@ -6723,18 +6858,61 @@ async function addProductCardToCart(page, productName) {
   await expect(page).toHaveURL(/\/shop\/cart(?:\?|$)/);
 }
 
+async function fakeCheckoutWidget(context) {
+  // The PHP router fakes siteverify; no browser or server contacts Cloudflare.
+  await context.route(
+    "https://challenges.cloudflare.com/turnstile/v0/api.js",
+    (route) =>
+      route.fulfill({
+        contentType: "application/javascript",
+        body: `
+          const renderBrowserCheckoutFixture = () => {
+            document.querySelectorAll('.cf-turnstile[data-sitekey="browser-only-turnstile-site-key"][data-action="checkout"]').forEach((widget) => {
+              const proof = document.createElement("input");
+              proof.type = "hidden";
+              proof.name = "cf-turnstile-response";
+              proof.value = "browser-checkout-proof";
+              widget.append(proof);
+              // Match the public compact widget footprint for layout coverage.
+              Object.assign(widget.style, { width: "150px", height: "140px", maxWidth: "100%" });
+              window[widget.dataset.callback]?.();
+            });
+          };
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", renderBrowserCheckoutFixture, { once: true });
+          } else {
+            renderBrowserCheckoutFixture();
+          }
+        `,
+      })
+  );
+}
+
+async function cancelCurrentManualInvoice(page) {
+  const cancellation = page.locator('form[action*="/cancel"]');
+  const support = page.locator("#invoice-support");
+  if ((await support.getAttribute("open")) === null) {
+    await support.locator(":scope > summary").click();
+  }
+  await expect(cancellation).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await cancellation.getByRole("button").click();
+  await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
+    "data-invoice-state",
+    "terminal"
+  );
+}
+
 async function completeManualCheckout(page, buyerName) {
   await expectStorefrontPageCheckout(page);
   await page.getByRole("textbox", { name: "Nama pembeli" }).fill(buyerName);
   await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
   await page.locator("[data-checkout-sticky-submit]:visible").click();
-  await expect(page).toHaveURL(/\/shop\/orders\/\d+/);
-  await expect(
-    page.getByRole("heading", { name: "Order QRIS dibuat" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Invoice QRIS" })
-  ).toBeVisible();
+  await expect(page).toHaveURL(customerInvoiceUrlPattern);
+  await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
+    "data-invoice-state",
+    "pending"
+  );
   expect(new URL(page.url()).searchParams.get("signature")).not.toBeNull();
 }
 
@@ -6747,6 +6925,9 @@ async function expectStorefrontPageCheckout(page) {
     })
   ).toBeVisible();
   await expect(page.locator("#checkout-form")).toBeVisible();
+  await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(
+    "browser-checkout-proof"
+  );
   expect(page.url()).not.toContain("checkout=1");
 }
 

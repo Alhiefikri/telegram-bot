@@ -25,7 +25,7 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
                 'telegram' => ['webhook_secret' => 'telegram-secret', 'webhook_rate_limit_per_minute' => 17],
                 'pakasir' => ['webhook_rate_limit_per_minute' => 23, 'status_refresh_rate_limit_per_minute' => 4],
                 'sakurupiah' => ['webhook_rate_limit_per_minute' => 29, 'status_refresh_rate_limit_per_minute' => 5],
-                'storefront' => ['checkout_rate_limit_per_minute' => 6, 'credential_access_rate_limit_per_minute' => 7],
+                'storefront' => ['credential_access_rate_limit_per_minute' => 7],
             ],
         ])))->register();
     }
@@ -131,19 +131,6 @@ class ApplicationRateLimiterRegistrarTest extends TestCase
         $limits = $this->limits('storefront-binance-order-id', $request);
         $this->assertLimit($limits[0], 5, 60, 'storefront:binance-order-id:order:789');
         $this->assertLimit($limits[1], 15, 60, 'storefront:binance-order-id:source:203.0.113.31');
-    }
-
-    public function test_storefront_checkout_policy_preserves_source_and_session_buckets(): void
-    {
-        $limits = $this->limits('storefront-checkout', Request::create('/', 'POST', [], [], [], [
-            'REMOTE_ADDR' => '203.0.113.40',
-        ]));
-
-        $this->assertCount(2, $limits);
-        $this->assertLimit($limits[0], 6, 60, 'storefront:checkout:source:203.0.113.40');
-        $this->assertLimit($limits[1], 6, 60, 'storefront:checkout:session:no-session');
-        $this->assertIsCallable($limits[0]->responseCallback);
-        $this->assertIsCallable($limits[1]->responseCallback);
     }
 
     public function test_storefront_order_access_policy_preserves_source_and_normalized_invoice_buckets(): void
