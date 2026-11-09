@@ -14,6 +14,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Services\OrderStateMachine;
+use App\Storefront\StorefrontCheckoutChallenge;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
@@ -25,6 +26,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
+use Tests\Support\FakeStorefrontCheckoutChallenge;
 use Tests\Support\StorefrontCheckoutScenarios;
 use Tests\Support\StorefrontShopAssertions;
 use Tests\TestCase;
@@ -38,6 +40,7 @@ class StorefrontShopCheckoutTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
 
         config()->set('services.storefront.telegram_reservation_floor', 0);
     }
@@ -92,29 +95,20 @@ class StorefrontShopCheckoutTest extends TestCase
     {
         $product = $this->availableProduct(['stock' => 1]);
 
-        $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
             'cart_snapshot' => 'snapshot',
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => true,
-        ])
+            'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => true, ])
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHasErrors(['product_id', 'cart_snapshot']);
 
-        $this->post(route('storefront.shop.checkout'), [
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => true,
-        ])
+        $this->post(route('storefront.shop.checkout'), ['buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => true])
             ->assertRedirect(route('storefront.shop.checkout.start'))
             ->assertSessionHasErrors(['product_id', 'cart_snapshot']);
 
-        $this->post(route('storefront.shop.checkout'), [
-            'cart_snapshot' => 'snapshot',
+        $this->post(route('storefront.shop.checkout'), ['cart_snapshot' => 'snapshot',
             'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => true,
-        ])
+            'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => true, ])
             ->assertRedirect(route('storefront.shop.checkout.start'))
             ->assertSessionHasErrors('quantity');
     }
@@ -157,13 +151,10 @@ class StorefrontShopCheckoutTest extends TestCase
         Http::fake();
 
         $this->from(route('storefront.home'))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
+            ->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
                 'quantity' => 1,
                 'buyer_name' => 'buyer_test',
-                'payment_method' => 'qris',
-                'terms_accepted' => true,
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => true, ])
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHasErrors([
                 'support_contact_channel',
@@ -372,12 +363,9 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $response = $this
             ->from(route('storefront.shop.index'))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => 999_999,
+            ->post(route('storefront.shop.checkout'), ['product_id' => 999_999,
                 'quantity' => 1,
-                'buyer_name' => 'buyer_test',
-                'terms_accepted' => '1',
-            ]);
+                'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ]);
 
         $response
             ->assertRedirect(url('/#products'))
@@ -397,17 +385,13 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $response = $this
             ->from(route('storefront.home'))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
+            ->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
                 'quantity' => 1,
                 'buyer_name' => 'Recovered Provider Buyer',
                 'email' => 'provider-recovery@example.test',
                 'support_contact_channel' => 'telegram',
                 'support_contact_value' => '@provider_recovery',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-                'payment_secret' => 'must-not-be-flashed',
-            ]);
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_secret' => 'must-not-be-flashed', ]);
 
         $response
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
@@ -575,17 +559,13 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
 
         $response = $this->from(route('storefront.home'))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
+            ->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
                 'quantity' => 2,
                 'buyer_name' => 'x',
                 'email' => 'validation-recovery@example.test',
                 'support_contact_channel' => 'telegram',
-                'support_contact_value' => '@validation_recovery',
-                'terms_accepted' => '1',
-                'payment_method' => 'qris',
-                'payment_secret' => 'must-not-be-flashed',
-            ]);
+                'support_contact_value' => '@validation_recovery', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'qris',
+                'payment_secret' => 'must-not-be-flashed', ]);
         $response
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHasErrors(['buyer_name' => 'The buyer name field must be at least 2 characters.']);
@@ -626,13 +606,9 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
         Http::fake();
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 2,
-            'buyer_name' => 'international_buyer',
-            'terms_accepted' => '1',
-            'payment_method' => 'binance_pay',
-        ]);
+            'buyer_name' => 'international_buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'binance_pay', ]);
 
         $response->assertRedirect();
         $order = Order::with('payments')->sole();
@@ -669,13 +645,9 @@ class StorefrontShopCheckoutTest extends TestCase
             'stock' => 1,
         ]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'automatic_binance_buyer',
-            'terms_accepted' => '1',
-            'payment_method' => 'binance_pay',
-        ]);
+            'buyer_name' => 'automatic_binance_buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'binance_pay', ]);
 
         $order = Order::with('payments')->sole();
         $payment = $order->payments->sole();
@@ -709,13 +681,9 @@ class StorefrontShopCheckoutTest extends TestCase
             'stock' => 1,
         ]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'automatic_amount_buyer',
-            'terms_accepted' => '1',
-            'payment_method' => 'binance_pay',
-        ]);
+            'buyer_name' => 'automatic_amount_buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'binance_pay', ]);
 
         $order = Order::with('payments')->sole();
         $payment = $order->payments->sole();
@@ -734,13 +702,10 @@ class StorefrontShopCheckoutTest extends TestCase
     {
         $product = $this->availableProduct(['stock' => 1]);
 
-        $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'buyer_test',
-            'payment_method' => 'manual;DROP TABLE payments',
-            'terms_accepted' => '1',
-        ])->assertSessionHasErrors('payment_method');
+            'payment_method' => 'manual;DROP TABLE payments', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])->assertSessionHasErrors('payment_method');
 
         $this->assertNoLocalCheckoutRowsCreated('invalid payment method');
     }
@@ -760,13 +725,10 @@ class StorefrontShopCheckoutTest extends TestCase
             ->assertSee('Bayar dengan Binance Pay');
         $settings->update(['binance_pay_enabled' => false]);
 
-        $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'buyer_test',
-            'payment_method' => 'binance_pay',
-            'terms_accepted' => '1',
-        ])->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
+            'payment_method' => 'binance_pay', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHas('storefront_checkout_error', 'Binance Pay belum tersedia untuk produk ini.');
 
         $this->assertNoLocalCheckoutRowsCreated('disabled Binance Pay after render');
@@ -782,13 +744,9 @@ class StorefrontShopCheckoutTest extends TestCase
             'is_active' => true,
         ]);
         $product = $this->availableProduct(['usdt_price_amount' => 2_000_000, 'stock' => 2]);
-        $payload = [
-            'product_id' => $product->id,
+        $payload = ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => '1',
-            'payment_method' => 'binance_pay',
-        ];
+            'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'binance_pay', ];
 
         $first = $this->withSession(['storefront.checkout_client_key' => 'same-binance-browser-session'])
             ->post(route('storefront.shop.checkout'), $payload);
@@ -803,17 +761,14 @@ class StorefrontShopCheckoutTest extends TestCase
         Queue::assertPushed(SendAdminOrderPendingNotification::class, 1);
     }
 
-    public function test_cancelled_checkout_can_be_retried_with_identical_payload_and_session(): void
+    public function test_cancelled_purchase_replay_returns_its_invoice_and_a_new_attempt_can_buy_again(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);
         $product = $this->availableProduct(['name' => 'Retryable Cancelled Checkout', 'price_amount' => 15000, 'stock' => 3]);
         $this->manualPaymentModeIsActive();
-        $payload = [
-            'product_id' => $product->id,
+        $payload = ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => '1',
-        ];
+            'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ];
         $session = ['storefront.checkout_client_key' => 'cancel-retry-session'];
 
         $first = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
@@ -823,10 +778,14 @@ class StorefrontShopCheckoutTest extends TestCase
         $old->refresh();
 
         $second = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
+        $second->assertRedirect(app(StorefrontInvoiceUrl::class)->show($old));
+        $this->assertSame(1, Order::count());
+        $payload['checkout_attempt'] = '73000000-0000-4000-8000-000000000002';
+        $third = $this->withSession($session)->post(route('storefront.shop.checkout'), $payload);
         $new = Order::whereKeyNot($old->id)->sole();
 
         $first->assertRedirect();
-        $second->assertRedirect(app(StorefrontInvoiceUrl::class)->show($new));
+        $third->assertRedirect(app(StorefrontInvoiceUrl::class)->show($new));
         $this->assertSame(2, Order::count());
         $this->assertSame(OrderStatus::Cancelled, $old->fresh()->order_status);
         $this->assertSame(PaymentStatus::Failed, $old->fresh()->payment_status);
@@ -846,12 +805,9 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
         $this->manualPaymentModeIsActive();
 
-        $payload = [
-            'product_id' => $product->id,
+        $payload = ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => '1',
-        ];
+            'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ];
         $first = $this->withSession(['storefront.checkout_client_key' => 'same-browser-session'])
             ->from(route('storefront.home'))
             ->post(route('storefront.shop.checkout'), $payload);
@@ -877,12 +833,9 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
         $this->manualPaymentModeIsActive();
 
-        $payload = [
-            'product_id' => $product->id,
+        $payload = ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => '1',
-        ];
+            'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ];
         $session = ['storefront.checkout_client_key' => 'completed-browser-session'];
         $first = $this->withSession($session)
             ->from(route('storefront.home'))
@@ -926,16 +879,13 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
 
         $response = $this->from(route('storefront.shop.checkout.product', ['product' => $product]))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
+            ->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
                 'quantity' => 1,
                 'buyer_name' => 'Recovered Maintenance Buyer',
                 'email' => 'maintenance-recovery@example.test',
                 'support_contact_channel' => 'telegram',
                 'support_contact_value' => '@maintenance_recovery',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHas('storefront_checkout_error');
 
@@ -1000,12 +950,9 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->manualPaymentModeIsActive();
 
         $session = ['storefront.checkout_client_key' => 'same-browser-support-contact-session'];
-        $basePayload = [
-            'product_id' => $product->id,
+        $basePayload = ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => '1',
-        ];
+            'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ];
         $first = $this->withSession($session)
             ->from(route('storefront.home'))
             ->post(route('storefront.shop.checkout'), $basePayload + [
@@ -1117,14 +1064,10 @@ class StorefrontShopCheckoutTest extends TestCase
     {
         $product = $this->availableProduct(['stock' => 1]);
 
-        $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'Guest Buyer',
-            'terms_accepted' => '1',
-            'support_contact_channel' => 'instagram',
-            'support_contact_value' => '@buyer',
-        ])->assertSessionHasErrors('support_contact_channel');
+            'buyer_name' => 'Guest Buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'support_contact_channel' => 'instagram',
+            'support_contact_value' => '@buyer', ])->assertSessionHasErrors('support_contact_channel');
 
         $this->assertNoLocalCheckoutRowsCreated('invalid support contact channel');
     }

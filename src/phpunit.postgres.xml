@@ -14,6 +14,10 @@
             <file>tests/Feature/ProductResellerUsdtBasePriceConstraintTest.php</file>
             <file>tests/Feature/StorefrontProductCheckoutTest.php</file>
             <file>tests/Feature/StorefrontShopCheckoutTest.php</file>
+            <file>tests/Feature/StorefrontCheckoutChallengeTest.php</file>
+            <file>tests/Feature/StorefrontCheckoutAdmissionTest.php</file>
+            <file>tests/Feature/StorefrontCheckoutAdmissionPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/TrustedProxyConfigurationTest.php</file>
             <file>tests/Feature/Telegram/CartCheckoutTest.php</file>
             <file>tests/Feature/Telegram/PaymentProofAdminCallbackTest.php</file>
             <file>tests/Feature/AdminOrderPaymentOperationsTest.php</file>
@@ -108,6 +112,10 @@
         <env name="SESSION_DRIVER" value="array" force="true"/>
         <env name="TELEGRAM_ADMIN_CHAT_ID" value="" force="true"/>
         <env name="TELEGRAM_BOT_TOKEN" value="" force="true"/>
+        <env name="TURNSTILE_SITE_KEY" value="" force="true"/>
+        <env name="TURNSTILE_SECRET_KEY" value="" force="true"/>
+        <server name="TURNSTILE_SITE_KEY" value="" force="true"/>
+        <server name="TURNSTILE_SECRET_KEY" value="" force="true"/>
         <env name="PULSE_ENABLED" value="false" force="true"/>
         <env name="TELESCOPE_ENABLED" value="false" force="true"/>
         <env name="NIGHTWATCH_ENABLED" value="false" force="true"/>

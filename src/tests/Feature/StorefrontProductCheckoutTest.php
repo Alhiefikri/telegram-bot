@@ -11,9 +11,11 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
+use App\Storefront\StorefrontCheckoutChallenge;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\FakeStorefrontCheckoutChallenge;
 use Tests\TestCase;
 
 class StorefrontProductCheckoutTest extends TestCase
@@ -23,6 +25,7 @@ class StorefrontProductCheckoutTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
 
         ManualPaymentSetting::create([
             'payment_mode' => 'manual',
@@ -636,17 +639,13 @@ class StorefrontProductCheckoutTest extends TestCase
             'reserved_stock' => 0,
         ]);
         $response = $this->from(route('storefront.shop.checkout.product', ['product' => $product]))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
+            ->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
                 'quantity' => 1,
                 'buyer_name' => 'Recovered Buyer',
                 'email' => 'recovered@example.test',
                 'support_contact_channel' => 'telegram',
                 'support_contact_value' => '@recovered_buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-                'payment_secret' => 'must-not-be-flashed',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_secret' => 'must-not-be-flashed', ])
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHasErrors('product_id');
 
@@ -673,14 +672,11 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $html = $this->followingRedirects()
             ->from(route('storefront.shop.checkout.product', ['product' => $product]))
-            ->post(route('storefront.shop.checkout'), [
-                'product_id' => $product->id,
+            ->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
                 'quantity' => 1,
                 'buyer_name' => 'Valid Buyer',
                 'email' => 'invalid-email',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertOk()
             ->getContent();
 

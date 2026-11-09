@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Storefront\StorefrontCartPageBuilder;
+use App\Storefront\StorefrontCheckoutChallenge;
 use App\Storefront\StorefrontCheckoutReviewPresentation;
 use App\Storefront\StorefrontFunnelEvents;
 use App\Storefront\StorefrontUrl;
@@ -16,6 +17,7 @@ class StorefrontShopCheckoutReviewController extends Controller
     public function __construct(
         private readonly StorefrontFunnelEvents $events,
         private readonly StorefrontUrl $urls,
+        private readonly StorefrontCheckoutChallenge $challenge,
     ) {}
 
     public function __invoke(Request $request, StorefrontCartPageBuilder $pages): Response|RedirectResponse
@@ -55,7 +57,9 @@ class StorefrontShopCheckoutReviewController extends Controller
     private function render(StorefrontCheckoutReviewPresentation $review): Response
     {
         return response()
-            ->view('storefront.shop-checkout', $review->viewData())
+            ->view('storefront.shop-checkout', $review->viewData() + [
+                'checkoutChallengeSiteKey' => $this->challenge->siteKey(),
+            ])
             ->header('Cache-Control', 'no-store, private')
             ->header('Referrer-Policy', 'no-referrer');
     }

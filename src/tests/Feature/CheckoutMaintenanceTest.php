@@ -146,13 +146,9 @@ class CheckoutMaintenanceTest extends TestCase
         ]);
         $product = Product::factory()->create(['stock' => 5, 'reserved_stock' => 0]);
 
-        $response = $this->from(route('storefront.products.show', $product))->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->from(route('storefront.products.show', $product))->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'Web Buyer',
-            'terms_accepted' => '1',
-            'payment_method' => 'qris',
-        ]);
+            'buyer_name' => 'Web Buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'qris', ]);
 
         $response
             ->assertRedirect()

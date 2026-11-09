@@ -9,6 +9,8 @@ use App\Exceptions\InvalidCheckout;
 use App\Http\Requests\StorefrontShopCheckoutRequest;
 use App\Models\Order;
 use App\Models\Product;
+use App\Storefront\StorefrontCheckoutChallenge;
+use App\Storefront\StorefrontCheckoutLimitReached;
 use App\Storefront\StorefrontCheckoutMaintenanceCopy;
 use App\Storefront\StorefrontFunnelEvents;
 use App\Storefront\StorefrontGuestCart;
@@ -27,6 +29,7 @@ class StorefrontShopCheckoutController extends Controller
         StorefrontFunnelEvents $events,
         StorefrontGuestCart $guestCart,
         StorefrontUrl $urls,
+        StorefrontCheckoutChallenge $challenge,
     ): RedirectResponse {
         $isDirectCheckout = $request->filled('product_id');
         $from = $request->query('from');
@@ -45,7 +48,21 @@ class StorefrontShopCheckoutController extends Controller
                 StorefrontShopCheckoutInput::fromValidated($request->validated()),
                 $checkoutClientKey,
                 $session,
+                authorizeNewCheckout: fn () => $challenge->verify($request),
+                visitorIp: $request->ip(),
             );
+        } catch (StorefrontCheckoutLimitReached $exception) {
+            $events->checkoutSubmitted($product, null, [
+                'status_endpoint_result' => 'rejected',
+                'failure_kind' => $exception::class,
+            ] + $eventMetadata);
+
+            return redirect()
+                ->to($isDirectCheckout ? $request->checkoutRecoveryUrl() : route('storefront.shop.checkout.start'))
+                ->withInput($request->checkoutRecoveryInput())
+                ->with('storefront_checkout_error', $exception->getMessage())
+                ->with('storefront_pending_invoice_urls', $exception->invoiceUrls)
+                ->withErrors([$errorKey => $exception->getMessage()]);
         } catch (CheckoutMaintenanceActive $exception) {
             $message = StorefrontCheckoutMaintenanceCopy::notice($exception->state);
             $events->checkoutSubmitted($product, null, [

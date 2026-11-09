@@ -13,8 +13,10 @@ use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\ProductFamilySlugRedirect;
 use App\Models\ProductWaitlistSubscription;
+use App\Storefront\StorefrontCheckoutChallenge;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\FakeStorefrontCheckoutChallenge;
 use Tests\TestCase;
 
 class StorefrontProductFamilyDiscoveryTest extends TestCase
@@ -24,6 +26,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
 
         $this->withoutVite();
         config()->set('services.storefront.telegram_reservation_floor', 0);
@@ -178,13 +181,10 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertSame('family_direct_checkout_page', $openedEvent->new_values['source']);
         $this->assertArrayNotHasKey('buyer_name', $openedEvent->new_values);
 
-        $this->post(route('storefront.shop.checkout').'?from='.rawurlencode($familyUrl), [
-            'product_id' => $product->id,
+        $this->post(route('storefront.shop.checkout').'?from='.rawurlencode($familyUrl), ['product_id' => $product->id,
             'quantity' => 2,
             'buyer_name' => 'Family Direct Buyer',
-            'payment_method' => 'qris',
-            'terms_accepted' => '1',
-        ])
+            'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect();
         $submittedEvent = AuditLog::query()->where('action', 'storefront.checkout_submitted')->latest('id')->firstOrFail();
         $this->assertSame('family_direct_checkout_page', $submittedEvent->new_values['source']);
@@ -237,12 +237,9 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $this->assertNotEmpty($matches[1] ?? null);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $matches[1],
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $matches[1],
                 'buyer_name' => 'Family Cart Buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect();
 
         $order = Order::query()->with('orderItems')->sole();
@@ -278,12 +275,9 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
         $product->update(['price_amount' => 13000]);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $matches[1],
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $matches[1],
                 'buyer_name' => 'Stale Family Buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect(route('storefront.shop.checkout.start'));
 
         $this->assertSame(0, Order::query()->count());

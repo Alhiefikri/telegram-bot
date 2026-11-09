@@ -13,8 +13,10 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Storefront\StorefrontCheckoutChallenge;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\FakeStorefrontCheckoutChallenge;
 use Tests\Support\StorefrontProductScenarios;
 use Tests\TestCase;
 
@@ -26,6 +28,7 @@ class StorefrontShopCartTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
 
         config()->set('services.storefront.telegram_reservation_floor', 0);
     }
@@ -137,15 +140,12 @@ class StorefrontShopCartTest extends TestCase
             ->assertSee('Kontak bantuan', false);
 
         $response = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'buyer_name' => 'Multi Buyer',
+            ->post(route('storefront.shop.checkout'), ['buyer_name' => 'Multi Buyer',
                 'cart_snapshot' => $snapshot,
                 'email' => 'multi@example.test',
                 'support_contact_channel' => 'telegram',
                 'support_contact_value' => '@multi_buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ]);
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ]);
 
         $response->assertRedirect();
         $order = Order::query()->sole();
@@ -188,12 +188,9 @@ class StorefrontShopCartTest extends TestCase
         $snapshot = $this->checkoutSnapshot($sessionKey);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $snapshot,
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $snapshot,
                 'buyer_name' => 'Binance Cart Buyer',
-                'payment_method' => 'binance_pay_id',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'binance_pay_id', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect();
 
         $order = Order::query()->sole();
@@ -214,12 +211,9 @@ class StorefrontShopCartTest extends TestCase
         $this->addToCart($second, sessionKey: $sessionKey);
         $snapshot = $this->checkoutSnapshot($sessionKey);
 
-        $payload = [
-            'cart_snapshot' => $snapshot,
+        $payload = ['cart_snapshot' => $snapshot,
             'buyer_name' => 'Duplicate Buyer',
-            'payment_method' => 'qris',
-            'terms_accepted' => '1',
-        ];
+            'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ];
         $firstResponse = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), $payload);
         $secondResponse = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
@@ -232,24 +226,22 @@ class StorefrontShopCartTest extends TestCase
         $this->assertSame(2, InventoryMovement::query()->where('type', 'reservation')->count());
     }
 
-    public function test_direct_buy_uses_a_new_cart_after_a_previous_order_is_complete(): void
+    public function test_a_deliberate_new_purchase_uses_a_new_attempt_and_cart(): void
     {
         Queue::fake();
         $this->manualPaymentModeIsActive();
         $product = $this->availableProduct(['name' => 'Direct Buy Again', 'price_amount' => 12000, 'stock' => 3]);
         $sessionKey = 'direct-buy-again-session';
-        $payload = [
-            'product_id' => $product->id,
+        $payload = ['product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'Repeat Direct Buyer',
-            'payment_method' => 'qris',
-            'terms_accepted' => '1',
-        ];
+            'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ];
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), $payload)
             ->assertRedirect();
         $this->addToCart($product, sessionKey: $sessionKey);
+        $payload['checkout_attempt'] = '73000000-0000-4000-8000-000000000002';
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), $payload)
             ->assertRedirect();
@@ -276,12 +268,9 @@ class StorefrontShopCartTest extends TestCase
             ->assertSee('Stok produk berubah menjadi 0.');
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $snapshot,
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $snapshot,
                 'buyer_name' => 'Conflict Buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect(route('storefront.shop.checkout.start'));
 
         $this->assertSame(0, Order::query()->count());
@@ -304,12 +293,9 @@ class StorefrontShopCartTest extends TestCase
         ]);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $snapshot,
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $snapshot,
                 'buyer_name' => 'Maintenance Buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect(route('storefront.shop.checkout.start'))
             ->assertSessionHas('storefront_checkout_error');
 
@@ -333,16 +319,12 @@ class StorefrontShopCartTest extends TestCase
         $product->forceFill(['stock' => 0, 'reserved_stock' => 0])->save();
 
         $response = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $snapshot,
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $snapshot,
                 'buyer_name' => 'Recovered Cart Buyer',
                 'email' => 'cart-recovery@example.test',
                 'support_contact_channel' => 'telegram',
                 'support_contact_value' => '@cart_recovery',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-                'payment_secret' => 'must-not-be-flashed',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_secret' => 'must-not-be-flashed', ])
             ->assertRedirect(route('storefront.shop.checkout.start'))
             ->assertSessionHas('storefront_checkout_error');
 
@@ -375,12 +357,9 @@ class StorefrontShopCartTest extends TestCase
         $snapshot = $this->checkoutSnapshot($sessionKey);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $snapshot,
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $snapshot,
                 'buyer_name' => 'Mixed Buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect();
 
         $order = Order::query()->sole();
@@ -425,26 +404,19 @@ class StorefrontShopCartTest extends TestCase
         ]);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $staleSnapshot,
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $staleSnapshot,
                 'buyer_name' => 'Stale Tier Buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect(route('storefront.shop.checkout.start'));
         $this->assertSame(0, Order::query()->count());
 
         $freshSnapshot = $this->checkoutSnapshot($sessionKey);
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $freshSnapshot,
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $freshSnapshot,
                 'buyer_name' => 'Canonical Tier Buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-                'unit_price' => 1,
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'unit_price' => 1,
                 'subtotal' => 1,
-                'quantity_price_tier_minimum' => 20,
-            ])
+                'quantity_price_tier_minimum' => 20, ])
             ->assertRedirect();
 
         $orderItem = Order::query()->sole()->orderItems()->sole();
@@ -470,12 +442,9 @@ class StorefrontShopCartTest extends TestCase
         $product->update(['price_amount' => 11000]);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
-            ->post(route('storefront.shop.checkout'), [
-                'cart_snapshot' => $matches[1],
+            ->post(route('storefront.shop.checkout'), ['cart_snapshot' => $matches[1],
                 'buyer_name' => 'Snapshot Buyer',
-                'payment_method' => 'qris',
-                'terms_accepted' => '1',
-            ])
+                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])
             ->assertRedirect(route('storefront.shop.checkout.start'));
 
         $this->assertSame(0, Order::query()->count());

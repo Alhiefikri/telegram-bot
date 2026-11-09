@@ -134,7 +134,7 @@ class ApplicationRateLimiterRegistrar
             };
 
             return [
-                Limit::perMinute($limit)->by('storefront:checkout:source:'.$source)->response($rateLimitedResponse),
+                Limit::perMinute(60)->by('storefront:checkout:source:'.$source)->response($rateLimitedResponse),
                 Limit::perMinute($limit)->by('storefront:checkout:session:'.$session)->response($rateLimitedResponse),
             ];
         });

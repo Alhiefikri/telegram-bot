@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\OrderNotificationEvent;
 use App\Services\GuestOrderNotificationService;
 use App\Services\OrderStateMachine;
+use App\Storefront\StorefrontCheckoutChallenge;
 use App\Storefront\StorefrontShopCheckout;
 use App\Storefront\StorefrontShopCheckoutInput;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
+use Tests\Support\FakeStorefrontCheckoutChallenge;
 use Tests\Support\StorefrontCheckoutScenarios;
 use Tests\TestCase;
 
@@ -30,6 +32,7 @@ class GuestOrderNotificationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
 
         config()->set('services.storefront.telegram_reservation_floor', 0);
     }
@@ -40,12 +43,9 @@ class GuestOrderNotificationTest extends TestCase
         $this->manualPaymentModeIsActive();
         $product = $this->availableProduct(['stock' => 1]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'No Email Buyer',
-            'terms_accepted' => '1',
-        ]);
+            'buyer_name' => 'No Email Buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ]);
 
         $response->assertRedirect();
 
@@ -63,13 +63,10 @@ class GuestOrderNotificationTest extends TestCase
         $this->manualPaymentModeIsActive();
         $product = $this->availableProduct(['stock' => 1]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'Email Buyer',
-            'email' => ' Buyer@Example.TEST ',
-            'terms_accepted' => '1',
-        ]);
+            'email' => ' Buyer@Example.TEST ', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ]);
 
         $response->assertRedirect();
         $order = Order::query()->sole();
@@ -87,13 +84,10 @@ class GuestOrderNotificationTest extends TestCase
         $this->manualPaymentModeIsActive();
         $product = $this->availableProduct(['stock' => 1]);
 
-        $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'Invalid Email Buyer',
-            'email' => 'not-an-email',
-            'terms_accepted' => '1',
-        ])->assertSessionHasErrors('email');
+            'email' => 'not-an-email', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])->assertSessionHasErrors('email');
 
         $this->assertSame(0, Order::query()->count());
         $this->assertSame(0, OrderNotificationEvent::query()->count());
@@ -253,7 +247,7 @@ class GuestOrderNotificationTest extends TestCase
 
     private function createOrder(int $productId, string $sessionId, string $email): Order
     {
-        app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+        $result = app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
             productId: $productId,
             quantity: 1,
             buyerName: 'Fixture Buyer',
@@ -261,12 +255,6 @@ class GuestOrderNotificationTest extends TestCase
             email: $email,
         ), $sessionId);
 
-        return Order::query()->where('checkout_key', hash_hmac('sha256', implode('|', [
-            $sessionId,
-            $productId,
-            1,
-            'fixture buyer',
-            'qris',
-        ]), (string) config('app.key')))->firstOrFail();
+        return Order::query()->findOrFail($result->orderId);
     }
 }

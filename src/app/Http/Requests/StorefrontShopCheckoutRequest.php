@@ -8,6 +8,7 @@ use App\Storefront\StorefrontUrl;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -35,6 +36,7 @@ class StorefrontShopCheckoutRequest extends FormRequest
         }
 
         return [
+            'checkout_attempt' => ['required', 'uuid'],
             'product_id' => [
                 'nullable',
                 'integer',
@@ -84,7 +86,8 @@ class StorefrontShopCheckoutRequest extends FormRequest
      */
     public function checkoutRecoveryInput(): array
     {
-        return $this->only([
+        $input = $this->only([
+            'checkout_attempt',
             'product_id',
             'quantity',
             'buyer_name',
@@ -95,6 +98,11 @@ class StorefrontShopCheckoutRequest extends FormRequest
             'cart_snapshot',
             'terms_accepted',
         ]);
+        if (! is_string($input['checkout_attempt'] ?? null) || ! Str::isUuid($input['checkout_attempt'])) {
+            unset($input['checkout_attempt']);
+        }
+
+        return $input;
     }
 
     protected function failedValidation(Validator $validator): void
@@ -113,6 +121,7 @@ class StorefrontShopCheckoutRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'checkout_attempt.*' => 'Buka ulang halaman checkout sebelum membuat pesanan.',
             'product_id.required' => 'Pilih produk yang ingin dibeli.',
             'product_id.required_without' => 'Pilih produk atau gunakan snapshot keranjang untuk checkout.',
             'product_id.prohibits' => 'Pilih produk atau gunakan snapshot keranjang, bukan keduanya.',

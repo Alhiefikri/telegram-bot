@@ -39,6 +39,7 @@ use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtBalance\UsdtPurchase;
 use App\Services\UsdtFunding\CustomerUsdtFundingGate;
+use App\Storefront\StorefrontCheckoutAdmission;
 use App\Support\PaymentProvider;
 use DateTimeInterface;
 use Illuminate\Database\QueryException;
@@ -74,6 +75,7 @@ class OrderCheckoutService
         ?ResellerPricingContext $resellerContext = null,
         ?BalanceCheckoutRequest $balanceRequest = null,
         ?string $apiOrderClaimId = null,
+        ?StorefrontCheckoutAdmission $storefrontAdmission = null,
     ): Order {
         if ($balanceRequest !== null && $paymentIntent !== null) {
             throw new InvalidCheckout('A preference request cannot override an explicit payment rail.');
@@ -99,7 +101,7 @@ class OrderCheckoutService
         for ($i = 0; $i < 5; $i++) {
             try {
                 $order = DB::transaction(
-                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext, $balanceRequest, $apiOrderClaimId),
+                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext, $balanceRequest, $apiOrderClaimId, $storefrontAdmission),
                     5,
                 );
 
@@ -124,7 +126,17 @@ class OrderCheckoutService
         ?ResellerPricingContext $resellerContext = null,
         ?BalanceCheckoutRequest $balanceRequest = null,
         ?string $apiOrderClaimId = null,
+        ?StorefrontCheckoutAdmission $storefrontAdmission = null,
     ): Order {
+        if ($storefrontAdmission !== null) {
+            if ($checkoutKey === null) {
+                throw new InvalidCheckout('Guest checkout requires a replay identity.');
+            }
+            if (($existing = $storefrontAdmission->guard($checkoutKey)) !== null) {
+                return $existing;
+            }
+        }
+
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->assertCheckoutCustomer($existing, $cart);
             $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
@@ -369,6 +381,7 @@ class OrderCheckoutService
         }
 
         $lockedCart->update(['status' => CartStatus::CheckedOut]);
+        $storefrontAdmission?->record($order, $checkoutKey);
 
         return $order->fresh(['orderItems', 'payments']);
     }

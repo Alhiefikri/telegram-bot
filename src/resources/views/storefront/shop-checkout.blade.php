@@ -2,6 +2,24 @@
 <html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
 <head>
     @include('storefront.partials.head', ['metadata' => $metadata])
+    @if ($checkoutChallengeSiteKey !== null)
+        <script>
+            function checkoutChallengeStatus(message) {
+                const status = document.getElementById('checkout-challenge-status');
+                if (status) status.textContent = message;
+            }
+            function checkoutChallengeReady() {
+                checkoutChallengeStatus('Verifikasi selesai. Anda dapat melanjutkan checkout.');
+            }
+            function checkoutChallengeExpired() {
+                checkoutChallengeStatus('Verifikasi kedaluwarsa. Tunggu verifikasi baru sebelum checkout.');
+            }
+            function checkoutChallengeError() {
+                checkoutChallengeStatus('Verifikasi tidak dapat dimuat. Periksa koneksi, izinkan challenges.cloudflare.com, lalu muat ulang halaman.');
+            }
+        </script>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer onerror="checkoutChallengeError()"></script>
+    @endif
 </head>
 <body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white motion-reduce:animate-none">
     <div class="storefront-shell storefront-checkout-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-clip">
@@ -77,6 +95,18 @@
                             @if (is_string($checkoutSessionError) && ! $checkoutSessionErrorIsDuplicate)
                                 <li><a href="#checkout-recovery-action" class="underline underline-offset-2">{{ $checkoutSessionError }}</a></li>
                             @endif
+                        </ul>
+                    </section>
+                @endif
+
+                @if (session('storefront_pending_invoice_urls', []) !== [])
+                    <section aria-labelledby="checkout-pending-invoices-title" class="mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface)] p-4 text-sm font-bold leading-6 text-[var(--sf-ink)]">
+                        <h2 id="checkout-pending-invoices-title" class="font-black">Pesanan yang belum selesai</h2>
+                        <p>Selesaikan pembayaran atau batalkan pesanan sebelumnya melalui invoice sebelum membuat pesanan baru.</p>
+                        <ul class="mt-2 grid gap-2">
+                            @foreach (session('storefront_pending_invoice_urls', []) as $invoiceUrl)
+                                <li><a href="{{ $invoiceUrl }}" class="inline-flex min-h-11 items-center underline underline-offset-2 focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-blue)]">Buka invoice pesanan {{ $loop->iteration }}</a></li>
+                            @endforeach
                         </ul>
                     </section>
                 @endif
@@ -252,6 +282,7 @@
                             @endphp
                             <form id="checkout-form" method="POST" action="{{ $checkoutSubmitUrl }}" class="neo-panel grid grid-cols-1 min-w-0 gap-4 bg-[var(--sf-surface)] p-4 sm:p-5" x-ref="checkoutForm">
                                 @csrf
+                                <input type="hidden" name="checkout_attempt" value="{{ old('checkout_attempt', (string) \Illuminate\Support\Str::uuid()) }}">
                                 @if ($checkoutSource === 'direct' && $checkoutProduct)
                                     <input type="hidden" name="product_id" value="{{ old('product_id', $checkoutProduct->id) }}">
                                 @elseif ($checkoutSnapshot)
@@ -330,6 +361,18 @@
                                         <p id="checkout-terms-accepted-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
                                     @enderror
                                 </div>
+
+                                <section id="checkout-challenge" aria-labelledby="checkout-challenge-title" class="grid min-w-0 gap-2">
+                                    <h2 id="checkout-challenge-title" class="text-sm font-black text-[var(--sf-ink)]">Verifikasi sebelum membuat pesanan</h2>
+                                    @if ($checkoutChallengeSiteKey !== null)
+                                        <p class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Selesaikan verifikasi Cloudflare untuk membantu mencegah pesanan otomatis. Verifikasi berlaku lima menit dan hanya untuk satu checkout.</p>
+                                        <div class="cf-turnstile" data-sitekey="{{ $checkoutChallengeSiteKey }}" data-action="checkout" data-size="compact" data-callback="checkoutChallengeReady" data-error-callback="checkoutChallengeError" data-expired-callback="checkoutChallengeExpired" data-timeout-callback="checkoutChallengeExpired" data-refresh-expired="auto" data-refresh-timeout="auto" aria-describedby="checkout-challenge-status"></div>
+                                        <p id="checkout-challenge-status" role="status" aria-live="polite" aria-atomic="true" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Menunggu verifikasi keamanan. Jika tidak muncul, periksa koneksi dan izinkan challenges.cloudflare.com.</p>
+                                        <noscript><p class="text-sm font-bold leading-6 text-[var(--sf-ink)]">Aktifkan JavaScript, lalu muat ulang halaman untuk menyelesaikan verifikasi checkout.</p></noscript>
+                                    @else
+                                        <p role="status" class="text-sm font-bold leading-6 text-[var(--sf-ink)]">{{ \App\Storefront\StorefrontCheckoutChallenge::UNAVAILABLE_MESSAGE }}</p>
+                                    @endif
+                                </section>
 
                                 @if (! $checkoutCanSubmit)
                                     <p id="checkout-submit-disabled-help" role="status" class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]">{{ $checkoutBlockedReason }}</p>

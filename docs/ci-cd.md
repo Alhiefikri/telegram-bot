@@ -3,6 +3,25 @@
 
 This repository does not use Railway. The release path is GitHub Actions from `main`, followed by the SSH-based VPS deployment in `.github/workflows/deploy-production.yml`. Keep production configuration on the VPS and do not add Railway commands, services, or configuration.
 
+### Visitor IP attribution and trusted proxies (#730)
+
+Checkout admission and other IP limiters use Laravel `Request::ip()`. The repository does not infer the production proxy topology or read `CF-Connecting-IP` as an identity. `TRUSTED_PROXIES` remains the comma-separated list parsed by `config/app.php`; only explicit IP addresses and non-global CIDRs are accepted. Empty lists, invalid entries, `*`, `**`, `REMOTE_ADDR`, private-range aliases, and `/0` networks do not enable trust. Framework hostname-based and static auto-trust are not used.
+
+The shipped nginx config passes `REMOTE_ADDR` from its incoming connection through `fastcgi_params` and appends that same peer to `X-Forwarded-For`. The FastCGI connection comes from nginx, but Laravel's `REMOTE_ADDR` is **not** thereby nginx's container IP. For `visitor -> Cloudflare -> nginx -> PHP-FPM`, it is the Cloudflare edge address. If a host reverse proxy or `cloudflared` sits before nginx, it is that intermediary's address instead. Adding the Compose subnet alone does not identify visitors behind Cloudflare.
+
+Before relying on a production per-visitor ceiling, the operator must:
+
+1. Establish the actual inbound peer seen by nginx and each proxy hop before it. Do not configure trust from a hostname, a forwarded header, or the PHP-FPM socket peer. This change did not inspect or modify production.
+2. For direct Cloudflare ingress, copy **all current IPv4 and IPv6 origin-facing CIDRs** from [Cloudflare's IP list](https://www.cloudflare.com/ips/) into `TRUSTED_PROXIES`, comma-separated. Maintain that list when Cloudflare updates it. Add the explicit addresses or narrowly scoped CIDRs of any controlled intermediary between Cloudflare and nginx; do not add visitor/NAT ranges or the entire Docker/private address space.
+3. Require every trusted HTTP intermediary to preserve the verified chain and append its actual incoming peer, or to replace it with a client address independently verified at that boundary. A host proxy must not relay an arbitrary caller's `X-Forwarded-For` without appending its peer. For Cloudflare Tunnel, ensure only the controlled connector reaches the origin listener and confirm its forwarding behavior; trusting a shared Docker gateway without isolating that listener is insufficient.
+4. Protect the origin listener against bypass of the intended edge path. Cloudflare IP allowlisting identifies the network, not your zone: use your own zone/hostname Authenticated Origin Pull certificate or an isolated Cloudflare Tunnel when zone authentication is required. Preserve required webhook/provider access through the approved ingress rather than adding application-level blocks for unknown IPs.
+5. Keep Cloudflare visitor-IP headers enabled. Avoid Pseudo IPv4 **Overwrite Headers** when native IPv6 identity is required. Review same-zone Workers and other header-rewriting transforms, since operator-controlled rewrites can change attribution. Do not replace `REMOTE_ADDR` with `CF-Connecting-IP` or trust that header on arbitrary inbound requests.
+6. Refresh Laravel's configuration cache through the approved release process after changing `TRUSTED_PROXIES`; setting the ENV value without rebuilding the cached configuration is insufficient. In an authorized disposable or release check, confirm that two known visitor addresses behind the same edge produce separate identities, requests sharing one public NAT address share an identity, and spoofed forwarding from a direct untrusted peer cannot change its identity.
+
+Laravel walks the trusted chain from the socket peer toward the visitor and selects the nearest untrusted address. An attacker-supplied prefix before that address cannot rotate the limiter key. Missing trust or missing forwarding stops attribution at the nearest unverified hop: it may be a Cloudflare edge or connector, so unrelated visitors can share the secondary IP ceiling until the operator fixes the chain. The application does not guess a visitor from `CF-Connecting-IP`, reject all unknown peers, or prove that one public IP represents one person. Shared NATs still share a ceiling; IP limits are secondary to the checkout's other admission controls.
+
+References: [Laravel 13 trusted proxies](https://laravel.com/docs/13.x/requests#configuring-trusted-proxies), consulted through Context7; [Cloudflare forwarding headers and Worker caveats](https://developers.cloudflare.com/fundamentals/reference/http-request-headers/); [Cloudflare origin-facing IPs and origin protection](https://developers.cloudflare.com/fundamentals/concepts/cloudflare-ip-addresses/). Focused request-chain coverage is in `src/tests/Feature/TrustedProxyConfigurationTest.php`; production attribution still requires the operator checks above.
+
 ## Branch strategy
 
 Project ini memakai satu branch utama untuk integrasi dan sumber rilis:

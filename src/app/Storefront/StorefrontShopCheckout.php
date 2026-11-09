@@ -28,6 +28,7 @@ use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\WijayaPay\WijayaPayInvoiceLifecycleService;
 use App\Support\PaymentProvider;
+use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Support\Facades\Cache;
@@ -53,22 +54,30 @@ class StorefrontShopCheckout
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
     ) {}
 
-    public function start(StorefrontShopCheckoutInput $input, ?string $sessionId = null, ?Session $session = null): StorefrontShopCheckoutResult
-    {
+    public function start(
+        StorefrontShopCheckoutInput $input,
+        ?string $sessionId = null,
+        ?Session $session = null,
+        ?Closure $authorizeNewCheckout = null,
+        ?string $visitorIp = null,
+    ): StorefrontShopCheckoutResult {
         $this->assertTermsAccepted($input);
         $termsVersion = $this->currentTermsVersion();
         $paymentRail = $this->paymentRail($input->paymentMethod);
         if ($sessionId === null || trim($sessionId) === '') {
+            $authorizeNewCheckout?->__invoke();
+
             return $this->startOnce($input, null, $termsVersion, null, $paymentRail);
         }
 
         $session ??= app('session.store');
         $session->put(StorefrontGuestCart::CLIENT_KEY, trim($sessionId));
         $sessionId = $this->guestCarts->clientKey($session);
+        $admission = new StorefrontCheckoutAdmission($sessionId, $visitorIp);
 
         try {
             return Cache::lock('storefront:checkout:'.hash('sha256', $sessionId), 45)
-                ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $sessionId, $termsVersion, $session, $paymentRail));
+                ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $sessionId, $termsVersion, $session, $paymentRail, $authorizeNewCheckout, $admission));
         } catch (LockTimeoutException $exception) {
             throw new InvalidCheckout('Checkout sedang diproses. Tunggu sebentar lalu buka kembali invoice Anda.', previous: $exception);
         }
@@ -80,9 +89,11 @@ class StorefrontShopCheckout
         string $termsVersion,
         ?Session $session,
         string $paymentRail,
+        ?Closure $authorizeNewCheckout = null,
+        ?StorefrontCheckoutAdmission $admission = null,
     ): StorefrontShopCheckoutResult {
         if ($session !== null) {
-            return $this->startSessionCheckout($input, $sessionId, $session, $termsVersion, $paymentRail);
+            return $this->startSessionCheckout($input, $sessionId, $session, $termsVersion, $paymentRail, $authorizeNewCheckout, $admission);
         }
 
         $maintenanceState = $this->maintenance->current();
@@ -128,12 +139,17 @@ class StorefrontShopCheckout
         Session $session,
         string $termsVersion,
         string $paymentRail,
+        ?Closure $authorizeNewCheckout,
+        StorefrontCheckoutAdmission $admission,
     ): StorefrontShopCheckoutResult {
         $candidate = $this->guestCarts->checkoutCandidate($session);
-        $candidateKey = $candidate === null
+        $candidateKey = $candidate === null && $input->checkoutAttempt === null
             ? null
             : $this->checkoutKey($input, $sessionId, $paymentRail, $candidate);
 
+        if ($candidateKey !== null && ($existing = $admission->existing($candidateKey)) !== null) {
+            return $this->reuseExistingCheckout($existing, $input);
+        }
         if ($candidateKey !== null
             && ($existing = Order::query()->where('checkout_key', $candidateKey)->first()) !== null
             && (string) $existing->cart_id === (string) $candidate?->getKey()) {
@@ -144,6 +160,8 @@ class StorefrontShopCheckout
         if ($maintenanceState->active) {
             throw new CheckoutMaintenanceActive($maintenanceState);
         }
+        $admission->assertCapacity();
+        $authorizeNewCheckout?->__invoke();
 
         if ($input->productId !== null) {
             $product = $this->product($input->productId);
@@ -182,22 +200,17 @@ class StorefrontShopCheckout
         if ($existing !== null && (string) $existing->cart_id === (string) $cart->getKey()) {
             return $this->reuseExistingCheckout($existing, $input);
         }
-        if ($existing !== null) {
-            $checkoutKey = $this->checkoutKey($input, $sessionId, $paymentRail, $cart, forceCartSnapshot: true);
-        }
 
-        $order = DB::transaction(function () use ($input, $cart, $paymentIntent, $checkoutKey, $termsVersion): Order {
-            $customer = Customer::query()->whereKey($cart->customer_id)->lockForUpdate()->firstOrFail();
-            $customer->forceFill(['first_name' => $this->buyerName($input->buyerName)])->save();
-
-            return $this->orders->checkout(
-                $cart,
-                $paymentIntent,
-                checkoutKey: $checkoutKey,
-                termsVersion: $termsVersion,
-                termsAcceptedAt: now(),
-            );
-        });
+        $customer = Customer::query()->findOrFail($cart->customer_id);
+        $customer->forceFill(['first_name' => $this->buyerName($input->buyerName)])->save();
+        $order = $this->orders->checkout(
+            $cart,
+            $paymentIntent,
+            checkoutKey: $checkoutKey,
+            termsVersion: $termsVersion,
+            termsAcceptedAt: now(),
+            storefrontAdmission: $admission,
+        );
 
         return $this->finishNewCheckout($order, $input);
     }
@@ -242,7 +255,7 @@ class StorefrontShopCheckout
         $payment = $order->payments()->latest('created_at')->firstOrFail();
 
         if ($payment->provider === PaymentProvider::MANUAL && $payment->method === 'BINANCE_PAY_ID') {
-            $recoveryKey = $this->orderAccess->issue($order);
+            $recoveryKey = $this->issueRecoveryKeyIfMissing($order);
             $this->dispatchPendingAdminNotification($order);
 
             return new StorefrontShopCheckoutResult(
@@ -309,7 +322,11 @@ class StorefrontShopCheckout
 
     private function issueRecoveryKeyIfMissing(Order $order): ?string
     {
-        return $this->orderAccess->hasKey($order) ? null : $this->orderAccess->issue($order);
+        return DB::transaction(function () use ($order): ?string {
+            $lockedOrder = Order::query()->whereKey($order->getKey())->lockForUpdate()->firstOrFail();
+
+            return $this->orderAccess->hasKey($lockedOrder) ? null : $this->orderAccess->issue($lockedOrder);
+        }, 5);
     }
 
     private function buyerName(string $buyerName): string
@@ -379,21 +396,20 @@ class StorefrontShopCheckout
         ?string $sessionId,
         ?string $paymentRail = null,
         ?Cart $cart = null,
-        bool $forceCartSnapshot = false,
     ): ?string {
         if ($sessionId === null || $sessionId === '') {
             return null;
         }
 
-        $isLegacySingleProduct = ! $forceCartSnapshot
-            && ($cart === null
-                || ($input->productId !== null
-                    && $cart->cartItems->count() === 1
-                    && (int) $cart->cartItems->first()->product_id === $input->productId
-                    && (int) $cart->cartItems->first()->quantity === $input->quantity));
-        $cartFingerprint = $isLegacySingleProduct
-            ? (string) $input->productId.'|'.$input->quantity
-            : $this->guestCarts->fingerprint($cart);
+        if ($input->checkoutAttempt !== null) {
+            $cartFingerprint = $input->checkoutAttempt.'|'.($input->productId !== null
+                ? $input->productId.':'.$input->quantity
+                : $input->cartSnapshot);
+        } else {
+            $cartFingerprint = $input->productId !== null
+                ? (string) $cart?->getKey().'|'.$input->productId.':'.$input->quantity
+                : $this->guestCarts->fingerprint($cart);
+        }
         $payload = implode('|', [
             $sessionId,
             $cartFingerprint,

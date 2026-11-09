@@ -20,13 +20,11 @@ class StorefrontErrorPageTest extends TestCase
     public function test_checkout_rate_limit_uses_the_recovery_page_and_preserves_retry_headers(): void
     {
         config()->set('services.storefront.checkout_rate_limit_per_minute', 1);
+        $this->withCookie(config('session.cookie'), $this->app['session.store']->getId());
 
-        $payload = [
-            'product_id' => 999_999,
+        $payload = ['product_id' => 999_999,
             'quantity' => 1,
-            'buyer_name' => 'buyer_test',
-            'terms_accepted' => '1',
-        ];
+            'buyer_name' => 'buyer_test', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ];
 
         $this->post(route('storefront.shop.checkout'), $payload)->assertRedirect();
 

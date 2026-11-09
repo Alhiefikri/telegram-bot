@@ -66,6 +66,7 @@ trait StorefrontCheckoutScenarios
         ?string $email = null,
     ): TestResponse {
         $payload = [
+            'checkout_attempt' => '73000000-0000-4000-8000-000000000001',
             'product_id' => $product->id,
             'quantity' => $quantity,
             'buyer_name' => $buyerName,

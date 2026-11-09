@@ -14,11 +14,13 @@ use App\Models\Product;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscTransferLogRpcClientInterface;
 use App\Services\Checkout\PaymentProviderResolver;
+use App\Storefront\StorefrontCheckoutChallenge;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\BscTransferLogRpcStub;
+use Tests\Support\FakeStorefrontCheckoutChallenge;
 use Tests\TestCase;
 
 class BinancePaymentRailSelectionTest extends TestCase
@@ -30,6 +32,7 @@ class BinancePaymentRailSelectionTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
 
         config()->set('services.bsc.rpc_urls', ['https://bsc-rpc.test']);
         config()->set('services.bsc.chain_id', 56);
@@ -97,13 +100,9 @@ class BinancePaymentRailSelectionTest extends TestCase
             'usdt_price_amount' => 2_500_000,
         ]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'bsc_buyer',
-            'terms_accepted' => '1',
-            'payment_method' => 'usdt_bep20',
-        ]);
+            'buyer_name' => 'bsc_buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ]);
 
         $response->assertRedirect();
         $order = Order::with('payments')->sole();
@@ -132,13 +131,9 @@ class BinancePaymentRailSelectionTest extends TestCase
             'usdt_price_amount' => 2_500_000,
         ]);
 
-        $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'bsc_disabled',
-            'terms_accepted' => '1',
-            'payment_method' => 'usdt_bep20',
-        ])->assertRedirect()
+            'buyer_name' => 'bsc_disabled', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ])->assertRedirect()
             ->assertSessionHas('storefront_checkout_error', fn (string $message): bool => str_contains($message, 'BSC payment rail is not ready.'));
 
         $this->assertSame(0, Order::count());
@@ -159,21 +154,13 @@ class BinancePaymentRailSelectionTest extends TestCase
         ]);
         $session = ['storefront.checkout_client_key' => 'same-rail-selector-session'];
 
-        $this->withSession($session)->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->withSession($session)->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'rail_buyer',
-            'terms_accepted' => '1',
-            'payment_method' => 'binance_pay_id',
-        ])->assertRedirect();
+            'buyer_name' => 'rail_buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'binance_pay_id', ])->assertRedirect();
 
-        $this->withSession($session)->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->withSession($session)->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'rail_buyer',
-            'terms_accepted' => '1',
-            'payment_method' => 'usdt_bep20',
-        ])->assertRedirect();
+            'buyer_name' => 'rail_buyer', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ])->assertRedirect();
 
         $this->assertSame(2, Order::count());
         $this->assertSame(2, Payment::count());
@@ -191,13 +178,9 @@ class BinancePaymentRailSelectionTest extends TestCase
             'usdt_price_amount' => 2_500_000,
         ]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'bsc_invoice',
-            'terms_accepted' => '1',
-            'payment_method' => 'usdt_bep20',
-        ]);
+            'buyer_name' => 'bsc_invoice', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ]);
         $order = Order::with('payments.bscDetail')->sole();
         $payment = $order->payments->sole();
 
@@ -228,13 +211,9 @@ class BinancePaymentRailSelectionTest extends TestCase
             'usdt_price_amount' => 2_500_000,
         ]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'bsc_policy_snapshot',
-            'terms_accepted' => '1',
-            'payment_method' => 'usdt_bep20',
-        ]);
+            'buyer_name' => 'bsc_policy_snapshot', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ]);
         $order = Order::with('payments.bscDetail')->sole();
         $payment = $order->payments->sole();
         ManualPaymentSetting::current()->update(['bsc_min_confirmations' => 12]);
@@ -259,13 +238,9 @@ class BinancePaymentRailSelectionTest extends TestCase
             'usdt_price_amount' => 2_500_000,
         ]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'bsc_snapshot',
-            'terms_accepted' => '1',
-            'payment_method' => 'usdt_bep20',
-        ]);
+            'buyer_name' => 'bsc_snapshot', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ]);
         $order = Order::with('payments.bscDetail')->sole();
         $payment = $order->payments->sole();
         $snapshotAddress = (string) $payment->bscDetail->receiver_address;
@@ -324,13 +299,9 @@ class BinancePaymentRailSelectionTest extends TestCase
             'usdt_price_amount' => 2_500_000,
         ]);
 
-        $response = $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $response = $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'bsc_states',
-            'terms_accepted' => '1',
-            'payment_method' => 'usdt_bep20',
-        ]);
+            'buyer_name' => 'bsc_states', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ]);
         $order = Order::with('payments.bscDetail')->sole();
         $detail = $order->payments->sole()->bscDetail;
 
@@ -359,13 +330,9 @@ class BinancePaymentRailSelectionTest extends TestCase
             'reserved_stock' => 0,
             'usdt_price_amount' => 2_500_000,
         ]);
-        $this->post(route('storefront.shop.checkout'), [
-            'product_id' => $product->id,
+        $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
-            'buyer_name' => 'bsc_hash',
-            'terms_accepted' => '1',
-            'payment_method' => 'usdt_bep20',
-        ]);
+            'buyer_name' => 'bsc_hash', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ]);
         $order = Order::with('payments.bscDetail')->sole();
         $payment = $order->payments->sole();
         $payment->bscDetail()->update([

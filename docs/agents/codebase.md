@@ -1295,11 +1295,27 @@ Route utama ada di [`src/routes/web.php`](../../src/routes/web.php):
 - Recovery Key order access: `/akses-pesanan`;
 - customer account/login link: `/akun/*`;
 - admin: `/admin/*` behind `admin.access`.
-Cart checkout replay identity is based on the Cart and its Product/quantity
-composition; the submitted Cart snapshot separately validates mutable pricing
-and availability before a new Order is created. This keeps duplicate submits
-resolvable after reservations update Product timestamps without accepting a
-stale snapshot for a new checkout.
+Web checkout (#730) requires a review-issued `checkout_attempt` UUID. Its browser-bound
+checkout key includes that attempt, the submitted direct Product/quantity or Cart
+snapshot, buyer name and payment rail. Retries recover the same Order even after
+anonymous Customer rotation or cancellation; a deliberate new purchase opens a new
+review. Cart snapshots still validate mutable pricing and availability before any new
+Order is created. Internal service callers without a web attempt retain Cart-bound keys.
+
+`StorefrontCheckoutChallenge` verifies Turnstile outside database transactions, after
+replay lookup and before new checkout work. `StorefrontCheckoutAdmission` locks sorted
+browser/IP HMAC subjects before canonical Customer/Cart locks, rechecks limits and
+records the admission in the same transaction as Order, Payment and stock reservation.
+The browser limit is two pending Orders; the shared-IP ceiling is 20, with separate
+five/session and 60/IP request budgets per minute. It reads authoritative pending
+Order/payment state, never releases stock or capacity merely because a deadline passed,
+and exposes only the requesting browser's invoice links on rejection.
+`TrustConfiguredProxies` accepts explicit verified IP/CIDR trust only; rollout requires
+operator-verified proxy topology and Turnstile credentials. Old Orders cannot be
+retroactively browser/IP attributed; simultaneous session/IP rotation remains a
+limitation. See [operations and verification](../../src/README.md#verifikasi-keamanan-checkout-web).
+Regression entry points: `StorefrontCheckoutChallengeTest`, `StorefrontCheckoutAdmissionTest`,
+`StorefrontCheckoutAdmissionPostgresConcurrencyTest`, `TrustedProxyConfigurationTest`.
 
 `StorefrontShopCheckoutReviewController` and `StorefrontCartPageBuilder` own the page-based checkout review module. The Blade page
 [`storefront/shop-checkout.blade.php`](../../src/resources/views/storefront/shop-checkout.blade.php)
