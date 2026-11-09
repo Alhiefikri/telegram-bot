@@ -34,6 +34,27 @@ class GuestOrderNotificationTest extends TestCase
         config()->set('services.storefront.telegram_reservation_floor', 0);
     }
 
+    public function test_candidate_pending_inflight_and_cancelled_milestones_are_not_sent_on_rollback(): void
+    {
+        Queue::fake();
+        Mail::fake();
+        $this->manualPaymentModeIsActive();
+        $product = $this->availableProduct(['stock' => 1]);
+        app(StorefrontShopCheckout::class)->start(new StorefrontShopCheckoutInput(
+            productId: $product->id, quantity: 1, buyerName: 'Rollback fixture',
+            termsAccepted: true, email: 'rollback@example.test',
+        ), 'milestone-rollback-session');
+        $event = OrderNotificationEvent::query()->sole();
+        $event->forceFill(['attempts' => 1, 'delivery_started_at' => now(), 'next_attempt_at' => now()->subSecond()])->save();
+        $service = app(GuestOrderNotificationService::class);
+        $service->deliver($event->id);
+        $this->assertSame('pending', $event->fresh()->status);
+        $event->forceFill(['status' => 'cancelled', 'delivery_started_at' => null])->save();
+        $service->deliver($event->id);
+        $this->assertSame('cancelled', $event->fresh()->status);
+        Mail::assertNothingSent();
+    }
+
     public function test_guest_checkout_without_email_keeps_the_no_email_path(): void
     {
         Queue::fake();

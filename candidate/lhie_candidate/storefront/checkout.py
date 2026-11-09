@@ -295,6 +295,8 @@ def _capture_contact(order_id, email, channel, value):
                           (order_id,event_type,status,created_at,updated_at)
                           VALUES (%s,'order_created','pending',%s,%s)
                           ON CONFLICT (order_id,event_type) DO NOTHING''', (order_id, now, now))
+            from ..notifications.milestones import record_transition
+            record_transition(db, order_id, 'order_created')
 
 
 

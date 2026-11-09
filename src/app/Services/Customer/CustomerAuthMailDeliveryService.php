@@ -123,6 +123,16 @@ final class CustomerAuthMailDeliveryService
             if (! $work || $work->status !== 'pending') {
                 return null;
             }
+            // The candidate retains uncertain attempts rather than retrying a
+            // capability whose SMTP acceptance is unknown. Preserve that
+            // boundary when the application is rolled back to this reader.
+            if ($work->last_error_code === 'mail_delivery_inflight') {
+                if (! $work->next_attempt_at->isFuture()) {
+                    $work->forceFill(['status' => 'failed', 'payload' => null, 'last_error_code' => 'mail_delivery_unknown'])->save();
+                }
+
+                return null;
+            }
             if (! $this->canDeliver($grant, $customer) || ! $work->expires_at->isFuture()) {
                 $work->forceFill(['status' => 'cancelled', 'payload' => null, 'last_error_code' => null])->save();
 

@@ -146,6 +146,16 @@ class NavigationProcessor:
                     else resolve_customer(self.repository, source["from"]))
         if customer is None:
             return "unknown_customer"
+        from django.conf import settings
+        if getattr(getattr(settings, 'RUNTIME', None), 'notifications', False):
+            from ..notifications.broadcast_intents import BroadcastIntents
+            from ..notifications.policy import TestRecipients
+            outcome = BroadcastIntents(self.repository, self.transport, TestRecipients(frozenset({'1'}))).handle(
+                customer, str(chat['id']), source, callback=bool(callback))
+            if outcome is not None:
+                if callback:
+                    self.transport.execute('answerCallbackQuery', {'callback_query_id': callback['id']})
+                return outcome
         self.presenter.callback_notice = None
         self.presenter.callback_handled = False
         receipt_action = None

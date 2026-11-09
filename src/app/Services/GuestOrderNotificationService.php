@@ -89,7 +89,7 @@ final class GuestOrderNotificationService
         }
 
         $order = $event->order()->with('orderItems')->firstOrFail();
-        $email = $order->notification_email;
+        $email = $event->recipient_email ?? $order->notification_email;
 
         if (! filled($email)) {
             $this->markFailed($event, 'recipient_missing');
@@ -166,8 +166,16 @@ final class GuestOrderNotificationService
                 return null;
             }
 
+            // Candidate SMTP claims retain this marker when acceptance is
+            // uncertain. Rollback must not turn that pending lease into a send.
+            if ($event->status === OrderNotificationEvent::STATUS_PENDING && $event->delivery_started_at !== null) {
+                return null;
+            }
+
             if ($event->status === OrderNotificationEvent::STATUS_SENT
-                || $event->status === OrderNotificationEvent::STATUS_SENDING) {
+                || $event->status === OrderNotificationEvent::STATUS_SENDING
+                || $event->status === OrderNotificationEvent::STATUS_CANCELLED
+                || $event->next_attempt_at?->isFuture()) {
                 return null;
             }
 

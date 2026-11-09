@@ -6,13 +6,15 @@ import re
 BROADCAST = 'admin.broadcast_recipient'
 STOCK = 'stock.notification_recipient'
 PRICE = 'price_change.notification_recipient'
+PRICE_CHANNEL = 'price_change.store_channel'
 PROOF = 'sales_proof.post'
 MANUAL = 'admin.manual_payment_proof'
 ADJUSTMENT = 'balance.adjustment_notice'
 ORDER_TYPES = ('admin.order_pending_notification', 'admin.order_paid_notification',
                'admin.order_expired_notification', 'admin.order_review_notification')
-LIMITS = {BROADCAST: 5, STOCK: 5, PRICE: 5, PROOF: 3, MANUAL: 3, ADJUSTMENT: 3,
-          **{kind: 3 for kind in ORDER_TYPES}}
+BALANCE_TYPES = ('balance.top_up_receipt', 'admin.balance_top_up_paid_notification')
+LIMITS = {BROADCAST: 5, STOCK: 5, PRICE: 5, PRICE_CHANNEL: 3, PROOF: 3, MANUAL: 3, ADJUSTMENT: 3,
+          **{kind: 3 for kind in (*ORDER_TYPES, *BALANCE_TYPES)}}
 TERMINAL_CODES = frozenset({'notification_not_eligible', 'notification_render_invalid',
                            'legacy_notification_terminal'})
 

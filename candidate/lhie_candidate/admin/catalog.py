@@ -99,8 +99,9 @@ def _check_errors(errors):
 
 
 class CatalogService:
-    def __init__(self, db=None):
+    def __init__(self, db=None, *, price_events=None):
         self.db = db or Database()
+        self.price_events = price_events
 
     # -- read models -----------------------------------------------------
 
@@ -812,6 +813,8 @@ class CatalogService:
                         updated_at=CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta'
                         WHERE id=%s""", params)
             if section == "price":
+                if self.price_events is not None:
+                    self.price_events.record_change(current, current | values)
                 old["quantity_price_tiers"] = [
                     {"minimum_quantity": int(item["minimum_quantity"]),
                      "price_amount": int(item["price_amount"]),

@@ -271,4 +271,102 @@ if (getenv('P17_USDT_SMOKE') === '1') {
     $fixtures['p17_bsc']['receiver_id'] = $receiver->id;
     $fixtures['p17_bsc']['telegram_id'] = $customer->telegram_id;
 }
+if (getenv('P25_NOTIFICATION_SMOKE') === '1') {
+    config(['app.name' => 'LhieStore']);
+    // Redacted copy oracle only: these values are never persisted as grants.
+    $authNotifications = [
+        'magic' => new App\Notifications\CustomerLoginLinkNotification(route('customer.login-link.show').'#token=[REDACTED]'),
+    ];
+    foreach ([App\Enums\CustomerAuthTokenPurpose::EmailVerification,
+        App\Enums\CustomerAuthTokenPurpose::EmailOtp, App\Enums\CustomerAuthTokenPurpose::PasswordReset] as $purpose) {
+        $authNotifications[$purpose->value] = new App\Notifications\CustomerAuthMailNotification($purpose, '[REDACTED]');
+    }
+    foreach ($authNotifications as $purpose => $notification) {
+        $copy = $notification->toMail(new stdClass);
+        $fixtures['p25_auth_copy'][$purpose] = ['subject' => $copy->subject, 'greeting' => $copy->greeting,
+            'intro' => $copy->introLines, 'outro' => $copy->outroLines,
+            'action' => $copy->actionText, 'url' => $copy->actionUrl];
+    }
+    Illuminate\Support\Facades\Cache::forever('sales-proof-posts:published-count', 37);
+    $fixtures['p25_counter_floor'] = app(App\Services\Telegram\SalesProofPostNumbering::class)->publishedCount();
+    App\Models\Customer::whereKey($fixtures['python']['customer_id'])->update(['telegram_id' => 1]);
+    $priceProduct = App\Models\Product::findOrFail($fixtures['preflight']['product_id']);
+    $priceProduct->forceFill(['icon' => '📦', 'custom_emoji_id' => null, 'price_amount' => 12000,
+        'usdt_price_amount' => 1000001])->save();
+    $priceService = app(App\Services\Telegram\ProductPriceChangeNotificationService::class);
+    $priceEvent = $priceService->createEventForCommittedUpdate($priceProduct,
+        ['price_amount' => 15000, 'usdt_price_amount' => 2000002],
+        ['price_amount' => 12000, 'usdt_price_amount' => 1000001]);
+    $message = new ReflectionMethod($priceService, 'message');
+    $fixtures['p25_price'] = ['event_id' => $priceEvent->id, 'messages' => []];
+    foreach (['id', 'ms', 'en'] as $locale) {
+        $fixtures['p25_price']['messages'][$locale] = $message->invoke($priceService, $priceEvent, $locale);
+    }
+    $milestone = new App\Mail\GuestOrderMilestoneMail(
+        App\Enums\GuestOrderNotificationEvent::PaymentConfirmed, 'INV-P25-ORACLE', 'processing',
+        'Sedang diproses', [['name' => '<Product>', 'quantity' => 2]], null,
+        'http://127.0.0.1:18801/invoice', 'http://127.0.0.1:18801/akses-pesanan');
+    $fixtures['p25_milestone_html'] = $milestone->render();
+    $redactedGroups = [['product_name' => '<Product>', 'delivery_note' => 'Petunjuk penggunaan produk.', 'usage_guide' => null,
+        'accounts' => [['label' => 'Data akun 1', 'kind' => 'structured', 'text' => null, 'parts' => null,
+            'email' => '[REDACTED]', 'password' => '[REDACTED]', 'tutorial' => 'Petunjuk akun.',
+            'access' => ['label' => 'Akses Token', 'value' => '[REDACTED]',
+                'url' => 'https://reader.example.invalid/redacted', 'domain' => 'reader.example.invalid']]]]];
+    $fixtures['p25_credential_html'] = (new App\Mail\OrderCredentialMail('INV-P25-REDACTED', $redactedGroups, [],
+        'http://127.0.0.1:18801/invoice', '/akses-pesanan',
+        'Login dari perangkat pribadi, ganti password setelah berhasil masuk, lalu pindahkan MFA/Authenticator ke perangkat Anda sendiri jika produk mendukungnya.'))->render();
+    $reviewCustomer = buyer(50000);
+    $reviewProduct = App\Models\Product::factory()->create(['name' => 'P25 numeric-stock review',
+        'stock' => 1, 'reserved_stock' => 0, 'price_amount' => 10000, 'usdt_price_amount' => null,
+        'category_id' => null, 'product_family_id' => null, 'is_active' => true]);
+    $fixtures['p25_review'] = row($reviewCustomer, $reviewProduct, cart($reviewCustomer, $reviewProduct));
+    $reviewCart = App\Models\Cart::findOrFail($fixtures['p25_review']['cart_id']);
+    $reviewOrder = app(App\Services\OrderCheckoutService::class)->checkout($reviewCart,
+        App\Services\Checkout\CheckoutPaymentIntents::storeBalance(), hash('sha256', 'p25-review'));
+    $fixtures['p25_review']['order_id'] = $reviewOrder->id;
+    foreach (['php', 'python'] as $balanceLanguage) {
+    $balanceCustomer = App\Models\Customer::findOrFail($fixtures[$balanceLanguage]['customer_id']);
+    $balanceChat = (string) $balanceCustomer->telegram_id;
+    $fundingIntent = App\Models\StoreBalanceFundingIntent::create([
+        'customer_id' => $balanceCustomer->id, 'chat_id' => $balanceChat, 'canonical_message_id' => 1,
+        'policy_version' => 1, 'amount' => 5000, 'nonce' => Illuminate\Support\Str::random(32),
+        'status' => App\Enums\StoreBalanceFundingIntentStatus::Confirmed,
+        'expires_at' => now()->addMinutes(15), 'claimed_at' => now()]);
+    $balanceTopUp = App\Models\StoreBalanceTopUp::create([
+        'customer_id' => $balanceCustomer->id, 'store_balance_funding_intent_id' => $fundingIntent->id,
+        'chat_id' => $balanceChat, 'canonical_message_id' => 1, 'locale' => 'en', 'provider' => 'manual',
+        'merchant_ref' => 'P25-BALANCE-SYNTHETIC-'.$balanceLanguage, 'idempotency_key' => 'p25-balance-synthetic-'.$balanceLanguage,
+        'currency' => 'IDR', 'amount' => 5000, 'status' => App\Enums\StoreBalanceTopUpStatus::AwaitingConfirmation,
+        'provider_fee' => 0, 'provider_total_payment' => 5000, 'provider_payment_method' => 'QR_MANUAL',
+        'provider_created_at' => now(), 'provider_expires_at' => now()->addMinutes(15),
+        'expires_at' => now()->addMinutes(15), 'provider_create_state' => 'created']);
+    app(App\Services\StoreBalance\TopUp\ManualStoreBalanceTopUpConfirmationService::class)->approve($balanceTopUp, $balanceCustomer, '1');
+    if ($balanceLanguage === 'python') {
+        $fixtures['p25_balance'] = ['top_up_id' => $balanceTopUp->id, 'status' => $balanceTopUp->fresh()->status->value];
+    } else {
+        $fixtures['expected']['balance'] = app(App\Services\StoreBalance\StoreBalanceLedger::class)->snapshot($balanceCustomer)->balance();
+    }
+    }
+    $stockProduct = App\Models\Product::factory()->create(['name' => 'P25 Stock <Product>',
+        'stock' => 0, 'reserved_stock' => 0, 'price_amount' => 15000, 'usdt_price_amount' => 1000001,
+        'icon' => '📦', 'custom_emoji_id' => null, 'category_id' => null, 'product_family_id' => null,
+        'description' => 'Petunjuk <aman>', 'description_ms' => 'Panduan Melayu', 'description_en' => 'English guide',
+        'telegram_channel_image_path' => 'synthetic-stock.png', 'is_active' => true]);
+    $stockProduct->quantityPriceTiers()->create(['minimum_quantity' => 2, 'price_amount' => 12000, 'usdt_price_amount' => 900001]);
+    app(App\Services\ProductStockIntake::class)->submit($stockProduct,
+        App\Services\ProductStockIntakeSubmission::legacy(['P25 synthetic stock one', 'P25 synthetic stock two', 'P25 synthetic stock three']));
+    $movement = App\Models\InventoryMovement::where('product_id', $stockProduct->id)->orderByDesc('id')->firstOrFail();
+    $stockService = app(App\Services\Telegram\TelegramProductNotificationService::class);
+    $fixtures['p25_stock'] = ['product_id' => $stockProduct->id, 'movement_id' => $movement->id, 'messages' => []];
+    foreach (['id', 'ms', 'en'] as $locale) {
+        $customer = App\Models\Customer::findOrFail($fixtures['python']['customer_id']);
+        $customer->forceFill(['locale' => $locale])->save();
+        $batch = $stockService->stockAddedDeliveryBatch($stockProduct, 3, 0, 3, 0, 100);
+        foreach ($batch['deliveries'] as $delivery) {
+            if ($delivery['recipient_type'] === 'customer' && $delivery['telegram_id'] === '1') {
+                $fixtures['p25_stock']['messages'][$locale] = $delivery['text'];
+            }
+        }
+    }
+}
 echo json_encode($fixtures, JSON_THROW_ON_ERROR);

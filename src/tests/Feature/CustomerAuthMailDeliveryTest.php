@@ -38,6 +38,25 @@ class CustomerAuthMailDeliveryTest extends TestCase
         Queue::fake();
     }
 
+    public function test_candidate_inflight_auth_work_is_not_reclaimed_on_rollback(): void
+    {
+        Notification::fake();
+        [, $work] = $this->work(CustomerAuthTokenPurpose::EmailOtp);
+        $work->forceFill(['attempts' => 1, 'last_error_code' => 'mail_delivery_inflight',
+            'next_attempt_at' => now()->addSeconds(120)])->save();
+        $service = app(CustomerAuthMailDeliveryService::class);
+        $service->deliver($work->id);
+        $this->assertSame('pending', $work->fresh()->status);
+        $this->travel(121)->seconds();
+        $service->deliver($work->id);
+        $service->deliver($work->id);
+        $this->assertSame('failed', $work->fresh()->status);
+        $this->assertSame('mail_delivery_unknown', $work->fresh()->last_error_code);
+        $this->assertSame(1, $work->fresh()->attempts);
+        $this->assertNull($work->fresh()->payload);
+        Notification::assertNothingSent();
+    }
+
     public function test_otp_mail_preserves_leading_zeroes_and_never_puts_code_in_a_url(): void
     {
         Notification::fake();

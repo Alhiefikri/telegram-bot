@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{ subject }}</title></head>
+<body style="margin:0;background:#edf2f7;color:#3d4852;font-family:Arial,sans-serif;line-height:1.5">
+<main style="max-width:570px;margin:32px auto;background:white;padding:32px">
+<h1 style="font-size:18px">{{ greeting }}</h1>
+{% for line in lines %}<p>{{ line }}</p>{% endfor %}
+{% if url %}<p style="text-align:center;margin:30px 0"><a href="{{ url }}" style="display:inline-block;background:#2d3748;color:white;padding:10px 20px;text-decoration:none;border-radius:4px">{{ action }}</a></p>{% endif %}
+{% if expiry %}<p>{{ expiry }}</p>{% endif %}<p>{{ ignore }}</p>
+{% if url %}<hr><p style="font-size:12px;overflow-wrap:anywhere">{{ url }}</p>{% endif %}
+</main></body></html>

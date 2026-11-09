@@ -204,10 +204,14 @@ class ReceiptProtocol:
             WHERE effect_type = %s AND effect_group_key = %s ORDER BY sequence''', (EFFECT_TYPE, group_key))
 
     def _ready(self, row, at):
+        metadata = row.get('outcome_metadata') or {}
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+        manual = row['effect_type'] == 'sales_proof.post' and metadata.get('manual_retry_requested') is True
         if (row['effect_type'] not in self.family_limits or row['state'] not in ('pending', 'failed')
-                or row['attempts'] >= self.family_limits[row['effect_type']]):
+                or (row['attempts'] >= self.family_limits[row['effect_type']] and not manual)):
             return False
-        if row['effect_type'] in (REFUND_TYPE, TOPUP_TYPE) and self.db.one(
+        if row['effect_type'] in (REFUND_TYPE, TOPUP_TYPE, 'balance.top_up_receipt') and self.db.one(
                 "SELECT id FROM public.customer_usdt_funding_pauses WHERE scope='delivery' LIMIT 1"):
             return False
         if (row['effect_type'] == EFFECT_TYPE and row['template_version'] == PHOTO_TEMPLATE
@@ -224,6 +228,19 @@ class ReceiptProtocol:
             if any(item['state'] != 'sent' and not _legacy_resolved(item) for item in predecessors):
                 return False
         return True
+
+    def request_manual_retry(self, effect_id):
+        """One explicit extra attempt; unknowns and terminal rejections stay held."""
+        self._require_postgres()
+        with transaction.atomic(using=self.using):
+            row = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id=%s FOR UPDATE', (effect_id,))
+            if (not row or row['effect_type'] != 'sales_proof.post' or row['effect_type'] not in self.effect_types
+                    or row['state'] != 'failed' or row['last_error_code'] in self.terminal_codes):
+                return None
+            return self.db.one('''UPDATE public.telegram_outbound_effects SET state='pending',next_attempt_at=%s,
+                failed_at=NULL,last_error_code=NULL,last_error=NULL,outcome_metadata=
+                (COALESCE(outcome_metadata::jsonb,'{}'::jsonb) || '{"manual_retry_requested":true,"delivery_context":"sales_proof"}'::jsonb)::json,
+                updated_at=%s WHERE id=%s RETURNING *''', (_now(), _now(), effect_id))
 
     def next_receipt_effect(self, group_key, after_sequence=0):
         self._require_postgres()
@@ -253,9 +270,9 @@ class ReceiptProtocol:
                 attempts = attempts + 1, next_attempt_at = NULL, lease_until = %s,
                 claim_token = %s, last_error_code = NULL, last_error = NULL,
                 outcome_metadata = CASE WHEN outcome_metadata::jsonb ? 'first_pickup_at'
-                    THEN outcome_metadata
+                    THEN (outcome_metadata::jsonb - 'manual_retry_requested')::json
                     ELSE (COALESCE(outcome_metadata::jsonb, '{}'::jsonb)
-                          || jsonb_build_object('first_pickup_at', %s::text))::json END,
+                          - 'manual_retry_requested' || jsonb_build_object('first_pickup_at', %s::text))::json END,
                 updated_at = %s
                 WHERE id = %s RETURNING *''',
                 (now + timedelta(seconds=self.lease_seconds), secrets.token_hex(32), now.isoformat(), now, effect_id))
@@ -370,9 +387,10 @@ class ReceiptProtocol:
         self._require_postgres()
         return self.db.rows('''SELECT e.id FROM public.telegram_outbound_effects e
             WHERE e.effect_type=ANY(%s) AND e.state IN ('pending','failed')
-              AND e.attempts < (%s::jsonb ->> e.effect_type)::int
+              AND (e.attempts < (%s::jsonb ->> e.effect_type)::int OR
+                (e.effect_type='sales_proof.post' AND e.outcome_metadata::jsonb @> '{"manual_retry_requested":true}'::jsonb))
               AND (%s::text[] IS NULL OR e.telegram_chat_id=ANY(%s))
-              AND (e.effect_type NOT IN ('usdt.refund_receipt','usdt.top_up_receipt') OR NOT EXISTS (
+              AND (e.effect_type NOT IN ('usdt.refund_receipt','usdt.top_up_receipt','balance.top_up_receipt') OR NOT EXISTS (
                   SELECT 1 FROM public.customer_usdt_funding_pauses WHERE scope='delivery'))
               AND (e.next_attempt_at IS NULL OR e.next_attempt_at<=%s)
               AND (e.last_error_code IS NULL OR NOT (e.last_error_code=ANY(%s)))

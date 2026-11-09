@@ -122,6 +122,7 @@ class OrderLifecycle:
         return OrderLifecycleResult(dict(order), None if payment is None else dict(payment), changed, receipt, review)
 
     def _statuses(self, order, payment, *, order_status=None, payment_status=None):
+        previous_order, previous_payment = order['order_status'], order['payment_status']
         at = self.clock()
         if payment_status is not None and payment is not None:
             self.db.execute('UPDATE public.payments SET status=%s,paid_at=%s,updated_at=%s WHERE id=%s',
@@ -134,6 +135,13 @@ class OrderLifecycle:
         self.db.execute('UPDATE public.orders SET order_status=%s,payment_status=%s,updated_at=%s WHERE id=%s',
             (order_status, payment_status, at, order['id']))
         order.update(order_status=order_status, payment_status=payment_status)
+        from ..notifications.milestones import record_transition
+        if previous_payment != 'paid' and payment_status == 'paid':
+            record_transition(self.db, order['id'], 'payment_confirmed')
+        if previous_order != order_status:
+            kind = {'completed': 'fulfillment_completed', 'expired': 'order_expired', 'cancelled': 'order_cancelled'}.get(order_status)
+            if kind:
+                record_transition(self.db, order['id'], kind)
 
     def review_locked(self, order, payment, reason):
         self.db.require_transaction()

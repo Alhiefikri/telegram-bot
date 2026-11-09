@@ -9,13 +9,15 @@ from ..receipt.transport import ReceiptPreSendError
 from . import broadcast, price
 from .rate import BroadcastRate
 from .proof_publication import PublicationUnavailable
-from .policy import (ADJUSTMENT, BROADCAST, LIMITS, MANUAL, PRICE, PROOF, STOCK,
-                     ORDER_TYPES, TERMINAL_CODES, NotEligible, TestRecipients)
+from .policy import (ADJUSTMENT, BROADCAST, LIMITS, MANUAL, PRICE, PRICE_CHANNEL, PROOF, STOCK,
+                     ORDER_TYPES, BALANCE_TYPES, TERMINAL_CODES, NotEligible, TestRecipients)
 
 
 MODELS = {BROADCAST: 'TelegramBroadcastRecipient', STOCK: 'StockNotificationRecipient',
           PRICE: 'ProductPriceChangeNotificationRecipient', PROOF: 'Order',
           MANUAL: 'Payment', ADJUSTMENT: 'BalanceAdjustmentRequest',
+          PRICE_CHANNEL: 'ProductPriceChangeEvent',
+          **{kind: 'StoreBalanceTopUp' for kind in BALANCE_TYPES},
           **{kind: 'Order' for kind in ORDER_TYPES[:-1]}, ORDER_TYPES[-1]: 'ManualFulfillmentReview'}
 RECIPIENT_TABLES = {BROADCAST: 'telegram_broadcast_recipients',
                     STOCK: 'stock_notification_recipients',
@@ -38,6 +40,12 @@ class Notifications:
         self.order_notices = order_notices
         self.rate = rate if rate is not None else BroadcastRate()
         self._projection_cursor = None
+        self._broadcast_cursor = 0
+        self.price_notifications = price.PriceNotifications(self.db, self.recipients)
+        from .stock import StockNotifications
+        self.stock_notifications = StockNotifications(self.db, self.recipients)
+        from .balance import BalanceNotifications
+        self.balance_notifications = BalanceNotifications(self.db, self.recipients)
 
     def _outside(self):
         if (connections[self.db.using].in_atomic_block
@@ -51,6 +59,16 @@ class Notifications:
                 or method not in ('sendMessage', 'sendPhoto')):
             raise NotEligible()
         legacy = legacy or {}
+        sequence = 1
+        if supersedes is not None:
+            predecessor = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id=%s FOR UPDATE', (supersedes,))
+            if (not predecessor or predecessor['effect_type'] != kind
+                    or predecessor['source_type'] != 'App\\Models\\' + model
+                    or predecessor['source_id'] != str(source)
+                    or predecessor['telegram_chat_id'] != str(chat)
+                    or predecessor['state'] not in ('sent', 'unknown', 'manual_review')):
+                raise NotEligible()
+            sequence = predecessor['sequence'] + 1
         at = _now()
         # Import retained delivery history conservatively. An old in-flight
         # claim must not become a new pending send after migration.
@@ -63,9 +81,9 @@ class Notifications:
             (id,effect_key,effect_group_key,sequence,effect_type,source_type,source_id,target_type,
              telegram_chat_id,queue,telegram_method,locale,template_version,state,attempts,
               next_attempt_at,sent_at,unknown_at,failed_at,last_error_code,telegram_message_id,supersedes_effect_id,outcome_metadata,created_at,updated_at)
-             VALUES (%s,%s,%s,1,%s,%s,%s,%s,%s,'notifications',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)
+              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'notifications',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)
             ON CONFLICT (effect_key) DO NOTHING''',
-            (str(uuid4()), key, key, kind, 'App\\Models\\' + model, str(source), target, str(chat), method,
+            (str(uuid4()), key, key, sequence, kind, 'App\\Models\\' + model, str(source), target, str(chat), method,
              locale, template, state, legacy.get('attempts', 0),
              legacy.get('retry_at') or at if state in ('pending', 'failed') and not terminal else None,
              legacy.get('sent_at'), at if state == 'unknown' else None, legacy.get('failed_at'),
@@ -87,6 +105,8 @@ class Notifications:
             raise NotEligible()
         if kind in ORDER_TYPES and self.order_notices is not None:
             return self.order_notices.payload(effect)
+        if kind in BALANCE_TYPES:
+            return self.balance_notifications.payload(effect)
         if kind == BROADCAST:
             row = self._recipient(effect, RECIPIENT_TABLES[kind])
             source = self.db.one('SELECT * FROM public.telegram_broadcasts WHERE id=%s', (row['broadcast_id'],))
@@ -98,28 +118,50 @@ class Notifications:
             return result
         if kind == STOCK:
             row = self._recipient(effect, RECIPIENT_TABLES[kind])
-            if row.get('photo_path'):
-                # Never turn a stored path into an arbitrary filesystem read or
-                # silently change the snapshotted photo into a text delivery.
+            from .html import telegram_entities
+            from ..navigation.repository import CatalogRepository
+            movement = self.db.one('''SELECT m.product_id,m.quantity,m.became_unavailable
+                FROM public.stock_notification_events e JOIN public.inventory_movements m ON m.id=e.inventory_movement_id
+                WHERE e.id=%s''', (row['stock_notification_event_id'],))
+            if movement and movement['quantity'] < 0 and movement['became_unavailable']:
+                product = CatalogRepository(self.db.using).product(movement['product_id'])
+                if product and product['available_stock'] > 0:
+                    raise NotEligible()
+            if effect['target_type'] != row['recipient_type']:
                 raise NotEligible()
+            if effect['target_type'] == 'store_channel':
+                setting = self.db.one("SELECT telegram_chat_id,last_test_success FROM public.store_channel_settings WHERE singleton_key='store_channel'")
+                if not setting or not setting['last_test_success'] or not self.recipients.permits(setting['telegram_chat_id']):
+                    raise NotEligible()
+            if effect['telegram_method'] == 'sendPhoto':
+                from ..storefront.public_media import open_image
+                if not row.get('photo_path'):
+                    raise NotEligible()
+                text, entities = telegram_entities(row['text'])
+                stream, _, _ = open_image(row['photo_path'])
+                with stream:
+                    image = stream.read()
+                return {'chat_id': effect['telegram_chat_id'], 'photo': image, 'caption': text,
+                        'caption_entities': entities,
+                        'reply_markup': broadcast.markup(row['reply_markup'], effect['locale'])}
             return {'chat_id': effect['telegram_chat_id'], 'text': row['text'],
                     'reply_markup': broadcast.markup(row['reply_markup'], effect['locale']), 'parse_mode': 'HTML'}
         if kind == MANUAL:
-            row = self.db.one('''SELECT p.payment_proof_file_id,p.payment_proof_admin_chat_id,
-                p.payment_proof_submitted_at,o.invoice_number FROM public.payments p
-                JOIN public.orders o ON o.id=p.order_id WHERE p.id=%s''', (effect['source_id'],))
-            if (not row or not row['payment_proof_submitted_at'] or not row['payment_proof_file_id']
-                    or effect['target_type'] != 'admin'
-                    or str(row['payment_proof_admin_chat_id']) != effect['telegram_chat_id']):
-                raise NotEligible()
-            return {'chat_id': effect['telegram_chat_id'], 'photo': row['payment_proof_file_id'],
-                    'caption': 'Bukti pembayaran manual\n' + row['invoice_number']}
+            from .payment_proof import payload
+            return payload(self.db, effect)
         if kind == PRICE:
             row = self._recipient(effect, RECIPIENT_TABLES[kind])
             event = self.db.one('SELECT * FROM public.product_price_change_events WHERE id=%s', (row['event_id'],))
             if not event or effect['target_type'] != 'customer':
                 raise NotEligible()
-            return price.payload(event, effect)
+            return price.payload(event, effect, icons=self.db.rows('SELECT source_emoji,fallback_emoji,custom_emoji_id FROM public.telegram_ui_icons'))
+        if kind == PRICE_CHANNEL:
+            event = self.db.one('SELECT * FROM public.product_price_change_events WHERE id=%s', (effect['source_id'],))
+            setting = self.db.one("SELECT telegram_chat_id,channel_username FROM public.store_channel_settings WHERE singleton_key='store_channel'")
+            chat = str((setting or {}).get('telegram_chat_id') or (setting or {}).get('channel_username') or '').strip()
+            if not event or effect['target_type'] != 'store_channel' or not self.recipients.permits(chat):
+                raise NotEligible()
+            return price.payload(event, effect, icons=self.db.rows('SELECT source_emoji,fallback_emoji,custom_emoji_id FROM public.telegram_ui_icons'))
         if kind == ADJUSTMENT:
             metadata = effect.get('outcome_metadata') or {}
             if isinstance(metadata, str):
@@ -146,7 +188,7 @@ class Notifications:
             pending = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id=%s', (effect_id,))
             if not self.order_notices.prepare(pending):
                 return 'waiting_outcome'
-        if preview['effect_type'] in (BROADCAST, STOCK, PRICE) and not self.rate.acquire():
+        if preview['effect_type'] in (BROADCAST, STOCK, PRICE, PRICE_CHANNEL) and not self.rate.acquire():
             return 'rate_limited'
         effect = self.protocol.claim(effect_id)
         if effect is None:
@@ -224,6 +266,12 @@ class Notifications:
                 updated_at=%s WHERE id=%s AND payment_proof_forwarded_at IS NULL
                 AND payment_proof_admin_chat_id=%s''',
                 (effect['sent_at'], at, effect['source_id'], effect['telegram_chat_id']))
+        if kind == PRICE_CHANNEL and effect['state'] in ('sent', 'unknown', 'manual_review'):
+            return self.db.execute('''UPDATE public.product_price_change_events SET store_channel_sent_at=%s,
+                store_channel_message_id=%s,store_channel_failed_at=NULL,store_channel_last_error=%s,
+                store_channel_attempts=%s,updated_at=%s WHERE id=%s AND store_channel_sent_at IS NULL''',
+                (effect['sent_at'] if effect['state'] == 'sent' else None, effect['telegram_message_id'],
+                 None if effect['state'] == 'sent' else 'Delivery outcome requires review.', effect['attempts'], at, effect['source_id']))
         if kind == PROOF and effect['state'] in ('sent', 'unknown', 'manual_review'):
             return self.db.execute('''UPDATE public.sales_proof_posts SET status=%s,
                 telegram_message_id=%s,sent_at=%s,attempts=%s,last_error=%s,updated_at=%s
@@ -265,15 +313,23 @@ class Notifications:
             self._aggregate(effect)
         self._projection_cursor = str(rows[-1]['id']) if rows else None
         sources = self.db.rows('''SELECT id FROM public.telegram_broadcasts
-            WHERE recipients_materialized_at IS NULL ORDER BY id LIMIT %s''', (limit,)) if BROADCAST in self.protocol.effect_types else ()
+            WHERE recipients_materialized_at IS NULL AND id>%s ORDER BY id LIMIT %s''',
+            (self._broadcast_cursor, limit)) if BROADCAST in self.protocol.effect_types else ()
+        self._broadcast_cursor = sources[-1]['id'] if sources else 0
         for source in sources:
             broadcast.materialize(self.db, self.recipients, source['id'], self.record)
+        if PRICE in self.protocol.effect_types or PRICE_CHANNEL in self.protocol.effect_types:
+            self.price_notifications.recover(self.record, limit, channel_enabled=PRICE_CHANNEL in self.protocol.effect_types)
+        if STOCK in self.protocol.effect_types:
+            self.stock_notifications.recover(limit)
         self.materialize_recipients(limit)
         if PROOF in self.protocol.effect_types and self.proof is not None:
             self.proof.discover(self.record, limit)
         if self.order_notices is not None:
             self.order_notices.discover(self.record, limit)
             self.order_notices.recover_results(self.record, limit)
+        if set(BALANCE_TYPES) <= set(self.protocol.effect_types):
+            self.balance_notifications.recover(self.record, limit)
         outcomes = {}
         for effect in self.protocol.ready_effects(limit, chats=chats):
             result = self.deliver(effect['id'])
@@ -314,4 +370,5 @@ class Notifications:
                         target = 'customer'
                     self.record(key=key, kind=kind, model=MODELS[kind], source=recipient['id'],
                                 chat=recipient['telegram_id'], target=target,
-                                locale=recipient.get('locale') or 'en', template='notification-v1', legacy=recipient)
+                                locale=recipient.get('locale') or 'en', template='notification-v1', legacy=recipient,
+                                method='sendPhoto' if kind == STOCK and recipient.get('photo_path') and len(recipient['text']) <= 1024 else 'sendMessage')

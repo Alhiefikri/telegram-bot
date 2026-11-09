@@ -196,8 +196,20 @@ def order_credential_mail(request, order_id):
 @require_POST
 @access.guard
 def order_sales_proof(request, order_id):
-    return _fail(request, CheckoutError("sales_proof_retry_owned_by_p25"),
-                 f"/admin/orders/{order_id}")
+    from ..notifications.policy import PROOF, TestRecipients
+    from ..notifications.proof_publication import SalesProofPublication
+    from ..notifications.service import Notifications
+    target = f"/admin/orders/{order_id}"
+    if not access.can_manage_operations(request):
+        raise Http404()
+    recipients = TestRecipients(frozenset({'1'}))
+    owner = SalesProofPublication(recipients)
+    protocol = Notifications(None, recipients=recipients, proof=owner, families=(PROOF,)).protocol
+    try:
+        owner.retry(str(order_id), request.admin_user['id'], protocol, ip=request.META.get('REMOTE_ADDR'))
+    except CheckoutError as error:
+        return _fail(request, error, target)
+    return _ok(request, 'Retry Sales Proof Post dicatat. Unknown delivery tetap memerlukan review.', target)
 
 
 @require_POST

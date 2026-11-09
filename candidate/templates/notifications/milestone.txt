@@ -1,0 +1,18 @@
+{% autoescape off %}{{ headline }}
+
+{{ intro }}
+
+Invoice: {{ invoice_number }}
+Status saat ini: {{ status_label }} ({{ order_status }})
+
+Ringkasan pesanan:
+{% for item in items %}- {{ item.name }} x {{ item.quantity }}
+{% empty %}- Detail produk tersedia di halaman invoice.
+{% endfor %}{% if payment_deadline %}
+Batas pembayaran: {{ payment_deadline }}
+{% endif %}
+Buka invoice dan status: {{ invoice_url }}
+Akses pesanan: {{ order_access_url }}
+
+{{ footer }}
+{% endautoescape %}

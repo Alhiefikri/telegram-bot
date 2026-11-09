@@ -128,6 +128,35 @@ class CompletionTests(unittest.TestCase):
         handler.sweep_bounded(5, bounded, lambda: True)
         bounded.assert_not_called()
 
+    def test_auth_and_milestone_mail_share_only_isolated_mail_budget(self):
+        owners = [SimpleNamespace(recover=Mock(), deliver=Mock(), confirm_mail=Mock()) for _ in range(4)]
+        handler = MailHandler(*owners)
+        bounded = Mock(side_effect=lambda function, limit: function(limit))
+        firsts = []
+        for _ in range(4):
+            bounded.reset_mock()
+            handler.sweep_bounded(5, bounded, lambda: False)
+            self.assertEqual(bounded.call_count, 4)
+            firsts.append(bounded.call_args_list[0].args[0])
+        self.assertEqual(firsts, [owner.recover for owner in owners])
+        for kind, owner in (('auth.mail', owners[2]), ('milestone.mail', owners[3])):
+            handler.handle(wakeup.encode(kind, 123))
+            owner.deliver.assert_called_once_with(123)
+            for queue in ('candidate:interaction', 'candidate:payments', 'candidate:telegram-receipts', 'candidate:notices'):
+                with self.assertRaises(wakeup.InvalidWakeup):
+                    wakeup.decode(queue, wakeup.encode(kind, 123))
+
+    def test_auth_mail_copy_uses_fragments_and_php_expiry(self):
+        from lhie_candidate.auth.mail import auth_copy
+        for purpose, minutes in (('magic', '15 menit'), ('password_reset', '30 menit'), ('email_verification', '30 menit')):
+            copy = auth_copy(purpose, 'a' * 64)
+            self.assertIn('#token=' + 'a' * 64, copy['url'])
+            self.assertIn(minutes, ' '.join(copy['lines']) + (copy['expiry'] or ''))
+        copy = auth_copy('email_otp', '123456')
+        self.assertIsNone(copy['url'])
+        self.assertIn('123456', copy['lines'])
+        self.assertIn('10 menit', ' '.join(copy['lines']))
+
 
 if __name__ == '__main__':
     unittest.main()

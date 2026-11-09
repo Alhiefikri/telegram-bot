@@ -307,3 +307,173 @@ unsupported parse-mode option. No failed run was labelled flaky or accepted.
 Current dataset: `synthetic-p25-notifications-isolation-v3`. Source-hash manifest:
 `.local/migration-p25/verification.json`. Full P25 acceptance remains blocked by
 the explicit remaining rows above; this continuation does not establish #708.
+
+### Completion-branch audit and continuation (2026-11-09, uncommitted)
+
+The checkpoint was `0d9d0651` on `migration/p25-completion-708`. Before reusing
+its evidence, all **102** `source_sha256` entries in the retained P25 manifest
+were checked and matched. That did not establish the correctness of the code:
+the audit found auth-mail ambiguity retries, successor notices stuck at
+`sequence=1`, and a disabled Sales Proof retry route. These are implementation
+findings, not historical-data or production findings.
+
+Implemented additions (all still local/opt-in):
+
+- `auth/mail.py` retains uncertain SMTP attempts as terminal
+  `mail_delivery_unknown`, clears encrypted work payloads at terminal outcomes,
+  fences stale completion by attempt/deadline and permits a retry only after an
+  explicit `DefiniteMailFailure`. Imported previously attempted work without that
+  definite marker is conservatively uncertain. OTP work additionally checks the
+  original browser-binding shape. Grant consumption remains owned by P19; mail
+  does not grant authentication. The fixed sink admits only `.invalid` recipients.
+- The isolated mail consumer fairly rotates credential, waitlist, auth and guest
+  milestone owners. Wakeups for the latter two contain integer work IDs only.
+  `milestones.py` uses existing `order_notification_events`, encrypted recipient
+  snapshots and the credential-mail claim/finalization seam. Lifecycle, storefront
+  contact capture and supplier completion commit their milestone handoffs with
+  the source change, without rendering or external I/O. Retained committed state
+  and existing pending handoffs are recovered in bounded pages.
+- `broadcast_intents.py` adds private-admin `/broadcast` draft/preview,
+  optional Product selection, expiry, cancellation and explicit confirmation.
+  Confirmation writes the canonical `telegram_broadcasts` source and consumes
+  the current draft atomically. Replays cannot publish a second source. It accepts
+  text or one photo, preserves authored content, snapshots localized action
+  buttons and revalidates authorization/Product eligibility. Session state is
+  the existing navigation state, not another outbox. Source recovery rotates
+  instead of remaining stuck on its first incomplete source page.
+- Price events have bounded admitted-audience recovery and the Store Channel
+  family. Admin price edits in the opt-in profile create the immutable event in
+  the existing Product transaction. Stock recovery renders locale/price/tier/
+  description/channel snapshots into existing recipient rows. Photo reads use
+  the guarded disposable public-image reader, outside transactions; HTML becomes
+  explicit Telegram entities for the upload relay. Stale sold-out delivery is
+  rejected. Channel admission/readiness and the legacy event/chat uniqueness
+  remain authoritative; the channel is inserted before a coincident DM target.
+- `payment_proof.py` replaces the checkpoint's abbreviated proof caption with
+  the PHP item/customer/exact-money/late-evidence presentation and decision
+  buttons, rechecking the retained attachment, admin target and payment state.
+  `balance.py` adds IDR top-up receipts and paid Owner notices, proving the exact
+  immutable posting and Customer/source ownership instead of treating a `paid`
+  label as financial evidence. Delivery pause applies before receipt claim.
+- Paid outcome successor effects advance their predecessor sequence; projection
+  repair serializes on the Order and can replace an old non-null timestamp with
+  the latest sent version without transport. The existing admin Sales Proof retry
+  POST now requests one shared-protocol manual attempt for a definite failed
+  effect, retaining attempts/history. Unknown and terminal rejection cannot use
+  this route. The protocol consumes the manual flag at pickup, not an unlimited
+  attempt-limit bypass.
+- Sales Proof's explicit stopped-publisher counter handoff imports a PHP
+  `publishedCount()` floor and exports a monotonic rollback floor, including
+  reserved/unknown publication numbers rather than only sent rows. The existing
+  PHP cache key must receive that floor before PHP resumes. This seam is not an
+  automatic production Redis migration or permission to operate a live cache.
+- PHP rollback readers retain candidate auth in-flight markers and milestone
+  pending/in-flight/cancelled states; milestone sends use the encrypted recipient
+  snapshot when present. Any rollback image must contain these guards, in addition
+  to the checkpoint's waitlist guards.
+
+Verification remains in `tools/migration_harness/smoke_checkout.py --notifications`
+and **one** `.local/migration-p25/verification.json`. The expanded deterministic
+fixture is `synthetic-p25-notifications-completion-v4`; PHP/Python comparator
+Customers both receive the same additional real manual top-up through the
+canonical PHP confirmation/ledger owner. No ledger projection/history is edited
+to make an assertion pass. Retained numeric-stock review history is also created
+by the PHP owner: the candidate currently refuses a new numeric-only checkout
+at its credential inventory guard. That separate upstream parity gap has not
+been bypassed or declared fixed by P25.
+
+The runner additionally checks exact price copy for `id/ms/en`, PHP/Django HTML
+for guest milestones and a **redacted** structured-credential preview, and offline
+Chromium mail layouts at 390/1280px. Browser evidence contains `[REDACTED]`, never
+an issued grant, password, Auth Token or Recovery Key. Browser binaries are
+already-installed local tools; the run downloads none and records their identity.
+Static preview/pixel comparisons do not establish native mail-client rendering,
+full waitlist browser behavior, Android/iOS Telegram display or full P27 acceptance.
+
+Failure diagnostics now record only code locations, exception classes and
+SQLSTATE, not exception messages/SQL DETAIL/locals that could expose secrets.
+The expanded smoke diagnoses concrete fixture/read-boundary failures rather
+than relabelling them flaky: a definite-failure fixture incorrectly used HTTP
+500 (which the shared protocol correctly treats as ambiguous), a removed legacy
+price lease column, colliding synthetic channel/DM recipients, a manual top-up
+fixture using `manual` instead of `QR_MANUAL`, a review test requesting ungranted
+columns, and a proof-submitted checkout correctly held against ordinary expiry.
+The fixtures/read projections were corrected; those guards were not weakened.
+
+#### Acceptance mapping — not yet complete
+
+| Requirement | Implementation/evidence owner | Remaining limit |
+| --- | --- | --- |
+| Credential retry recipient, expiry/grant, private secret transport | CredentialMail, MailWork, MilestoneMail; SMTP/claim/expiry/unknown and rollback-reader checks | Full auth HTML differential and all retained mail variants still need qualification |
+| Confirmed broadcast, authored content, locale/recipient snapshots | BroadcastIntents + existing broadcast recipients/effects; confirmation/replay/cancel and changed HTTP-to-bulk flow | Full picker/premium-icon/photo confirmation parity and complete original-audience handoff are not established by a filtered local audience |
+| Stock/price materialization and channel/photo delivery | Existing event/recipient owners, guarded image reader, shared effect protocol; price/stock PHP content comparisons | All stock transitions, aggregate projection repair and historical photo layouts remain to audit/qualify |
+| Payment/balance/admin notices | OrderNotices, payment_proof.py, balance.py; existing receipt evidence | IDR instruction/proof/compensation/owner-alert/channel-proof and supplier-health families are not claimed complete; supplier-specific outcome E2E remains outstanding |
+| Unknown no-blind-retry and sent projection no-resend | Existing shared effect protocol; no second ledger/outbox | Must cover the remaining families before P25 acceptance |
+| Sales Proof retry/counter/rollback | Shared manual retry + guarded admin POST + explicit counter floor transfer + PHP rollback readers | Full retry-browser flow, retained v1/v2 public proof differential and real cache namespace handoff are not qualified |
+| Critical-worker isolation/resource budget | Same opt-in eight-process/seven-connection profile; held SMTP versus navigation/receipt | Short disposable resource observations are not final whole-stack/production capacity evidence |
+
+**P25 is not accepted, and its prerequisite for #708 is not fulfilled.** Remaining
+implementation/qualification is not an operator-access blocker or an implicit
+waiver. #708 has not been started. No commit, push, merge, issue mutation,
+production access, live send, provider activation or CI/CD operation is authorized
+or implied by this continuation.
+
+Focused regression commands for this continuation:
+
+```sh
+cd candidate
+.venv/bin/python -m unittest tests.test_notification_completion tests.test_runtime tests.test_notifications tests.test_waitlist tests.test_workers tests.test_receipt_render tests.test_receipt_transport tests.test_jobs tests.test_legacy_crypto tests.test_auth_core tests.test_auth_http tests.test_auth_providers
+.venv/bin/python -m unittest tests.test_admin_operations tests.test_admin_pricing tests.test_order_projection tests.test_order_refunds
+.venv/bin/python -m compileall -q lhie_candidate tests
+cd ../src
+php vendor/bin/phpunit tests/Feature/CustomerAuthMailDeliveryTest.php tests/Feature/GuestOrderNotificationTest.php
+cd ..
+git diff --check
+```
+
+Observed: **121 + 26 focused Python tests**, **21 PHP tests / 189 assertions**,
+compilation and whitespace validation pass. These are focused behavior/rollback
+checks, not PostgreSQL concurrency or full P25 acceptance by themselves. The
+disposable runner supplies changed-flow PostgreSQL/HTTP/Redis/SMTP/browser
+evidence separately in the existing manifest, with its source hashes and limits.
+
+#### Current v4 composition evidence (2026-11-09)
+
+The expanded `--notifications` runner now passes through the final browser and
+drained counter-handoff checks. The retained single manifest identifies
+`synthetic-p25-notifications-completion-v4`; all **122 candidate/harness source
+hashes** and **39 PHP owner hashes** matched the working files after the run.
+This replaces the stale v3 evidence for these tested slices, not for unimplemented
+families or the remaining acceptance rows above.
+
+The expiry failure was an incorrect test assumption about bounded discovery:
+two sweeps do not necessarily rotate a keyset when other unnotified, currently
+ineligible Orders occupy multiple pages. Random UUID order made that assumption
+intermittently pass. The regression now deliberately places the expired Order
+behind the cursor, verifies it is initially absent, and requires discovery within
+one population-bounded rotation of seven-row pages. It neither resets the
+production cursor nor directly creates the expected notification. No lifecycle,
+financial or transport guard was changed to make this check pass.
+
+Auth copy is additionally compared against the actual PHP `toMail()` output for
+all four purposes: verification, password reset, browser-bound OTP and login
+link. Subjects, greeting, paragraph placement, actions, expiry language and exact
+route/query/fragment match (only the deliberately different disposable origins
+are excluded). The oracle uses `[REDACTED]`, never a persisted/issued capability.
+This establishes semantic copy/route parity, **not** full Laravel/Django HTML
+layout equality or end-to-end grant/browser acceptance for every purpose.
+
+Current smoke results include the changed HTTP-confirmation-to-bulk flow, held
+SMTP versus navigation/receipt progress, paid-outcome successor recovery, expiry
+cleanup, manual proof photo/caption, historical fulfillment review, immutable IDR
+posting-backed notices, stock channel photo, and the existing unknown/no-resend
+checks. Redacted credential and milestone previews are pixel-identical to PHP
+at 390px and 1280px. Counter evidence imports PHP floor **37**, exports candidate
+floor **43** after workers drain, and verifies PHP next reservation **44**.
+
+The latest short isolated-worker observation is 422,977,536 peak cgroup bytes,
+10 peak PIDs, seven runtime DB connections and 0.433 average CPUs over 23.357s;
+these include probe/harness overhead and are not production capacity evidence.
+Remaining balance families, supplier-health/outcome qualification, historical
+presentation/aggregate cases and full browser flows still prevent P25 acceptance.
+**#708 remains unstarted and its P25 prerequisite remains unfulfilled.**

@@ -390,23 +390,18 @@ def exercise_mail_faults(service, admin, mail, cipher, browser):
             assert entered.wait(timeout=10)
             newer = MailWork(cipher, app_key=service.app_key, clock=lambda: base + timedelta(seconds=121),
                              transport=UnavailableSink())
-            try:
-                newer.deliver(work_id)
-            except AuthError:
-                pass
-            else:
-                raise AssertionError("Expected SMTP failure")
+            assert not newer.deliver(work_id)
         finally:
             release.set()
-        assert future.result(timeout=10)
+        assert not future.result(timeout=10)
     assert admin.execute("SELECT status,attempts,payload IS NOT NULL,last_error_code FROM public.customer_auth_mail_works WHERE id=%s",
-                         (work_id,)).fetchone() == ("pending", 2, True, "mail_delivery_failed")
-    # A stale successful ACK cannot erase the newer attempt's durable retry.
+                         (work_id,)).fetchone() == ("failed", 1, False, "mail_delivery_unknown")
+    # A stale ACK cannot erase uncertainty or authorize another capability send.
     recovered = MailWork(cipher, app_key=service.app_key, clock=lambda: base + timedelta(seconds=242))
     recovered.recover(limit=100)
     assert admin.execute("SELECT status,attempts,payload FROM public.customer_auth_mail_works WHERE id=%s",
-                         (work_id,)).fetchone() == ("sent", 3, None)
-    return "lost wakeup recovery; same capability retried; stale successful sender fenced"
+                         (work_id,)).fetchone() == ("failed", 1, None)
+    return "lost wakeup recovery; expired attempt retained unknown; stale successful sender fenced without resend"
 
 
 def exercise_http(data, admin, mail, service, claimed_owner):

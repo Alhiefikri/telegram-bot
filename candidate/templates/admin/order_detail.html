@@ -38,7 +38,7 @@
       {% if order.can_resend_mail %}
       <form method="post" action="/admin/orders/{{ order.id }}/credential-email">{% csrf_token %}<button class="admin-button" type="submit">Kirim ulang email akun</button></form>
       {% endif %}
-      <form method="post" action="/admin/orders/{{ order.id }}/sales-proof/retry">{% csrf_token %}<button class="admin-button" type="submit" disabled title="Sales Proof retry dimiliki P25">Retry Sales Proof</button></form>
+      <form method="post" action="/admin/orders/{{ order.id }}/sales-proof/retry">{% csrf_token %}<button class="admin-button" type="submit">Retry Sales Proof</button></form>
     </div>
     <p class="admin-help">Tombol setujui/tolak hanya muncul saat Payment Binance manual menyimpan bukti mismatch. Approval manual biasa dilakukan di Manual Fulfillment Review.</p>
   </section>

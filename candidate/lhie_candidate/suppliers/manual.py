@@ -50,6 +50,8 @@ class ManualSupplierRecovery(SupplierAcquisition):
             actor_user_id=%s,resolution_reason=%s,updated_at=%s WHERE order_id=%s AND state='pending'
             AND reason IN ('supplier_fulfillment','late_payment')''', (at, actor, reason, at, order['id']))
         self.db.execute("UPDATE public.orders SET order_status='completed',updated_at=%s WHERE id=%s", (at, order['id']))
+        from ..notifications.milestones import record_transition
+        record_transition(self.db, order['id'], 'fulfillment_completed')
         has_handoff = self.db.one('''SELECT h.id FROM public.supplier_manual_handoffs h
             JOIN public.supplier_fulfillments f ON f.id=h.supplier_fulfillment_id
             WHERE f.order_id=%s LIMIT 1''', (order['id'],))

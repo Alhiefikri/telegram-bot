@@ -73,6 +73,15 @@ class ReceiptSource:
         return self.db.rows('''SELECT key,fallback_emoji,source_emoji,custom_emoji_id
             FROM public.telegram_ui_icons ORDER BY sort_order,label,id''')
 
+    def invoice_url(self, order_id, created):
+        if not self.signing_key or not self.invoice_base_url or created is None:
+            return ''
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=ZoneInfo('Asia/Jakarta'))
+        expires = int((created + timedelta(days=7)).timestamp())
+        unsigned = f"/shop/orders/{order_id}?expires={expires}"
+        return self.invoice_base_url + unsigned + '&signature=' + signed_url_digest(unsigned, self.signing_key)
+
     def support_url(self):
         setting = self.db.one('''SELECT admin_contact_url,admin_username FROM public.manual_payment_settings
             ORDER BY is_active DESC,id LIMIT 1''')
@@ -249,14 +258,7 @@ class ReceiptSource:
                   'bank_transfer': _tr(display_locale, 'payment.method.bank_transfer')}.get(method, payment['method'])
         paid = payment['paid_at']
         paid_label = f"{paid:%d} {_tr(display_locale, 'date.month.' + str(paid.month))} {paid:%Y %H:%M} WIB"
-        invoice_url = ''
-        if self.signing_key and self.invoice_base_url and order['created_at'] is not None:
-            created = order['created_at']
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=ZoneInfo('Asia/Jakarta'))
-            expires = int((created + timedelta(days=7)).timestamp())
-            unsigned = f"/shop/orders/{order['id']}?expires={expires}"
-            invoice_url = self.invoice_base_url + unsigned + '&signature=' + signed_url_digest(unsigned, self.signing_key)
+        invoice_url = self.invoice_url(order['id'], order['created_at'])
         invoice = order['invoice_number'] or str(order['id'])
         return {'order_id': str(order['id']), 'customer_id': order['customer_id'],
             'chat_id': str(order['telegram_id']) if order['telegram_id'] is not None else None,

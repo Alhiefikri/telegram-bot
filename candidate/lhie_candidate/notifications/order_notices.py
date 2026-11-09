@@ -308,20 +308,25 @@ class OrderNotices:
         if (kind not in COLUMNS or effect['state'] != 'sent'
                 or not str(effect['telegram_message_id'] or '').isdigit() or int(effect['telegram_message_id']) < 1):
             return 0
-        if self.db.one('''SELECT id FROM public.telegram_outbound_effects WHERE source_type=%s AND source_id=%s
-            AND effect_type=%s AND state='sent' AND sequence>%s LIMIT 1''',
-            (effect['source_type'], effect['source_id'], kind, effect['sequence'])):
-            return 0
         column, at = COLUMNS[kind], _now()
-        if kind == PENDING:
-            return self.db.execute(f'''UPDATE public.orders SET {column}=%s,admin_pending_order_notification_chat_id=%s,
-                admin_pending_order_notification_message_id=%s,updated_at=%s WHERE id=%s AND
-                ({column},admin_pending_order_notification_chat_id,admin_pending_order_notification_message_id)
-                IS DISTINCT FROM (%s,%s,%s)''',
-                (effect['sent_at'], effect['telegram_chat_id'], effect['telegram_message_id'], at, effect['source_id'],
-                 effect['sent_at'], effect['telegram_chat_id'], effect['telegram_message_id']))
-        return self.db.execute(f'UPDATE public.orders SET {column}=%s,updated_at=%s WHERE id=%s AND {column} IS NULL',
-                               (effect['sent_at'], at, effect['source_id']))
+        # Serialize against successor creation and keep the latest-version test
+        # in the same transaction as the conditional projection write. An old
+        # sent row must not overwrite the successor during a recovery sweep.
+        with transaction.atomic(using=self.db.using):
+            self.db.one('SELECT id FROM public.orders WHERE id=%s FOR UPDATE', (effect['source_id'],))
+            if self.db.one('''SELECT id FROM public.telegram_outbound_effects WHERE source_type=%s AND source_id=%s
+                AND effect_type=%s AND state='sent' AND sequence>%s LIMIT 1''',
+                (effect['source_type'], effect['source_id'], kind, effect['sequence'])):
+                return 0
+            if kind == PENDING:
+                return self.db.execute(f'''UPDATE public.orders SET {column}=%s,admin_pending_order_notification_chat_id=%s,
+                    admin_pending_order_notification_message_id=%s,updated_at=%s WHERE id=%s AND
+                    ({column},admin_pending_order_notification_chat_id,admin_pending_order_notification_message_id)
+                    IS DISTINCT FROM (%s,%s,%s)''',
+                    (effect['sent_at'], effect['telegram_chat_id'], effect['telegram_message_id'], at, effect['source_id'],
+                     effect['sent_at'], effect['telegram_chat_id'], effect['telegram_message_id']))
+            return self.db.execute(f'UPDATE public.orders SET {column}=%s,updated_at=%s WHERE id=%s AND {column} IS DISTINCT FROM %s',
+                                   (effect['sent_at'], at, effect['source_id'], effect['sent_at']))
 
     def cleanup(self, order_id):
         order = self.db.one('''SELECT order_status,payment_status,admin_pending_order_notification_deleted_at,

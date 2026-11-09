@@ -107,7 +107,7 @@ QUEUES = tuple(TOPOLOGY)
 NOTIFICATION_TOPOLOGY = {
     'notice': QueueSpec('notice', 'candidate:notices', ('notification.effect',), 10, 5, 10, 3),
     'bulk': QueueSpec('bulk', 'candidate:bulk', ('bulk.effect',), 10, 5, 10, 5),
-    'mail': QueueSpec('mail', 'candidate:mail', ('credential.mail', 'waitlist.confirmation', 'waitlist.delivery'), 5, 5, 5, 5),
+    'mail': QueueSpec('mail', 'candidate:mail', ('credential.mail', 'auth.mail', 'milestone.mail', 'waitlist.confirmation', 'waitlist.delivery'), 5, 5, 5, 5),
 }
 ALL_TOPOLOGY = {**TOPOLOGY, **NOTIFICATION_TOPOLOGY}
 WAKEUP_QUEUES = {spec.wakeup_queue: spec for spec in ALL_TOPOLOGY.values()}

@@ -19,9 +19,19 @@ TEXT_ICONS = {'message.users': '👥', 'message.ticket': '🎫', 'message.detail
               'message.quantity': '🔢', 'message.deadline': '⏳', 'message.cash': '💵', 'message.next': '➡️'}
 _NUMBER = '''local current=tonumber(redis.call('GET',KEYS[1]) or '0')
 local floor=tonumber(ARGV[1])
-if not current or current<0 or not floor then return redis.error_reply('invalid counter') end
+if not current or current<0 or current~=math.floor(current) or not floor
+  or floor<0 or floor~=math.floor(floor) or math.max(current,floor)>=9007199254740990
+  then return redis.error_reply('invalid counter') end
 if current<floor then redis.call('SET',KEYS[1],ARGV[1]) end
 return redis.call('INCR',KEYS[1])'''
+_COUNTER_FLOOR = '''local current=tonumber(redis.call('GET',KEYS[1]) or '0')
+local floor=tonumber(ARGV[1])
+if not current or current<0 or current~=math.floor(current) or not floor or floor<0
+  or floor~=math.floor(floor) or math.max(current,floor)>=9007199254740991
+  then return redis.error_reply('invalid counter') end
+if current<floor then redis.call('SET',KEYS[1],ARGV[1]); return floor end
+return current'''
+COUNTER_KEY = 'candidate:sales-proof-posts:published-count'
 
 
 class PublicationUnavailable(Exception):
@@ -106,6 +116,25 @@ class SalesProofPublication:
         self.counter = counter if counter is not None else RedisAdmission()
         self._cursor = None
 
+    def handoff_counter(self, legacy_floor, *, producers_stopped=False):
+        """Local cutover seam: import PHP's publishedCount, export rollback floor.
+
+        Run only after both publishers are drained. The returned floor must be
+        installed in PHP's existing sales-proof-posts:published-count cache
+        before PHP publication resumes. Never infer the floor from sent rows:
+        reserved/unknown publications and fake-proof reservations count too.
+        """
+        if producers_stopped is not True or type(legacy_floor) is not int or not 0 <= legacy_floor < 2**53 - 1:
+            raise ValueError('Counter handoff requires stopped publishers and an exact floor')
+        sent = self.db.one("SELECT count(*) AS count FROM public.sales_proof_posts WHERE status='sent'")['count']
+        try:
+            result = self.counter.eval(_COUNTER_FLOOR, 1, COUNTER_KEY, max(sent, legacy_floor))
+        except Exception:
+            raise PublicationUnavailable() from None
+        if type(result) is not int or not 0 <= result < 2**53 - 1:
+            raise PublicationUnavailable()
+        return result
+
     def setting(self):
         row = self.db.one("SELECT sales_proof_enabled,telegram_chat_id,channel_username FROM public.store_channel_settings WHERE singleton_key='store_channel'")
         if not row or not row['sales_proof_enabled']:
@@ -149,6 +178,35 @@ class SalesProofPublication:
                 WHERE id=%s AND effect_type=%s AND template_version=%s AND state IN ('pending','failed')
                   AND telegram_method<>'sendPhoto' ''', (_now(), effect_id, PROOF, PHOTO_TEMPLATE))
 
+    def retry(self, order_id, actor_id, protocol, *, ip=None):
+        from ..checkout.errors import CheckoutError
+        with transaction.atomic(using=self.db.using):
+            actor = self.db.one('SELECT role FROM public.users WHERE id=%s', (actor_id,))
+            if not actor or actor['role'] not in ('owner', 'admin'):
+                raise CheckoutError('operator_forbidden')
+            self.db.one('SELECT id FROM public.orders WHERE id=%s FOR UPDATE', (order_id,))
+            try:
+                self.setting()
+                self.eligibility.load(order_id)
+            except NotEligible:
+                raise CheckoutError('sales_proof_not_eligible') from None
+            post = self.db.one('SELECT * FROM public.sales_proof_posts WHERE order_id=%s FOR UPDATE', (order_id,))
+            effect = self.db.one('''SELECT * FROM public.telegram_outbound_effects
+                WHERE source_type='App\\Models\\Order' AND source_id=%s AND effect_type=%s
+                ORDER BY sequence DESC,created_at DESC,id DESC LIMIT 1 FOR UPDATE''', (str(order_id), PROOF))
+            if (not post or post['status'] != 'failed' or not effect
+                    or not self.recipients.permits(effect['telegram_chat_id'])):
+                raise CheckoutError('sales_proof_retry_unavailable')
+            result = protocol.request_manual_retry(effect['id'])
+            if not result:
+                raise CheckoutError('sales_proof_retry_unavailable')
+            self.db.execute("UPDATE public.sales_proof_posts SET status='pending',last_error=NULL,updated_at=%s WHERE id=%s", (_now(), post['id']))
+            self.db.execute('''INSERT INTO public.audit_logs
+                (user_id,action,subject_type,subject_id,new_values,ip_address,created_at)
+                VALUES (%s,'sales_proof.retry_requested','App\\Models\\SalesProofPost',%s,%s,%s,%s)''',
+                (actor_id, str(post['id']), '{"order_id":"' + str(order_id) + '"}', ip, _now()))
+            return result
+
     def payload(self, effect):
         self.setting()  # Disabled channels never send retained work.
         if effect['target_type'] != 'store_channel' or effect['template_version'] not in (PHOTO_TEMPLATE, LEGACY_TEMPLATE):
@@ -167,7 +225,7 @@ class SalesProofPublication:
             return value
         count = self.db.one("SELECT COUNT(*) AS count FROM public.sales_proof_posts WHERE status='sent'")['count']
         try:
-            number = self.counter.eval(_NUMBER, 1, 'candidate:sales-proof-posts:published-count', count)
+            number = self.counter.eval(_NUMBER, 1, COUNTER_KEY, count)
         except Exception:
             raise PublicationUnavailable() from None
         if type(number) is not int or number < 1:

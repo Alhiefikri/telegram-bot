@@ -48,7 +48,7 @@ def run():
     if os.environ.get('P22_ADMIN_SMOKE') != '1':
         outcomes = exercise(fixtures)
     import django
-    dataset = ('synthetic-p25-notifications-isolation-v3' if os.environ.get('P25_NOTIFICATION_SMOKE') == '1'
+    dataset = ('synthetic-p25-notifications-completion-v4' if os.environ.get('P25_NOTIFICATION_SMOKE') == '1'
                else 'synthetic-p23-admin-v1' if os.environ.get('P22_ADMIN_SMOKE') == '1'
                else 'synthetic-p21-storefront-v1' if os.environ.get('P21_STOREFRONT_SMOKE') == '1'
                else 'synthetic-p20-api-v1' if os.environ.get('P20_API_SMOKE') == '1'
@@ -78,6 +78,11 @@ if __name__ == '__main__':
             import traceback
             from pathlib import Path
             diagnostic = Path('/evidence/probe-failure.txt')
-            diagnostic.write_text(traceback.format_exc(limit=30))
+            # Exception messages/SQL DETAIL can contain decrypted values. Keep
+            # only code locations and SQLSTATE, never messages or frame locals.
+            diagnostic.write_text(json.dumps({**details,
+                'sqlstate': getattr(error.__cause__, 'sqlstate', None),
+                'frames': [{'file': entry.filename.rsplit('/', 1)[-1], 'line': entry.lineno, 'function': entry.name}
+                           for entry in traceback.extract_tb(error.__traceback__, limit=30)]}, indent=2))
             diagnostic.chmod(0o600)
         raise SystemExit(1)

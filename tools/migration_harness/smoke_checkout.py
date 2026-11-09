@@ -28,6 +28,54 @@ def cli(*args):
     return result.stdout.strip()
 
 
+def notification_browser(output):
+    """Offline, redacted HTML only; reuse P25's output and single manifest."""
+    import importlib.metadata
+    from playwright.sync_api import sync_playwright
+    observations = []
+    # Use an already installed local browser, never download during the proof.
+    shells = sorted((Path.home() / '.cache/ms-playwright').glob('chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell'))
+    if not shells:
+        raise RuntimeError('P25 browser proof requires an installed local Chromium')
+    executable = shells[-1]
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=str(executable))
+        browser_version = browser.version
+        try:
+            for width in (390, 1280):
+                context = browser.new_context(viewport={'width': width, 'height': 900}, offline=True,
+                                              service_workers='block', java_script_enabled=False)
+                try:
+                    context.route('**/*', lambda route: route.abort())
+                    page = context.new_page()
+                    images = {}
+                    for name in ('milestone', 'php-milestone', 'auth', 'waitlist', 'credential', 'php-credential'):
+                        page.set_content((output / ('preview-' + name + '.html')).read_text())
+                        # Layout inspection uses the browser engine, not app JS.
+                        overflow = page.evaluate('document.documentElement.scrollWidth > window.innerWidth')
+                        if overflow:
+                            raise AssertionError('P25 mail preview overflows: ' + name + ' at ' + str(width))
+                        page.locator('a').first.focus()
+                        # Clear the focus before comparing PHP/Django pixels.
+                        page.locator('a').first.blur()
+                        screenshot = page.screenshot(full_page=True)
+                        images[name] = screenshot
+                        (output / f'preview-{name}-{width}.png').write_bytes(screenshot)
+                        observations.append({'template': name, 'width': width, 'overflow': False, 'links_focusable': True})
+                    if images['milestone'] != images['php-milestone']:
+                        raise AssertionError('P25 milestone PHP/Django pixels differ at ' + str(width))
+                    if images['credential'] != images['php-credential']:
+                        raise AssertionError('P25 credential PHP/Django pixels differ at ' + str(width))
+                finally:
+                    context.close()
+        finally:
+            browser.close()
+    return {'playwright': importlib.metadata.version('playwright'), 'mode': 'offline-redacted-static-html',
+            'chromium': browser_version, 'executable_sha256': hashlib.sha256(executable.read_bytes()).hexdigest(),
+            'milestone_php_pixels': 'identical', 'credential_php_pixels': 'identical', 'observations': observations,
+            'limits': 'Chromium mail previews only; not SMTP-client rendering, live browser flows or device acceptance'}
+
+
 def main():
     notifications = sys.argv[1:] == ['--notifications']
     receipt = sys.argv[1:] == ['--receipt'] or notifications
@@ -67,7 +115,7 @@ def main():
         database = container('candidate','database')
         php(boundary,'php artisan migrate --force --no-interaction')
         fixture = (ROOT / 'tools/migration_harness/checkout_fixture.php').read_text().removeprefix('<?php')
-        fixtures = json.loads(php(boundary, ('P20_API_SMOKE=1 P16_USDT_SMOKE=1 ' if api else 'P17_USDT_SMOKE=1 ' if p17 else 'P21_STOREFRONT_SMOKE=1 P19_AUTH_SMOKE=1 ' if storefront else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
+        fixtures = json.loads(php(boundary, ('P25_NOTIFICATION_SMOKE=1 ' if notifications else 'P20_API_SMOKE=1 P16_USDT_SMOKE=1 ' if api else 'P17_USDT_SMOKE=1 ' if p17 else 'P21_STOREFRONT_SMOKE=1 P19_AUTH_SMOKE=1 ' if storefront else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
         if receipt:
             customer_id = int(fixtures['python']['customer_id'])
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
@@ -153,6 +201,25 @@ def main():
             raise RuntimeError(f'{scope} probe failed; private diagnostics in .local/{scope}')
         observed = json.loads(probe.stdout)
         assert observed['status'] == 'passed'
+        if notifications:
+            observed['notification_browser'] = notification_browser(output)
+            handoff = json.loads((output / 'counter-handoff.json').read_text())
+            floor = handoff['rollback_floor']
+            if type(floor) is not int or not handoff['php_floor'] < floor < 2**53 - 1:
+                raise AssertionError('Invalid local Sales Proof counter handoff')
+            rollback = ("require '/var/www/html/vendor/autoload.php'; "
+                "$app=require '/var/www/html/bootstrap/app.php'; "
+                "$app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); "
+                "if (!app()->environment('testing') || Illuminate\\Support\\Facades\\DB::connection()->getDatabaseName()!=='disposable') throw new RuntimeException('refused'); "
+                "config(['cache.default'=>'array']); "
+                f"Illuminate\\Support\\Facades\\Cache::forever('sales-proof-posts:published-count',{floor}); "
+                "echo json_encode(['next'=>app(App\\Services\\Telegram\\SalesProofPostNumbering::class)->reserveNextNumber()]);")
+            next_number = json.loads(php(boundary, 'php -r ' + shlex.quote(rollback)))['next']
+            if next_number != floor + 1:
+                raise AssertionError('PHP rollback Sales Proof numbering regressed')
+            observed['sales_proof_counter_handoff'] = {'php_floor': handoff['php_floor'],
+                'candidate_rollback_floor': floor, 'php_next': next_number,
+                'limits': 'Drained synthetic publishers and explicit integer transfer; not a production Redis/cache migration'}
         sources = [*sorted((ROOT / 'candidate/lhie_candidate/checkout').glob('*')),
             ROOT / 'candidate/lhie_candidate/readiness.py', ROOT / 'candidate/smoke_checkout.py',
             ROOT / 'candidate/tests/test_checkout_postgres.py',ROOT / 'candidate/tests/test_checkout_pricing.py',
@@ -175,6 +242,7 @@ def main():
                 'candidate/tests/test_notification_completion.py', 'candidate/tests/test_runtime.py',
                 'candidate/lhie_candidate/runtime.py', 'candidate/workers.py', 'candidate/stack.py'))
             sources.extend((ROOT / 'candidate/templates/notifications').glob('*.html'))
+            sources.extend((ROOT / 'candidate/templates/notifications').glob('*.txt'))
             sources.extend(ROOT / name for name in (
                 'candidate/lhie_candidate/notifications/waitlist_grants.sql',
                 'candidate/tests/test_waitlist.py', 'candidate/tests/test_waitlist_postgres.py',
@@ -184,10 +252,18 @@ def main():
                 'candidate/lhie_candidate/storefront/catalog_grants.sql',
                 'candidate/lhie_candidate/auth/schema.sql',
                 'candidate/lhie_candidate/auth/grants.sql',
+                'candidate/lhie_candidate/auth/mail.py',
+                'candidate/lhie_candidate/admin/catalog.py', 'candidate/lhie_candidate/admin/views.py',
+                'candidate/lhie_candidate/admin/operations_views.py', 'candidate/templates/admin/order_detail.html',
+                'candidate/lhie_candidate/storefront/checkout.py',
+                'candidate/lhie_candidate/suppliers/manual.py', 'candidate/lhie_candidate/suppliers/acquisition.py',
                 'candidate/lhie_candidate/auth/sessions.py',
                 'candidate/lhie_candidate/compat/identity.py',
                 'candidate/lhie_candidate/navigation/repository.py',
                 'src/app/Models/ProductWaitlistNotification.php',
+                'src/app/Services/GuestOrderNotificationService.php',
+                'src/app/Services/Customer/CustomerAuthMailDeliveryService.php',
+                'src/tests/Feature/CustomerAuthMailDeliveryTest.php', 'src/tests/Feature/GuestOrderNotificationTest.php',
                 'src/tests/Feature/ProductWaitlistTest.php',
                 'candidate/lhie_candidate/checkout/privileges.py'))
             sources.extend((ROOT / 'candidate/templates/storefront').glob('waitlist*.html'))
@@ -352,11 +428,24 @@ def main():
                 'Injected lost ACK and crash boundaries; no production delivery or history qualification',
                 'Receipt and checkout grants provisioned explicitly, never at startup']
         if notifications:
+            observed['legacy_owner_sha256'].update({name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                for name in ('src/app/Services/Telegram/TelegramProductNotificationService.php',
+                    'src/app/Services/Telegram/StockNotificationDeliveryPipeline.php',
+                    'src/app/Services/Telegram/ProductPriceChangeNotificationService.php',
+                    'src/app/Services/Telegram/TelegramBroadcastIntents.php',
+                    'src/app/Services/Telegram/TelegramBroadcastService.php',
+                    'src/app/Services/Telegram/BalanceTopUpReceiptDeliveryPipeline.php',
+                    'src/app/Services/Telegram/BalanceTopUpOwnerAlertDeliveryPipeline.php',
+                    'src/app/Services/Telegram/TelegramManualPaymentIntents.php',
+                    'src/app/Mail/GuestOrderMilestoneMail.php',
+                    'src/app/Notifications/CustomerAuthMailNotification.php',
+                    'src/app/Notifications/CustomerLoginLinkNotification.php',
+                    'src/resources/views/emails/guest-order-milestone.blade.php')})
             resources_path = output / 'notification-resources.json'
             observed['notification_resources'] = json.loads(resources_path.read_text())
             resources_path.unlink()
             observed['limits'] = ['Synthetic disposable PostgreSQL/Redis, fake Telegram relay and loopback SMTP sink only',
-                'Waitlist HTTP is exercised through Django request middleware, not a browser/visual qualification',
+                'Waitlist HTTP uses middleware; offline redacted HTML previews do not qualify the full browser flow or mail clients',
                 'Waitlist is disabled by default and admits only reserved .invalid mail targets when explicitly provisioned',
                 'Optional eight-process profile: seven runtime connections; cgroup sampling includes probe/harness overhead, not production capacity',
                 'No full P25 parity, P26 acceptance, live delivery, production or CI/CD operation']

@@ -536,6 +536,8 @@ class SupplierAcquisition:
                 self.db.execute("""UPDATE public.manual_fulfillment_reviews SET state='fulfilled',resolved_at=%s,updated_at=%s
                     WHERE order_id=%s AND reason IN ('supplier_fulfillment','late_payment') AND state='pending'""", (at, at, order['id']))
                 self.db.execute("UPDATE public.orders SET order_status='completed',updated_at=%s WHERE id=%s", (at, order['id']))
+                from ..notifications.milestones import record_transition
+                record_transition(self.db, order['id'], 'fulfillment_completed')
                 wake_after_commit('order', str(order['id']), using=self.using)
         elif result.identity_trusted and result.delivery_trusted and not conflict and quantity_matches and len(trusted) == p['quantity'] and p['actual_cost_micros'] is None and p['supplier_order_id']:
             self._await(f, p, at)

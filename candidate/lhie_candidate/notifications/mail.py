@@ -35,6 +35,7 @@ class SinkMail:
 
 
 class CredentialMail:
+    owned_types = ('credentials_ready',)
     def __init__(self, source, encrypter, *, using='default', transport=None, recipients=None):
         self.db = Database(using)
         self.source, self.encrypter = source, encrypter
@@ -76,7 +77,7 @@ class CredentialMail:
     def _claim(self, event_id):
         with transaction.atomic(using=self.db.using):
             row = self.db.one('''SELECT * FROM public.order_notification_events
-                WHERE id=%s AND event_type='credentials_ready' FOR UPDATE''', (event_id,))
+                WHERE id=%s AND event_type=ANY(%s) FOR UPDATE''', (event_id, list(self.owned_types)))
             at = _now()
             if (not row or row['status'] != 'pending'
                     or (row['next_attempt_at'] and row['next_attempt_at'] > at)):

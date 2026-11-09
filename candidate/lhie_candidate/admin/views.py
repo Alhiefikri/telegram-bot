@@ -558,8 +558,14 @@ def product_workspace(request, product_id):
 @access.guard
 def product_update(request, product_id):
     section = raw(request.POST, "workspace_section", "")
+    service = CatalogService()
+    from django.conf import settings
+    if settings.RUNTIME.notifications:
+        from ..notifications.price import PriceNotifications
+        from ..notifications.policy import TestRecipients
+        service.price_events = PriceNotifications(service.db, TestRecipients(frozenset({'1'})))
     try:
-        CatalogService().update_product(
+        service.update_product(
             product_id, request.POST, request.admin_user["id"],
             request.META.get("REMOTE_ADDR"), section=section)
     except AdminValidationError as error:
