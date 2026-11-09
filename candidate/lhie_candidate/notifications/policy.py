@@ -10,10 +10,16 @@ PRICE_CHANNEL = 'price_change.store_channel'
 PROOF = 'sales_proof.post'
 MANUAL = 'admin.manual_payment_proof'
 ADJUSTMENT = 'balance.adjustment_notice'
+SUPPLIER_HEALTH = 'admin.supplier_health'
+COMPENSATION = 'balance.owner_compensation_notification'
+OWNER_ALERT = 'admin.balance_top_up_owner_alert'
+TOPUP_CHANNEL_PROOF = 'balance.top_up_channel_proof'
+TOPUP_INSTRUCTIONS = 'balance.top_up_instructions'
 ORDER_TYPES = ('admin.order_pending_notification', 'admin.order_paid_notification',
                'admin.order_expired_notification', 'admin.order_review_notification')
-BALANCE_TYPES = ('balance.top_up_receipt', 'admin.balance_top_up_paid_notification')
+BALANCE_TYPES = ('balance.top_up_receipt', 'admin.balance_top_up_paid_notification', 'admin.balance_top_up_payment_proof')
 LIMITS = {BROADCAST: 5, STOCK: 5, PRICE: 5, PRICE_CHANNEL: 3, PROOF: 3, MANUAL: 3, ADJUSTMENT: 3,
+          SUPPLIER_HEALTH: 3, COMPENSATION: 3, OWNER_ALERT: 3, TOPUP_CHANNEL_PROOF: 3, TOPUP_INSTRUCTIONS: 3,
           **{kind: 3 for kind in (*ORDER_TYPES, *BALANCE_TYPES)}}
 TERMINAL_CODES = frozenset({'notification_not_eligible', 'notification_render_invalid',
                            'legacy_notification_terminal'})

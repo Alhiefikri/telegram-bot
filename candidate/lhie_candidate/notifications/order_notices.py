@@ -89,6 +89,17 @@ class OrderNotices:
                 or (kind == PAID and order['payment_status'] == 'paid' and order['order_status'] in ('processing', 'completed'))
                 or kind == REVIEW)
 
+    def _refunded_successor(self, order, effect):
+        if (not order or effect['effect_type'] != PAID or not effect['supersedes_effect_id']
+                or order['payment_status'] != 'refunded' or order['order_status'] not in ('cancelled', 'completed')):
+            return False
+        return bool(self.db.one('''SELECT id FROM public.telegram_outbound_effects
+            WHERE id=%s AND effect_type=%s AND source_type='App\\Models\\Order' AND source_id=%s
+              AND telegram_chat_id=%s AND target_type='admin'
+              AND state IN ('sent','unknown','manual_review')
+              AND outcome_metadata->'paid_outcome'->>'resolved'='false' ''',
+            (effect['supersedes_effect_id'], PAID, str(order['id']), effect['telegram_chat_id'])))
+
     def outcome(self, order, items, payments):
         """Port AdminPaidOrderOutcome without changing any delivery state."""
         effects = self.db.rows('''SELECT * FROM public.telegram_outbound_effects WHERE source_type='App\\Models\\Order'
@@ -116,7 +127,10 @@ class OrderNotices:
             FROM public.supplier_fulfillments f WHERE f.order_id=%s ORDER BY f.id''', (order['id'],))
         by_item = {f['order_item_id']: f for f in fulfillments}
         purchases = self.db.rows('''SELECT p.supplier_fulfillment_id,p.state,p.committed_at,p.supplier_order_id,
-            p.actual_cost_micros,p.observed_quantity,p.quantity,s.name AS supplier_name FROM public.supplier_purchases p
+            p.actual_cost_micros,p.observed_quantity,p.quantity,s.name AS supplier_name,
+            EXISTS (SELECT 1 FROM public.supplier_purchase_evidence ev WHERE ev.supplier_purchase_id=p.id
+                AND ev.kind='no_debit' AND ev.evidence_source='owner_attestation') AS owner_no_debit
+            FROM public.supplier_purchases p
             JOIN public.supplier_fulfillments f ON f.id=p.supplier_fulfillment_id
             JOIN public.suppliers s ON s.id=p.supplier_id WHERE f.order_id=%s ORDER BY p.id''', (order['id'],))
         resolved, intervention, lines = bool(items), bool(review) or unknown or failed, []
@@ -129,11 +143,14 @@ class OrderNotices:
             for purchase in relevant:
                 acquired = (purchase['committed_at'] is not None and bool(purchase['supplier_order_id'])
                             and purchase['actual_cost_micros'] is not None and purchase['observed_quantity'] is not None)
-                rejected = purchase['state'] == 'rejected' and purchase['committed_at'] is None
+                rejected = (purchase['committed_at'] is None and
+                            (purchase['state'] == 'rejected' or
+                             (purchase['state'] == 'cancelled' and purchase['owner_no_debit'])))
                 supplier_resolved &= (acquired and purchase['state'] not in ('ambiguous', 'review')) or rejected
                 intervention |= purchase['state'] in ('ambiguous', 'review') or fulfillment['state'] == 'review'
                 label = (f"pembelian berhasil ({purchase['observed_quantity']}/{purchase['quantity']} unit)"
                          + ('; perlu diperiksa' if purchase['state'] in ('ambiguous', 'review') else '') if acquired
+                         else 'tidak ada debit menurut konfirmasi Owner' if rejected and purchase['owner_no_debit']
                          else 'pembelian ditolak; tidak ada debit' if rejected
                          else 'hasil pembelian belum dapat dipastikan; jangan beli ulang')
                 summary.append(purchase['supplier_name'] + ' · ' + label)
@@ -174,7 +191,8 @@ class OrderNotices:
             self.db.one('SELECT id FROM public.orders WHERE id=%s FOR UPDATE', (effect['source_id'],))
             locked = self.db.one('SELECT * FROM public.telegram_outbound_effects WHERE id=%s FOR UPDATE', (effect['id'],))
             order = self._order(effect['source_id'])
-            if not self._eligible(order, PAID) or not order['telegram_id'] or order['api_order_claim_id'] is not None:
+            if (not (self._eligible(order, PAID) or self._refunded_successor(order, locked))
+                    or not order['telegram_id'] or order['api_order_claim_id'] is not None):
                 return True
             if metadata(locked['outcome_metadata']).get('paid_outcome') is not None:
                 return True
@@ -193,7 +211,9 @@ class OrderNotices:
         kind = effect['effect_type']
         review = self._review(effect['source_id']) if kind == REVIEW else None
         order = self._order(review['order_id'] if review else effect['source_id']) if kind != REVIEW or review else None
-        if effect['target_type'] != 'admin' or not self._eligible(order, kind):
+        refunded = self._refunded_successor(order, effect)
+        if (effect['target_type'] != 'admin' or not (self._eligible(order, kind) or refunded)
+                or (refunded and metadata(effect['outcome_metadata']).get('paid_outcome', {}).get('resolved') is not True)):
             raise NotEligible()
         items, payments = self._items(order['id']), self._payments(order['id'])
         payment = next((p for status in ('paid', 'pending', 'expired') for p in payments if p['status'] == status), payments[0] if payments else None)
@@ -242,7 +262,7 @@ class OrderNotices:
             lines.extend(('', 'Cek dashboard untuk follow up pembeli ini.'))
         else:
             review_open = bool(self.db.one("SELECT id FROM public.manual_fulfillment_reviews WHERE order_id=%s AND state IN ('pending','refund_uncertain') LIMIT 1", (order['id'],)))
-            lines.append('Status pembayaran: ' + (order['payment_status'] if order['api_order_claim_id'] is not None else 'Paid'))
+            lines.append('Status pembayaran: ' + (order['payment_status'] if refunded or order['api_order_claim_id'] is not None else 'Paid'))
             if outcome:
                 lines.extend(escape(line) for line in outcome['lines'])
             else:

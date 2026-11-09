@@ -26,6 +26,22 @@ class ReceiptRelayTests(unittest.TestCase):
         self.request = {'method': 'sendDocument', 'payload': {'chat_id': '1', 'filename': 'synthetic.txt',
                         'document': base64.b64encode(self.document).decode(), 'protect_content': True}}
 
+    def test_fake_relay_accepts_jpeg_and_rejects_unrecognized_photo(self):
+        from io import BytesIO
+        from PIL import Image
+
+        image = BytesIO()
+        Image.new('RGB', (2, 2), 'white').save(image, format='JPEG')
+        config = harness.default('candidate')
+        photo = {'method': 'sendPhoto', 'payload': {
+            'chat_id': '1', 'photo': base64.b64encode(image.getvalue()).decode('ascii')}}
+        with patch.object(boundary, 'upstream', side_effect=AssertionError('network reached')):
+            self.assertEqual(boundary.receipt_request(config, photo, 7),
+                             {'ok': True, 'result': {'message_id': 7}})
+            photo['payload']['photo'] = base64.b64encode(b'not an image').decode('ascii')
+            with self.assertRaises(ValueError):
+                boundary.receipt_request(config, photo, 7)
+
     def test_other_approvals_and_foreign_chats_cannot_send_receipts(self):
         harness.validate(self.config)
         with patch.object(boundary, 'upstream', side_effect=AssertionError('network reached')):

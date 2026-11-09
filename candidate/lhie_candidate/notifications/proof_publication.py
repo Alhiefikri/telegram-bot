@@ -62,7 +62,10 @@ def caption(snapshot, number, remaining=None, *, icon=lambda value: value, text_
         return (item.get('icon') or '🛍️') + ' ' + name
     quantity = sum(item['quantity'] for item in items)
     if legacy:
-        primary = label(items[0]) + (f' + {len(items) - 1} other products' if len(items) > 1 else '')
+        item = items[0]
+        name = item['product_name'] if item['product_name'] is not None else 'Digital product'
+        glyph = str(item.get('icon') or '').strip() or '🛍️'
+        primary = glyph + ' ' + str(name) + (f' + {len(items) - 1} other products' if len(items) > 1 else '')
         return escape('\n'.join((icon('🎉 SUCCESSFUL PURCHASE 🎉'), '',
             text_icon('message.users') + ' Buyer: ' + snapshot['legacy_buyer'], text_icon('message.details') + ' Product: ' + primary,
             text_icon('message.quantity') + ' Quantity: ' + str(quantity) + 'x', icon('🏆 Successful orders: #') + str(number), '',

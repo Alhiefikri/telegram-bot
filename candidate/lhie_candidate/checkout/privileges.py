@@ -264,19 +264,29 @@ def verify_public_writes(cursor):
             'stock_notification_recipients': set('stock_notification_event_id customer_id recipient_type telegram_id locale text reply_markup photo_path created_at updated_at'.split()),
             'product_price_change_events': set('event_key product_id product_name product_icon product_custom_emoji_id old_price_amount new_price_amount old_usdt_price_amount new_usdt_price_amount created_at updated_at'.split()),
             'product_price_change_notification_recipients': set('event_id customer_id telegram_id locale created_at updated_at'.split()),
+            'supplier_health_states': set('supplier_id low_active error_codes balance_stale_active error_recovered_at'.split()),
+            'supplier_health_reviews': {'supplier_fulfillment_id', 'active_identities'},
+            'supplier_health_events': {'id', 'supplier_id', 'message', 'created_at'},
         })
         allowed_update = _merge(allowed_update, {
-            'telegram_outbound_effects': {'telegram_method'},
+            'telegram_outbound_effects': {'telegram_method', 'telegram_message_deleted_at',
+                'telegram_message_deletion_started_at', 'telegram_message_deletion_token'},
             'orders': set('admin_pending_order_notified_at admin_paid_order_notified_at admin_expired_order_notified_at admin_pending_order_notification_chat_id admin_pending_order_notification_message_id admin_pending_order_notification_deleted_at'.split()),
             'sales_proof_posts': set('status telegram_message_id sent_at attempts last_error updated_at'.split()),
             'payments': {'payment_proof_forwarded_at'},
+            'store_balance_top_ups': set('payment_proof_file_id payment_proof_submitted_at payment_proof_forwarded_at payment_proof_admin_chat_id updated_at'.split()),
             'telegram_broadcasts': set('recipient_count sent_count failed_count pending_count terminal_failed_count status completed_at updated_at'.split()),
             'product_price_change_events': set('store_channel_sent_at store_channel_message_id store_channel_failed_at store_channel_last_error store_channel_attempts updated_at'.split()),
-            'stock_notification_events': set('tier_promotion_snapshotted_at promoted_tier_minimum promoted_tier_price_amount promoted_tier_usdt_price_amount'.split()),
+            'inventory_movements': {'stock_notification_sent_at'},
+            'stock_notification_events': set('tier_promotion_snapshotted_at promoted_tier_minimum promoted_tier_price_amount promoted_tier_usdt_price_amount recipients_snapshotted_at updated_at'.split()),
             'telegram_broadcast_recipients': set('sent_at failed_at terminal_failed_at retry_at last_error attempts updated_at'.split()),
             'stock_notification_recipients': set('sent_at failed_at terminal_failed_at last_error attempts updated_at'.split()),
             'product_price_change_notification_recipients': set('sent_at failed_at last_error attempts updated_at'.split()),
             'order_notification_events': set('recipient_email status attempts delivery_started_at next_attempt_at sent_at failed_at last_error updated_at'.split()),
+            'supplier_health_scans': {'supplier_cursor', 'fulfillment_cursor'},
+            'supplier_health_states': {'low_active', 'error_codes', 'balance_stale_active', 'error_recovered_at'},
+            'supplier_health_reviews': {'active_identities'},
+            'suppliers': {'low_balance_alerted_at'},
         })
     cursor.execute("SELECT has_column_privilege(current_user,'public.payments','provider_reference','UPDATE')")
     if cursor.fetchone()[0]:

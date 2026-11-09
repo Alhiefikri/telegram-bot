@@ -5,7 +5,7 @@ from threading import Barrier
 from types import SimpleNamespace
 
 
-def exercise_waitlist():
+def exercise_waitlist(fixtures):
     from django.db import connections
     from django.test import Client
     import re
@@ -143,8 +143,141 @@ def exercise_waitlist():
         assert len(captured) == before
         # Readiness accepts only the new narrow grants, never UPDATE on history.
         assert not db.one("SELECT has_table_privilege(current_user,'public.inventory_movements','UPDATE') AS allowed")['allowed']
+        browser_waitlist(fixtures)
         return {'waitlist_http_csrf_opt_in': 'passed', 'waitlist_opt_in_signed_links': 'passed', 'waitlist_bounded_fanout': 'passed',
                 'waitlist_smtp_claim_race': 'passed', 'waitlist_unsubscribe': 'passed',
-                'waitlist_unknown_no_resend': 'passed'}
+                'waitlist_unknown_no_resend': 'passed', 'waitlist_live_browser_flow': 'passed'}
     finally:
         admin.close()
+
+
+def browser_waitlist(fixtures):
+    """Serve the real storefront while the host drives a disposable browser."""
+    import hmac
+    import json
+    import os
+    import re
+    import threading
+    import time
+    from pathlib import Path
+    from wsgiref.simple_server import make_server
+
+    from django.contrib.staticfiles.handlers import StaticFilesHandler
+    from django.core.wsgi import get_wsgi_application
+    from django.db import connections
+    from lhie_candidate.compat.crypto import LaravelEncrypter
+    from lhie_candidate.notifications.mail import SinkMail
+    from lhie_candidate.notifications.waitlist import Waitlist
+    from lhie_candidate.runtime import application_key
+    from serve import BoundedServer, QuietHandler
+    from tests.test_checkout_postgres import admin_connection
+    control_key = fixtures['p25_browser_key']
+
+    key = application_key()
+    cipher = LaravelEncrypter(key)
+    admin = admin_connection()
+    try:
+        product_id = admin.execute('''INSERT INTO public.products
+            (name,description,price_amount,currency,stock,reserved_stock,is_active,created_at,updated_at)
+            VALUES ('Synthetic browser waitlist','Synthetic fixture',100,'IDR',0,0,true,now(),now()) RETURNING id''').fetchone()[0]
+    finally:
+        admin.close()
+    captured = []
+
+    class Mail:
+        def send(self, address, subject, text, *, html):
+            assert address == 'browser@example.invalid'
+            SinkMail().send(address, subject, text, html=html)
+            captured.append(text)
+
+    django_app = StaticFilesHandler(get_wsgi_application())
+
+    def app(environ, start_response):
+        path = environ.get('PATH_INFO', '')
+        connection = connections['default']
+        username = 'candidate_p25_admin' if path.startswith('/admin') else 'candidate_runtime'
+        password = fixtures['p25_admin_db_password'] if username == 'candidate_p25_admin' else 'candidate-local-only'
+        if connection.settings_dict['USER'] != username:
+            connection.close()
+            connection.settings_dict = {**connection.settings_dict, 'USER': username, 'PASSWORD': password}
+        if not path.startswith('/__p25_browser/'):
+            return django_app(environ, start_response)
+        if (environ.get('REQUEST_METHOD') != 'POST'
+                or not hmac.compare_digest(environ.get('HTTP_X_P25_CONTROL', ''), control_key)):
+            start_response('403 Forbidden', [('Content-Length', '0')])
+            return [b'']
+        admin = admin_connection()
+        try:
+            subscription = admin.execute('''SELECT id,status FROM public.product_waitlist_subscriptions
+                WHERE product_id=%s''', (product_id,)).fetchone()
+            assert subscription is not None
+            owner = Waitlist(cipher, key, enabled=True, transport=Mail())
+            if path == '/__p25_browser/confirmation':
+                assert subscription[1] == 'pending_confirmation'
+                assert owner.confirm_mail(subscription[0]) == 'sent'
+                purpose = 'confirm'
+            elif path == '/__p25_browser/restock':
+                assert subscription[1] == 'active'
+                with admin.transaction():
+                    admin.execute('UPDATE public.products SET stock=1 WHERE id=%s', (product_id,))
+                    admin.execute('''INSERT INTO public.product_stock_items (product_id,secret,created_at,updated_at)
+                        VALUES (%s,%s,now(),now())''', (product_id, cipher.encrypt_string('Synthetic browser stock')))
+                    movement = admin.execute('''INSERT INTO public.inventory_movements
+                        (product_id,type,quantity,stock_before,available_before,available_after,became_unavailable,created_at)
+                        VALUES (%s,'adjustment',1,0,0,1,false,now()) RETURNING id''', (product_id,)).fetchone()[0]
+                assert owner.materialize(movement, 10) == 1
+                notice = admin.execute('''SELECT n.id FROM public.product_waitlist_notifications n
+                    JOIN public.product_waitlist_events e ON e.id=n.product_waitlist_event_id
+                    WHERE e.inventory_movement_id=%s AND n.subscription_id=%s''', (movement, subscription[0])).fetchone()
+                assert notice and owner.deliver(notice[0]) == 'sent'
+                purpose = 'unsubscribe'
+            else:
+                raise ValueError('Unknown browser operation')
+            match = re.search(r'http://127\.0\.0\.1:18801/waitlist/' + purpose
+                              + r'/[0-9]+\?expires=[0-9]+&signature=[a-f0-9]{64}', captured[-1])
+            assert match
+            body = json.dumps({'url': match.group(0)}).encode()
+            start_response('200 OK', [('Content-Type', 'application/json'), ('Cache-Control', 'no-store'),
+                                      ('Content-Length', str(len(body)))])
+            return [body]
+        finally:
+            admin.close()
+            connections.close_all()
+
+    evidence = Path('/evidence')
+    discard = open(os.devnull, 'w')
+    server = make_server('0.0.0.0', 8080, app, server_class=BoundedServer, handler_class=QuietHandler)
+    server.discard = discard
+    def serve():
+        try:
+            server.serve_forever(poll_interval=0.1)
+        finally:
+            connections.close_all()
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        (evidence / 'waitlist-browser-ready.json').write_text(json.dumps({
+            'product_id': product_id, 'retry_order': fixtures['p25_browser_retry_order'],
+            'unknown_order': fixtures['p25_browser_unknown_order'],
+        }))
+        deadline = time.monotonic() + 180
+        finished = evidence / 'waitlist-browser-finished'
+        while not finished.exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Disposable waitlist browser timed out')
+            time.sleep(0.1)
+        if finished.read_text().strip() != 'PASS':
+            raise RuntimeError('Disposable waitlist browser failed')
+        admin = admin_connection()
+        try:
+            assert admin.execute('SELECT status FROM public.product_waitlist_subscriptions WHERE product_id=%s',
+                                 (product_id,)).fetchone() == ('unsubscribed',)
+        finally:
+            admin.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+        discard.close()
+        (evidence / 'waitlist-browser-ready.json').unlink(missing_ok=True)
+        (evidence / 'waitlist-browser-finished').unlink(missing_ok=True)

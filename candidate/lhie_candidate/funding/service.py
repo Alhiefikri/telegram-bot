@@ -90,7 +90,7 @@ class FundingService:
     TOPUP_COLUMNS = (
         'id customer_id store_balance_funding_intent_id telegram_navigation_root_id chat_id '
         'canonical_message_id locale provider payment_setting_id payment_provider_version merchant_ref idempotency_key currency amount status '
-        'provider_reference provider_qris_url provider_fee provider_total_payment provider_payment_method '
+        'provider_reference provider_qris_url provider_qris_payload provider_fee provider_total_payment provider_payment_method '
         'sakurupiah_channel provider_created_at provider_expires_at expires_at provider_create_state '
         'provider_create_attempted_at provider_create_last_error paid_at settled_at created_at updated_at'
     ).split()
@@ -787,15 +787,27 @@ class FundingService:
         except (TypeError, ValueError):
             deadline = None
         expired = topup['status'] == 'expired' or (deadline is not None and deadline <= now)
-        qris_url = None
-        if topup['status'] == 'payable' and topup['provider_qris_url'] and self.encrypter is not None:
+        qris_url = qris_payload = None
+        if (topup['provider'] == 'sakurupiah' and topup['status'] == 'payable'
+                and topup.get('provider_qris_payload') and self.encrypter is not None):
             try:
-                presentation = self.encrypter.decrypt_json(topup['provider_qris_url'])
-                if isinstance(presentation, dict):
-                    qris_url = _secure_qris_url(presentation.get('qris_image_url'))
+                from lhie_candidate.payments.sakurupiah_urls import validate_sakurupiah_qris_payload
+                value = self.encrypter.decrypt_string(topup['provider_qris_payload'])
+                if validate_sakurupiah_qris_payload(value, topup['provider_total_payment']):
+                    qris_payload = value
+            except (CryptoError, ValueError, TypeError):
+                pass
+        if (topup['status'] == 'payable' and not topup.get('provider_qris_payload')
+                and topup['provider_qris_url'] and self.encrypter is not None):
+            try:
+                qris_url = _secure_qris_url(self.encrypter.decrypt_string(topup['provider_qris_url']))
+                if qris_url is None:
+                    presentation = self.encrypter.decrypt_json(topup['provider_qris_url'])
+                    if isinstance(presentation, dict):
+                        qris_url = _secure_qris_url(presentation.get('qris_image_url'))
             except (CryptoError, ValueError, TypeError):
                 qris_url = None
-        payable = bool(topup['status'] == 'payable' and qris_url and not expired)
+        payable = bool(topup['status'] == 'payable' and (qris_url or qris_payload) and not expired)
         return {
             'state': ('paid' if paid else 'payable' if payable else 'expired' if expired
                       else 'manual_review' if topup['status'] == 'invalid_provider_result'
@@ -812,6 +824,6 @@ class FundingService:
             'amount': int(topup['amount']),
             'fee': topup['provider_fee'] if type(topup['provider_fee']) is int else None,
             'total': topup['provider_total_payment'] if type(topup['provider_total_payment']) is int else None,
-            'expires': deadline, 'qris_url': qris_url,
+            'expires': deadline, 'qris_url': qris_url, 'qris_payload': qris_payload,
             'topup_id': str(topup['id']),
         }

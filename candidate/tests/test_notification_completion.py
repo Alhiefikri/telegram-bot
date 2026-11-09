@@ -13,7 +13,10 @@ from lhie_candidate.notifications.html import bounded_html
 from lhie_candidate.notifications.policy import BROADCAST, STOCK, PRICE, MANUAL, ADJUSTMENT, PROOF
 from lhie_candidate.notifications.order_notices import OrderNotices
 from lhie_candidate.notifications.proof_publication import caption, money
+from lhie_candidate.notifications.proof import payment_method
 from lhie_candidate.notifications.service import Notifications
+from lhie_candidate.notifications.balance import BalanceNotifications
+from lhie_candidate.notifications.transport import NotificationTransport
 from lhie_candidate.receipt.render import _len
 from lhie_candidate.workers import contract, wakeup
 from lhie_candidate.workers.notifications import MailHandler
@@ -21,6 +24,33 @@ from lhie_candidate.workers.supervisor import commands
 
 
 class CompletionTests(unittest.TestCase):
+    def test_compensation_uses_database_button_icons_and_safe_definite_fallback(self):
+        icons = [
+            {'key': 'menu.balance', 'source_emoji': '💰', 'fallback_emoji': '🪙', 'custom_emoji_id': '123'},
+            {'key': 'menu.home', 'source_emoji': '🏠', 'fallback_emoji': '🏡', 'custom_emoji_id': None},
+        ]
+        owner = BalanceNotifications(None, None)
+        owner.db = SimpleNamespace(rows=lambda sql: icons)
+        owner.compensation_source = lambda identity, chat: {
+            'customer_locale': 'en', 'resolved_at': datetime(2026, 1, 1, tzinfo=ZoneInfo('Asia/Jakarta')),
+            'created_at': datetime(2026, 1, 1, tzinfo=ZoneInfo('Asia/Jakarta')), 'amount': 1000, 'topup_id': 7}
+        payload = owner.compensation({'source_id': 1, 'telegram_chat_id': '1', 'target_type': 'customer',
+                                      'telegram_method': 'sendMessage', 'locale': 'en'})
+        buttons = payload['reply_markup']['inline_keyboard'][0]
+        self.assertEqual(buttons[0]['text'], 'Balance')
+        self.assertEqual(buttons[0]['icon_custom_emoji_id'], '123')
+        self.assertEqual(buttons[1]['text'], '🏡 Home')
+        relay = NotificationTransport()
+        relay.relay = SimpleNamespace(_request=Mock(side_effect=[
+            {'ok': False, 'error_code': 400, 'description': 'custom emoji unavailable'},
+            {'ok': True, 'result': {'message_id': 1}},
+        ]))
+        self.assertEqual(relay.execute('sendMessage', payload).outcome, 'success')
+        first, second = [call.args[1] for call in relay.relay._request.call_args_list]
+        self.assertNotIn('_unicode_fallback', first['reply_markup']['inline_keyboard'][0][0])
+        self.assertEqual(second['reply_markup']['inline_keyboard'][0][0]['text'], '🪙 Balance')
+        self.assertNotIn('icon_custom_emoji_id', second['reply_markup']['inline_keyboard'][0][0])
+
     def test_admin_paid_outcome_does_not_infer_delivery_from_paid_or_completed(self):
         owner = OrderNotices(SimpleNamespace(telegram=frozenset({'1'})))
         effect = {'effect_group_key': 'receipt-group', 'state': 'unknown', 'telegram_message_id': None,
@@ -98,6 +128,14 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(money(10_000_000, 'USDT'), '10 USDT')
         snapshot['items'] = [{**snapshot['items'][0], 'product_name': '😀' * 80} for _ in range(10)]
         self.assertLessEqual(_len(unescape(caption(snapshot, 11))), 1024)
+
+    def test_sales_proof_payment_method_matches_owner_labels(self):
+        self.assertEqual(payment_method('STORE_BALANCE', 'local'), 'STORE_BALANCE')
+        self.assertEqual(payment_method('USDT_BEP20', 'manual'), 'USDT_BEP20')
+        self.assertEqual(payment_method('hosted', 'pakasir'), 'Pakasir')
+        self.assertEqual(payment_method('legacy', 'pakasir'), 'QRIS')
+        self.assertEqual(payment_method(' BINANCE_PAY_ID ', 'manual'), 'Binance Pay')
+        self.assertEqual(payment_method('x' * 49, 'manual'), 'x' * 47 + '…')
 
     def test_optional_profile_is_disjoint_and_keeps_default_budget(self):
         self.assertEqual(contract.worker_connection_budget(), {'processes': 5, 'threads': 5, 'db_connections': 4})

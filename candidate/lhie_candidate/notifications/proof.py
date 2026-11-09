@@ -16,6 +16,17 @@ def mask(first_name, username):
     return name[:3] + '***' if name else 'Buyer'
 
 
+def payment_method(method, provider):
+    method = str(method or '').strip()
+    provider = str(provider or '').strip()
+    label = 'QRIS' if provider.lower() == 'pakasir' else (method or provider or 'unknown')
+    label = {'api_qris': 'QRIS', 'qris': 'QRIS', 'binance_pay_id': 'Binance Pay',
+             'usdt_balance': 'USDT Balance', 'hosted': 'Pakasir',
+             'qr_manual': 'QR Manual'}.get(method.lower(), label)
+    label = re.sub(r'[\x00-\x1f\x7f]+', ' ', label).strip()
+    return (label[:47].rstrip() + '…' if len(label) > 48 else label) or 'Unknown'
+
+
 class SalesProofEligibility:
     """Secret-free eligibility/projection seam, not a qualified publication adapter."""
     def __init__(self, *, using='default'):
@@ -28,7 +39,7 @@ class SalesProofEligibility:
         if (not order or order['payment_status'] != 'paid'
                 or order['order_status'] not in ('processing', 'completed')):
             raise NotEligible()
-        payment = self.db.one('''SELECT id,method,currency,amount,provider_fee,provider_total_payment,paid_at
+        payment = self.db.one('''SELECT id,method,provider,currency,amount,provider_fee,provider_total_payment,paid_at
             FROM public.payments WHERE order_id=%s AND status='paid' AND paid_at IS NOT NULL
             ORDER BY paid_at,id LIMIT 1''', (order_id,))
         if not payment:
@@ -63,9 +74,7 @@ class SalesProofEligibility:
         paid = payment['paid_at']
         if paid.tzinfo is None:
             paid = paid.replace(tzinfo=ZoneInfo('Asia/Jakarta'))
-        method = {'BINANCE_PAY_ID': 'Binance Pay', 'USDT_BEP20': 'USDT BEP20 (BSC)',
-                  'USDT_BALANCE': 'USDT Balance', 'STORE_BALANCE': 'Saldo Toko',
-                  'QR_MANUAL': 'QR Manual'}.get(payment['method'], payment['method'])
+        method = payment_method(payment['method'], payment['provider'])
         if order['api_order_claim_id'] is not None:
             method += ' · API'
         return {'invoice_number': order['invoice_number'], 'buyer_name': mask(order['first_name'], order['username']),

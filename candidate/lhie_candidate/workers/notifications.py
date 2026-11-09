@@ -50,7 +50,7 @@ def build_notification_handler(queue):
     from ..auth.mail import MailWork
     from ..notifications.mail import CredentialMail
     from ..notifications.milestones import MilestoneMail
-    from ..notifications.policy import ADJUSTMENT, BROADCAST, MANUAL, PRICE, PRICE_CHANNEL, PROOF, STOCK, ORDER_TYPES, BALANCE_TYPES, TestRecipients
+    from ..notifications.policy import ADJUSTMENT, BROADCAST, MANUAL, PRICE, PRICE_CHANNEL, PROOF, STOCK, ORDER_TYPES, BALANCE_TYPES, COMPENSATION, OWNER_ALERT, SUPPLIER_HEALTH, TOPUP_CHANNEL_PROOF, TOPUP_INSTRUCTIONS, TestRecipients
     from ..notifications.order_notices import OrderNotices
     from ..notifications.proof_publication import SalesProofPublication
     from ..notifications.service import Notifications
@@ -63,10 +63,10 @@ def build_notification_handler(queue):
     # cannot enroll an audience or change SMTP, Telegram, or storefront targets.
     recipients = TestRecipients(frozenset({'1'}))
     if queue in ('notice', 'bulk'):
-        families = (MANUAL, ADJUSTMENT, PROOF, *ORDER_TYPES, *BALANCE_TYPES) if queue == 'notice' else (BROADCAST, STOCK, PRICE, PRICE_CHANNEL)
+        families = (MANUAL, ADJUSTMENT, PROOF, COMPENSATION, OWNER_ALERT, SUPPLIER_HEALTH, TOPUP_CHANNEL_PROOF, TOPUP_INSTRUCTIONS, *ORDER_TYPES, *BALANCE_TYPES) if queue == 'notice' else (BROADCAST, STOCK, PRICE, PRICE_CHANNEL)
         proof = SalesProofPublication(recipients) if queue == 'notice' else None
         return NotificationHandler(Notifications(NotificationTransport(), recipients=recipients,
-                                                families=families, proof=proof,
+                                                families=families, proof=proof, admin_target='1' if queue == 'notice' else None,
                                                 order_notices=OrderNotices(recipients) if queue == 'notice' else None), queue)
     if queue != 'mail':
         raise ValueError('Invalid notification queue')

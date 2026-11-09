@@ -51,6 +51,9 @@ def classify(method, response):
         return TelegramResult(None, "ambiguous")
     description = str(response.get("description", "")).lower()
     code = response.get("error_code")
+    if method == "deleteMessage" and code == 400 and any(
+            reason in description for reason in ("message to delete not found", "message can't be deleted")):
+        return TelegramResult(None, "not_modified")
     if method == "sendPhoto" and response.get("ok") is False and type(code) is int and code == 400:
         return TelegramResult(None, "definite")
     if code == 400 and "message is not modified" in description:

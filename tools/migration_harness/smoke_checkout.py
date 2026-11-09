@@ -7,6 +7,8 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+import secrets
+import time
 
 import harness
 from smoke import container, docker
@@ -49,15 +51,25 @@ def notification_browser(output):
                     context.route('**/*', lambda route: route.abort())
                     page = context.new_page()
                     images = {}
-                    for name in ('milestone', 'php-milestone', 'auth', 'waitlist', 'credential', 'php-credential'):
+                    variants = ('magic', 'email_verification', 'email_otp')
+                    names = ('milestone', 'php-milestone', 'auth', 'php-auth', 'waitlist', 'credential',
+                             'php-credential', 'credential-variant', 'php-credential-variant')
+                    names += tuple(prefix + variant for variant in variants for prefix in ('auth-', 'php-auth-'))
+                    for name in names:
                         page.set_content((output / ('preview-' + name + '.html')).read_text())
                         # Layout inspection uses the browser engine, not app JS.
                         overflow = page.evaluate('document.documentElement.scrollWidth > window.innerWidth')
                         if overflow:
                             raise AssertionError('P25 mail preview overflows: ' + name + ' at ' + str(width))
-                        page.locator('a').first.focus()
-                        # Clear the focus before comparing PHP/Django pixels.
-                        page.locator('a').first.blur()
+                        links = page.locator('a')
+                        for index in range(links.count()):
+                            link = links.nth(index)
+                            link.focus()
+                            if not link.evaluate('(element) => document.activeElement === element'):
+                                raise AssertionError('P25 mail link cannot receive focus: ' + name)
+                            link.blur()
+                        page.set_content((output / ('preview-' + name + '.html')).read_text())
+                        page.evaluate('window.scrollTo(0, 0)')
                         screenshot = page.screenshot(full_page=True)
                         images[name] = screenshot
                         (output / f'preview-{name}-{width}.png').write_bytes(screenshot)
@@ -66,14 +78,175 @@ def notification_browser(output):
                         raise AssertionError('P25 milestone PHP/Django pixels differ at ' + str(width))
                     if images['credential'] != images['php-credential']:
                         raise AssertionError('P25 credential PHP/Django pixels differ at ' + str(width))
+                    if images['credential-variant'] != images['php-credential-variant']:
+                        raise AssertionError('P25 credential variant PHP/Django pixels differ at ' + str(width))
+                    if images['auth'] != images['php-auth']:
+                        raise AssertionError('P25 auth PHP/Django pixels differ at ' + str(width))
+                    for variant in variants:
+                        if images['auth-' + variant] != images['php-auth-' + variant]:
+                            raise AssertionError('P25 auth PHP/Django pixels differ for ' + variant + ' at ' + str(width))
                 finally:
                     context.close()
         finally:
             browser.close()
     return {'playwright': importlib.metadata.version('playwright'), 'mode': 'offline-redacted-static-html',
             'chromium': browser_version, 'executable_sha256': hashlib.sha256(executable.read_bytes()).hexdigest(),
-            'milestone_php_pixels': 'identical', 'credential_php_pixels': 'identical', 'observations': observations,
+            'milestone_php_pixels': 'identical', 'credential_php_pixels': 'identical',
+            'auth_php_pixels': 'identical_all_four_purposes', 'observations': observations,
             'limits': 'Chromium mail previews only; not SMTP-client rendering, live browser flows or device acceptance'}
+
+def local_storefront_proxy():
+    """Forward the signed loopback origin to the quarantined candidate port."""
+    import contextlib
+    import http.client
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+
+    class Proxy(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def forward(self):
+            connection = http.client.HTTPConnection('127.0.0.1', 18802, timeout=10)
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if length < 0 or length > 131072:
+                    self.send_error(413)
+                    return
+                body = self.rfile.read(length) if length else None
+                headers = {key: value for key, value in self.headers.items()
+                           if key.lower() not in ('connection', 'transfer-encoding')}
+                connection.request(self.command, self.path, body=body, headers=headers)
+                response = connection.getresponse()
+                data = response.read()
+                self.send_response(response.status)
+                for key, value in response.getheaders():
+                    if key.lower() not in ('connection', 'transfer-encoding', 'content-length'):
+                        self.send_header(key, value)
+                size = response.getheader('Content-Length') if self.command == 'HEAD' else str(len(data))
+                self.send_header('Content-Length', size or '0')
+                self.end_headers()
+                if self.command != 'HEAD':
+                    self.wfile.write(data)
+            finally:
+                connection.close()
+
+        do_GET = forward
+        do_POST = forward
+        do_HEAD = forward
+
+    class QuietServer(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):
+            pass
+
+    @contextlib.contextmanager
+    def run():
+        server = QuietServer(('127.0.0.1', 18801), Proxy)
+        thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.1}, daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            server.server_close()
+    return run()
+
+
+
+def waitlist_browser(output, control_key, admin_password):
+    """Drive real storefront routes through the candidate's disposable HTTP port."""
+    from playwright.sync_api import sync_playwright
+    fixture = json.loads((output / 'waitlist-browser-ready.json').read_text())
+    def stage(name):
+        (output / 'waitlist-browser-stage.txt').write_text(name)
+    shells = sorted((Path.home() / '.cache/ms-playwright').glob('chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell'))
+    if not shells:
+        raise RuntimeError('P25 browser proof requires an installed local Chromium')
+    with local_storefront_proxy(), sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=str(shells[-1]))
+        try:
+            context = browser.new_context(service_workers='block')
+            try:
+                def route_request(route):
+                    original = route.request.url
+                    if not original.startswith('http://127.0.0.1:18801/'):
+                        route.abort()
+                        return
+                    route.continue_()
+                context.route('**/*', route_request)
+                page = context.new_page()
+                from urllib.parse import urlsplit
+                responses = []
+                def remember(response):
+                    path = urlsplit(response.url).path
+                    if path.startswith(('/produk/', '/waitlist/', '/admin')):
+                        responses.append({'path': path, 'status': response.status, 'method': response.request.method})
+                        (output / 'waitlist-browser-http.json').write_text(json.dumps(responses))
+                page.on('response', remember)
+                url = 'http://127.0.0.1:18801/produk/' + str(fixture['product_id'])
+                stage('product')
+                page.goto(url, wait_until='domcontentloaded')
+                status = page.evaluate("""async url => (await fetch(url + '/waitlist', {
+                    method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: 'email=browser%40example.invalid'})).status""", url)
+                if status != 403:
+                    raise AssertionError('Waitlist accepted a request without CSRF')
+                stage('submit')
+                page.locator('#waitlist-email').fill('browser@example.invalid')
+                page.locator('#waitlist button[type=submit]').click()
+                stage('submit-result')
+                page.locator('#waitlist [role=status]').wait_for()
+                def operation(name):
+                    return page.evaluate("""async ([name, key]) => {
+                        const response = await fetch('/__p25_browser/' + name, {
+                            method: 'POST', headers: {'X-P25-Control': key}});
+                        if (!response.ok) throw new Error('browser operation rejected');
+                        return (await response.json()).url;
+                    }""", [name, control_key])
+                stage('confirmation-mail')
+                confirmation = operation('confirmation')
+                stage('confirmation-page')
+                page.goto(confirmation, wait_until='domcontentloaded')
+                page.get_by_role('heading', name='Permintaan dikonfirmasi').wait_for()
+                stage('restock-mail')
+                unsubscribe = operation('restock')
+                stage('unsubscribe-page')
+                page.goto(unsubscribe, wait_until='domcontentloaded')
+                page.get_by_role('heading', name='Notifikasi dihentikan').wait_for()
+                stage('admin-authorization')
+                retry_url = 'http://127.0.0.1:18801/admin/orders/' + fixture['retry_order'] + '/sales-proof/retry'
+                page.goto('http://127.0.0.1:18801/admin/login', wait_until='domcontentloaded')
+                unauthorized = page.evaluate("""async url => {
+                    const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+                    const r = await fetch(url, {method:'POST', headers: {'Accept':'text/html',
+                        'Content-Type':'application/x-www-form-urlencoded'},
+                        body: new URLSearchParams({csrfmiddlewaretoken:csrf})});
+                    return new URL(r.url).pathname;
+                }""", retry_url)
+                if unauthorized != '/admin/login':
+                    raise AssertionError('Unauthenticated Sales Proof retry accepted')
+                stage('admin-login')
+                page.goto('http://127.0.0.1:18801/admin/login?next=/admin/orders/' + fixture['retry_order'])
+                page.locator('#id_email').fill('p25-operator@example.invalid')
+                page.locator('#id_password').fill(admin_password)
+                page.locator('form[action="/admin/login"] button[type=submit]').click()
+                stage('admin-retry')
+                page.get_by_role('button', name='Retry Sales Proof').wait_for()
+                without_csrf = page.evaluate("""async url => (await fetch(url, {method:'POST',
+                    headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:''})).status""", retry_url)
+                if without_csrf != 403:
+                    raise AssertionError('Sales Proof retry accepted without CSRF')
+                page.get_by_role('button', name='Retry Sales Proof').click()
+                page.get_by_text('Retry Sales Proof Post dicatat. Unknown delivery tetap memerlukan review.').wait_for()
+                stage('admin-unknown')
+                page.goto('http://127.0.0.1:18801/admin/orders/' + fixture['unknown_order'])
+                page.get_by_role('button', name='Retry Sales Proof').click()
+                page.get_by_text('Tindakan tidak dapat diproses pada status saat ini.').wait_for()
+            finally:
+                context.close()
+        finally:
+            browser.close()
 
 
 def main():
@@ -107,8 +280,17 @@ def main():
     if browser:
         (output / 'browser-finished').unlink(missing_ok=True)
         (output / 'browser-fixture.json').unlink(missing_ok=True)
+    if notifications:
+        (output / 'waitlist-browser-ready.json').unlink(missing_ok=True)
+        (output / 'waitlist-browser-finished').unlink(missing_ok=True)
+        (output / 'waitlist-browser-failure.json').unlink(missing_ok=True)
     cli('reset','candidate')
     harness.candidate_admission(config,harness.STATE / 'candidate', workers=notifications, notifications=notifications)
+    if notifications:
+        image_boundary = docker('run', '--rm', '--network', 'none', '--entrypoint', 'python',
+            harness.IMAGE, '-c', "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/opt/harness/boundary.py').read_bytes()).hexdigest())")
+        if image_boundary != hashlib.sha256((ROOT / 'tools/migration_harness/boundary.py').read_bytes()).hexdigest():
+            raise RuntimeError('P25 boundary image does not match the local relay source')
     try:
         manifest = cli('start','candidate','--quarantine')
         boundary = container('candidate','boundary')
@@ -116,6 +298,12 @@ def main():
         php(boundary,'php artisan migrate --force --no-interaction')
         fixture = (ROOT / 'tools/migration_harness/checkout_fixture.php').read_text().removeprefix('<?php')
         fixtures = json.loads(php(boundary, ('P25_NOTIFICATION_SMOKE=1 ' if notifications else 'P20_API_SMOKE=1 P16_USDT_SMOKE=1 ' if api else 'P17_USDT_SMOKE=1 ' if p17 else 'P21_STOREFRONT_SMOKE=1 P19_AUTH_SMOKE=1 ' if storefront else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
+        if notifications:
+            fixtures['p25_browser_key'] = secrets.token_hex(32)
+            fixtures['p25_admin_password'] = secrets.token_hex(24)
+            fixtures['p25_admin_db_password'] = secrets.token_hex(24)
+            fixtures['p25_supplier_db_password'] = secrets.token_hex(24)
+            fixtures['p25_funding_db_password'] = secrets.token_hex(24)
         if receipt:
             customer_id = int(fixtures['python']['customer_id'])
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
@@ -131,6 +319,15 @@ def main():
             schema += '\nALTER ROLE candidate_runtime CONNECTION LIMIT 7;\n'
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/notifications/grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/notifications/waitlist_grants.sql').read_text()
+            schema += "\nGRANT candidate_runtime TO candidate_p25_admin;\n"
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/admin/grants.sql').read_text().replace(
+                'TO candidate_runtime', 'TO candidate_p25_admin')
+            schema += "\nGRANT candidate_runtime TO candidate_p25_supplier;\n"
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/grants.sql').read_text().replace(
+                'TO candidate_runtime', 'TO candidate_p25_supplier')
+            schema += "\nGRANT candidate_runtime TO candidate_p25_funding;\n"
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/funding/grants.sql').read_text().replace(
+                'TO candidate_runtime', 'TO candidate_p25_funding')
         if p16 or p17:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/grants.sql').read_text()
         if p17:
@@ -161,6 +358,15 @@ def main():
         if api:
             schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/customer_api' / name).read_text()
                                        for name in ('credential_grants.sql','orders_grants.sql','reads_grants.sql'))
+        if notifications:
+            role_sql = ("CREATE ROLE candidate_p25_admin LOGIN PASSWORD '" + fixtures['p25_admin_db_password']
+                        + "' CONNECTION LIMIT 1; CREATE ROLE candidate_p25_supplier LOGIN PASSWORD '"
+                        + fixtures['p25_supplier_db_password'] + "' CONNECTION LIMIT 1; "
+                        + "CREATE ROLE candidate_p25_funding LOGIN PASSWORD '"
+                        + fixtures['p25_funding_db_password'] + "' CONNECTION LIMIT 1;")
+            subprocess.run(['docker', 'exec', '-i', database, 'psql', '-v', 'ON_ERROR_STOP=1',
+                            '-U', 'harness', '-d', 'disposable'],
+                           input=role_sql, capture_output=True, text=True, check=True, timeout=30)
         docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable','-c',schema)
         directory = harness.STATE / 'candidate'
         oracle_key = directory / 'p09-oracle-key'
@@ -192,7 +398,56 @@ def main():
             '--env',f'P20_API_SMOKE={"1" if api else "0"}',
             '--env',f'P18_SUPPLIER_SMOKE={"1" if supplier else "0"}','--entrypoint','python',
             candidate_image,'smoke_checkout.py']
-        probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=1200 if browser else 240)
+        if notifications:
+            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            process.stdin.write(json.dumps(fixtures))
+            process.stdin.close()
+            process.stdin = None
+            finished = output / 'waitlist-browser-finished'
+            stage = 'waiting-for-storefront'
+            try:
+                ready = output / 'waitlist-browser-ready.json'
+                deadline = time.monotonic() + 180
+                while not ready.exists():
+                    if process.poll() is not None or time.monotonic() >= deadline:
+                        raise RuntimeError('Disposable storefront did not become ready')
+                    time.sleep(0.1)
+                stage = 'php-compensation'
+                compensation = fixtures['p25_compensation']
+                owner_call = ("require '/var/www/html/vendor/autoload.php'; "
+                    "$app=require '/var/www/html/bootstrap/app.php'; "
+                    "$app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); "
+                    "if (!app()->environment('testing') || Illuminate\\Support\\Facades\\DB::connection()->getDatabaseName()!=='disposable') throw new RuntimeException('refused'); "
+                    "Illuminate\\Support\\Facades\\Http::preventStrayRequests(); Illuminate\\Support\\Facades\\Queue::fake(); "
+                    f"$result=app(App\\Services\\StoreBalance\\StoreBalanceOwnerCompensationService::class)->release({int(compensation['top_up_id'])},"
+                    f"App\\Models\\User::findOrFail({int(compensation['owner_id'])}),"
+                    "'P25-SYNTHETIC-REFERENCE','Synthetic compensation qualification'); "
+                    "Illuminate\\Support\\Facades\\Event::fake([App\\Events\\StoreBalanceOwnerCompensated::class]); "
+                    f"$missing=app(App\\Services\\StoreBalance\\StoreBalanceOwnerCompensationService::class)->release({int(compensation['missing_top_up_id'])},"
+                    f"App\\Models\\User::findOrFail({int(compensation['owner_id'])}),"
+                    "'P25-MISSING-REFERENCE','Synthetic missing handoff'); "
+                    "echo json_encode(['applied'=>$result->applied,'missing_applied'=>$missing->applied]);")
+                if json.loads(php(boundary, 'php -r ' + shlex.quote(owner_call))) != {'applied': True, 'missing_applied': True}:
+                    raise AssertionError('Synthetic PHP compensation did not apply')
+                stage = 'browser-flow'
+                waitlist_browser(output, fixtures['p25_browser_key'], fixtures['p25_admin_password'])
+                finished.write_text('PASS')
+                stage = 'finalizing-probe'
+                stdout, stderr = process.communicate(timeout=240)
+                probe = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+            except Exception as error:
+                (output / 'waitlist-browser-failure.json').write_text(json.dumps(
+                    {'stage': stage, 'error_type': type(error).__name__}))
+                if process.poll() is None:
+                    finished.write_text('FAIL')
+                    try:
+                        process.communicate(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.communicate()
+                raise RuntimeError('P25 disposable browser verification failed') from None
+        else:
+            probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=1200 if browser else 240)
         if probe.returncode:
             if receipt and not notifications:
                 diagnostic = [json.loads(line) for line in probe.stderr.splitlines() if line.startswith('{')]
@@ -202,7 +457,34 @@ def main():
         observed = json.loads(probe.stdout)
         assert observed['status'] == 'passed'
         if notifications:
+            for name in ('waitlist-browser-stage.txt', 'waitlist-browser-http.json',
+                         'probe-failure.txt', 'probe-failure.stderr', 'p25-bulk-failure.json'):
+                (output / name).unlink(missing_ok=True)
+        if notifications:
             observed['notification_browser'] = notification_browser(output)
+            observed['waitlist_browser_boundary'] = {
+                'mode': 'live-loopback-storefront',
+                'restock': 'disposable fixture through existing waitlist owner',
+                'delivery': 'local discard-only SMTP',
+                'limits': 'No production, real email, Admin stock UI or mail-client rendering',
+            }
+            from uuid import UUID
+            supplier_case = json.loads((output / 'p25-supplier-outcome.json').read_text())
+            supplier_order = str(UUID(supplier_case['order_id']))
+            supplier_oracle = ("require '/var/www/html/vendor/autoload.php'; "
+                "$app=require '/var/www/html/bootstrap/app.php'; "
+                "$app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); "
+                "if (!app()->environment('testing') || Illuminate\\Support\\Facades\\DB::connection()->getDatabaseName()!=='disposable') throw new RuntimeException('refused'); "
+                f"$order=App\\Models\\Order::with(['customer','orderItems','payments'])->findOrFail('{supplier_order}'); "
+                "echo json_encode(app(App\\Services\\Telegram\\AdminPaidOrderOutcome::class)->read($order));")
+            legacy_outcome = json.loads(php(boundary, 'php -r ' + shlex.quote(supplier_oracle)))
+            if (legacy_outcome['resolved'] is not False or supplier_case['outcome']['resolved'] is not True
+                    or not any('hasil pembelian belum dapat dipastikan' in line for line in legacy_outcome['lines'])
+                    or not any('konfirmasi Owner' in line for line in supplier_case['outcome']['lines'])):
+                raise AssertionError('Supplier full-refund differential changed unexpectedly')
+            observed['supplier_full_refund_php_differential'] = (
+                'PHP reports unresolved after owner-attested no-debit and full refund; '
+                'candidate resolves from immutable owner evidence')
             handoff = json.loads((output / 'counter-handoff.json').read_text())
             floor = handoff['rollback_floor']
             if type(floor) is not int or not handoff['php_floor'] < floor < 2**53 - 1:
@@ -237,7 +519,18 @@ def main():
             sources.extend(sorted((ROOT / 'candidate/lhie_candidate/workers').glob('*.py')))
             sources.extend(ROOT / name for name in (
                 'candidate/lhie_candidate/notifications/grants.sql', 'candidate/tests/test_notifications.py',
-                 'candidate/tests/test_notifications_postgres.py', 'candidate/notifications.py'))
+                 'candidate/tests/test_notifications_postgres.py', 'candidate/tests/test_supplier_notice_postgres.py',
+                 'candidate/notifications.py'))
+            sources.extend(ROOT / name for name in (
+                'candidate/lhie_candidate/funding/manual.py', 'candidate/lhie_candidate/funding/service.py',
+                'candidate/lhie_candidate/funding/outbound.py', 'candidate/lhie_candidate/funding/grants.sql',
+                'candidate/lhie_candidate/payments/presentation.py', 'candidate/lhie_candidate/payments/sakurupiah_urls.py',
+                'candidate/lhie_candidate/payments/klikqris.py'))
+            sources.extend(ROOT / name for name in (
+                'candidate/lhie_candidate/settings.py', 'candidate/lhie_candidate/navigation/transport.py',
+                'candidate/lhie_candidate/navigation/presentation.py',
+                'candidate/lhie_candidate/navigation/id.json', 'candidate/lhie_candidate/navigation/en.json',
+                'candidate/lhie_candidate/navigation/ms.json'))
             sources.extend(ROOT / name for name in (
                 'candidate/tests/test_notification_completion.py', 'candidate/tests/test_runtime.py',
                 'candidate/lhie_candidate/runtime.py', 'candidate/workers.py', 'candidate/stack.py'))
@@ -246,6 +539,13 @@ def main():
             sources.extend(ROOT / name for name in (
                 'candidate/lhie_candidate/notifications/waitlist_grants.sql',
                 'candidate/tests/test_waitlist.py', 'candidate/tests/test_waitlist_postgres.py',
+                'candidate/serve.py', 'candidate/lhie_candidate/startup.py',
+                'candidate/lhie_candidate/urls.py', 'candidate/lhie_candidate/http.py',
+                'candidate/templates/storefront/catalog_base.html',
+                'candidate/static/storefront/laravel-storefront.css', 'candidate/static/storefront/catalog.css',
+                'candidate/static/storefront/catalog.js', 'candidate/static/storefront/carousels-init.js',
+                'candidate/static/storefront/carousels.js', 'candidate/static/storefront/activity.js',
+                'candidate/static/storefront/favicon.png', 'candidate/static/storefront/product-placeholder.svg',
                 'candidate/lhie_candidate/storefront/waitlist.py',
                 'candidate/lhie_candidate/storefront/catalog.py',
                 'candidate/lhie_candidate/storefront/catalog_urls.py',
@@ -255,8 +555,14 @@ def main():
                 'candidate/lhie_candidate/auth/mail.py',
                 'candidate/lhie_candidate/admin/catalog.py', 'candidate/lhie_candidate/admin/views.py',
                 'candidate/lhie_candidate/admin/operations_views.py', 'candidate/templates/admin/order_detail.html',
+                'candidate/lhie_candidate/admin/grants.sql', 'candidate/lhie_candidate/admin/access.py',
+                'candidate/lhie_candidate/admin/orders.py', 'candidate/lhie_candidate/admin/urls.py',
+                'candidate/lhie_candidate/auth/admin.py', 'candidate/templates/admin/base.html',
+                'candidate/templates/admin/login.html', 'candidate/static/admin/admin.css', 'candidate/static/admin/admin.js',
                 'candidate/lhie_candidate/storefront/checkout.py',
                 'candidate/lhie_candidate/suppliers/manual.py', 'candidate/lhie_candidate/suppliers/acquisition.py',
+                'candidate/lhie_candidate/suppliers/capacity.py', 'candidate/lhie_candidate/suppliers/transport.py',
+                'candidate/lhie_candidate/suppliers/warranty.py', 'candidate/lhie_candidate/suppliers/grants.sql',
                 'candidate/lhie_candidate/auth/sessions.py',
                 'candidate/lhie_candidate/compat/identity.py',
                 'candidate/lhie_candidate/navigation/repository.py',
@@ -381,6 +687,10 @@ def main():
                     'src/app/Services/Telegram/SalesProofDeliveryPipeline.php',
                     'src/app/Services/Telegram/SalesProofPostFormatter.php',
                     'src/app/Services/Telegram/SalesProofPostNumbering.php',
+                    'src/app/Services/PaidInvoice/PaidInvoiceOrderPresentationAdapter.php',
+                    'src/app/Services/PaidInvoice/PaidInvoicePresentation.php',
+                    'src/app/Services/PaidInvoice/PaidInvoiceBuyerNameMasker.php',
+                    'src/app/Services/Telegram/TelegramProductNameRenderer.php',
                     'src/app/Services/OrderCredentialMailService.php',
                     'src/resources/views/emails/order-credential.blade.php',
                     'src/resources/views/emails/order-credential-text.blade.php',
@@ -435,17 +745,43 @@ def main():
                     'src/app/Services/Telegram/TelegramBroadcastIntents.php',
                     'src/app/Services/Telegram/TelegramBroadcastService.php',
                     'src/app/Services/Telegram/BalanceTopUpReceiptDeliveryPipeline.php',
+                    'src/app/Services/Telegram/BalanceTopUpInstructionDeliveryPipeline.php',
+                    'src/app/Services/Telegram/TelegramPaymentInstructionRenderer.php',
+                    'src/app/Services/Telegram/StoreBalanceTopUpOutbound.php',
+                    'src/app/Services/Telegram/BalanceTopUpChannelProofDeliveryPipeline.php',
+                    'src/app/Services/PaidInvoice/PaidInvoiceTopUpPresentationAdapter.php',
                     'src/app/Services/Telegram/BalanceTopUpOwnerAlertDeliveryPipeline.php',
+                    'src/app/Services/Telegram/TelegramBotApiRedactor.php',
+                    'src/app/Logging/RedactCustomerApiSecrets.php',
+                    'src/app/Services/Telegram/TelegramUiIcons.php',
+                    'src/app/Services/Telegram/CustomEmojiCapability.php',
+                    'src/app/Services/Telegram/BalanceTopUpPaymentProofDeliveryPipeline.php',
+                    'src/app/Services/StoreBalance/StoreBalanceOwnerCompensationService.php',
+                    'src/app/Services/Telegram/OwnerCompensationNotificationDeliveryPipeline.php',
+                    'src/app/Listeners/MaterializeStoreBalanceOwnerCompensationNotification.php',
+                    'src/app/Models/StoreBalanceCompensation.php',
+                    'src/app/Services/StoreBalance/TopUp/ManualStoreBalanceTopUpLifecycle.php',
+                    'src/app/Services/StoreBalance/TopUp/StoreBalanceTopUpLifecycleResolver.php',
+                    'src/app/Services/Suppliers/SupplierHealthDeliveryPipeline.php',
+                    'src/app/Services/Suppliers/SupplierHealthService.php',
+                    'src/app/Services/Suppliers/SupplierMoney.php',
+                    'src/app/Services/Suppliers/SupplierCatalogSync.php',
+                    'src/app/Models/SupplierFulfillment.php',
+                    'src/app/Models/StoreBalanceTopUp.php',
+                    'src/app/Models/SupplierHealthEvent.php',
+                    'src/app/Services/Telegram/TelegramLocale.php',
+                    'src/lang/id.json', 'src/lang/en.json', 'src/lang/ms.json',
                     'src/app/Services/Telegram/TelegramManualPaymentIntents.php',
                     'src/app/Mail/GuestOrderMilestoneMail.php',
                     'src/app/Notifications/CustomerAuthMailNotification.php',
                     'src/app/Notifications/CustomerLoginLinkNotification.php',
+                    'src/composer.lock',
                     'src/resources/views/emails/guest-order-milestone.blade.php')})
             resources_path = output / 'notification-resources.json'
             observed['notification_resources'] = json.loads(resources_path.read_text())
             resources_path.unlink()
             observed['limits'] = ['Synthetic disposable PostgreSQL/Redis, fake Telegram relay and loopback SMTP sink only',
-                'Waitlist HTTP uses middleware; offline redacted HTML previews do not qualify the full browser flow or mail clients',
+                'Live waitlist browser uses loopback and a disposable restock fixture; mail previews do not qualify mail-client rendering',
                 'Waitlist is disabled by default and admits only reserved .invalid mail targets when explicitly provisioned',
                 'Optional eight-process profile: seven runtime connections; cgroup sampling includes probe/harness overhead, not production capacity',
                 'No full P25 parity, P26 acceptance, live delivery, production or CI/CD operation']

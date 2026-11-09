@@ -29,7 +29,7 @@ def main():
     if args.family == 'telegram':
         from lhie_candidate.notifications.order_notices import OrderNotices
         from lhie_candidate.notifications.proof_publication import SalesProofPublication
-        service = Notifications(NotificationTransport(), recipients=recipients,
+        service = Notifications(NotificationTransport(), recipients=recipients, admin_target='1',
                                 proof=SalesProofPublication(recipients), order_notices=OrderNotices(recipients))
     elif args.family == 'credential-mail':
         cipher = LaravelEncrypter(application_key())

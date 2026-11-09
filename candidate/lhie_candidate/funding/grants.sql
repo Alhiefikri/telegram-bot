@@ -25,7 +25,7 @@ GRANT UPDATE (status,claimed_at,updated_at) ON public.store_balance_funding_inte
 
 GRANT SELECT (id,customer_id,store_balance_funding_intent_id,telegram_navigation_root_id,chat_id,
     canonical_message_id,locale,provider,payment_setting_id,payment_provider_version,merchant_ref,idempotency_key,currency,amount,status,
-    provider_reference,provider_qris_url,provider_fee,provider_total_payment,provider_payment_method,
+    provider_reference,provider_qris_url,provider_qris_payload,provider_fee,provider_total_payment,provider_payment_method,
     sakurupiah_channel,provider_created_at,provider_expires_at,expires_at,provider_create_state,
     provider_create_attempted_at,provider_create_last_error,paid_at,settled_at,created_at,updated_at,
     payment_proof_file_id,payment_proof_submitted_at,payment_proof_admin_chat_id)

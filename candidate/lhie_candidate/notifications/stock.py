@@ -7,11 +7,19 @@ from django.db import transaction
 from ..navigation.repository import CatalogRepository
 from ..receipt.protocol import _now
 from ..receipt.render import _tr
-from .policy import NotEligible
+from .policy import LIMITS, STOCK, TERMINAL_CODES, NotEligible
 from .html import localized_html
+
+STOCK_MOVEMENT_PREDICATE = """(
+    (type='adjustment' AND quantity>0)
+    OR (type='availability' AND quantity>0 AND COALESCE(available_before,0)=0 AND COALESCE(available_after,0)>0)
+    OR (type IN ('adjustment','availability','sale') AND quantity<0 AND became_unavailable=true)
+)"""
 
 
 def render(product, movement, event, locale, *, channel=False, icons=()):
+    if movement['available_after'] is None:
+        movement = dict(movement, available_after=product['available_stock'])
     def tr(key, **values):
         return localized_html(locale, key, icons=icons, custom=not channel, **values)
     def amount(value):
@@ -80,10 +88,13 @@ class StockNotifications:
         self.catalog = CatalogRepository(db.using)
         self._movement_cursor = 0
         self._event_cursor = 0
+        self._projection_cursor = 0
 
     def recover(self, limit):
-        movements = self.db.rows('''SELECT id FROM public.inventory_movements WHERE id>%s
-            AND ((type IN ('adjustment','availability') AND quantity>0) OR (quantity<0 AND became_unavailable=true))
+        self.repair_projections(limit)
+        movements = self.db.rows('''SELECT id FROM public.inventory_movements WHERE id>%s AND '''
+            + STOCK_MOVEMENT_PREDICATE + ''' AND EXISTS
+            (SELECT 1 FROM public.products p WHERE p.id=inventory_movements.product_id)
             ORDER BY id LIMIT %s''', (self._movement_cursor, limit))
         self._movement_cursor = movements[-1]['id'] if movements else 0
         for movement in movements:
@@ -97,6 +108,41 @@ class StockNotifications:
         for event in events:
             self.materialize(event['id'], limit)
 
+    def repair_projections(self, limit):
+        rows = self.db.rows('''SELECT m.id FROM public.inventory_movements m
+            WHERE m.id>%s AND m.stock_notification_sent_at IS NULL
+              AND EXISTS (SELECT 1 FROM public.stock_notification_events s WHERE s.inventory_movement_id=m.id)
+            ORDER BY m.id LIMIT %s''', (self._projection_cursor, limit))
+        self._projection_cursor = rows[-1]['id'] if rows else 0
+        for row in rows:
+            self.db.execute('''UPDATE public.inventory_movements m SET stock_notification_sent_at=%s
+                WHERE m.id=%s AND m.stock_notification_sent_at IS NULL
+                  AND EXISTS (SELECT 1 FROM public.stock_notification_events s WHERE s.inventory_movement_id=m.id)
+                  AND NOT EXISTS (SELECT 1 FROM public.stock_notification_events s
+                      WHERE s.inventory_movement_id=m.id AND s.recipients_snapshotted_at IS NULL)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.stock_notification_recipients r
+                      JOIN public.stock_notification_events s ON s.id=r.stock_notification_event_id
+                      WHERE s.inventory_movement_id=m.id AND NOT (r.telegram_id=ANY(%s)))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.stock_notification_recipients r
+                      JOIN public.stock_notification_events s ON s.id=r.stock_notification_event_id
+                      WHERE s.inventory_movement_id=m.id AND
+                        (SELECT count(*) FROM public.telegram_outbound_effects e
+                         WHERE e.source_type=%s AND e.source_id=r.id::text AND e.effect_type=%s)<>1)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.stock_notification_recipients r
+                      JOIN public.stock_notification_events s ON s.id=r.stock_notification_event_id
+                      JOIN public.telegram_outbound_effects e ON e.source_type=%s
+                          AND e.source_id=r.id::text AND e.effect_type=%s
+                      WHERE s.inventory_movement_id=m.id AND e.state<>'sent'
+                        AND (e.state<>'failed' OR (e.attempts<%s
+                          AND NOT (COALESCE(e.last_error_code,'')=ANY(%s)))))''',
+                (_now(), row['id'], list(self.recipients.telegram), 'App\\Models\\StockNotificationRecipient', STOCK,
+                 'App\\Models\\StockNotificationRecipient', STOCK, LIMITS[STOCK],
+                 list(TERMINAL_CODES | {'telegram_http_400', 'telegram_http_403',
+                     'stock_notification_attempts_exhausted', 'stock_notification_terminal_failure', 'sold_out_stale'})))
+
     def materialize(self, identity, limit):
         with transaction.atomic(using=self.db.using):
             event = self.db.one('SELECT * FROM public.stock_notification_events WHERE id=%s FOR UPDATE', (identity,))
@@ -106,6 +152,8 @@ class StockNotifications:
             product = self.catalog.product(movement['product_id']) if movement else None
             if not product:
                 return
+            if movement['available_after'] is None:
+                movement = dict(movement, available_after=product['available_stock'])
             media = self.db.one('''SELECT p.telegram_channel_image_path,p.image_path,f.image_path AS family_image_path
                 FROM public.products p LEFT JOIN public.product_families f ON f.id=p.product_family_id
                 WHERE p.id=%s''', (product['id'],))
@@ -124,20 +172,32 @@ class StockNotifications:
                      tier['usdt_price_amount'] if tier else None, identity))
                 event = self.db.one('SELECT * FROM public.stock_notification_events WHERE id=%s', (identity,))
             customers = self.db.rows('''SELECT id,telegram_id,locale FROM public.customers c
-                WHERE telegram_id::text=ANY(%s) AND NOT EXISTS (SELECT 1 FROM public.stock_notification_recipients r
-                WHERE r.stock_notification_event_id=%s AND r.recipient_type='customer' AND r.telegram_id=c.telegram_id::text)
-                ORDER BY id LIMIT %s''', (list(self.recipients.telegram), identity, limit))
+                WHERE c.id>%s AND telegram_id::text=ANY(%s) AND NOT EXISTS (SELECT 1 FROM public.stock_notification_recipients r
+                WHERE r.stock_notification_event_id=%s AND r.telegram_id=c.telegram_id::text)
+                ORDER BY id LIMIT %s''', (event['materialization_cursor'] or 0, list(self.recipients.telegram), identity, limit))
             targets = [(c['id'], str(c['telegram_id']), c['locale'] if c['locale'] in ('id', 'en', 'ms') else 'en', False) for c in customers]
             setting = self.db.one("SELECT telegram_chat_id,last_test_success FROM public.store_channel_settings WHERE singleton_key='store_channel'")
-            if setting and setting['last_test_success'] and self.recipients.permits(setting['telegram_chat_id']):
-                targets.insert(0, (None, str(setting['telegram_chat_id']), 'en', True))
-            for customer_id, chat, locale, channel in targets:
+            channel = str((setting or {}).get('telegram_chat_id') or '').strip() if setting and setting['last_test_success'] else ''
+            if channel and self.recipients.permits(channel) and not event['materialization_cursor']:
+                targets.insert(0, (None, channel, 'en', True))
+            for customer_id, chat, locale, is_channel in targets:
                 icons = self.db.rows('SELECT source_emoji,fallback_emoji,custom_emoji_id FROM public.telegram_ui_icons')
-                text, markup, photo = render(product, movement, event, locale, channel=channel, icons=icons)
+                text, markup, photo = render(product, movement, event, locale, channel=is_channel, icons=icons)
                 self.db.execute('''INSERT INTO public.stock_notification_recipients
                     (stock_notification_event_id,customer_id,recipient_type,telegram_id,locale,text,reply_markup,photo_path,created_at,updated_at)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''',
-                    (identity, customer_id, 'store_channel' if channel else 'customer', chat, None if channel else locale,
+                    (identity, customer_id, 'store_channel' if is_channel else 'customer', chat, None if is_channel else locale,
                      text, json.dumps(markup) if markup else None, photo, _now(), _now()))
-            # Keep the global PHP handoff incomplete while local admission
-            # intentionally excludes any canonical audience. No hidden waiver.
+            original = self.db.rows('''SELECT telegram_id FROM public.customers
+                WHERE telegram_id IS NOT NULL ORDER BY id LIMIT 101''')
+            snapshots = self.db.rows('''SELECT telegram_id FROM public.stock_notification_recipients
+                WHERE stock_notification_event_id=%s ORDER BY id LIMIT 101''', (identity,))
+            expected = {str(row['telegram_id']).strip() for row in original if str(row['telegram_id']).strip()}
+            if channel and not event['materialization_cursor']:
+                expected.add(channel)
+            actual = {row['telegram_id'] for row in snapshots}
+            if (len(original) <= 100 and len(snapshots) <= 100 and expected <= actual
+                    and actual <= self.recipients.telegram and expected <= self.recipients.telegram):
+                self.db.execute('''UPDATE public.stock_notification_events SET recipients_snapshotted_at=%s,
+                    updated_at=%s WHERE id=%s AND recipients_snapshotted_at IS NULL''',
+                    (_now(), _now(), identity))

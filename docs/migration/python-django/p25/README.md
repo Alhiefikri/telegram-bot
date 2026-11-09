@@ -463,7 +463,7 @@ are excluded). The oracle uses `[REDACTED]`, never a persisted/issued capability
 This establishes semantic copy/route parity, **not** full Laravel/Django HTML
 layout equality or end-to-end grant/browser acceptance for every purpose.
 
-Current smoke results include the changed HTTP-confirmation-to-bulk flow, held
+That earlier smoke included the changed HTTP-confirmation-to-bulk flow, held
 SMTP versus navigation/receipt progress, paid-outcome successor recovery, expiry
 cleanup, manual proof photo/caption, historical fulfillment review, immutable IDR
 posting-backed notices, stock channel photo, and the existing unknown/no-resend
@@ -471,9 +471,91 @@ checks. Redacted credential and milestone previews are pixel-identical to PHP
 at 390px and 1280px. Counter evidence imports PHP floor **37**, exports candidate
 floor **43** after workers drain, and verifies PHP next reservation **44**.
 
-The latest short isolated-worker observation is 422,977,536 peak cgroup bytes,
+That earlier isolated-worker observation was 422,977,536 peak cgroup bytes,
 10 peak PIDs, seven runtime DB connections and 0.433 average CPUs over 23.357s;
 these include probe/harness overhead and are not production capacity evidence.
 Remaining balance families, supplier-health/outcome qualification, historical
 presentation/aggregate cases and full browser flows still prevent P25 acceptance.
 **#708 remains unstarted and its P25 prerequisite remains unfulfilled.**
+
+#### Source audit against the retained v4 manifest
+
+The working branch is `migration/p25-completion-708`. The expanded v4 smoke
+was rerun after the supplier-health scanner, balance families, historical
+Sales Proof, stock projection, waitlist and Admin browser slices. Its 160
+`source_sha256` and 71 `legacy_owner_sha256` entries matched the working
+files immediately after that run.
+Source identity does not prove untested acceptance. The canonical issue and
+its comment confirm that administrative closure did not accept unfinished work.
+
+| Requirement | Current boundary and observed evidence | Work required before acceptance |
+| --- | --- | --- |
+| Balance notices | Receipt and paid Owner notice remain posting-backed. Manual proof delivers the retained photo with a PHP caption comparison and repairs its sent marker without resend; competing recoverers preserve unknown. A PHP-created Owner alert matches the PHP message hash, synthetic configured-token, API-key and Bot-URL redaction, and a DB-backed custom-emoji entity including UTF-16 offsets; it sends through the fake relay. Competing recoverers create one missing handoff and retain an ambiguous outcome. The PHP compensation owner creates two synthetic immutable postings: an existing effect sends, and a suppressed handoff is discovered once and remains unknown. A PHP-created settled top-up supplies the public channel caption differential; its PNG sends through the fake relay. Two PostgreSQL recoverers create a single missing channel effect, which remains unknown after an ambiguous delivery. | Port instructions. Qualify channel-proof photo parity, QRIS and historical/disabled-channel variants; the PNG renderer is not PHP pixel parity. Qualify Owner-alert eligibility/status variants, additional configured-secret forms and width truncation, PHP compensation message/keyboard differential, additional locales and historical proof cases. |
+| Supplier health and outcomes | `supplier_health.py` uses the existing scan, state, review and event tables and shared effect ledger; the opt-in notice worker admits the synthetic admin target only. A PHP scanner supplies the low-balance message oracle. Two PostgreSQL scanners serialize on the existing scan row and create one matching low episode; it sends via fake relay. Synthetic observations exercise low recovery/re-entry, transient-error threshold and deduplication, timed error recovery, stale observation and retry grace. A PHP-created ambiguous purchase produces one review and, after 15 minutes, a separate aged-hold alert. Retained PHP effects also send or remain unknown without resend. | Qualify episode closure/reopening and PHP differential for review/hold, no-target behavior, lock races against supplier finalization, bounded work for a fulfillment with many purchases, and real changed-flow outcomes for ambiguous, rejected, handoff and refund. Current review fixture is synthetic and does not prove provider transitions. |
+| Audience and projection recovery | Broadcast and price materialization leave the global snapshot marker unset when filtering original recipients. Stock and broadcast aggregate repair require admission of every original recipient; stock also requires one resolved effect per recipient. PHP created zero-, one- and five-recipient stock snapshots and a five-recipient broadcast snapshot with their handoffs. In the multi-recipient repair cases, one effect reaches the fake relay; others receive simulated terminal outcomes or an explicit unknown. A PHP-registered stock event also completes its candidate snapshot and handoff over bounded two-recipient slices when every original recipient is admitted; the check reads at most 101 customers and snapshots and refuses global completion above the admission cap. Restricted admission blocks completion; restricted repair preserves an already completed broadcast. | Qualify all stock transitions, historical/photo variants, partial PHP cursor/channel changes and production-scale recipient counts. Simulated terminal outcomes are not evidence of real delivery to the other recipients. |
+| Auth and credential mail | v4 compares semantic auth copy/routes and redacted full PHP/Django HTML preview pixels for magic link, verification, OTP and reset at 390 and 1280 pixels. Credential and milestone previews also match PHP pixels for one redacted variant each. | Qualify remaining credential/milestone variants. The auth comparison normalizes the synthetic action URL and is offline Chromium rendering, not a real email-client, device, or live authentication acceptance. |
+| Public Sales Proof | v4 compares both v1 and v2 captions with PHP's formatter for two PHP-created paid Orders, including a long historical Product name. Chromium signs in through the real Admin form, rejects unauthenticated and CSRF-less retry, retries an exhausted definite failure through the actual order route and shared protocol, refuses an unknown effect, and observes one eventual fake-relay send. Admin HTML now uses `same-origin` referrer policy: `no-referrer` caused Chromium to submit `Origin: null` and fail CSRF. Drained counter handoff: PHP floor 37, candidate rollback floor 47, PHP next 48. | Qualify other historical/payment and photo variants. Browser Admin used a separately provisioned disposable role with the existing Admin grants; this is not production authorization evidence. |
+| Waitlist | Chromium now submits the real CSRF-protected storefront form, follows the confirmation link delivered through local SMTP, and follows the unsubscribe link after a disposable restock fixture invokes the existing waitlist owner and sends the restock mail. The same manifest retains bounded PostgreSQL fan-out, concurrency and unknown/no-resend checks. | The restock is a test-controlled fixture, not the Admin stock UI; historical/custom-key data and actual email-client rendering remain outside this proof. |
+| Worker isolation | v4 holds SMTP while navigation and receipt progress and records seven runtime connections and short cgroup samples. | Qualify the final family composition, relevant payment isolation, concurrency, bounded/fair recovery and resources after the missing families are integrated. |
+
+The original #707 contract also requires disabled-channel readiness, eligible
+recipients, locale/fallback/rate handling, masked Sales Proof and API fulfillment
+eligibility. Retain those as explicit checks in the same harness and manifest;
+the table does not waive them. No production history/key or live-send
+qualification follows from synthetic evidence.
+
+The missing-handoff compensation fixture stores the original chat ID with
+surrounding spaces, as accepted by the PHP owner. The first recovery smoke
+failed because discovery compared it without trimming; the retained smoke
+passes with a normalized recipient snapshot and without changing the source.
+
+Balance receipt and compensation buttons now use the existing DB-backed
+navigation presentation. The focused regression verifies the Unicode fallback
+after an explicit custom-emoji rejection and that the internal fallback field
+is not sent to the relay. Unknown delivery remains outside that retry path.
+
+For the retained supplier-health slice, `python
+tools/migration_harness/smoke_checkout.py --notifications` passed with the
+single manifest above. The focused candidate command for notification,
+runtime, worker, waitlist and receipt-transport regressions passed 63 tests. The prior
+expected red run stopped at the missing family import; no assertion or
+delivery guard was weakened.
+
+The latest synthetic resource sample was 440,664,064 peak cgroup bytes, 10 PIDs
+and 0.447 average CPUs over 23.476s; it is not a production capacity measurement.
+
+The later v4 run also covers the instruction handoff and the seven-day channel
+proof discovery boundary:
+
+| Requirement | Implementation | Evidence | Limit |
+| --- | --- | --- | --- |
+| Lost balance instruction handoff | `TopUpInstructions.recover` discovers admitted eligible top-ups with a bounded rotating keyset, locks Customer then TopUp, rechecks eligibility and uses the existing funding effect writer and canonical key/queue. | A PHP-created manual top-up without an effect is recovered concurrently by two PostgreSQL workers; exactly one effect is created. An ambiguous send remains unknown and is not rediscovered or resent. Retained manual JPEG instructions match PHP caption hashes in `id`, `ms`, and `en` and reach the fake relay. | Provider-image fetch and KlikQRIS/Sakurupiah end-to-end presentation, instruction cleanup and additional retry cases remain unqualified. Unknown provider values are not admitted by recovery. |
+| Lost balance channel proof | Existing channel-proof discovery and its locked eligibility recheck enforce the PHP seven-day settlement window. | A PHP owner creates a synthetic settlement under an eight-day-old clock without rewriting financial history; recovery does not rediscover it. A recent lost handoff is recovered once under concurrency and an unknown send remains unknown. | The synthetic PNG is not full historical invoice pixel parity; retained older effects are not invalidated solely by the discovery window. |
+| Supplier review message | The existing scanner/review state and effect ledger remain authoritative. | A separately PHP-created ambiguous review supplies a normalized message hash; the candidate matches it. A blocked supplier-row race rechecks current supplier observations after acquiring the lock. | This does not qualify every supplier-specific purchase, handoff and refund outcome or all scanner fan-out bounds. |
+| Mail layouts | Django auth and credential templates use the existing presentation paths. | Four redacted auth purposes and two redacted credential variants match PHP preview pixels at 390 and 1280 pixels. | Offline Chromium previews normalize synthetic action URLs; they do not establish mail-client, device or every live auth flow acceptance. |
+
+This run recorded seven runtime database connections, 452,710,400 peak cgroup
+bytes, 10 peak PIDs and 0.461 average CPUs over 24.237 seconds. It is a short
+disposable observation including harness overhead, not capacity evidence. The
+synthetic boundary image is source-hash checked before the smoke and accepts
+both JPEG and PNG photo fixtures; it remains fake-only.
+
+Supplier outcome recovery now has a changed-flow PostgreSQL test using the
+existing checkout, supplier-acquisition, Owner attestation, refund and manual
+handoff owners with a separate disposable supplier role. It proves that an
+ambiguous purchase is not repeated or refunded without debit evidence; a real
+synthetic refund posts once, and a successor notice reaches the fake relay.
+Another Order proves a manual handoff alone does not resolve the independent
+supplier debit: only the subsequent Owner no-debit attestation allows a result
+notice. No financial rows are edited to manufacture those outcomes.
+
+The PHP differential exposes an intentional mismatch for the full-refund case:
+after the lifecycle cancels the purchase and Order, PHP
+`AdminPaidOrderOutcome` still reports the purchase uncertain and cannot deliver
+the paid-outcome successor. The candidate reads the existing immutable Owner
+no-debit evidence, explicitly attributes it to the Owner, and admits a resolved
+successor only when it references the original unresolved notice. It reports
+the actual refunded payment status. This is **not PHP parity** and must remain
+visible in acceptance review; it is not permission to modify financial history
+or retry an unknown original send. Other supplier outcomes and edge cases remain
+to be qualified.

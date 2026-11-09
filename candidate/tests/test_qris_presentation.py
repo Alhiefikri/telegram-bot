@@ -63,3 +63,9 @@ class QrPresentationContracts(unittest.TestCase):
         self.assertFalse(QrPresentation().manual_ready())
         with self.assertRaises(ValueError):
             QrPresentation().manual()
+
+    def test_manual_qris_accepts_single_frame_jpeg(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'qr-lhie.jpg'
+            Image.new('RGB', (48, 48), 'white').save(path, format='JPEG')
+            self.assertEqual(QrPresentation(public_storage=directory).manual(), path.read_bytes())

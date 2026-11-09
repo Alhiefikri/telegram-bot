@@ -406,7 +406,7 @@ def receipt_request(config, body, next_message_id):
         data = base64.b64decode(value, validate=True)
         if not 0 < len(data) <= limit:
             raise ValueError("invalid receipt attachment")
-        if field == "photo" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        if field == "photo" and not (data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"\xff\xd8\xff")):
             raise ValueError("invalid receipt image")
         if field == "document":
             if (not isinstance(payload.get("filename"), str)

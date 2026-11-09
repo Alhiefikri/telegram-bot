@@ -19,7 +19,7 @@ def _image(contents):
     if type(contents) is not bytes or not 0 < len(contents) <= MAX_IMAGE_BYTES:
         raise ValueError('Invalid QR image')
     image = Image.open(BytesIO(contents))
-    if (image.format not in ('PNG', 'JPEG', 'WEBP') or image.n_frames != 1
+    if (image.format not in ('PNG', 'JPEG', 'WEBP') or getattr(image, 'n_frames', 1) != 1
             or not all(0 < side <= MAX_IMAGE_SIDE for side in image.size)):
         raise ValueError('Invalid QR image')
     image.load()

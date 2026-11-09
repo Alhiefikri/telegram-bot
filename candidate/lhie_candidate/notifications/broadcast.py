@@ -74,12 +74,17 @@ def materialize(db, recipients, broadcast_id, record, *, limit=100):
         return len(rows)
 
 
-def project(db, broadcast_id):
+def project(db, recipients, broadcast_id):
     """Aggregate is a read projection. Unknown delivery never becomes completed."""
     with transaction.atomic(using=db.using):
-        source = db.one('SELECT id,recipients_materialized_at FROM public.telegram_broadcasts WHERE id=%s FOR UPDATE',
+        source = db.one('SELECT id,recipients_materialized_at,completed_at FROM public.telegram_broadcasts WHERE id=%s FOR UPDATE',
                         (broadcast_id,))
         if not source:
+            return
+        excluded = db.one('''SELECT 1 AS excluded FROM public.telegram_broadcast_recipients
+            WHERE broadcast_id=%s AND NOT (telegram_id=ANY(%s)) LIMIT 1''',
+            (broadcast_id, list(recipients.telegram)))
+        if excluded and source['completed_at'] is not None:
             return
         counts = db.one('''SELECT count(*) AS total,
             count(*) FILTER (WHERE e.state='sent') AS sent,
@@ -94,9 +99,10 @@ def project(db, broadcast_id):
                 AND e.effect_type=%s ORDER BY e.created_at DESC,e.id DESC LIMIT 1
             ) e ON true WHERE r.broadcast_id=%s''', (BROADCAST, broadcast_id))
         pending = counts['total'] - counts['sent'] - counts['terminal']
-        complete = source['recipients_materialized_at'] is not None and pending == 0 and counts['review'] == 0
+        complete = (source['recipients_materialized_at'] is not None and not excluded
+                    and pending == 0 and counts['review'] == 0)
         status = ('completed' if not counts['terminal'] else 'partially_failed' if counts['sent'] else 'failed') if complete else 'in_progress'
         db.execute('''UPDATE public.telegram_broadcasts SET recipient_count=%s,sent_count=%s,failed_count=%s,
             pending_count=%s,terminal_failed_count=%s,status=%s,completed_at=%s,updated_at=%s WHERE id=%s''',
             (counts['total'], counts['sent'], counts['failed'], pending, counts['terminal'], status,
-             _now() if complete else None, _now(), broadcast_id))
+             (source['completed_at'] or _now()) if complete else None, _now(), broadcast_id))

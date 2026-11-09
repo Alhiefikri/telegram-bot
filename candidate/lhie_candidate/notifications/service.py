@@ -10,13 +10,16 @@ from . import broadcast, price
 from .rate import BroadcastRate
 from .proof_publication import PublicationUnavailable
 from .policy import (ADJUSTMENT, BROADCAST, LIMITS, MANUAL, PRICE, PRICE_CHANNEL, PROOF, STOCK,
-                     ORDER_TYPES, BALANCE_TYPES, TERMINAL_CODES, NotEligible, TestRecipients)
+                     ORDER_TYPES, BALANCE_TYPES, COMPENSATION, OWNER_ALERT, TOPUP_CHANNEL_PROOF, TOPUP_INSTRUCTIONS,
+                     SUPPLIER_HEALTH, TERMINAL_CODES, NotEligible, TestRecipients)
 
 
 MODELS = {BROADCAST: 'TelegramBroadcastRecipient', STOCK: 'StockNotificationRecipient',
           PRICE: 'ProductPriceChangeNotificationRecipient', PROOF: 'Order',
           MANUAL: 'Payment', ADJUSTMENT: 'BalanceAdjustmentRequest',
-          PRICE_CHANNEL: 'ProductPriceChangeEvent',
+          PRICE_CHANNEL: 'ProductPriceChangeEvent', SUPPLIER_HEALTH: 'SupplierHealthEvent',
+          COMPENSATION: 'StoreBalanceCompensation', OWNER_ALERT: 'StoreBalanceTopUp',
+          TOPUP_CHANNEL_PROOF: 'StoreBalanceTopUp', TOPUP_INSTRUCTIONS: 'StoreBalanceTopUp',
           **{kind: 'StoreBalanceTopUp' for kind in BALANCE_TYPES},
           **{kind: 'Order' for kind in ORDER_TYPES[:-1]}, ORDER_TYPES[-1]: 'ManualFulfillmentReview'}
 RECIPIENT_TABLES = {BROADCAST: 'telegram_broadcast_recipients',
@@ -25,10 +28,17 @@ RECIPIENT_TABLES = {BROADCAST: 'telegram_broadcast_recipients',
 
 
 class Notifications:
-    def __init__(self, transport, *, recipients=None, using='default', proof=None, rate=None, families=None, order_notices=None):
+    def __init__(self, transport, *, recipients=None, using='default', proof=None, rate=None, families=None,
+                 order_notices=None, admin_target=None, qris=None, funding=None):
         self.recipients = recipients if recipients is not None else TestRecipients()
+        if admin_target is not None and (not isinstance(admin_target, str) or not admin_target.isascii()
+                or not admin_target.isdecimal() or admin_target.startswith('0')
+                or not self.recipients.permits(admin_target)):
+            raise ValueError('Invalid admitted admin target')
+        self.admin_target = admin_target
         active = {kind: limit for kind, limit in LIMITS.items() if (kind != PROOF or proof is not None)
-                  and (kind not in ORDER_TYPES or order_notices is not None)}
+                  and (kind not in ORDER_TYPES or order_notices is not None)
+                  and (kind not in (SUPPLIER_HEALTH, OWNER_ALERT) or admin_target is not None)}
         if families is not None:
             if not families or not set(families) <= set(active):
                 raise ValueError('Invalid notification worker families')
@@ -46,6 +56,10 @@ class Notifications:
         self.stock_notifications = StockNotifications(self.db, self.recipients)
         from .balance import BalanceNotifications
         self.balance_notifications = BalanceNotifications(self.db, self.recipients)
+        from .supplier_health import SupplierHealth
+        self.supplier_health = SupplierHealth(self.db, self.recipients)
+        from .topup_instructions import TopUpInstructions
+        self.topup_instructions = TopUpInstructions(self.db, qris=qris, funding=funding)
 
     def _outside(self):
         if (connections[self.db.using].in_atomic_block
@@ -107,6 +121,23 @@ class Notifications:
             return self.order_notices.payload(effect)
         if kind in BALANCE_TYPES:
             return self.balance_notifications.payload(effect)
+        if kind == COMPENSATION:
+            return self.balance_notifications.compensation(effect)
+        if kind == OWNER_ALERT:
+            return self.balance_notifications.owner_alert(effect, self.admin_target)
+        if kind == TOPUP_CHANNEL_PROOF:
+            return self.balance_notifications.channel_proof(effect)
+        if kind == TOPUP_INSTRUCTIONS:
+            return self.topup_instructions.payload(effect)
+        if kind == SUPPLIER_HEALTH:
+            if (effect['target_type'] != 'admin' or effect['telegram_chat_id'] != self.admin_target
+                    or effect['telegram_method'] != 'sendMessage'):
+                raise NotEligible()
+            event = self.db.one('SELECT message FROM public.supplier_health_events WHERE id=%s',
+                                (effect['source_id'],))
+            if not event or not isinstance(event['message'], str) or not event['message']:
+                raise NotEligible()
+            return {'chat_id': effect['telegram_chat_id'], 'text': event['message'], 'parse_mode': 'HTML'}
         if kind == BROADCAST:
             row = self._recipient(effect, RECIPIENT_TABLES[kind])
             source = self.db.one('SELECT * FROM public.telegram_broadcasts WHERE id=%s', (row['broadcast_id'],))
@@ -235,7 +266,7 @@ class Notifications:
             recipient = self.db.one('SELECT broadcast_id FROM public.telegram_broadcast_recipients WHERE id=%s',
                                     (effect['source_id'],))
             if recipient:
-                broadcast.project(self.db, recipient['broadcast_id'])
+                broadcast.project(self.db, self.recipients, recipient['broadcast_id'])
 
     def project(self, effect):
         """Read-model repair never invokes claim or transport."""
@@ -263,6 +294,11 @@ class Notifications:
                     (effect['attempts'], at, effect['source_id'], effect['telegram_chat_id'], effect['attempts']))
         if kind == MANUAL and effect['state'] == 'sent':
             return self.db.execute('''UPDATE public.payments SET payment_proof_forwarded_at=%s,
+                updated_at=%s WHERE id=%s AND payment_proof_forwarded_at IS NULL
+                AND payment_proof_admin_chat_id=%s''',
+                (effect['sent_at'], at, effect['source_id'], effect['telegram_chat_id']))
+        if kind == 'admin.balance_top_up_payment_proof' and effect['state'] == 'sent':
+            return self.db.execute('''UPDATE public.store_balance_top_ups SET payment_proof_forwarded_at=%s,
                 updated_at=%s WHERE id=%s AND payment_proof_forwarded_at IS NULL
                 AND payment_proof_admin_chat_id=%s''',
                 (effect['sent_at'], at, effect['source_id'], effect['telegram_chat_id']))
@@ -328,8 +364,22 @@ class Notifications:
         if self.order_notices is not None:
             self.order_notices.discover(self.record, limit)
             self.order_notices.recover_results(self.record, limit)
-        if set(BALANCE_TYPES) <= set(self.protocol.effect_types):
+        if set(BALANCE_TYPES[:2]) <= set(self.protocol.effect_types):
             self.balance_notifications.recover(self.record, limit)
+        if 'admin.balance_top_up_payment_proof' in self.protocol.effect_types:
+            self.balance_notifications.recover_proofs(self.record, limit)
+        if COMPENSATION in self.protocol.effect_types:
+            self.balance_notifications.recover_compensations(self.record, limit)
+        if OWNER_ALERT in self.protocol.effect_types:
+            self.balance_notifications.recover_alerts(self.record, self.admin_target, limit)
+        if TOPUP_CHANNEL_PROOF in self.protocol.effect_types:
+            self.balance_notifications.recover_channel_proofs(self.record, limit)
+        if TOPUP_INSTRUCTIONS in self.protocol.effect_types:
+            self.topup_instructions.recover(self.recipients, limit)
+            from ..navigation.transport import RelayTransport
+            self.topup_instructions.cleanup_paid(self.recipients, limit, RelayTransport())
+        if SUPPLIER_HEALTH in self.protocol.effect_types:
+            self.supplier_health.materialize(self.record, self.admin_target, limit)
         outcomes = {}
         for effect in self.protocol.ready_effects(limit, chats=chats):
             result = self.deliver(effect['id'])
