@@ -863,6 +863,7 @@ printf '%s\n' "$PREVIOUS_IMAGE" > "$RELEASE_ARTIFACT_DIR/previous-image.txt"
 write_release_state "previous-release-recorded"
 echo "Recorded rollback target commit=$PREVIOUS_COMMIT image=$PREVIOUS_IMAGE"
 
+git restore --source=HEAD --staged --worktree -- nginx/default.conf
 git checkout --detach "$DEPLOY_SHA"
 git reset --hard "$DEPLOY_SHA"
 COMPOSE_CONFIG_STATUS=unvalidated
