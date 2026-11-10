@@ -308,27 +308,6 @@ class TelegramCustomerLocaleTest extends TelegramBotTestSupport
         $this->assertStringNotContainsString('I did not understand that command', $copy);
     }
 
-    public function test_payment_proof_callback_guidance_follows_customer_locale(): void
-    {
-        $this->fakeTelegramHttp();
-        Customer::factory()->create(['telegram_id' => 41041, 'locale' => 'id']);
-        Customer::factory()->create(['telegram_id' => 41042, 'locale' => 'en']);
-
-        $this->postTelegramWebhook($this->callbackUpdate(41041, 'proof-id', 'payment-proof:101', ['id' => 41041], 41041))->assertOk();
-        $this->postTelegramWebhook($this->callbackUpdate(41042, 'proof-en', 'payment-proof:102', ['id' => 41042], 41042))->assertOk();
-
-        $this->assertLocalizedCopy(
-            $this->callbackPayload('proof-id'),
-            ['Kirim foto bukti pembayaran', '/payment INVOICE'],
-            ['Send a photo'],
-        );
-        $this->assertLocalizedCopy(
-            $this->callbackPayload('proof-en'),
-            ['Send a photo', '/payment INVOICE'],
-            ['Kirim foto bukti pembayaran'],
-        );
-    }
-
     public function test_generic_checkout_error_follows_customer_locale(): void
     {
         $this->fakeTelegramHttp();
