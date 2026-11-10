@@ -58,6 +58,7 @@ chmod 0700 "$SAFE_COMPOSE_CONFIG"
 
 COMPOSE_CONFIG_STATUS=unvalidated
 RELEASE_STATE_FILE="$RELEASE_ARTIFACT_DIR/release-state.env"
+PREVIOUS_NGINX_CONFIG_FILE="$RELEASE_ARTIFACT_DIR/previous-nginx.conf"
 CREDENTIAL_IDENTITY_BACKFILL_SUMMARY_FILE="$RELEASE_ARTIFACT_DIR/credential-identity-backfill-summary.txt"
 CREDENTIAL_IDENTITY_DIAGNOSTIC_FILE="$RELEASE_ARTIFACT_DIR/credential-identity-conflicts.json"
 
@@ -602,6 +603,10 @@ load_previous_release() {
 restore_previous_release() {
   local failure_reason="${FAILURE_REASON:-deploy-failed}"
   local candidate_queue_connection candidate_queue_image
+  if [ ! -s "$PREVIOUS_NGINX_CONFIG_FILE" ]; then
+    echo "Cannot restore the previous release without its recorded nginx configuration." >&2
+    return 1
+  fi
   local producers="scheduler app"
   if compose config --services | grep -qx outbound-recovery; then
     producers="$producers outbound-recovery"
@@ -662,7 +667,9 @@ restore_previous_release() {
     echo "DEPLOY FAILED: previous content-addressed local image is unavailable." >&2
     return 1
   fi
-  if ! APP_IMAGE="$PREVIOUS_IMAGE" compose up -d --no-build --remove-orphans; then
+  if ! cp "$PREVIOUS_NGINX_CONFIG_FILE" ./nginx/default.conf \
+    || ! APP_IMAGE="$PREVIOUS_IMAGE" compose up -d --no-build --remove-orphans \
+    || ! APP_IMAGE="$PREVIOUS_IMAGE" compose up -d --no-build --no-deps --force-recreate web; then
     record_result "${failure_reason}-rollback-failed"
     write_release_state "rollback-failed"
     echo "DEPLOY FAILED: previous release could not be started." >&2
@@ -850,6 +857,7 @@ else
   echo "Current app image is not an immutable GHCR digest reference and cannot be used for rollback: $configured_previous_image" >&2
   exit 1
 fi
+cp ./nginx/default.conf "$PREVIOUS_NGINX_CONFIG_FILE"
 printf '%s\n' "$PREVIOUS_COMMIT" > "$RELEASE_ARTIFACT_DIR/previous-commit.txt"
 printf '%s\n' "$PREVIOUS_IMAGE" > "$RELEASE_ARTIFACT_DIR/previous-image.txt"
 write_release_state "previous-release-recorded"
@@ -908,6 +916,7 @@ fi
 if ! compose stop --timeout 150 $producers \
   || ! APP_IMAGE="$APP_IMAGE" compose run --rm --no-deps --entrypoint php -e APP_AUTO_MIGRATE=false -e APP_OPTIMIZE=false app artisan ops:check-failed-jobs --snapshot </dev/null > "$FAILED_JOBS_BASELINE_FILE" \
   || ! APP_IMAGE="$APP_IMAGE" compose up -d --no-build --remove-orphans \
+  || ! APP_IMAGE="$APP_IMAGE" compose up -d --no-build --no-deps --force-recreate web \
   || ! verify_service_images "$APP_IMAGE" \
   || ! verify_release_gates "$cutover_started_at" \
   || ! verify_app_url \

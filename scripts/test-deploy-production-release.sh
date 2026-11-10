@@ -44,8 +44,9 @@ run_scenario() {
   workspace=$(mktemp -d)
   bin="$workspace/bin"
   artifacts="$workspace/artifacts"
-  mkdir -p "$bin" "$artifacts" "$workspace/scripts" "$workspace/src/database/migrations"
+  mkdir -p "$bin" "$artifacts" "$workspace/scripts" "$workspace/src/database/migrations" "$workspace/nginx"
   cp "$ROOT_DIR/docker-compose.yml" "$workspace/docker-compose.yml"
+  cp "$ROOT_DIR/nginx/default.conf" "$workspace/nginx/default.conf"
   : > "$workspace/src/database/migrations/2026_08_17_000003_create_telegram_outbound_effects_table.php"
   : > "$workspace/src/database/migrations/2026_08_18_000001_contract_telegram_outbound_effects.php"
   if [ "$operation" = "contract" ] || [ "$operation" = "reconcile" ]; then
@@ -71,6 +72,7 @@ run_scenario() {
     printf 'CREDENTIAL_IDENTITY_FINGERPRINT_KEY=%064d\n' 0 > "$workspace/.env"
   fi
   if [ "$operation" = "reconcile" ]; then
+    cp "$workspace/nginx/default.conf" "$artifacts/previous-nginx.conf"
     printf '%s\n' "$PREVIOUS_COMMIT" > "$artifacts/previous-commit.txt"
     printf '%s\n' "$PREVIOUS_IMAGE" > "$artifacts/previous-image.txt"
     if [ "$scenario" = "reconcile-rollback-succeeded" ]; then

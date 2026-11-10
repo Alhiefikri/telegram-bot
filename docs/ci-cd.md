@@ -9,9 +9,11 @@ Checkout admission and other IP limiters use Laravel `Request::ip()`. The reposi
 
 The shipped nginx config passes `REMOTE_ADDR` from its incoming connection through `fastcgi_params` and appends that same peer to `X-Forwarded-For`. The FastCGI connection comes from nginx, but Laravel's `REMOTE_ADDR` is **not** thereby nginx's container IP. For `visitor -> Cloudflare -> nginx -> PHP-FPM`, it is the Cloudflare edge address. If a host reverse proxy or `cloudflared` sits before nginx, it is that intermediary's address instead. Adding the Compose subnet alone does not identify visitors behind Cloudflare.
 
+FastCGI forwarding uses nginx's validated `$host`, not an optional incoming `X-Forwarded-Host`. The forwarded port is 443 for `X-Forwarded-Proto: https`, 80 for `http`, and otherwise the origin listener's port. Cloudflare need not supply forwarded host or port headers. Passing present-but-empty values makes Symfony reject the host once explicit proxy trust is enabled, returning HTTP 400 before application routes run.
+
 Before relying on a production per-visitor ceiling, the operator must:
 
-1. Establish the actual inbound peer seen by nginx and each proxy hop before it. Do not configure trust from a hostname, a forwarded header, or the PHP-FPM socket peer. This change did not inspect or modify production.
+1. Establish the actual inbound peer seen by nginx and each proxy hop before it. Do not configure trust from a hostname, a forwarded header, or the PHP-FPM socket peer.
 2. For direct Cloudflare ingress, copy **all current IPv4 and IPv6 origin-facing CIDRs** from [Cloudflare's IP list](https://www.cloudflare.com/ips/) into `TRUSTED_PROXIES`, comma-separated. Maintain that list when Cloudflare updates it. Add the explicit addresses or narrowly scoped CIDRs of any controlled intermediary between Cloudflare and nginx; do not add visitor/NAT ranges or the entire Docker/private address space.
 3. Require every trusted HTTP intermediary to preserve the verified chain and append its actual incoming peer, or to replace it with a client address independently verified at that boundary. A host proxy must not relay an arbitrary caller's `X-Forwarded-For` without appending its peer. For Cloudflare Tunnel, ensure only the controlled connector reaches the origin listener and confirm its forwarding behavior; trusting a shared Docker gateway without isolating that listener is insufficient.
 4. Protect the origin listener against bypass of the intended edge path. Cloudflare IP allowlisting identifies the network, not your zone: use your own zone/hostname Authenticated Origin Pull certificate or an isolated Cloudflare Tunnel when zone authentication is required. Preserve required webhook/provider access through the approved ingress rather than adding application-level blocks for unknown IPs.
@@ -21,6 +23,8 @@ Before relying on a production per-visitor ceiling, the operator must:
 Laravel walks the trusted chain from the socket peer toward the visitor and selects the nearest untrusted address. An attacker-supplied prefix before that address cannot rotate the limiter key. Missing trust or missing forwarding stops attribution at the nearest unverified hop: it may be a Cloudflare edge or connector, so unrelated visitors can share the secondary IP ceiling until the operator fixes the chain. The application does not guess a visitor from `CF-Connecting-IP`, reject all unknown peers, or prove that one public IP represents one person. Shared NATs still share a ceiling; IP limits are secondary to the checkout's other admission controls.
 
 References: [Laravel 13 trusted proxies](https://laravel.com/docs/13.x/requests#configuring-trusted-proxies), consulted through Context7; [Cloudflare forwarding headers and Worker caveats](https://developers.cloudflare.com/fundamentals/reference/http-request-headers/); [Cloudflare origin-facing IPs and origin protection](https://developers.cloudflare.com/fundamentals/concepts/cloudflare-ip-addresses/). Focused request-chain coverage is in `src/tests/Feature/TrustedProxyConfigurationTest.php`; production attribution still requires the operator checks above.
+
+Forwarding references, consulted through Context7: [nginx FastCGI parameters](https://nginx.org/en/docs/http/ngx_http_fastcgi_module.html#fastcgi_param), [nginx `map`](https://nginx.org/en/docs/http/ngx_http_map_module.html), and [Compose `up`](https://docs.docker.com/reference/cli/docker/compose/up/).
 
 ## Branch strategy
 
@@ -139,9 +143,10 @@ GitHub Actions performance benchmark.
   - Authenticates Docker on the VPS to private GHCR only for the release, streaming the workflow-scoped read-only `GITHUB_TOKEN` through SSH stdin; an `always()` cleanup logs out after deploy diagnostics. The token is never a process argument, release-script variable, or artifact.
   - Uses `./scripts/safe-compose-config.sh` before every Compose action, including diagnostics, rollback, contract migration, and backup.
   - Reads the image digest recorded on the deployment commit by the selected CI run. The `production-image` status must point to that exact CI run URL; production pulls only that immutable GHCR digest and never rebuilds the application image.
-  - Records the previous Git commit and immutable running image before changing the checkout. Mutable tags and local image names are rejected as rollback targets.
+  - Records the previous Git commit, immutable running image, and nginx file (`previous-nginx.conf`) before changing the checkout. Rollback restores that nginx snapshot, including an authorized recovery fix not yet represented by the previous commit. Mutable tags and local image names are rejected as rollback targets.
   - Runs only expand migrations (excluding the deferred Telegram outbound contract migration) in a one-off candidate container before application cutover. Normal `app` and `scheduler` startup never owns migrations.
   - Cuts over the compatible candidate, verifies its internal gates and container `APP_URL` against `PRODUCTION_APP_URL`, writes a public `release-sha.txt` marker, and runs the public smoke check. Smoke requires HTTPS, canonical `APP_URL` equality, expected health/admin body markers, matching host after redirects, and the exact release marker.
+  - Force-recreates only `web` with `--no-deps --no-build` after starting services on both cutover and rollback. `nginx/default.conf` is a single-file bind mount: checkout or atomic replacement can leave the existing container attached to the old inode. A successful nginx reload alone does not prove that the container sees the new host file.
   - The destructive deferred Telegram outbound contract is opt-in through `apply_telegram_outbound_contract=true`. It first creates and cryptographically verifies an encrypted, readable backup, records its checksum and verification marker, then records preflight evidence, recovers eligible effects, requires `telegram:outbound-contract --strict`, applies the final migration, restarts long-lived workers, and rechecks health.
   - Writes an atomic `release-state.env` plus append-only `release-journal.log`. SSH is allowed to return an ambiguous status; mandatory remote reconciliation proves the candidate or validates a recorded healthy rollback before public smoke proceeds. A reconciled rollback skips candidate smoke and ends as an explicit deployment failure, not an unknown journal state.
   - Aborts before cutover when an expand migration or internal gate fails, leaving the current containers available. If public smoke fails before the contract phase, restores the previous commit and immutable image, updates the public release marker, reruns public smoke against the rollback identity, and fails the workflow even when recovery succeeds. Once the destructive contract phase begins, a failure leaves the compatible candidate running for manual investigation rather than attempting an unsafe code rollback.
@@ -355,7 +360,7 @@ The post-deploy release interface is intentionally cheap but deeper than livenes
 - **Telegram:** each registration property must be healthy, and the 30-second observation must see at least one sample at or below 25 pending updates. This avoids failing on a transient update while persistent backlog remains visible. If it blocks, inspect Telegram's status and deployment artifacts before changing the webhook.
 - **External smoke:** `/up` and `/admin` must be reachable from GitHub Actions after container health succeeds. Failure immediately invokes the same locked rollback operation, verifies the restored app and scheduler health, records an `external-smoke-failed-rollback-*` result, and still fails the workflow so the candidate cannot be reported as deployed.
 
-The artifact bundle is deliberately bounded and secret-safe: it includes `compose-ps.json`, `health-summary.json`, and a redacted 120-line Compose log. Do not add resolved Compose configuration or `.env` files to workflow artifacts.
+The artifact bundle is deliberately bounded and secret-safe: it includes `compose-ps.json`, `health-summary.json`, the previous nginx configuration, and a redacted 120-line Compose log. Keep credentials out of the repository's nginx configuration; never add resolved Compose configuration or `.env` files to workflow artifacts.
 
 ### Local webhook observation verification (#644)
 
@@ -402,18 +407,22 @@ live Telegram, deployment qualification, or permission to operate CI/CD.
 
 ## Emergency manual recovery
 
-Use this only when automatic rollback reports `deploy-failed-rollback-failed`. Read `previous-commit.txt` and `previous-image.txt` from the deployment artifact, then run on the VPS from `PRODUCTION_PATH`:
+Use this only when automatic rollback reports `deploy-failed-rollback-failed`. Read `previous-commit.txt`, `previous-image.txt`, and `previous-nginx.conf` from the deployment artifact, then run on the VPS from `PRODUCTION_PATH`. Stop if the recorded nginx snapshot is unavailable; do not assume that the previous commit contains an emergency ingress fix.
 
 ```bash
 PREVIOUS_COMMIT='<40-character commit from previous-commit.txt>'
 PREVIOUS_IMAGE='<immutable ghcr.io/...@sha256:... from previous-image.txt>'
+RELEASE_ARTIFACT_DIR='.release-gate-artifacts/<run-id>-<attempt>'
+test -s "$RELEASE_ARTIFACT_DIR/previous-nginx.conf" || exit 1
 
 git fetch --prune origin main
 git checkout --detach "$PREVIOUS_COMMIT"
 git reset --hard "$PREVIOUS_COMMIT"
+cp "$RELEASE_ARTIFACT_DIR/previous-nginx.conf" nginx/default.conf
 docker pull "$PREVIOUS_IMAGE"
 ./scripts/safe-compose-config.sh --project telegram-bot-prod --env-file .env
 APP_IMAGE="$PREVIOUS_IMAGE" docker compose -p telegram-bot-prod --env-file .env up -d --no-build --remove-orphans
+APP_IMAGE="$PREVIOUS_IMAGE" docker compose -p telegram-bot-prod --env-file .env up -d --no-build --no-deps --force-recreate web
 docker compose -p telegram-bot-prod --env-file .env exec -T app php artisan ops:health --db --queue-schema --queue-depth --supervisor </dev/null
 docker compose -p telegram-bot-prod --env-file .env exec -T scheduler php artisan ops:health --scheduler-heartbeat=180 </dev/null
 ```
