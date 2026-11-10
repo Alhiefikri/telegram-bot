@@ -8,13 +8,7 @@ use App\Models\StoreBalanceTopUp;
 use App\Support\PaymentProvider;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Customer-side submission of a manual Store Balance top-up payment proof.
- *
- * This mirrors the manual product purchase flow: the customer pays the static
- * QR, then sends the proof photo with the `/payment` caption. The proof is
- * review evidence only and never credits the balance by itself.
- */
+/** A submitted screenshot is review evidence, never authority to credit balance. */
 final class TelegramManualTopUpIntents
 {
     public function __construct(
@@ -22,24 +16,37 @@ final class TelegramManualTopUpIntents
         private readonly TelegramLocale $locale,
         private readonly TelegramAdminAccess $adminAccess,
         private readonly StoreBalanceTopUpOutbound $topUpOutbound,
+        private readonly TelegramOutboundEffectService $outboundEffects,
     ) {}
 
     /**
-     * Handle `/payment` for a manual top-up awaiting proof.
-     *
-     * Returns false when the customer has no top-up waiting for proof so the
-     * caller can fall back to the manual order purchase flow.
+     * Handle a manual top-up proof, scoped to the selected top-up when supplied.
      *
      * @param  array<string, mixed>  $message
      */
-    public function submitTopUpProof(Customer $customer, string $chatId, array $message): bool
+    public function submitTopUpProof(Customer $customer, string $chatId, array $message, ?int $topUpId = null): bool
     {
         if ((string) $customer->telegram_id !== $chatId) {
             return false;
         }
-        $topUp = $this->awaitingProofTopUp($customer);
+        $topUp = $topUpId === null
+            ? $this->awaitingProofTopUp($customer)
+            : StoreBalanceTopUp::query()->where('customer_id', $customer->getKey())
+                ->where('chat_id', $chatId)->whereKey($topUpId)->first();
         if ($topUp === null) {
             return false;
+        }
+        if ($topUp->hasPaymentProof()) {
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.topup.proof.duplicate'));
+
+            return true;
+        }
+        if (! $topUp->usesManualPayment()
+            || $topUp->status !== StoreBalanceTopUpStatus::AwaitingConfirmation
+            || $topUp->expires_at?->isFuture() !== true) {
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.reply_unavailable'));
+
+            return true;
         }
 
         $photoFileId = $this->largestPhotoFileId($message);
@@ -50,7 +57,7 @@ final class TelegramManualTopUpIntents
         }
 
         $adminChatId = trim((string) $this->adminAccess->adminChatId());
-        if ($adminChatId === '') {
+        if (preg_match('/^[1-9][0-9]*$/D', $adminChatId) !== 1) {
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.topup.proof.admin_unavailable'));
 
             return true;
@@ -74,6 +81,10 @@ final class TelegramManualTopUpIntents
                 'payment_proof_submitted_at' => now(),
                 'payment_proof_admin_chat_id' => $adminChatId,
             ])->save();
+            $effect = $this->outboundEffects->recordBalanceTopUpPaymentProof($locked->fresh());
+            if ($effect === null) {
+                throw new \RuntimeException('Manual top-up proof has no valid admin delivery target.');
+            }
 
             return true;
         }, attempts: 5);
@@ -84,7 +95,11 @@ final class TelegramManualTopUpIntents
             return true;
         }
 
-        $this->topUpOutbound->handoffPaymentProof($topUp->fresh() ?? $topUp);
+        try {
+            $this->topUpOutbound->handoffPaymentProof($topUp->fresh() ?? $topUp);
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
         $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'balance.topup.proof.received'));
 
         return true;
@@ -108,7 +123,7 @@ final class TelegramManualTopUpIntents
     /** @param array<string, mixed> $message */
     private function largestPhotoFileId(array $message): ?string
     {
-        $photos = $message['photo'] ?? null;
+        $photos = $message['photo'] ?? $message['reply_to_message']['photo'] ?? null;
         if (! is_array($photos) || $photos === []) {
             return null;
         }

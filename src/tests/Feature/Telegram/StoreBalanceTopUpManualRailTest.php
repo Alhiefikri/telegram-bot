@@ -156,7 +156,7 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
 
         $root = $this->openFundingChooser();
         $topUp = $this->confirmTopUp($root, 46592, 46593);
-        $this->postTelegramUpdate($this->paymentPhotoUpdate(46594, '', [], self::BUYER_CHAT_ID));
+        $this->postTelegramUpdate($this->paymentPhotoUpdate(46594, 'topup:'.$topUp->getKey(), [], self::BUYER_CHAT_ID));
 
         $this->assertNotNull($topUp->fresh()->payment_proof_submitted_at);
         $this->assertNull($payment->fresh()->payment_proof_submitted_at);

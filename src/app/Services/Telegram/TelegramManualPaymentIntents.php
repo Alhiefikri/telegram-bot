@@ -15,7 +15,6 @@ use App\Services\Binance\BinancePaymentVerification;
 use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscVerificationOutcome;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -72,15 +71,19 @@ class TelegramManualPaymentIntents
                 report($exception);
                 $key = 'payment.bsc.provider_error';
             }
-            $this->forgetPendingProofPhoto($customer);
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, $key, [
                 'invoice' => $order->invoice_number,
             ]));
 
             return;
         }
+        if ($order->payments()->where('provider', 'manual')->whereNotNull('payment_proof_submitted_at')->exists()) {
+            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.duplicate'));
 
-        $photoFileId = $this->largestPhotoFileId($message) ?? $this->pendingProofPhotoFileId($customer, $order);
+            return;
+        }
+
+        $photoFileId = $this->largestPhotoFileId($message);
         if (! $photoFileId) {
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.photo_required', [
                 'invoice' => $order->invoice_number,
@@ -90,7 +93,7 @@ class TelegramManualPaymentIntents
         }
 
         $adminTelegramChatId = $this->adminTelegramChatId();
-        if (! $adminTelegramChatId) {
+        if ($adminTelegramChatId === null || preg_match('/^[1-9][0-9]*$/D', $adminTelegramChatId) !== 1) {
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.admin_unavailable'));
 
             return;
@@ -164,7 +167,6 @@ class TelegramManualPaymentIntents
 
             return;
         }
-        $this->forgetPendingProofPhoto($customer);
 
         if ($claim['status'] === 'order_id_required') {
             $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.binance_order_id_required'));
@@ -456,44 +458,6 @@ class TelegramManualPaymentIntents
         $photo = collect($photos)->sortByDesc(fn ($photo) => (int) ($photo['file_size'] ?? (($photo['width'] ?? 0) * ($photo['height'] ?? 0))))->first();
 
         return is_array($photo) ? ($photo['file_id'] ?? null) : null;
-    }
-
-    public function rememberPendingProofPhoto(Customer $customer, array $message): bool
-    {
-        $photoFileId = $this->largestPhotoFileId($message);
-        $order = $this->manualPaymentOrderForCustomer($customer, '');
-        if ($photoFileId === null || $order === null) {
-            return false;
-        }
-
-        Cache::put($this->pendingProofPhotoCacheKey($customer), [
-            'order_id' => $order->id,
-            'file_id' => $photoFileId,
-        ], now()->addMinutes(30));
-
-        return true;
-    }
-
-    private function pendingProofPhotoFileId(Customer $customer, Order $order): ?string
-    {
-        $proof = Cache::get($this->pendingProofPhotoCacheKey($customer));
-        if (! is_array($proof) || ($proof['order_id'] ?? null) !== $order->id) {
-            return null;
-        }
-
-        $photoFileId = $proof['file_id'] ?? null;
-
-        return is_string($photoFileId) && $photoFileId !== '' ? $photoFileId : null;
-    }
-
-    private function forgetPendingProofPhoto(Customer $customer): void
-    {
-        Cache::forget($this->pendingProofPhotoCacheKey($customer));
-    }
-
-    private function pendingProofPhotoCacheKey(Customer $customer): string
-    {
-        return 'telegram:manual-payment-proof:'.$customer->telegram_id;
     }
 
     public function adminTelegramChatId(): ?string

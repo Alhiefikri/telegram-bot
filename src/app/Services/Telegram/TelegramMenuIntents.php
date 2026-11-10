@@ -757,6 +757,7 @@ class TelegramMenuIntents
     ): TelegramNavigationSurface {
         $copyableTotalLine = null;
         $copyableTotal = null;
+        $proofInstructionLine = null;
         // A confirmed top-up already owns a payment target, so the
         // pre-confirmation "no invoice yet" line must never be repeated here.
         $confirmationLines = $confirmationReceived ? [
@@ -781,6 +782,9 @@ class TelegramMenuIntents
         } elseif (($presentation->isPayable() || $presentation->isAwaitingConfirmation())
             && $presentation->payable() !== null) {
             $awaitingConfirmation = $presentation->isAwaitingConfirmation();
+            $proofInstructionLine = $awaitingConfirmation
+                ? $this->locale->translate($customer, 'balance.topup.proof_instruction_reference')
+                : null;
             $payable = $presentation->payable();
             $copyableTotal = number_format($payable->totalAmount(), 0, ',', '.');
             $copyableTotalLine = $this->locale->translate($customer, 'balance.topup.total', [
@@ -798,17 +802,15 @@ class TelegramMenuIntents
                 $this->locale->translate($customer, 'balance.topup.deadline', [
                     'expires' => $this->locale->formatDate($customer, $payable->effectiveExpiresAt()),
                 ]),
-                $this->locale->translate(
-                    $customer,
-                    $awaitingConfirmation
-                        ? 'balance.topup.awaiting_confirmation'
-                        : 'balance.topup.unpaid',
-                ),
+                $proofInstructionLine ?? $this->locale->translate($customer, 'balance.topup.unpaid'),
                 $this->locale->translate(
                     $customer,
                     $this->instructionNoticeKey($instructionsSent, $instructionOutcome, $instructionRetryable),
                 ),
             ]);
+            if ($awaitingConfirmation) {
+                $lines[] = $this->locale->translate($customer, 'balance.topup.manual_notice');
+            }
             $keyboard = [];
             if ($instructionRetryable ?? $this->defaultInstructionRetryable($instructionOutcome)) {
                 $keyboard[] = [[
@@ -871,6 +873,10 @@ class TelegramMenuIntents
                 str_replace($copyableTotal, '<code>'.$copyableTotal.'</code>', $escapedLine),
                 $caption,
             );
+        }
+        if ($proofInstructionLine !== null) {
+            $escapedProofInstruction = $this->captions->html($proofInstructionLine);
+            $caption = str_replace($escapedProofInstruction, '<b>'.$escapedProofInstruction.'</b>', $caption);
         }
 
         return new TelegramNavigationSurface(

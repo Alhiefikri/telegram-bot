@@ -162,13 +162,23 @@ Pada jalur manual:
 
 1. Customer checkout dari Telegram.
 2. Sistem membuat order dan payment provider `manual`, status `pending`.
-3. Bot mengirim foto QR manual LHIE STORE beserta invoice, total, batas pembayaran, dan instruksi singkat, dengan tombol `Sudah Bayar` dan `Batalkan`.
-4. Setelah pembayaran dilakukan, customer menekan `Sudah Bayar`. Bot memvalidasi ulang Order milik customer dan mengedit caption QR yang sama menjadi instruksi pengiriman bukti foto melalui `/payment`.
-5. Admin memvalidasi pembayaran di luar sistem, misalnya dari bukti transfer customer.
+3. Bot mengirim foto QR manual LHIE STORE beserta invoice, total, batas pembayaran, dan instruksi tebal: balas pesan tersebut dengan foto screenshot bukti pembayaran. Tombol `Sudah Bayar` dan `Batalkan` tetap tersedia.
+4. Customer dapat langsung membalas pesan QR dengan foto bukti, tanpa `/payment`. Tombol `Sudah Bayar` memvalidasi ulang Order milik customer dan menampilkan instruksi singkat yang sama; jika pesan harus diganti, binding bukti mengikuti ID pesan baru yang berhasil dikirim.
+5. Foto bukti diteruskan untuk pemeriksaan admin, bukan untuk menandai pembayaran sebagai paid. `/payment` tetap didukung, termasuk caption `/payment INVOICE` atau membalas foto dengan command tersebut.
 6. Admin menjalankan operasi “complete manual order” dari dashboard/admin operation.
 7. Sistem menandai payment sebagai `paid`, mengurangi stok dari reservasi menjadi penjualan, mengubah order menjadi `completed`, lalu mengirim receipt lewat queue.
 
 Manual payment dianggap pending sejak checkout sampai admin menyelesaikan order atau order kedaluwarsa/dibatalkan oleh proses lain.
+
+Instruksi ini tersedia dalam Bahasa Indonesia, Inggris, dan Melayu. Top-up saldo manual, termasuk perpindahan yang dikonfirmasi customer dari QR otomatis ke QR manual, memakai tindakan balas-foto yang sama. Pesan status saldo mengarahkan customer ke pesan QR; saldo hanya masuk setelah keputusan approve admin yang sah. Bukti pembelian dan top-up ditargetkan ke identitas masing-masing, bukan selalu ke pembayaran terbaru.
+
+Pesan instruksi yang sudah terkirim terikat melalui `telegram_outbound_effects` (`source_type`, `source_id`, `telegram_chat_id`, `telegram_message_id`). Prompt bukti eksplisit memakai binding customer/chat/pesan yang persisten. Caption dan tombol hanya menyajikan identitas; keduanya tidak memberi kewenangan untuk mengubah status pembayaran.
+
+Foto tanpa command diproses langsung hanya jika ada satu pembayaran yang sesuai. Jika pembelian dan top-up sama-sama menunggu bukti, bot meminta pilihan dan mengirim prompt balasan untuk target itu. `/payment` tanpa foto juga membuka prompt; `/payment topup:ID` dapat memilih top-up secara eksplisit. Binding prompt disimpan di `telegram_payment_proof_prompts`, sehingga cache hilang tidak memindahkan bukti ke pembayaran lain.
+
+Bukti top-up dan outbound effect admin disimpan dalam satu transaksi. `telegram:recover-outbound` memulihkan bukti lama yang belum memiliki effect serta mengirim ulang tugas pending/retryable yang kehilangan wakeup, dengan batas tiga percobaan. Hasil pengiriman ambigu tetap masuk review, bukan dikirim ulang otomatis. Admin tujuan harus berupa ID private-chat numerik yang valid sebelum bukti diklaim.
+
+Verifikasi lokal perubahan bukti pembayaran (2026-11-10): 242 test lulus dan satu test dilewati pada 11 suite terkait, termasuk 43 skenario intake/recovery baru dan dua unit test formatting HTML. Smoke HTTP terisolasi menjalankan pembelian/top-up dalam `id`/`en`/`ms` sampai keputusan admin. Walkthrough `LhieStoreTestBot` mengirim pesan/foto melalui API Telegram nyata: tiga pembelian QR otomatis → manual dan tiga top-up manual, dengan approve/reject serta entity bold dari Telegram. Update buyer/admin disimulasikan melalui webhook HTTP lokal; ini bukan pengujian klik dari klien Telegram, pembayaran nyata, CI, atau deployment produksi.
 
 ### 3.4 Pakasir legacy settlement
 

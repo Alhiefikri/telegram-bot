@@ -357,7 +357,9 @@ class CartCheckoutTest extends TelegramBotTestSupport
     public function test_manual_paid_button_edits_qr_caption_to_proof_instructions_without_new_buyer_message(): void
     {
         config()->set('services.telegram.payment_mode', 'manual');
-        $this->fakeTelegramHttp();
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/editMessageCaption' => Http::response(['ok' => true, 'result' => ['message_id' => 123456]]),
+        ]);
         ManualPaymentSetting::create(['admin_telegram_chat_id' => '999', 'is_active' => true]);
         $customer = Customer::factory()->create(['telegram_id' => 12346, 'username' => 'buyer', 'locale' => 'en']);
         $product = Product::factory()->create(['name' => 'Manual Proof Product', 'stock' => 5]);
@@ -385,14 +387,16 @@ class CartCheckoutTest extends TelegramBotTestSupport
         $this->assertCount(1, $editMessages);
         $edited = $editMessages->last()[0]->data();
         $this->assertSame(123456, $edited['message_id']);
-        $this->assertStringContainsString('Send payment proof', (string) $edited['caption']);
-        $this->assertStringContainsString('/payment', (string) $edited['caption']);
-        $this->assertStringNotContainsString('Scan the QR above', (string) $edited['caption']);
         $this->assertSame('buyer:cancel-pending:'.$order->id, $edited['reply_markup']['inline_keyboard'][0][0]['callback_data']);
         $buyerMessages = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) ($request['chat_id'] ?? '') === '12346');
         $this->assertCount(1, $buyerMessages);
-        $this->assertStringContainsString('Choose a payment method', (string) $buyerMessages->first()[0]->data()['text']);
+        $photo = $this->paymentPhotoUpdate(182, '', [], 12346);
+        unset($photo['message']['caption']);
+        $photo['message']['reply_to_message'] = ['message_id' => 123456];
+        $this->postTelegramWebhook($photo)->assertOk();
+        $this->assertSame('large-photo', $order->payments()->sole()->fresh()->payment_proof_file_id);
+        $this->assertNotNull($order->payments()->sole()->fresh()->payment_proof_forwarded_at);
     }
 
     public function test_manual_paid_button_rejects_an_expired_order_without_editing_or_sending(): void

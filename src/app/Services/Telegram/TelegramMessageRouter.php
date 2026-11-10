@@ -29,7 +29,7 @@ class TelegramMessageRouter
         private TelegramStockIntents $stock,
         private TelegramOrderIntents $orders,
         private TelegramManualPaymentIntents $manualPayments,
-        private TelegramManualTopUpIntents $manualTopUps,
+        private TelegramPaymentProofIntake $paymentProofs,
         private TelegramAdminAccess $adminAccess,
         private TelegramAdminStatsIntents $adminStats,
         private TelegramIconIntents $icons,
@@ -48,6 +48,8 @@ class TelegramMessageRouter
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
     {
         $text = TelegramBroadcastCommand::normalize((string) (Arr::get($message, 'text') ?: Arr::get($message, 'caption', '')));
+        $text = preg_replace('/^\\/payment(?:@[A-Za-z0-9_]+)?(?:\\s+|$)/u', '/payment ', $text) ?? $text;
+        $text = trim($text);
         $isPrivateChat = $this->chatPrivacy->isPrivate($chatType);
         if (! $isPrivateChat && $this->isPrivateOnlyCommand($text)) {
             $this->session->forgetWithLock($customer);
@@ -290,18 +292,12 @@ class TelegramMessageRouter
 
         if ($text === '/payment' || str_starts_with($text, '/payment ')) {
             $this->session->forgetWithLock($customer);
-            $invoice = trim(substr($text, strlen('/payment')));
-            if ($invoice === '' && $this->manualTopUps->submitTopUpProof($customer, $chatId, $message)) {
-                return;
-            }
-
-            $this->manualPayments->submitManualPaymentProof($customer, $chatId, $message, $invoice);
+            $this->paymentProofs->receive($customer, $chatId, $message, trim(substr($text, strlen('/payment'))));
 
             return;
         }
 
-        if ($isPrivateChat && $text === '' && $this->manualPayments->rememberPendingProofPhoto($customer, $message)) {
-            $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'payment.proof.photo_received'));
+        if ($isPrivateChat && ! str_starts_with($text, '/') && $this->paymentProofs->receive($customer, $chatId, $message)) {
 
             return;
         }

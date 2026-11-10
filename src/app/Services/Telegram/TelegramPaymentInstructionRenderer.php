@@ -42,6 +42,7 @@ class TelegramPaymentInstructionRenderer
             $this->text($locale, 'payment.pay_via', ['method' => $paymentOption['label']]),
             '',
             $this->text($locale, 'payment.manual.scan_qr_short'),
+            $this->text($locale, 'payment.manual.proof_prompt'),
             $this->text($locale, 'payment.manual_alternative.manual_notice'),
         ];
         if ($order->expires_at) {
@@ -61,6 +62,7 @@ class TelegramPaymentInstructionRenderer
                 ],
             ],
             copyableAmountLine: 2,
+            boldLines: [6],
         );
     }
 
@@ -68,16 +70,15 @@ class TelegramPaymentInstructionRenderer
     {
         $formattedTotal = 'Rp '.number_format($order->total_amount, 0, ',', '.');
 
+        $html = new TelegramHtmlCaption;
+
         return implode("\n", [
-            $this->text($locale, 'payment.manual.proof_title'),
-            '━━━━━━━━━━━━━━',
-            $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
-            $this->text($locale, 'payment.total', ['amount' => $formattedTotal]),
+            $html->escapeTextPreservingIcons($this->text($locale, 'payment.manual.proof_title')),
+            $html->escapeTextPreservingIcons($this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number])),
+            $html->escapeTextPreservingIcons($this->text($locale, 'payment.total', ['amount' => $formattedTotal])),
             '',
-            $this->text($locale, 'payment.manual.proof_prompt'),
-            '/payment',
-            '',
-            $this->text($locale, 'payment.manual.help', ['username' => $supportUsername]),
+            '<b>'.$html->escapeTextPreservingIcons($this->text($locale, 'payment.manual.proof_prompt')).'</b>',
+            $html->escapeTextPreservingIcons($this->text($locale, 'payment.manual_alternative.manual_notice')),
         ]);
     }
 
@@ -295,6 +296,10 @@ class TelegramPaymentInstructionRenderer
             ),
         ];
 
+        if ($awaitingConfirmation) {
+            $lines[] = $this->text($locale, 'balance.topup.manual_notice');
+        }
+
         $keyboard = [[[
             'text' => $this->text($locale, 'balance.topup.check'),
             'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
@@ -313,6 +318,7 @@ class TelegramPaymentInstructionRenderer
             captionLines: $lines,
             replyMarkup: ['inline_keyboard' => $keyboard],
             copyableAmountLine: 1,
+            boldLines: $awaitingConfirmation ? [6] : [],
         );
     }
 

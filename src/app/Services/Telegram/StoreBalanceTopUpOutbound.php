@@ -274,6 +274,22 @@ final class StoreBalanceTopUpOutbound
         );
     }
 
+    public function recoverMissingPaymentProofs(int $chunk = 100): int
+    {
+        return $this->recoverMissingFromQuery(
+            'topup_payment_proofs',
+            StoreBalanceTopUp::query()
+                ->where('status', StoreBalanceTopUpStatus::AwaitingConfirmation->value)
+                ->whereNotNull('payment_proof_file_id')
+                ->whereNotNull('payment_proof_submitted_at')
+                ->whereNull('payment_proof_forwarded_at')
+                ->whereDoesntHave('outboundEffects', fn ($query) => $query
+                    ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)),
+            $chunk,
+            fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffPaymentProof($topUp),
+        );
+    }
+
     /**
      * Recover both top-up effect families through their normal handoff rules.
      * Existing effects, review states, and non-dispatchable retries are left
@@ -285,6 +301,7 @@ final class StoreBalanceTopUpOutbound
             + $this->recoverMissingReceipts($chunk)
             + $this->recoverMissingOwnerAlerts($chunk)
             + $this->recoverMissingPaidNotifications($chunk)
+            + $this->recoverMissingPaymentProofs($chunk)
             + $this->recoverMissingChannelProofs($chunk);
     }
 

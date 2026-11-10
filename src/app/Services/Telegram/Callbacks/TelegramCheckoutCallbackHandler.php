@@ -15,6 +15,7 @@ use App\Exceptions\InsufficientUsdtBalance;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\StoreBalanceProjectionMismatchException;
+use App\Exceptions\TelegramApiException;
 use App\Exceptions\UsdtBalanceFrozenException;
 use App\Exceptions\UsdtBalanceProjectionMismatchException;
 use App\Jobs\SendAdminOrderPendingNotification;
@@ -56,6 +57,8 @@ use App\Services\Telegram\TelegramLocale;
 use App\Services\Telegram\TelegramManualPaymentIntents;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramOutboundResponseValidator;
+use App\Services\Telegram\TelegramPaymentProofIntake;
 use App\Services\Telegram\TelegramUiIcons;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtFunding\CustomerUsdtFundingGate;
@@ -110,11 +113,18 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             || preg_match('/^checkout:binance:(?:rail:)?(binance_pay_id|usdt_bep20):[a-f0-9]{16}$/', $context->data) === 1
             || preg_match('/^checkout:binance:cancel:[a-f0-9]{16}$/', $context->data) === 1
             || preg_match('/^manual:paid:([0-9a-fA-F-]+)$/', $context->data) === 1
+            || preg_match('/^proof:(order|topup):([0-9a-fA-F-]+)$/', $context->data) === 1
             || preg_match('/^detail:pay:(qris|binance|balance):([1-9][0-9]*):[A-Za-z0-9_-]+$/', $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
     {
+        if (preg_match('/^proof:(order|topup):([0-9a-fA-F-]+)$/', $context->data, $matches) === 1) {
+            app(TelegramPaymentProofIntake::class)->choose($context, $matches[1], $matches[2]);
+
+            return true;
+        }
+
         if (preg_match('/^checkout:manual:(ask|confirm|back):([a-f0-9]{32})$/', $context->data, $matches) === 1) {
             $state = Cache::get($this->recoveryKey($context->customer, $matches[2]));
             $this->withCheckoutIntentLock($context, $state['checkoutKey'] ?? null,
@@ -1405,7 +1415,25 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             ]]],
         ];
 
-        $this->bot->editMessageCaptionOrSend($context->chatId, $caption, $replyMarkup, $context->messageId);
+        $messageId = $context->messageId;
+        $options = ['parse_mode' => 'HTML'];
+        try {
+            $response = $messageId !== null && $messageId > 0
+                ? $this->bot->editMessageCaption($context->chatId, $messageId, $caption, $replyMarkup, $options)
+                : $this->bot->sendMessage($context->chatId, $caption, $replyMarkup, $options);
+            $messageId = app(TelegramOutboundResponseValidator::class)->messageIdFromResponse($response, 'Manual payment proof prompt');
+        } catch (TelegramApiException $exception) {
+            if (! $exception->isMessageNotModified()) {
+                if (! $exception->isDefiniteEditFailure()) {
+                    throw $exception;
+                }
+
+                $response = $this->bot->sendMessage($context->chatId, $caption, $replyMarkup, $options);
+                $messageId = app(TelegramOutboundResponseValidator::class)->messageIdFromResponse($response, 'Manual payment proof prompt');
+            }
+        }
+
+        app(TelegramPaymentProofIntake::class)->bindOrderPrompt($context->customer, $context->chatId, (int) $messageId, $order);
     }
 
     private function sendSelectionStale(TelegramCallbackContext $context): void

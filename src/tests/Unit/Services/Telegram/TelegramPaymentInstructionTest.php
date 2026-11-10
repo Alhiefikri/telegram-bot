@@ -48,6 +48,38 @@ class TelegramPaymentInstructionTest extends TestCase
         ));
     }
 
+    public function test_bold_instruction_keeps_amount_copyable_and_escapes_untrusted_caption_content(): void
+    {
+        $instruction = new TelegramPaymentInstruction(
+            photoContents: 'qr',
+            filename: 'qr.png',
+            captionLines: ['Invoice <b>123</b> & user', 'Total: Rp 10.125', 'Reply with a photo'],
+            copyableAmountLine: 1,
+            boldLines: [2],
+        );
+
+        $this->assertSame('HTML', $instruction->options()['parse_mode']);
+        $this->assertStringContainsString('Invoice &lt;b&gt;123&lt;/b&gt; &amp; user', $instruction->caption());
+        $this->assertStringContainsString('<code>10.125</code>', $instruction->caption());
+        $this->assertStringContainsString('<b>Reply with a photo</b>', $instruction->caption());
+        $this->assertStringNotContainsString('<b>123</b>', $instruction->caption());
+    }
+
+    public function test_bold_instruction_preserves_trusted_custom_emoji_without_changing_the_total(): void
+    {
+        $instruction = new TelegramPaymentInstruction(
+            photoContents: 'qr',
+            filename: 'qr.png',
+            captionLines: ['<tg-emoji emoji-id="12345" data-omp-icon="1">🧾</tg-emoji> Invoice 987', 'Total: Rp 10.125', 'Send proof'],
+            copyableAmountLine: 1,
+            boldLines: [2],
+        );
+
+        $this->assertStringContainsString('<tg-emoji emoji-id="12345"', $instruction->caption());
+        $this->assertStringContainsString('<code>10.125</code>', $instruction->caption());
+        $this->assertStringNotContainsString('<code>987</code>', $instruction->caption());
+    }
+
     public static function amountLabels(): array
     {
         return [
