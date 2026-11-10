@@ -35,7 +35,10 @@ final class ManualStoreBalanceTopUpConfirmationService
     ): ManualStoreBalanceTopUpDecision {
         $topUp->refresh();
 
-        if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+        $alreadyPaid = $topUp->status === StoreBalanceTopUpStatus::Paid;
+        if ($alreadyPaid && ($topUp->manual_alternative_at === null
+            || $topUp->settled_provider === PaymentProvider::MANUAL
+            || ! $topUp->hasPaymentProof())) {
             return ManualStoreBalanceTopUpDecision::AlreadyConfirmed;
         }
 
@@ -47,12 +50,12 @@ final class ManualStoreBalanceTopUpConfirmationService
             return ManualStoreBalanceTopUpDecision::AlreadyRejected;
         }
 
-        if (strtolower(trim((string) $topUp->provider)) !== PaymentProvider::MANUAL
-            || $topUp->status !== StoreBalanceTopUpStatus::AwaitingConfirmation) {
+        if (! $topUp->usesManualPayment()
+            || (! $alreadyPaid && $topUp->status !== StoreBalanceTopUpStatus::AwaitingConfirmation)) {
             return ManualStoreBalanceTopUpDecision::NotEligible;
         }
 
-        if ($this->deadlinePassed($topUp)) {
+        if (! $alreadyPaid && $this->deadlinePassed($topUp)) {
             $this->topUps->expireIfDue($topUp);
 
             return ManualStoreBalanceTopUpDecision::Expired;
@@ -64,11 +67,11 @@ final class ManualStoreBalanceTopUpConfirmationService
             providerReference: null,
             providerStatus: 'CONFIRMED',
             amount: (int) $topUp->amount,
-            totalAmount: $topUp->provider_total_payment === null
+            totalAmount: $topUp->manual_alternative_at !== null
                 ? (int) $topUp->amount
-                : (int) $topUp->provider_total_payment,
+                : ($topUp->provider_total_payment === null ? (int) $topUp->amount : (int) $topUp->provider_total_payment),
             trusted: true,
-            providerFee: $topUp->provider_fee === null ? 0 : (int) $topUp->provider_fee,
+            providerFee: $topUp->manual_alternative_at !== null ? 0 : ($topUp->provider_fee === null ? 0 : (int) $topUp->provider_fee),
             paidAt: CarbonImmutable::instance(now()),
         );
 
@@ -87,6 +90,10 @@ final class ManualStoreBalanceTopUpConfirmationService
                 ],
             ),
         );
+
+        if ($alreadyPaid) {
+            return ManualStoreBalanceTopUpDecision::AlreadyConfirmed;
+        }
 
         $settled = $topUp->fresh();
         if ($settled !== null && $settled->status === StoreBalanceTopUpStatus::Paid) {
@@ -125,7 +132,7 @@ final class ManualStoreBalanceTopUpConfirmationService
             return ManualStoreBalanceTopUpDecision::AlreadyRejected;
         }
 
-        if (strtolower(trim((string) $topUp->provider)) !== PaymentProvider::MANUAL
+        if (! $topUp->usesManualPayment()
             || $topUp->status !== StoreBalanceTopUpStatus::AwaitingConfirmation) {
             return ManualStoreBalanceTopUpDecision::NotEligible;
         }
@@ -153,8 +160,9 @@ final class ManualStoreBalanceTopUpConfirmationService
 
             $locked->forceFill([
                 'status' => StoreBalanceTopUpStatus::Failed,
-                'provider_create_state' => 'manual_rejected',
-                'provider_create_last_error' => 'manual_rejected',
+                'provider_create_state' => $locked->manual_alternative_at !== null ? $locked->provider_create_state : 'manual_rejected',
+                'provider_create_last_error' => $locked->manual_alternative_at !== null ? $locked->provider_create_last_error : 'manual_rejected',
+                'manual_alternative_decision' => $locked->manual_alternative_at !== null ? 'rejected' : null,
             ])->save();
         }, attempts: 5);
 
@@ -204,7 +212,7 @@ final class ManualStoreBalanceTopUpConfirmationService
     private function deadlinePassed(StoreBalanceTopUp $topUp): bool
     {
         return ($topUp->expires_at !== null && ! $topUp->expires_at->isFuture())
-            || ($topUp->provider_expires_at !== null && ! $topUp->provider_expires_at->isFuture());
+            || ($topUp->manual_alternative_at === null && $topUp->provider_expires_at !== null && ! $topUp->provider_expires_at->isFuture());
     }
 
     private function operatorReference(string $operatorChatId): string

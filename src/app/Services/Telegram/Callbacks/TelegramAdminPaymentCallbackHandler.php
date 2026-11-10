@@ -56,6 +56,22 @@ class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
             return false;
         }
 
+        $alternative = \App\Models\Payment::query()->where('order_id', $matches[2])
+            ->whereNotNull('manual_alternative_for_payment_id')->first();
+        if ($alternative !== null && (! $context->isPrivate()
+            || ! $this->adminAccess->isAdmin($context->customer, $context->chatId)
+            || $alternative->payment_proof_submitted_at === null
+            || $context->messageId === null
+            || ! \App\Models\TelegramOutboundEffect::query()
+                ->where('source_type', \App\Models\Payment::class)->where('source_id', $alternative->id)
+                ->where('effect_type', \App\Services\Telegram\TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF)
+                ->where('state', 'sent')->where('telegram_chat_id', $context->chatId)
+                ->where('telegram_message_id', (string) $context->messageId)->exists())) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, 'Bukti pembayaran tidak cocok atau belum diterima.');
+
+            return true;
+        }
+
         if ($matches[1] === 'approve-payment') {
             $approved = $this->manualPayments->approveManualPaymentFromTelegram($context->customer, $context->chatId, $context->callbackQueryId, $matches[2]);
             if ($approved && $context->messageId !== null && $context->messageId > 0) {
@@ -83,6 +99,21 @@ class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
         $topUp = StoreBalanceTopUp::query()->whereKey($topUpId)->first();
         if ($topUp === null) {
             $this->bot->answerCallbackQuery($context->callbackQueryId, 'Top-up tidak ditemukan.');
+
+            return;
+        }
+
+        if ($topUp->manual_alternative_at !== null
+            && (! $topUp->hasPaymentProof() || $context->messageId === null
+                || ! \App\Models\TelegramOutboundEffect::query()
+                    ->where('source_type', StoreBalanceTopUp::class)
+                    ->where('source_id', (string) $topUp->getKey())
+                    ->where('effect_type', \App\Services\Telegram\TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
+                    ->where('state', \App\Enums\TelegramOutboundEffectState::Sent->value)
+                    ->where('telegram_chat_id', $context->chatId)
+                    ->where('telegram_message_id', (string) $context->messageId)
+                    ->exists())) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, 'Bukti top-up tidak sesuai.');
 
             return;
         }

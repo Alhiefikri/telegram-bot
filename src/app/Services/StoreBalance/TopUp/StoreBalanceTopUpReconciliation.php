@@ -10,6 +10,7 @@ final readonly class StoreBalanceTopUpReconciliation
         private StoreBalanceTopUpLifecycleResult $result,
         private ?StoreBalanceTopUpSettlementEvidence $evidence = null,
         private ?string $eventId = null,
+        private bool $authoritativelyUnpaid = false,
     ) {}
 
     public static function state(StoreBalanceTopUpOutcome $outcome): self
@@ -35,5 +36,10 @@ final readonly class StoreBalanceTopUpReconciliation
     public function hasEvidence(): bool
     {
         return $this->evidence !== null;
+    }
+
+    public function isAuthoritativelyUnpaid(): bool
+    {
+        return $this->authoritativelyUnpaid;
     }
 }

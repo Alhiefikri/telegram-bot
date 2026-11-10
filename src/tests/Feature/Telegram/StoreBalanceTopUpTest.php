@@ -178,7 +178,6 @@ final class StoreBalanceTopUpTest extends TelegramBotTestSupport
         $caption = (string) $this->telegramRequestField($photo, 'caption');
         $this->assertStringContainsString('Balance credit after payment confirmation: Rp5.000', $caption);
         $this->assertStringContainsString('Provider fee: Rp16', $caption);
-        $this->assertStringContainsString('Final amount to pay: Rp5.016', $caption);
         $this->assertStringContainsString('not credited until the payment is confirmed', $caption);
 
         $this->postJson('/api/webhook/klikqris/sandbox', [

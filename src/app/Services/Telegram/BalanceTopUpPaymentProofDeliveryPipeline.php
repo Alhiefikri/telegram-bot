@@ -66,7 +66,7 @@ final class BalanceTopUpPaymentProofDeliveryPipeline
             }
 
             if ($topUp->status !== StoreBalanceTopUpStatus::AwaitingConfirmation
-                || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::MANUAL
+                || ! $topUp->usesManualPayment()
                 || ! $topUp->hasPaymentProof()) {
                 $this->ledger->finalizeNotDeliverable(
                     (string) $claimed->getKey(),

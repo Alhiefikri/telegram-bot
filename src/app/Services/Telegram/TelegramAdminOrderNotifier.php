@@ -230,10 +230,12 @@ class TelegramAdminOrderNotifier
 
     private function relevantPayment(Order $order): ?Payment
     {
-        return $order->payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Paid)
-            ?? $order->payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Pending)
-            ?? $order->payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Expired)
-            ?? $order->payments->first();
+        $payments = $order->payments->whereNull('manual_alternative_at');
+
+        return $payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Paid)
+            ?? $payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Pending)
+            ?? $payments->first(fn (Payment $payment): bool => $payment->status === PaymentStatus::Expired)
+            ?? $payments->first();
     }
 
     private function itemLines(Order $order): array

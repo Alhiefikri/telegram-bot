@@ -188,8 +188,8 @@ final class WijayaPayStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLife
             return StoreBalanceTopUpReconciliation::state(StoreBalanceTopUpOutcome::RecoveryPending);
         }
 
-        if (in_array($topUp->status, [
-            StoreBalanceTopUpStatus::Paid,
+        if (($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== PaymentProvider::MANUAL)
+            || in_array($topUp->status, [
             StoreBalanceTopUpStatus::InvalidProviderResult,
             StoreBalanceTopUpStatus::Compensated,
         ], true)) {
@@ -277,13 +277,19 @@ final class WijayaPayStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLife
         }
 
         if ($status->isPending()
+            && ! $topUp->usesManualPayment()
             && ! $this->deadlinePassed($topUp)
             && ! $this->classify($topUp)->isPayable()
         ) {
             $this->persistStatusPresentation($topUp, $status);
         }
 
-        return new StoreBalanceTopUpReconciliation($this->classify($topUp->fresh() ?? $topUp));
+        return new StoreBalanceTopUpReconciliation(
+            $this->classify($topUp->fresh() ?? $topUp),
+            authoritativelyUnpaid: $status->isPending()
+                && $diagnostics['missing_fields'] === []
+                && $diagnostics['conflicting_fields'] === [],
+        );
     }
 
     public function instructionAttachment(
@@ -330,6 +336,8 @@ final class WijayaPayStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLife
                 ->lockForUpdate()
                 ->first();
             if ($locked === null
+                || $locked->manual_alternative_at !== null
+                || $locked->manual_alternative_switch_token !== null
                 || $locked->status === StoreBalanceTopUpStatus::Payable
                 || in_array($locked->status, [
                     StoreBalanceTopUpStatus::Paid,
@@ -716,6 +724,10 @@ final class WijayaPayStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLife
 
     private function canRetryAmbiguousCreate(StoreBalanceTopUp $topUp): bool
     {
+        if ($topUp->usesManualPayment() || $topUp->manual_alternative_switch_token !== null) {
+            return false;
+        }
+
         if (filled($topUp->provider_reference)
             || $topUp->provider_total_payment !== null
             || $this->deadlinePassed($topUp)

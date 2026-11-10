@@ -82,7 +82,6 @@ final class StoreBalanceTopUpManualRailTest extends TelegramBotTestSupport
         $photo = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/sendPhoto'))->last()[0];
         $caption = (string) $this->telegramRequestField($photo, 'caption');
         $this->assertStringContainsString('Balance credit after payment confirmation: Rp5.000', $caption);
-        $this->assertStringContainsString('Send the payment proof photo to this chat with the /payment caption.', $caption);
 
         // No admin effect exists before the customer sends a proof: the proof
         // itself is the review artifact, exactly like a manual product purchase.

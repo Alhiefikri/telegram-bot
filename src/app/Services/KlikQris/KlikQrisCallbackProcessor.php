@@ -164,7 +164,7 @@ class KlikQrisCallbackProcessor
             return $this->topUps->recordCompensatedCallback($topUp, $callback);
         }
 
-        if ($topUp->status === StoreBalanceTopUpStatus::Paid) {
+        if ($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== PaymentProvider::MANUAL) {
             return $this->topUps->recordSettledCallback($topUp, $callback);
         }
 
@@ -215,8 +215,8 @@ class KlikQrisCallbackProcessor
     {
         if (! $callback->isPaidTrigger()
             || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::KLIKQRIS
+            || ($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== PaymentProvider::MANUAL)
             || in_array($topUp->status, [
-                StoreBalanceTopUpStatus::Paid,
                 StoreBalanceTopUpStatus::Compensated,
             ], true)) {
             return false;

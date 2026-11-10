@@ -440,7 +440,7 @@ final class StoreBalanceTopUpOutbound
     private function eligibleReceipt(StoreBalanceTopUp $topUp): bool
     {
         return $topUp->status === StoreBalanceTopUpStatus::Paid
-            && $topUp->provider_total_payment !== null
+            && $topUp->settledPaymentTotal() !== null
             && $topUp->settled_at !== null
             && $this->hasCustomerChat($topUp);
     }
@@ -477,7 +477,11 @@ final class StoreBalanceTopUpOutbound
                     ->from('telegram_outbound_effects')
                     ->where('telegram_outbound_effects.source_type', StoreBalanceTopUp::class)
                     ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP)
-                    ->whereRaw('telegram_outbound_effects.source_id = CAST(store_balance_top_ups.id AS TEXT)');
+                    ->whereRaw('telegram_outbound_effects.source_id = CAST(store_balance_top_ups.id AS TEXT)')
+                    ->where(function ($effects): void {
+                        $effects->whereNull('store_balance_top_ups.manual_alternative_at')
+                            ->orWhere('telegram_outbound_effects.effect_key', 'like', '%:manual-instructions:v1');
+                    });
             })
             ->orderBy('id');
     }
@@ -509,6 +513,7 @@ final class StoreBalanceTopUpOutbound
                         StoreBalanceTopUpStatus::RecoveryPending->value,
                         StoreBalanceTopUpStatus::InvalidProviderResult->value,
                     ])
+                    ->orWhereNotNull('manual_alternative_provider_paid_at')
                     ->orWhere(function (Builder $query): void {
                         $query
                             ->where('status', StoreBalanceTopUpStatus::Expired->value)
@@ -534,7 +539,7 @@ final class StoreBalanceTopUpOutbound
             ->where('status', StoreBalanceTopUpStatus::Paid->value)
             ->whereNotNull('settled_at')
             ->where('settled_at', '>=', now()->subDays(self::CHANNEL_PROOF_RECOVERY_WINDOW_DAYS))
-            ->whereNotNull('provider_total_payment')
+            ->where(fn (Builder $query) => $query->whereNotNull('provider_total_payment')->orWhere('settled_provider', 'manual'))
             ->whereNotExists(function ($effects): void {
                 $effects
                     ->selectRaw('1')
@@ -581,6 +586,7 @@ final class StoreBalanceTopUpOutbound
     ): bool {
         return $effect !== null
             && $this->stateOf($effect) === TelegramOutboundEffectState::Sent
+            && $effect->telegram_message_deleted_at === null
             && (string) $effect->telegram_chat_id === trim($chatId)
             && (int) $effect->telegram_message_id === (int) $messageId;
     }

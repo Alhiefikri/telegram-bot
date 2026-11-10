@@ -949,6 +949,13 @@ final class SakurupiahInvoiceLifecycleService
 
     private function classifyLocalState(Payment $payment): ?SakurupiahInvoiceOutcome
     {
+        if ($payment->manual_alternative_at !== null) {
+            return SakurupiahInvoiceOutcome::InvalidProviderResult;
+        }
+        if ($payment->manual_alternative_retirement_token !== null) {
+            return SakurupiahInvoiceOutcome::RecoveryPending;
+        }
+
         if ($payment->provider !== PaymentProvider::SAKURUPIAH
             || strtoupper(trim((string) $payment->method)) !== SakurupiahCreateInvoice::PAYMENT_METHOD_QRIS
             || strtoupper(trim((string) $payment->currency)) !== 'IDR') {

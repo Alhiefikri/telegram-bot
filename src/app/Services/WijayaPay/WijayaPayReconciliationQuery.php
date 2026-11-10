@@ -14,6 +14,7 @@ final class WijayaPayReconciliationQuery
     public const PAYMENT_COLUMNS = [
         'id',
         'order_id',
+        'manual_alternative_at',
         'provider',
         'merchant_ref',
         'provider_reference',
@@ -61,6 +62,7 @@ final class WijayaPayReconciliationQuery
                                 WijayaPayInvoiceLifecycleService::STATE_CREATING,
                             ]));
                 });
+                $query->orWhereNotNull('manual_alternative_at');
                 $this->orWithSuccessIndication($query);
             });
     }

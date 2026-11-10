@@ -46,7 +46,7 @@ final class MissingFulfillmentRefundService
             if ($existing !== null) {
                 return $existing;
             }
-            $payment = $payments->first(fn ($p) => $p->status === PaymentStatus::Paid && $p->paid_at !== null);
+            $payment = $payments->first(fn ($p) => $p->manual_alternative_at === null && $p->status === PaymentStatus::Paid && $p->paid_at !== null);
             if ($payment === null || $order->payment_status !== PaymentStatus::Paid
                 || $order->order_status !== OrderStatus::Processing || $f->state !== 'review'
                 || $order->hasOpenLatePaymentReview() || $f->reserved_quantity !== 0) {

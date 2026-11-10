@@ -216,12 +216,11 @@ class TelegramCheckoutIntents
         SakurupiahInvoiceOutcome $outcome,
         string $locale,
     ): array {
-        return $this->bot->sendMessage($chatId, $this->paymentInstructions->sakurupiahRetry($order, $outcome, $locale), [
-            'inline_keyboard' => [
-                [['text' => $this->locale->translate($order->customer, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
-                [['text' => $this->locale->translate($order->customer, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
-            ],
-        ]);
+        return $this->bot->sendMessage(
+            $chatId,
+            $this->paymentInstructions->sakurupiahRetry($order, $outcome, $locale),
+            $this->paymentInstructions->automaticQrisActions($order, null, $locale),
+        );
     }
 
     public function sendWijayaPayPaymentInstructions(string $chatId, Order $order, Payment $payment): array
@@ -282,22 +281,20 @@ class TelegramCheckoutIntents
         WijayaPayInvoiceOutcome $outcome,
         string $locale,
     ): array {
-        return $this->bot->sendMessage($chatId, $this->paymentInstructions->wijayaPayRetry($order, $outcome, $locale), [
-            'inline_keyboard' => [
-                [['text' => $this->locale->translate($order->customer, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
-                [['text' => $this->locale->translate($order->customer, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
-            ],
-        ]);
+        return $this->bot->sendMessage(
+            $chatId,
+            $this->paymentInstructions->wijayaPayRetry($order, $outcome, $locale),
+            $this->paymentInstructions->automaticQrisActions($order, null, $locale),
+        );
     }
 
     private function sendKlikQrisRetryState(string $chatId, Order $order, KlikQrisNativeQrisOutcome $outcome, string $locale): array
     {
-        return $this->bot->sendMessage($chatId, $this->paymentInstructions->klikQrisRetry($order, $outcome, $locale), [
-            'inline_keyboard' => [
-                [['text' => $this->locale->translate($order->customer, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
-                [['text' => $this->locale->translate($order->customer, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
-            ],
-        ]);
+        return $this->bot->sendMessage(
+            $chatId,
+            $this->paymentInstructions->klikQrisRetry($order, $outcome, $locale),
+            $this->paymentInstructions->automaticQrisActions($order, null, $locale),
+        );
     }
 
     public function binancePayEnabled(): bool
@@ -496,6 +493,7 @@ class TelegramCheckoutIntents
             $instruction->filename,
             $instruction->caption(),
             $instruction->replyMarkup,
+            $instruction->options(),
         );
 
         if ($timingContext === []) {

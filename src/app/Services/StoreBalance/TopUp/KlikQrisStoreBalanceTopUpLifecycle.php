@@ -115,14 +115,16 @@ final class KlikQrisStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifec
 
         $verified = null;
         $eventId = null;
+        $unpaid = false;
 
         try {
             $result = $this->nativeQris->reconcileTopUp(
                 $topUp,
-                function (StoreBalanceTopUp $current, KlikQrisTransaction $transaction) use (&$verified, &$eventId): void {
+                function (StoreBalanceTopUp $current, KlikQrisTransaction $transaction) use (&$verified, &$eventId, &$unpaid): void {
                     if (! $this->hasTrustedSignature($current, $transaction)) {
                         return;
                     }
+                    $unpaid = $transaction->isPending();
 
                     $verified = $this->evidence($current, $transaction, trusted: true);
                     $eventId = (string) $this->events->logReconciliation($transaction, $current)->getKey();
@@ -158,6 +160,7 @@ final class KlikQrisStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifec
             $current === null ? $result : $this->fromKlikQris($this->nativeQris->classifyTopUp($current)),
             $verified,
             $verified === null ? null : $eventId,
+            $unpaid,
         );
     }
 
@@ -220,7 +223,9 @@ final class KlikQrisStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifec
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
                 ->first();
-            if ($locked === null || $locked->provider_create_state !== 'provider_unavailable') {
+            if ($locked === null || $locked->manual_alternative_at !== null
+                || $locked->manual_alternative_switch_token !== null
+                || $locked->provider_create_state !== 'provider_unavailable') {
                 return;
             }
 

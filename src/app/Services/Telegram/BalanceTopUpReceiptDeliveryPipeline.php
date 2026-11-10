@@ -67,7 +67,7 @@ final class BalanceTopUpReceiptDeliveryPipeline
             }
 
             if ($topUp->status !== StoreBalanceTopUpStatus::Paid
-                || $topUp->provider_total_payment === null
+                || $topUp->settledPaymentTotal() === null
                 || $topUp->settled_at === null
                 || $topUp->customer === null
                 || $topUp->customer->telegram_id === null
@@ -84,14 +84,16 @@ final class BalanceTopUpReceiptDeliveryPipeline
 
             $locale = (string) ($claimed->locale ?: $topUp->locale ?: $topUp->customer->locale ?: TelegramLocale::DEFAULT_LOCALE);
             $paidAt = $topUp->paid_at ?? $topUp->settled_at;
-            $providerReference = trim((string) ($topUp->provider_reference ?: $topUp->merchant_ref));
+            $providerReference = $topUp->manual_alternative_at !== null && $topUp->settled_provider === 'manual'
+                ? (string) $topUp->merchant_ref
+                : trim((string) ($topUp->provider_reference ?: $topUp->merchant_ref));
             $message = implode("\n", [
                 $this->locale->translateLocale($locale, 'balance.topup.receipt.title'),
                 $this->locale->translateLocale($locale, 'balance.topup.receipt.credit', [
                     'amount' => $this->locale->idr((int) $topUp->amount),
                 ]),
                 $this->locale->translateLocale($locale, 'balance.topup.receipt.provider_total', [
-                    'amount' => $this->locale->idr((int) $topUp->provider_total_payment),
+                    'amount' => $this->locale->idr((int) $topUp->settledPaymentTotal()),
                 ]),
                 $this->locale->translateLocale($locale, 'balance.topup.receipt.reference', [
                     'reference' => $providerReference,

@@ -173,6 +173,19 @@ class OrderStateMachine implements OrderLifecycle
                 if (! $lockedPayment) {
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
+                if ($lockedPayment->manual_alternative_at !== null) {
+                    if (! in_array($lockedPayment->status, [PaymentStatus::Paid, PaymentStatus::Refunded], true)) {
+                        throw new InvalidOrderTransition('Only received alternative-rail money can be refunded.');
+                    }
+                    $changed = $lockedPayment->status !== PaymentStatus::Refunded;
+                    $lockedPayment->update(['status' => PaymentStatus::Refunded]);
+
+                    return new OrderLifecycleResult(
+                        order: $order->fresh(['payments']),
+                        payment: $lockedPayment->fresh(),
+                        newlyApplied: $changed,
+                    );
+                }
                 if ($lockedPayment->provider === PaymentProvider::USDT_BALANCE) {
                     $customer = Customer::findOrFail($storeBalanceCustomerId);
                     app(UsdtOrderRefundService::class)->full($customer, $order, $lockedPayment);
@@ -224,9 +237,22 @@ class OrderStateMachine implements OrderLifecycle
 
     public function applyPaymentExpired(Payment $payment): OrderLifecycleResult
     {
-        $initial = Payment::findOrFail($payment->id);
+        $payment = Payment::query()->findOrFail($payment->id);
+        return DB::transaction(function () use ($payment): OrderLifecycleResult {
+            return $this->withLockedOrderPayments($payment->order_id, function (Order $order, $payments) use ($payment): OrderLifecycleResult {
+                $lockedPayment = $payments->firstWhere('id', $payment->id);
+                if ($lockedPayment?->manual_alternative_at !== null) {
+                    $changed = $lockedPayment->status === PaymentStatus::Pending;
+                    if ($changed) {
+                        $lockedPayment->update(['status' => PaymentStatus::Expired]);
+                    }
 
-        return $this->releasePendingByOrderId($initial->order_id, OrderStatus::Expired, PaymentStatus::Expired, false);
+                    return new OrderLifecycleResult(order: $order->fresh(['payments']), payment: $lockedPayment->fresh(), newlyApplied: $changed);
+                }
+
+                return $this->applyReleaseTransition($order, $payments, OrderStatus::Expired, PaymentStatus::Expired, false);
+            });
+        }, 5);
     }
 
     public function expirePendingOrder(Order $order): ?Order
@@ -297,6 +323,30 @@ class OrderStateMachine implements OrderLifecycle
 
     private function applyPaidTransition(Payment $payment, Order $order): OrderLifecycleResult
     {
+        if ($payment->manual_alternative_at !== null) {
+            if ($payment->status === PaymentStatus::Refunded) {
+                return new OrderLifecycleResult(order: $order->fresh(['payments']), payment: $payment, newlyApplied: false);
+            }
+            $changed = $payment->status !== PaymentStatus::Paid;
+            if ($changed) {
+                $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => $payment->paid_at ?? now()]);
+            }
+            $review = ManualFulfillmentReview::query()->firstOrCreate(
+                ['payment_id' => $payment->id],
+                [
+                    'order_id' => $order->id,
+                    'amount' => $payment->provider_total_payment ?? $payment->amount,
+                    'currency' => $payment->currency,
+                    'reason' => ManualFulfillmentReview::REASON_PAYMENT_AFTER_MANUAL_ALTERNATIVE,
+                    'state' => ManualFulfillmentReview::STATE_PENDING,
+                    'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
+                ],
+            );
+            $this->dispatchManualReviewNotice($review);
+
+            return new OrderLifecycleResult(order: $order->fresh(['payments']), payment: $payment->fresh(), newlyApplied: $changed);
+        }
+
         if ($order->order_status === OrderStatus::Expired || $order->order_status === OrderStatus::Cancelled) {
             return $this->markLatePaymentPaid($payment, $order);
         }

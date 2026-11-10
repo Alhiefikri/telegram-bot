@@ -755,6 +755,8 @@ class TelegramMenuIntents
         ?StoreBalanceTopUpOutboundOutcome $instructionOutcome = null,
         ?bool $instructionRetryable = null,
     ): TelegramNavigationSurface {
+        $copyableTotalLine = null;
+        $copyableTotal = null;
         // A confirmed top-up already owns a payment target, so the
         // pre-confirmation "no invoice yet" line must never be repeated here.
         $confirmationLines = $confirmationReceived ? [
@@ -780,17 +782,18 @@ class TelegramMenuIntents
             && $presentation->payable() !== null) {
             $awaitingConfirmation = $presentation->isAwaitingConfirmation();
             $payable = $presentation->payable();
+            $copyableTotal = number_format($payable->totalAmount(), 0, ',', '.');
+            $copyableTotalLine = $this->locale->translate($customer, 'balance.topup.total', [
+                'amount' => $this->locale->idr($payable->totalAmount()),
+            ]);
             $lines = array_merge($confirmationLines, [
                 $this->locale->translate($customer, 'balance.topup.instruction.title'),
-                '━━━━━━━━━━━━━━',
+                $copyableTotalLine,
                 $this->locale->translate($customer, 'balance.topup.credit', [
                     'amount' => $this->locale->idr($payable->creditAmount()),
                 ]),
                 $this->locale->translate($customer, 'balance.topup.fee', [
                     'amount' => $this->locale->idr($payable->providerFee() ?? 0),
-                ]),
-                $this->locale->translate($customer, 'balance.topup.total', [
-                    'amount' => $this->locale->idr($payable->totalAmount()),
                 ]),
                 $this->locale->translate($customer, 'balance.topup.deadline', [
                     'expires' => $this->locale->formatDate($customer, $payable->effectiveExpiresAt()),
@@ -853,11 +856,58 @@ class TelegramMenuIntents
             $keyboard[] = $this->navigationRow($customer);
         }
 
+        if (app(StoreBalanceTopUpService::class)->canOfferManualAlternative($topUp)) {
+            $lines[] = $this->locale->translate($customer, 'payment.manual_alternative.hint');
+            array_splice($keyboard, max(0, count($keyboard) - 1), 0, [[[
+                'text' => $this->locale->translate($customer, 'balance.topup.manual_alternative.button'),
+                'callback_data' => StoreBalanceTopUpService::actionCallback('manual', $topUp->getKey()),
+            ]]]);
+        }
+        $caption = $this->captions->html(implode("\n", $lines));
+        if ($copyableTotalLine !== null && $copyableTotal !== null) {
+            $escapedLine = $this->captions->html($copyableTotalLine);
+            $caption = str_replace(
+                $escapedLine,
+                str_replace($copyableTotal, '<code>'.$copyableTotal.'</code>', $escapedLine),
+                $caption,
+            );
+        }
+
         return new TelegramNavigationSurface(
             TelegramNavigationScreen::AddBalance,
             $this->locale->code($customer),
-            $this->captions->html(implode("\n", $lines)),
+            $caption,
             ['inline_keyboard' => $keyboard],
+        );
+    }
+
+    public function fundingTopUpManualAlternativeConfirmationSurface(
+        Customer $customer,
+        StoreBalanceTopUp $topUp,
+    ): TelegramNavigationSurface {
+        $caption = $this->captions->html($this->locale->translate(
+            $customer,
+            'balance.topup.manual_alternative.confirmation',
+        ));
+
+        return new TelegramNavigationSurface(
+            TelegramNavigationScreen::AddBalance,
+            $this->locale->code($customer),
+            $caption,
+            ['inline_keyboard' => [
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.topup.manual_alternative.confirm'),
+                    'callback_data' => StoreBalanceTopUpService::actionCallback('manual_confirm', $topUp->getKey()),
+                ]],
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.topup.check'),
+                    'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
+                ]],
+                [[
+                    'text' => $this->locale->translate($customer, 'balance.topup.manual_alternative.cancel'),
+                    'callback_data' => StoreBalanceTopUpService::actionCallback('manual_cancel', $topUp->getKey()),
+                ]],
+            ]],
         );
     }
 

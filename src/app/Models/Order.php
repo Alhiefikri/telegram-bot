@@ -81,7 +81,8 @@ class Order extends Model
 
     public function payments()
     {
-        return $this->hasMany(Payment::class);
+        return $this->hasMany(Payment::class)
+            ->orderByRaw('CASE WHEN manual_alternative_at IS NULL THEN 0 ELSE 1 END');
     }
 
     public function orderNotificationEvents()

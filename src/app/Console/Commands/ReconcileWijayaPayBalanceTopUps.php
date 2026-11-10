@@ -181,6 +181,7 @@ final class ReconcileWijayaPayBalanceTopUps extends Command
                 $query->whereIn('status', [
                     StoreBalanceTopUpStatus::Pending->value,
                     StoreBalanceTopUpStatus::Payable->value,
+                    StoreBalanceTopUpStatus::AwaitingConfirmation->value,
                     StoreBalanceTopUpStatus::RecoveryPending->value,
                     StoreBalanceTopUpStatus::Failed->value,
                 ])->orWhere(function (Builder $expired) use ($lookback): void {
@@ -192,6 +193,11 @@ final class ReconcileWijayaPayBalanceTopUps extends Command
                                         ->where('expires_at', '>=', $lookback);
                                 });
                         });
+                })->orWhere(function (Builder $manual) use ($lookback): void {
+                    $manual->whereNotNull('manual_alternative_at')
+                        ->where('settled_provider', PaymentProvider::MANUAL)
+                        ->whereNull('manual_alternative_provider_paid_at')
+                        ->where('settled_at', '>=', $lookback);
                 });
             })
             ->where(function (Builder $query): void {

@@ -123,7 +123,7 @@ final class BalanceTopUpChannelProofDeliveryPipeline
     {
         return $topUp->status === StoreBalanceTopUpStatus::Paid
             && $topUp->settled_at !== null
-            && $topUp->provider_total_payment !== null
+            && $topUp->settledPaymentTotal() !== null
             && (int) $topUp->amount > 0
             && strtoupper(trim((string) $topUp->currency)) === 'IDR'
             && in_array(strtoupper(trim((string) $topUp->provider_payment_method)), ['QRIS', 'QR_MANUAL'], true);

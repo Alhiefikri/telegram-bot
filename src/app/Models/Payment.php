@@ -19,6 +19,10 @@ use Illuminate\Database\Eloquent\Model;
 
 #[Fillable([
     'order_id',
+    'manual_alternative_at',
+    'manual_alternative_for_payment_id',
+    'manual_alternative_retirement_token',
+    'manual_alternative_retirement_started_at',
     'provider',
     'merchant_ref',
     'provider_reference',
@@ -72,6 +76,8 @@ class Payment extends Model
     {
         return [
             'amount' => 'integer',
+            'manual_alternative_at' => 'datetime',
+            'manual_alternative_retirement_started_at' => 'datetime',
             'binance_auto_verification_enabled' => 'boolean',
             'binance_order_id_submission_version' => 'integer',
             'binance_order_id_attempts' => 'integer',
@@ -153,6 +159,8 @@ class Payment extends Model
     public function isPayableNativePakasirQris(): bool
     {
         $candidate = $this->status === PaymentStatus::Pending
+            && $this->manual_alternative_at === null
+            && $this->manual_alternative_retirement_token === null
             && $this->providerName() === PaymentProvider::PAKASIR
             && $this->providerPaymentMethodName() === 'qris'
             && filled($this->provider_payment_number)
@@ -194,6 +202,8 @@ class Payment extends Model
     public function isPayableNativeKlikQris(): bool
     {
         return $this->status === PaymentStatus::Pending
+            && $this->manual_alternative_at === null
+            && $this->manual_alternative_retirement_token === null
             && $this->isNativeKlikQris()
             && $this->provider_total_payment !== null
             && $this->klikQrisTotalAmountDisplay() !== null

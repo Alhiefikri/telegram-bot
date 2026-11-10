@@ -56,7 +56,10 @@ final class BalanceTopUpInstructionDeliveryPipeline
             }
 
             if ($topUp->status === StoreBalanceTopUpStatus::Paid
-                || $topUp->status === StoreBalanceTopUpStatus::Expired) {
+                || $topUp->status === StoreBalanceTopUpStatus::Expired
+                || $topUp->manual_alternative_switch_token !== null
+                || ($topUp->manual_alternative_at !== null
+                    && data_get($claimed->outcome_metadata, 'payment_method') !== 'manual')) {
                 $this->ledger->finalizeNotDeliverable(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
@@ -97,6 +100,7 @@ final class BalanceTopUpInstructionDeliveryPipeline
                 $instruction->filename,
                 $instruction->caption(),
                 $instruction->replyMarkup,
+                $instruction->options(),
             );
             $messageId = $this->responseValidator->messageIdFromResponse($response, 'Store Balance top-up instruction');
 

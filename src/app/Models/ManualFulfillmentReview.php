@@ -24,6 +24,8 @@ class ManualFulfillmentReview extends Model
 
     public const REASON_LATE_PAYMENT = 'late_payment';
 
+    public const REASON_PAYMENT_AFTER_MANUAL_ALTERNATIVE = 'payment_after_manual_alternative';
+
     public const REASON_LOCAL_CREDENTIALS_MISSING = 'local_credentials_missing';
 
     public const REASON_BSC_MISMATCH = 'bsc_mismatch';
@@ -39,6 +41,7 @@ class ManualFulfillmentReview extends Model
         $query->where(function (Builder $eligible): void {
             $eligible->whereHas('order', fn (Builder $order) => $order->whereNotNull('api_order_claim_id'))
                 ->orWhere('reason', self::REASON_LOCAL_CREDENTIALS_MISSING)
+                ->orWhere('reason', self::REASON_PAYMENT_AFTER_MANUAL_ALTERNATIVE)
                 ->orWhere(function (Builder $late): void {
                     $late->where('reason', self::REASON_LATE_PAYMENT)
                         ->whereHas('order.orderItems', fn (Builder $items) => $items->where('quantity', '>', 0))

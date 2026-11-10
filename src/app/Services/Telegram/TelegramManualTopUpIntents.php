@@ -34,6 +34,9 @@ final class TelegramManualTopUpIntents
      */
     public function submitTopUpProof(Customer $customer, string $chatId, array $message): bool
     {
+        if ((string) $customer->telegram_id !== $chatId) {
+            return false;
+        }
         $topUp = $this->awaitingProofTopUp($customer);
         if ($topUp === null) {
             return false;
@@ -60,7 +63,8 @@ final class TelegramManualTopUpIntents
                 ->first();
             if ($locked === null
                 || $locked->status !== StoreBalanceTopUpStatus::AwaitingConfirmation
-                || strtolower(trim((string) $locked->provider)) !== PaymentProvider::MANUAL
+                || ! $locked->usesManualPayment()
+                || $locked->expires_at?->isFuture() !== true
                 || $locked->payment_proof_submitted_at !== null) {
                 return false;
             }
@@ -90,7 +94,11 @@ final class TelegramManualTopUpIntents
     {
         return StoreBalanceTopUp::query()
             ->where('customer_id', $customer->getKey())
-            ->whereRaw('LOWER(TRIM(provider)) = ?', [PaymentProvider::MANUAL])
+            ->where(fn ($query) => $query
+                ->whereRaw('LOWER(TRIM(provider)) = ?', [PaymentProvider::MANUAL])
+                ->orWhereNotNull('manual_alternative_at'))
+            ->where('chat_id', (string) $customer->telegram_id)
+            ->where('expires_at', '>', now())
             ->where('status', StoreBalanceTopUpStatus::AwaitingConfirmation->value)
             ->whereNull('payment_proof_submitted_at')
             ->latest('id')

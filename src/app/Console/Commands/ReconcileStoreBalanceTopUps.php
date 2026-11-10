@@ -129,12 +129,21 @@ final class ReconcileStoreBalanceTopUps extends Command
                 ->select(self::TOP_UP_COLUMNS)
                 ->where('provider', PaymentProvider::KLIKQRIS)
                 ->whereNotNull('merchant_ref')
-                ->whereIn('status', [
-                    StoreBalanceTopUpStatus::Pending->value,
-                    StoreBalanceTopUpStatus::Payable->value,
-                    StoreBalanceTopUpStatus::RecoveryPending->value,
-                    StoreBalanceTopUpStatus::Failed->value,
-                ])
+                ->where(function (Builder $query): void {
+                    $query->whereIn('status', [
+                        StoreBalanceTopUpStatus::Pending->value,
+                        StoreBalanceTopUpStatus::Payable->value,
+                        StoreBalanceTopUpStatus::AwaitingConfirmation->value,
+                        StoreBalanceTopUpStatus::RecoveryPending->value,
+                        StoreBalanceTopUpStatus::Failed->value,
+                    ])->orWhere(function (Builder $manual): void {
+                        $manual->whereNotNull('manual_alternative_at')
+                            ->whereNull('manual_alternative_provider_paid_at')
+                            ->where('created_at', '>=', now()->subHours(72))
+                            ->where(fn (Builder $state) => $state->where('status', StoreBalanceTopUpStatus::Expired->value)
+                                ->orWhere('settled_provider', PaymentProvider::MANUAL));
+                    });
+                })
                 ->whereNotNull('provider_create_state')
                 ->where('provider_create_state', '!=', 'create_failed')
                 ->when($cursor !== null, fn (Builder $query): Builder => $this->applyCursor($query, $cursor))

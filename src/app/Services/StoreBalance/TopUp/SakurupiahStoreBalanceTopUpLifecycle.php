@@ -172,12 +172,14 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
             return StoreBalanceTopUpReconciliation::state(StoreBalanceTopUpOutcome::RecoveryPending);
         }
 
-        if (in_array($topUp->status, [
-            StoreBalanceTopUpStatus::Paid,
-            StoreBalanceTopUpStatus::Expired,
+        if (($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== PaymentProvider::MANUAL)
+            || in_array($topUp->status, [
             StoreBalanceTopUpStatus::InvalidProviderResult,
             StoreBalanceTopUpStatus::Compensated,
         ], true)) {
+            return new StoreBalanceTopUpReconciliation($this->classify($topUp));
+        }
+        if ($topUp->status === StoreBalanceTopUpStatus::Expired && $topUp->manual_alternative_at === null) {
             return new StoreBalanceTopUpReconciliation($this->classify($topUp));
         }
 
@@ -302,6 +304,7 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
         }
 
         if ($status->isPending()
+            && ! $topUp->usesManualPayment()
             && $status->transactionIdReturned
             && $status->merchantRef !== null
             && $status->paymentCode !== null
@@ -324,7 +327,13 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
             ));
         }
 
-        return new StoreBalanceTopUpReconciliation($this->classify($topUp->fresh() ?? $topUp));
+        return new StoreBalanceTopUpReconciliation(
+            $this->classify($topUp->fresh() ?? $topUp),
+            authoritativelyUnpaid: $status->isPending()
+                && $status->transactionIdReturned
+                && $status->merchantRef === (string) $topUp->merchant_ref
+                && $diagnostics['conflicting_fields'] === [],
+        );
     }
 
     public function instructionAttachment(
@@ -417,6 +426,8 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
                 ->lockForUpdate()
                 ->first();
             if ($locked === null
+                || $locked->manual_alternative_at !== null
+                || $locked->manual_alternative_switch_token !== null
                 || $locked->status === StoreBalanceTopUpStatus::Payable
                 || in_array($locked->status, [
                     StoreBalanceTopUpStatus::Paid,

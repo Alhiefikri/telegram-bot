@@ -65,6 +65,7 @@ use App\Services\Telegram\Callbacks\TelegramBscVerifyCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCartCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCatalogCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCheckoutCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramCheckoutManualAlternativeCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCheckoutMaintenanceCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramContentCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramCustomerApiCallbackHandler;
@@ -209,6 +210,7 @@ class AppServiceProvider extends ServiceProvider
             $app->make(TelegramReceiptActionCallbackHandler::class),
             $app->make(TelegramCartCallbackHandler::class),
             $app->make(TelegramCheckoutCallbackHandler::class),
+            $app->make(TelegramCheckoutManualAlternativeCallbackHandler::class),
             $app->make(TelegramCheckoutMaintenanceCallbackHandler::class),
             $app->make(TelegramBscVerifyCallbackHandler::class),
             $app->make(TelegramBinanceVerifyCallbackHandler::class),

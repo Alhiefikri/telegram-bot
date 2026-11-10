@@ -92,9 +92,28 @@ Sakurupiah QRIS Payment rail.
 Production enablement is intentionally simple: when both
 `SAKURUPIAH_PRODUCTION_API_ID` and `SAKURUPIAH_PRODUCTION_API_KEY` are
 non-empty, the application marks Sakurupiah production as enabled. No separate
-enable flag or contract-policy record is required. The Owner still selects
-Sakurupiah for new checkout through the Admin Payment Provider Switch after the
-readiness check passes.
+enable flag or contract-policy record is required. The Owner selects Sakurupiah
+for new checkout through the Admin Payment Provider Switch independently of
+readiness. A failed channel lookup, provider error or incomplete configuration
+must not disable the activation button or reject the Owner's provider choice.
+
+The selected provider remains active during errors; readiness is a separate
+diagnostic and checkout preflight result, not authority to rewrite the setting.
+Checkout may still fail when credentials or provider access are invalid.
+Payment identity, amount validation, callback verification and same-reference
+recovery remain enforced; activation does not prove the provider can accept money.
+
+Production recovery on 2026-11-10 changed the selected provider from `manual`
+to `sakurupiah` (version 149 → 150), retaining channel `QRISMU`, with an atomic
+switch audit. A subsequent metadata lookup returned provider status `400`,
+`API ID tidak valid`; selection remained `sakurupiah`. Correct merchant
+credentials are still required for operational recovery. No credential value
+is recorded here.
+
+Regression entry points: `SakurupiahProviderSwitchTest` and
+`PaymentProviderSwitchTest`. They cover activation despite unready configuration
+or HTTP 503, unchanged selection after lookup failure, Owner authorization,
+confirmation, optimistic version conflicts and historical Payment provenance.
 
 Automated release evidence is recorded in
 [`docs/sakurupiah-release-evidence.md`](sakurupiah-release-evidence.md). This

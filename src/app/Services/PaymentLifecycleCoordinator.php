@@ -43,7 +43,8 @@ final class PaymentLifecycleCoordinator
 
     public function canCreateNativeQris(Order $order, Payment $payment): bool
     {
-        if (! OrderLifecycleProjection::from($order, $payment)->isPendingPayment) {
+        if ($payment->manual_alternative_at !== null || $payment->manual_alternative_retirement_token !== null
+            || ! OrderLifecycleProjection::from($order, $payment)->isPendingPayment) {
             return false;
         }
 
@@ -54,6 +55,10 @@ final class PaymentLifecycleCoordinator
 
     public function canExposeNativeQris(Order $order, Payment $payment): bool
     {
+        if ($payment->manual_alternative_at !== null || $payment->manual_alternative_retirement_token !== null) {
+            return false;
+        }
+
         $projection = OrderLifecycleProjection::from($order, $payment);
 
         if ($projection->isPaid) {

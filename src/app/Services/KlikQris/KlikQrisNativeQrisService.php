@@ -79,8 +79,9 @@ class KlikQrisNativeQrisService
     {
         $payment->refresh();
 
-        if ($this->usesHardenedPath($payment)
-            && ! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment)) {
+        if ($payment->manual_alternative_at !== null || $payment->manual_alternative_retirement_token !== null
+            || ($this->usesHardenedPath($payment)
+                && ! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment))) {
             return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
         }
 
@@ -186,7 +187,8 @@ class KlikQrisNativeQrisService
         $payment->refresh();
         $hardened = $this->usesHardenedPath($payment);
 
-        if ($hardened && ! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment)) {
+        if ($payment->manual_alternative_at !== null || $payment->manual_alternative_retirement_token !== null
+            || ($hardened && ! $this->lifecycleCoordinator->isNativeQrisExposureAllowed($payment))) {
             return KlikQrisNativeQrisLifecycleResult::state(KlikQrisNativeQrisOutcome::Expired);
         }
 
@@ -633,8 +635,8 @@ class KlikQrisNativeQrisService
 
         try {
             $topUp->refresh();
-            if (in_array($topUp->status, [
-                StoreBalanceTopUpStatus::Paid,
+            if (($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== \App\Support\PaymentProvider::MANUAL)
+                || in_array($topUp->status, [
                 StoreBalanceTopUpStatus::Compensated,
             ], true)) {
                 return $this->classifyTopUp($topUp);
@@ -652,7 +654,11 @@ class KlikQrisNativeQrisService
             $transaction->assertMatchesTopUp($topUp);
             $signaturePersisted = $this->persistAuthoritativeTopUp($topUp, $transaction);
             $current = $topUp->fresh();
-            if ($signaturePersisted || $this->observesLateSettlement($current, $transaction)) {
+            if ($signaturePersisted || $this->observesLateSettlement($current, $transaction)
+                || ($current?->manual_alternative_switch_token !== null
+                    && $current->providerSignature() !== null
+                    && $transaction->signature() !== null
+                    && hash_equals($current->providerSignature(), $transaction->signature()))) {
                 $onAuthoritativeStatus($current, $transaction);
             }
 
@@ -1036,6 +1042,7 @@ class KlikQrisNativeQrisService
     {
         $reserved = $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($hardened): bool {
             if (($hardened && ! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment))
+                || $lockedPayment->manual_alternative_at !== null || $lockedPayment->manual_alternative_retirement_token !== null
                 || $this->hasPayablePersistedQris($lockedPayment)
                 || $lockedPayment->provider_create_state !== null
                 || $this->hasPersistedQrisPayload($lockedPayment)) {
@@ -1355,6 +1362,10 @@ class KlikQrisNativeQrisService
                 return false;
             }
 
+            if ($lockedTopUp->manual_alternative_at !== null) {
+                return $this->persistTopUpTransactionSignature($lockedTopUp, $transaction);
+            }
+
             if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid
                 || $lockedTopUp->status === StoreBalanceTopUpStatus::Compensated) {
                 return true;
@@ -1528,6 +1539,8 @@ class KlikQrisNativeQrisService
                 ->lockForUpdate()
                 ->firstOrFail();
             if ($locked->status === StoreBalanceTopUpStatus::Paid
+                || $locked->manual_alternative_at !== null
+                || $locked->manual_alternative_switch_token !== null
                 || $locked->status === StoreBalanceTopUpStatus::Compensated
                 || $locked->status === StoreBalanceTopUpStatus::InvalidProviderResult
                 || $locked->status === StoreBalanceTopUpStatus::Expired
@@ -1627,7 +1640,9 @@ class KlikQrisNativeQrisService
                 ->whereKey($topUp->getKey())
                 ->lockForUpdate()
                 ->first();
-            if ($locked === null || $locked->provider_create_state !== 'create_failed') {
+            if ($locked === null || $locked->manual_alternative_at !== null
+                || $locked->manual_alternative_switch_token !== null
+                || $locked->provider_create_state !== 'create_failed') {
                 return;
             }
 

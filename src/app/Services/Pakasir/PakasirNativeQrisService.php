@@ -178,6 +178,7 @@ class PakasirNativeQrisService
     {
         $reserved = $this->lifecycleCoordinator->withLockedOrderPayment($payment, function (Order $order, Payment $lockedPayment) use ($hardened): bool {
             if (($hardened && ! $this->lifecycleCoordinator->canCreateNativeQris($order, $lockedPayment))
+                || $lockedPayment->manual_alternative_at !== null || $lockedPayment->manual_alternative_retirement_token !== null
                 || $this->hasPayablePersistedQris($lockedPayment)
                 || $lockedPayment->provider_create_state !== null
                 || $this->hasPersistedQrisPayload($lockedPayment)) {

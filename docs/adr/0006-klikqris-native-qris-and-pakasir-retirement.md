@@ -6,6 +6,18 @@ Accepted — 2026-08-09
 
 The Payment Provider Switch remains owner-controlled: there is no scheduled provider change and no automatic fallback from KlikQRIS to Manual. The existing KlikQRIS Native QRIS module will be deepened directly; do not introduce a provider-neutral Native QRIS module or move Pakasir behind a new seam. If a KlikQRIS create outcome is uncertain, the same Payment is recovered and never replaced with a Manual payment, preventing duplicate payment instructions. Pakasir remains a legacy payment path only until every existing Pakasir Payment is terminal and the owner explicitly approves its removal.
 
+On 2026-11-10 the Owner approved an explicit Store Bot manual-QR alternative
+for checkout and IDR top-ups. This does not change the store's provider or
+silently replace an uncertain provider invoice. Switching requires customer
+confirmation, authoritative unpaid evidence (or a definite pre-request
+failure), and retirement of the visible automatic QR. The original invoice
+and its reconciliation authority remain intact; checkout links a separate
+manual Payment to the same Order, while top-up keeps one economic target.
+Late or second-rail money is retained for review without another fulfillment
+or balance credit. Unknown create/status/delivery outcomes still fail closed.
+Details: [provider guide](../agents/wijayapay-payment-provider-guide.md#alternatif-qr-manual-di-store-bot).
+
+
 ## Consequences
 
 - New KlikQRIS work keeps create, recovery, persistence, payability, and safe outcomes local to the existing KlikQRIS module.

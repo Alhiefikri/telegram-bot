@@ -43,8 +43,8 @@ final class WijayaPayStoreBalanceTopUpCallbackProcessor
         }
 
         if ($callback->isPending()
+            || ($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== PaymentProvider::MANUAL)
             || in_array($topUp->status, [
-                StoreBalanceTopUpStatus::Paid,
                 StoreBalanceTopUpStatus::Compensated,
                 StoreBalanceTopUpStatus::InvalidProviderResult,
             ], true)

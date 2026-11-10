@@ -455,7 +455,7 @@ Do not add ENV for catalog labels, product prices, customer-facing channel
 metadata, or editable presentation content. Runtime channel data comes from
 `list-payment.php`; owner-editable policy belongs in database/Admin.
 
-Readiness must fail closed when:
+Checkout readiness must fail closed when:
 
 - the API ID/API KEY pair is incomplete;
 - the base URL is not HTTPS in production;
@@ -573,8 +573,10 @@ provider-approved evidence:
 - Credential rotation/revocation, TLS/network, and retention obligations.
 
 These observations do not add a separate production enablement gate or ENV
-switch. Credentials, readiness, and the existing safe outcome rules remain the
-activation and integrity boundaries.
+switch. Owner selection is independent of readiness: provider errors must not
+disable the Sakurupiah activation button or reject a confirmed provider switch.
+Credentials, readiness, and the existing safe outcome rules remain checkout
+and payment-integrity boundaries, not provider-selection gates.
 
 ## Agent execution checklist
 

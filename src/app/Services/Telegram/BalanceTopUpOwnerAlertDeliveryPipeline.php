@@ -174,6 +174,12 @@ final class BalanceTopUpOwnerAlertDeliveryPipeline
             $this->uiIcons->renderLegacyIcons('📌 Kondisi: ').(self::STATUS_LABELS[$status] ?? $status),
         ];
 
+        if ($topUp->manual_alternative_provider_paid_at !== null) {
+            $lines[] = 'Pembayaran manual dan invoice provider sama-sama terkonfirmasi. Saldo sudah dikreditkan satu kali. Periksa kelebihan pembayaran; jangan kreditkan ulang.';
+
+            return implode("\n", $lines);
+        }
+
         $detail = trim((string) $topUp->provider_create_last_error);
         if ($detail !== '') {
             $lines[] = $this->uiIcons->renderLegacyIcons('🔎 Detail: ').mb_strimwidth(

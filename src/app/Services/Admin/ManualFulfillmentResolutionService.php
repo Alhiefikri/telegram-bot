@@ -193,6 +193,9 @@ class ManualFulfillmentResolutionService
 
     private function fulfill(ManualFulfillmentReview $review, User $actor, string $reason, ?string $ip): ManualFulfillmentReview
     {
+        if ($review->reason === ManualFulfillmentReview::REASON_PAYMENT_AFTER_MANUAL_ALTERNATIVE) {
+            throw new InvalidOrderTransition('Superseded automatic payment money must be reviewed separately; it cannot fulfill the Order again.');
+        }
         if ($review->reason === 'supplier_fulfillment') {
             $fulfillments = SupplierFulfillment::query()->where('order_id', $review->order_id)->where('state', 'review')->pluck('id');
             foreach ($fulfillments as $id) {
@@ -312,7 +315,9 @@ class ManualFulfillmentResolutionService
     private function refund(ManualFulfillmentReview $review, User $actor, string $reason, ?string $reference, ?string $result, ?string $ip): ManualFulfillmentReview
     {
         $order = Order::findOrFail($review->order_id);
-        app(SupplierFulfillmentService::class)->assertRefundable($order);
+        if ($review->reason !== ManualFulfillmentReview::REASON_PAYMENT_AFTER_MANUAL_ALTERNATIVE) {
+            app(SupplierFulfillmentService::class)->assertRefundable($order);
+        }
         $payment = Payment::query()->findOrFail($review->payment_id);
         if (in_array($payment->provider, ['store_balance', 'usdt_balance'], true)) {
             $this->orders->applyPaymentRefunded($payment);
@@ -328,6 +333,13 @@ class ManualFulfillmentResolutionService
         }
         if ($result === 'uncertain') {
             return $this->markRefundUncertain($review, $actor, $reason, $reference, $ip);
+        }
+        if ($review->reason === ManualFulfillmentReview::REASON_PAYMENT_AFTER_MANUAL_ALTERNATIVE) {
+            $this->orders->applyPaymentRefunded($payment);
+            $resolved = $this->markResolved($review, ManualFulfillmentReview::STATE_REFUNDED, $actor, $reason, $reference, $result);
+            $this->audit->log('manual_alternative.original_payment_refunded', $review, null, ['provider_reference' => $reference, 'amount' => $review->amount], $actor, $ip);
+
+            return $resolved;
         }
 
         $remainder = app(RemainderRefundService::class)->registerConfirmedExternal($actor, $order, $payment, $reference);

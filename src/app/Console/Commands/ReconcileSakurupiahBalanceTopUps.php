@@ -117,12 +117,21 @@ final class ReconcileSakurupiahBalanceTopUps extends Command
             ->select(['id', 'provider', 'status', 'provider_create_state', 'expires_at', 'provider_expires_at'])
             ->whereRaw('LOWER(TRIM(provider)) = ?', [PaymentProvider::SAKURUPIAH])
             ->whereNotNull('merchant_ref')
-            ->whereIn('status', [
-                StoreBalanceTopUpStatus::Pending->value,
-                StoreBalanceTopUpStatus::Payable->value,
-                StoreBalanceTopUpStatus::RecoveryPending->value,
-                StoreBalanceTopUpStatus::Failed->value,
-            ])
+            ->where(function (Builder $query): void {
+                $query->whereIn('status', [
+                    StoreBalanceTopUpStatus::Pending->value,
+                    StoreBalanceTopUpStatus::Payable->value,
+                    StoreBalanceTopUpStatus::AwaitingConfirmation->value,
+                    StoreBalanceTopUpStatus::RecoveryPending->value,
+                    StoreBalanceTopUpStatus::Failed->value,
+                ])->orWhere(function (Builder $manual): void {
+                    $manual->whereNotNull('manual_alternative_at')
+                        ->whereNull('manual_alternative_provider_paid_at')
+                        ->where('created_at', '>=', now()->subHours(72))
+                        ->where(fn (Builder $state) => $state->where('status', StoreBalanceTopUpStatus::Expired->value)
+                            ->orWhere('settled_provider', PaymentProvider::MANUAL));
+                });
+            })
             ->where(function (Builder $query): void {
                 $query->whereNull('provider_create_state')
                     ->orWhere('provider_create_state', '!=', 'provider_unavailable');

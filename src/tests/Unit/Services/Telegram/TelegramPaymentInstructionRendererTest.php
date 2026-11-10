@@ -18,6 +18,7 @@ use App\Services\Telegram\TelegramProductNameRenderer;
 use App\Services\Telegram\TelegramQrCodeRenderer;
 use App\Services\Telegram\TelegramTranslationCatalog;
 use App\Services\Telegram\TelegramUiIcons;
+use App\Services\WijayaPay\WijayaPayPayableInvoice;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -588,6 +589,54 @@ class TelegramPaymentInstructionRendererTest extends TestCase
         $this->assertStringContainsString('987654321', $instruction);
         $this->assertStringContainsString('Tekan butang Saya Sudah Bayar', $instruction);
         $this->assertStringNotContainsString('Amount to send', $instruction);
+    }
+
+    #[DataProvider('copyableAmountLocales')]
+    public function test_wijayapay_copy_target_is_the_final_provider_total_not_the_product_price(string $locale): void
+    {
+        $expiresAt = CarbonImmutable::now()->addMinutes(15);
+        $order = $this->orderWithItems($expiresAt);
+        $payment = Payment::factory()->for($order)->create([
+            'provider' => 'wijayapay',
+            'method' => 'QRIS',
+            'amount' => 125000,
+            'currency' => 'IDR',
+            'status' => PaymentStatus::Pending,
+            'provider_reference' => 'WP-COPY-TARGET',
+            'provider_create_state' => 'created',
+            'provider_fee' => 875,
+            'provider_total_payment' => 125875,
+            'provider_expires_at' => $expiresAt,
+            'expired_at' => $expiresAt,
+            'provider_presentation' => [
+                'mode' => 'qris_image',
+                'qris_payload' => null,
+                'qris_image_url' => 'https://wijayapay.com/qris/copy-target.png',
+                'customer_pays_fee' => true,
+                'effective_expires_at' => $expiresAt->toIso8601String(),
+            ],
+        ]);
+
+        $instruction = $this->renderer()->wijayaPayQrisImage(
+            $order,
+            WijayaPayPayableInvoice::fromPersistedPayment($payment),
+            'provider-image',
+            $locale,
+        );
+        $entity = $instruction->options()['caption_entities'][0];
+        $utf16 = mb_convert_encoding($instruction->caption(), 'UTF-16LE', 'UTF-8');
+
+        $this->assertSame('125.875', mb_convert_encoding(
+            substr($utf16, $entity['offset'] * 2, $entity['length'] * 2),
+            'UTF-8',
+            'UTF-16LE',
+        ));
+        $this->assertSame('code', $entity['type']);
+    }
+
+    public static function copyableAmountLocales(): array
+    {
+        return [['id'], ['ms'], ['en']];
     }
 
     private function renderer(): TelegramPaymentInstructionRenderer

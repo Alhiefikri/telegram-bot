@@ -886,6 +886,13 @@ final class WijayaPayInvoiceLifecycleService
 
     private function classifyLocalState(Payment $payment): ?WijayaPayInvoiceOutcome
     {
+        if ($payment->manual_alternative_at !== null) {
+            return WijayaPayInvoiceOutcome::InvalidProviderResult;
+        }
+        if ($payment->manual_alternative_retirement_token !== null) {
+            return WijayaPayInvoiceOutcome::RecoveryPending;
+        }
+
         if (strtolower(trim((string) $payment->provider)) !== PaymentProvider::WIJAYAPAY
             || strtoupper(trim((string) $payment->method)) !== WijayaPayCreateInvoice::PAYMENT_METHOD_QRIS
             || strtoupper(trim((string) $payment->currency)) !== 'IDR'

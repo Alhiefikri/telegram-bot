@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\StoreBalanceTopUp;
+use App\Services\Checkout\CheckoutManualAlternative;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
 use App\Services\KlikQris\KlikQrisPayableNativeQris;
 use App\Services\Pakasir\PakasirQrisFeePolicy;
@@ -41,6 +42,7 @@ class TelegramPaymentInstructionRenderer
             $this->text($locale, 'payment.pay_via', ['method' => $paymentOption['label']]),
             '',
             $this->text($locale, 'payment.manual.scan_qr_short'),
+            $this->text($locale, 'payment.manual_alternative.manual_notice'),
         ];
         if ($order->expires_at) {
             $lines[] = $this->text($locale, 'payment.manual.deadline_short', [
@@ -58,6 +60,7 @@ class TelegramPaymentInstructionRenderer
                     [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
                 ],
             ],
+            copyableAmountLine: 2,
         );
     }
 
@@ -257,12 +260,8 @@ class TelegramPaymentInstructionRenderer
             photoContents: $photoContents,
             filename: 'klikqris-'.$order->invoice_number.'.png',
             captionLines: $lines,
-            replyMarkup: [
-                'inline_keyboard' => [
-                    [['text' => $this->text($locale, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]],
-                    [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]],
-                ],
-            ],
+            replyMarkup: $this->automaticQrisActions($order, null, $locale),
+            copyableAmountLine: 4,
         );
     }
 
@@ -275,15 +274,14 @@ class TelegramPaymentInstructionRenderer
     ): TelegramPaymentInstruction {
         $lines = [
             $this->text($locale, 'balance.topup.instruction.title'),
-            '━━━━━━━━━━━━━━',
+            $this->text($locale, 'balance.topup.total', [
+                'amount' => $this->formatRupiah($payable->totalAmount()),
+            ]),
             $this->text($locale, 'balance.topup.credit', [
                 'amount' => $this->formatRupiah($payable->creditAmount()),
             ]),
             $this->text($locale, 'balance.topup.fee', [
                 'amount' => $this->formatRupiah($payable->providerFee() ?? 0),
-            ]),
-            $this->text($locale, 'balance.topup.total', [
-                'amount' => $this->formatRupiah($payable->totalAmount()),
             ]),
             $this->text($locale, 'balance.topup.deadline', [
                 'expires' => $this->formatDate($payable->effectiveExpiresAt(), $locale),
@@ -295,21 +293,26 @@ class TelegramPaymentInstructionRenderer
                     ? 'balance.topup.awaiting_confirmation'
                     : 'balance.topup.unpaid',
             ),
-            $this->text($locale, 'balance.topup.help'),
         ];
+
+        $keyboard = [[[
+            'text' => $this->text($locale, 'balance.topup.check'),
+            'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
+        ]]];
+        if (app(StoreBalanceTopUpService::class)->canOfferManualAlternative($topUp)) {
+            $lines[] = $this->text($locale, 'payment.manual_alternative.hint');
+            $keyboard[] = [[
+                'text' => $this->text($locale, 'balance.topup.manual_alternative.button'),
+                'callback_data' => StoreBalanceTopUpService::actionCallback('manual', $topUp->getKey()),
+            ]];
+        }
 
         return new TelegramPaymentInstruction(
             photoContents: $photoContents,
             filename: 'balance-top-up-'.$topUp->getKey().'.png',
             captionLines: $lines,
-            replyMarkup: [
-                'inline_keyboard' => [
-                    [[
-                        'text' => $this->text($locale, 'balance.topup.check'),
-                        'callback_data' => StoreBalanceTopUpService::actionCallback('check', $topUp->getKey()),
-                    ]],
-                ],
-            ],
+            replyMarkup: ['inline_keyboard' => $keyboard],
+            copyableAmountLine: 1,
         );
     }
 
@@ -324,7 +327,8 @@ class TelegramPaymentInstructionRenderer
             photoContents: $photoContents ?? $this->qrCodes->png($qrContent),
             filename: 'sakurupiah-'.$order->invoice_number.'.png',
             captionLines: $this->sakurupiahLines($order, $payable, $locale),
-            replyMarkup: $this->sakurupiahPaymentActions($order, null, $locale),
+            replyMarkup: $this->automaticQrisActions($order, null, $locale),
+            copyableAmountLine: 2,
         );
     }
 
@@ -338,7 +342,8 @@ class TelegramPaymentInstructionRenderer
             photoContents: $photoContents,
             filename: 'sakurupiah-'.$order->invoice_number.'.png',
             captionLines: $this->sakurupiahLines($order, $payable, $locale),
-            replyMarkup: $this->sakurupiahPaymentActions($order, $payable->checkoutUrl(), $locale),
+            replyMarkup: $this->automaticQrisActions($order, $payable->checkoutUrl(), $locale),
+            copyableAmountLine: 2,
         );
     }
 
@@ -352,7 +357,7 @@ class TelegramPaymentInstructionRenderer
 
         return [
             'text' => implode("\n", $this->sakurupiahLines($order, $payable, $locale)),
-            'reply_markup' => $this->sakurupiahPaymentActions($order, $paymentUrl, $locale),
+            'reply_markup' => $this->automaticQrisActions($order, $paymentUrl, $locale),
         ];
     }
 
@@ -370,7 +375,8 @@ class TelegramPaymentInstructionRenderer
             photoContents: $photoContents ?? $this->qrCodes->png($payable->qrisPayload),
             filename: 'wijayapay-'.$order->invoice_number.'.png',
             captionLines: $this->wijayaPayLines($order, $payable, $locale),
-            replyMarkup: $this->sakurupiahPaymentActions($order, null, $locale),
+            replyMarkup: $this->automaticQrisActions($order, null, $locale),
+            copyableAmountLine: 2,
         );
     }
 
@@ -388,7 +394,8 @@ class TelegramPaymentInstructionRenderer
             photoContents: $photoContents,
             filename: 'wijayapay-'.$order->invoice_number.'.png',
             captionLines: $this->wijayaPayLines($order, $payable, $locale),
-            replyMarkup: $this->sakurupiahPaymentActions($order, null, $locale),
+            replyMarkup: $this->automaticQrisActions($order, null, $locale),
+            copyableAmountLine: 2,
         );
     }
 
@@ -399,25 +406,17 @@ class TelegramPaymentInstructionRenderer
 
         return [
             $this->text($locale, 'payment.wijayapay.checkout_created'),
-            '━━━━━━━━━━━━━━',
             $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            $this->text($locale, 'payment.qris_total', ['amount' => $payable->totalAmountDisplay()]),
             $this->text($locale, 'payment.products', ['items' => $this->orderItemsSummary($order)]),
             $this->text($locale, 'payment.product_total', ['amount' => $this->formatRupiah($order->total_amount)]),
             $this->text($locale, 'payment.qris_fee', ['fee' => $this->formatRupiah($payable->providerFee)]),
-            $this->text($locale, 'payment.qris_total', ['amount' => $payable->totalAmountDisplay()]),
-            $this->text($locale, $payable->customerPaysFee ? 'payment.qris_fee_customer' : 'payment.qris_fee_store'),
-            '',
-            $this->text($locale, 'payment.wijayapay.exact_amount'),
-            $this->text($locale, 'payment.wijayapay.scan'),
-            '',
             $this->text($locale, 'payment.qris_deadline', [
                 'date' => $this->formatDate($payable->effectiveExpiresAt, $locale),
             ]),
-            $this->text($locale, 'payment.qris_deadline_guidance'),
-            $this->text($locale, 'payment.wijayapay.expiry_warning'),
             '',
-            $this->text($locale, 'payment.auto_delivery'),
-            $this->text($locale, 'payment.check_if_missing'),
+            $this->text($locale, 'payment.manual_alternative.scan'),
+            $this->text($locale, 'payment.manual_alternative.hint'),
         ];
     }
 
@@ -468,27 +467,19 @@ class TelegramPaymentInstructionRenderer
         $order->loadMissing('orderItems');
         $lines = [
             $this->text($locale, 'payment.sakurupiah.checkout_created'),
-            '━━━━━━━━━━━━━━',
             $this->text($locale, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            $this->text($locale, 'payment.qris_total', ['amount' => $payable->totalAmountDisplay()]),
             $this->text($locale, 'payment.products', ['items' => $this->orderItemsSummary($order)]),
             $this->text($locale, 'payment.product_total', ['amount' => $this->formatRupiah($order->total_amount)]),
             $this->text($locale, 'payment.qris_fee', ['fee' => $this->formatRupiah($payable->providerFee())]),
-            $this->text($locale, 'payment.qris_total', ['amount' => $payable->totalAmountDisplay()]),
-            $this->text($locale, $payable->customerPaysFee() ? 'payment.qris_fee_customer' : 'payment.qris_fee_store'),
-            '',
-            $this->text($locale, 'payment.sakurupiah.exact_amount'),
-            $payable->isDirectQris() || $payable->isQrisImage()
-                ? $this->text($locale, 'payment.sakurupiah.scan')
-                : $this->text($locale, 'payment.sakurupiah.hosted'),
-            '',
             $this->text($locale, 'payment.qris_deadline', [
                 'date' => $this->formatDate($payable->effectiveExpiresAt(), $locale),
             ]),
-            $this->text($locale, 'payment.qris_deadline_guidance'),
-            $this->text($locale, 'payment.sakurupiah.expiry_warning'),
             '',
-            $this->text($locale, 'payment.auto_delivery'),
-            $this->text($locale, 'payment.check_if_missing'),
+            $payable->isDirectQris() || $payable->isQrisImage()
+                ? $this->text($locale, 'payment.manual_alternative.scan')
+                : $this->text($locale, 'payment.sakurupiah.hosted'),
+            $this->text($locale, 'payment.manual_alternative.hint'),
         ];
 
         return $lines;
@@ -666,13 +657,22 @@ class TelegramPaymentInstructionRenderer
     /**
      * @return array{inline_keyboard: list<list<array{text: string, url?: string, callback_data?: string}>>}
      */
-    private function sakurupiahPaymentActions(Order $order, ?string $paymentUrl, string $locale): array
+    public function automaticQrisActions(Order $order, ?string $paymentUrl, string $locale): array
     {
         $keyboard = [];
         if ($paymentUrl !== null) {
             $keyboard[] = [['text' => $this->text($locale, 'payment.action.website'), 'url' => $paymentUrl]];
         }
         $keyboard[] = [['text' => $this->text($locale, 'payment.action.check'), 'callback_data' => 'order:'.$order->invoice_number]];
+        if ($order->exists) {
+            $payment = $order->payments->first();
+            if ($payment !== null && app(CheckoutManualAlternative::class)->isEligible($order, $payment)) {
+                $keyboard[] = [[
+                    'text' => $this->text($locale, 'payment.manual_alternative.button'),
+                    'callback_data' => 'checkout-manual:ask:'.$payment->getKey(),
+                ]];
+            }
+        }
         $keyboard[] = [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]];
 
         return ['inline_keyboard' => $keyboard];

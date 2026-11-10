@@ -55,12 +55,13 @@ final class ManualStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifecyc
             $this->classify($topUp),
             paid: $topUp->status === StoreBalanceTopUpStatus::Paid,
             recovered: $topUp->status === StoreBalanceTopUpStatus::Paid
-                && in_array($state, ['manual_confirmed', 'reconciled_manual_confirmed'], true),
+                && ($topUp->manual_alternative_decision === 'confirmed'
+                    || in_array($state, ['manual_confirmed', 'reconciled_manual_confirmed'], true)),
             retryable: $topUp->canRetryCreate(),
             manualReview: false,
             checkable: $topUp->status === StoreBalanceTopUpStatus::AwaitingConfirmation,
             rejected: $topUp->status === StoreBalanceTopUpStatus::Failed
-                && $state === 'manual_rejected',
+                && ($state === 'manual_rejected' || $topUp->manual_alternative_decision === 'rejected'),
         );
     }
 
@@ -131,10 +132,10 @@ final class ManualStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLifecyc
 
         return new StoreBalanceTopUpPayable(
             creditAmount: (int) $topUp->amount,
-            providerFee: $topUp->provider_fee === null ? 0 : (int) $topUp->provider_fee,
-            totalAmount: $topUp->provider_total_payment === null
+            providerFee: $topUp->manual_alternative_at !== null ? 0 : ($topUp->provider_fee === null ? 0 : (int) $topUp->provider_fee),
+            totalAmount: $topUp->manual_alternative_at !== null
                 ? (int) $topUp->amount
-                : (int) $topUp->provider_total_payment,
+                : ($topUp->provider_total_payment === null ? (int) $topUp->amount : (int) $topUp->provider_total_payment),
             expiresAt: CarbonImmutable::instance($expiresAt),
         );
     }

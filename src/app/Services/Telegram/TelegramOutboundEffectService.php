@@ -375,7 +375,7 @@ class TelegramOutboundEffectService
             return null;
         }
 
-        $provider = (string) $topUp->provider;
+        $provider = $topUp->usesManualPayment() ? \App\Support\PaymentProvider::MANUAL : (string) $topUp->provider;
         $effectKey = self::balanceTopUpEffectKey((string) $topUp->getKey(), $provider);
 
         return TelegramOutboundEffect::query()->firstOrCreate(
@@ -417,7 +417,7 @@ class TelegramOutboundEffectService
             || (int) $customer->getKey() !== (int) $topUp->customer_id
             || $topUp->status !== StoreBalanceTopUpStatus::Paid
             || $topUp->settled_at === null
-            || $topUp->provider_total_payment === null) {
+            || $topUp->settledPaymentTotal() === null) {
             return null;
         }
 
@@ -453,7 +453,7 @@ class TelegramOutboundEffectService
         $chatId = $this->adminTargetChatId($topUp->payment_proof_admin_chat_id);
         if ($chatId === null
             || $topUp->status !== StoreBalanceTopUpStatus::AwaitingConfirmation
-            || strtolower(trim((string) $topUp->provider)) !== PaymentProvider::MANUAL
+            || ! $topUp->usesManualPayment()
             || ! $topUp->hasPaymentProof()
             || $topUp->payment_proof_forwarded_at !== null) {
             return null;
@@ -565,7 +565,7 @@ class TelegramOutboundEffectService
             || $chatId === ''
             || $topUp->status !== StoreBalanceTopUpStatus::Paid
             || $topUp->settled_at === null
-            || $topUp->provider_total_payment === null
+            || $topUp->settledPaymentTotal() === null
             || (int) $topUp->amount <= 0) {
             return null;
         }
@@ -2114,10 +2114,16 @@ class TelegramOutboundEffectService
 
     public function forBalanceTopUp(string $topUpId): ?TelegramOutboundEffect
     {
+        $topUp = StoreBalanceTopUp::query()->find($topUpId);
+        if ($topUp === null) {
+            return null;
+        }
+        $provider = $topUp->usesManualPayment() ? PaymentProvider::MANUAL : (string) $topUp->provider;
         return TelegramOutboundEffect::query()
             ->where('source_type', StoreBalanceTopUp::class)
             ->where('source_id', $topUpId)
             ->where('effect_type', self::TYPE_BALANCE_TOP_UP)
+            ->where('effect_key', self::balanceTopUpEffectKey($topUpId, $provider))
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->first();

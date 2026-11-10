@@ -565,7 +565,37 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
             return true;
         }
 
-        $presentation = $this->resolveTopUp($topUp, $action === 'check');
+        if ($action === 'manual') {
+            $eligible = $this->topUps->requestManualAlternative($context->customer, $context->chatId, $topUp);
+            if ($eligible) {
+                $outcome = $this->navigation->presentOnRoot(
+                    $root,
+                    $context->chatId,
+                    $this->menu->fundingTopUpManualAlternativeConfirmationSurface($context->customer, $topUp->fresh()),
+                );
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->navigation->feedback($context->customer, $outcome));
+            } else {
+                $this->bot->answerCallbackQuery(
+                    $context->callbackQueryId,
+                    $this->locale->translate($context->customer, 'balance.topup.manual_alternative.blocked'),
+                );
+            }
+
+            return true;
+        }
+
+        $alternativeBlocked = false;
+        if ($action === 'manual_confirm') {
+            $switched = $this->topUps->confirmManualAlternative($context->customer, $context->chatId, $topUp);
+            $topUp->refresh();
+            $alternativeBlocked = ! $switched && $topUp->manual_alternative_at === null;
+        } elseif ($action === 'manual_cancel') {
+            $this->topUps->cancelManualAlternative($context->customer, $context->chatId, $topUp);
+        }
+
+        $presentation = in_array($action, ['manual_confirm', 'manual_cancel'], true)
+            ? $this->topUps->presentation($topUp->fresh())
+            : $this->resolveTopUp($topUp, $action === 'check');
         $topUp->refresh();
         $instructionHandoff = $action === 'retry'
             && ($presentation->isPayable() || $presentation->isAwaitingConfirmation())
@@ -586,7 +616,9 @@ final class TelegramBalanceFundingCallbackHandler implements TelegramCallbackHan
 
         $this->bot->answerCallbackQuery(
             $context->callbackQueryId,
-            $this->navigation->feedback($context->customer, $outcome),
+            $alternativeBlocked
+                ? $this->locale->translate($context->customer, 'balance.topup.manual_alternative.blocked')
+                : $this->navigation->feedback($context->customer, $outcome),
         );
 
         return true;

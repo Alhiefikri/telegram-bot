@@ -308,7 +308,7 @@ final class AdminDashboardStatsData
                 'label' => PaymentProvider::label(PaymentProvider::SAKURUPIAH),
                 'ready' => $isSakurupiahConfigured,
                 'reason' => $isSakurupiahConfigured ? null : $sakurupiahReadiness->configurationMessage(),
-                'can_activate' => $isSakurupiahConfigured,
+                'can_activate' => true,
             ],
             PaymentProvider::WIJAYAPAY => [
                 'label' => PaymentProvider::label(PaymentProvider::WIJAYAPAY),
@@ -335,9 +335,9 @@ final class AdminDashboardStatsData
             'sakurupiah_channel' => SakurupiahChannelPolicy::selected($settings),
             'sakurupiah_channels' => $sakurupiahChannels,
             'sakurupiah_channel_update_url' => route('admin.sakurupiah-channel.update'),
-            'is_sakurupiah_enabled' => $isSakurupiahEnabled,
+            'is_sakurupiah_enabled' => $requestedMode === PaymentProvider::SAKURUPIAH,
             'is_sakurupiah_configured' => $isSakurupiahConfigured,
-            'can_enable_sakurupiah' => $isSakurupiahConfigured,
+            'can_enable_sakurupiah' => true,
             'can_enable_klikqris' => $isKlikQrisConfigured,
             'can_enable_wijayapay' => $isWijayaPayConfigured,
             'wijayapay_guard_message' => $isWijayaPayConfigured

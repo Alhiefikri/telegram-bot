@@ -18,6 +18,64 @@ final class StoreBalanceTopUpInstructionCleaner
         private readonly TelegramBotClient $bot,
     ) {}
 
+    public function retireForManualAlternative(StoreBalanceTopUp $topUp): bool
+    {
+        $effect = $this->outboundEffects->forBalanceTopUp((string) $topUp->getKey());
+        if ($effect === null) {
+            return true;
+        }
+
+        $token = (string) Str::uuid();
+        $target = DB::transaction(function () use ($effect, $token): TelegramOutboundEffect|bool {
+            $locked = TelegramOutboundEffect::query()->whereKey($effect->getKey())->lockForUpdate()->firstOrFail();
+            if (in_array($locked->state, [
+                TelegramOutboundEffectState::Sending,
+                TelegramOutboundEffectState::Unknown,
+                TelegramOutboundEffectState::ManualReview,
+            ], true)) {
+                return false;
+            }
+            if ($locked->telegram_message_deleted_at !== null
+                || in_array($locked->state, [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed], true)) {
+                return true;
+            }
+            if ($locked->state !== TelegramOutboundEffectState::Sent
+                || trim((string) $locked->telegram_chat_id) === ''
+                || preg_match('/\A[1-9][0-9]{0,18}\z/D', (string) $locked->telegram_message_id) !== 1
+                || $this->hasActiveDeletionClaim($locked->telegram_message_deletion_started_at)) {
+                return false;
+            }
+            $locked->forceFill([
+                'telegram_message_deletion_started_at' => now(),
+                'telegram_message_deletion_token' => $token,
+            ])->save();
+
+            return $locked;
+        }, attempts: 5);
+        if (is_bool($target)) {
+            return $target;
+        }
+
+        try {
+            $this->bot->deleteMessage($target->telegram_chat_id, $target->telegram_message_id);
+        } catch (RequestException $exception) {
+            $description = Str::lower((string) data_get($exception->response?->json(), 'description'));
+            if ($exception->response?->status() !== 400 || ! str_contains($description, 'message to delete not found')) {
+                $this->releaseDeletionClaim($target, $token);
+
+                return false;
+            }
+        } catch (Throwable $exception) {
+            $this->releaseDeletionClaim($target, $token);
+            report($exception);
+
+            return false;
+        }
+        $this->markDeleted($target, $token);
+
+        return true;
+    }
+
     public function deleteInstruction(StoreBalanceTopUp $topUp): void
     {
         $source = $topUp->fresh();

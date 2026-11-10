@@ -9,6 +9,8 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\Checkout\PaymentProviderResolver;
+use App\Services\Sakurupiah\SakurupiahProviderReadiness;
 use App\Support\PaymentProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -47,7 +49,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
         $audit = AuditLog::query()->where('action', 'payment_provider.switched')->sole();
         $this->assertSame(PaymentProvider::MANUAL, $audit->old_values['provider']);
         $this->assertSame(PaymentProvider::SAKURUPIAH, $audit->new_values['provider']);
-        Http::assertSentCount(1);
+        Http::assertNothingSent();
     }
 
     public function test_switching_away_from_sakurupiah_keeps_existing_payment_provenance(): void
@@ -86,7 +88,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
         $this->assertSame('IDR', $payment->fresh()->currency);
     }
 
-    public function test_unready_sakurupiah_selection_fails_closed_and_preserves_the_current_provider(): void
+    public function test_owner_can_select_sakurupiah_even_when_configuration_is_unready(): void
     {
         config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
             'sandbox_enabled' => false,
@@ -108,15 +110,48 @@ final class SakurupiahProviderSwitchTest extends TestCase
                 'payment_mode' => PaymentProvider::SAKURUPIAH,
                 'confirm_provider_switch' => '1',
             ])
-            ->assertRedirect(route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran']))
-            ->assertSessionHasErrors(['payment_mode'], null, 'paymentMode');
+            ->assertRedirect('/admin?tab=settings&section=pembayaran#admin-payment-settings')
+            ->assertSessionDoesntHaveErrors();
 
-        $this->assertSame(PaymentProvider::MANUAL, $setting->fresh()->payment_mode);
-        $this->assertSame(0, AuditLog::query()->where('action', 'payment_provider.switched')->count());
+        $this->assertSame(PaymentProvider::SAKURUPIAH, $setting->fresh()->payment_mode);
+        $this->assertTrue($setting->fresh()->is_active);
+        $this->assertSame(1, AuditLog::query()->where('action', 'payment_provider.switched')->count());
         Http::assertNothingSent();
     }
 
-    private function configureReadySakurupiah(): void
+    public function test_provider_lookup_failure_does_not_block_activation_or_change_the_selected_provider(): void
+    {
+        $this->configureReadySakurupiah(channelUnavailable: true);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $setting = ManualPaymentSetting::create([
+            'payment_mode' => PaymentProvider::WIJAYAPAY,
+            'is_active' => true,
+            'sakurupiah_channel' => 'QRISC',
+        ]);
+
+        $this->actingAs($owner)->post(route('admin.payment-mode.update'), [
+            'payment_mode' => PaymentProvider::SAKURUPIAH,
+            'confirm_provider_switch' => '1',
+            'payment_provider_version' => 0,
+        ])->assertSessionDoesntHaveErrors();
+
+        Http::assertNothingSent();
+        $report = app(SakurupiahProviderReadiness::class)->observe();
+        $this->assertFalse($report->isReady());
+        $this->assertSame(PaymentProvider::SAKURUPIAH, $setting->fresh()->payment_mode);
+        $this->assertTrue($setting->fresh()->is_active);
+        $selection = app(PaymentProviderResolver::class)->resolve('QRIS');
+        $this->assertSame(PaymentProvider::SAKURUPIAH, $selection->provider);
+
+        $this->actingAs($owner)->get(route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran']))
+            ->assertOk()
+            ->assertViewHas('settingsTab.paymentControl', fn (array $control): bool => $control['can_enable_sakurupiah']
+                && $control['providers'][PaymentProvider::SAKURUPIAH]['can_activate']
+                && $control['is_sakurupiah_enabled']
+                && ! $control['is_sakurupiah_configured']);
+    }
+
+    private function configureReadySakurupiah(bool $channelUnavailable = false): void
     {
         config()->set('services.sakurupiah', array_replace(config('services.sakurupiah', []), [
             'sandbox_enabled' => true,
@@ -133,7 +168,7 @@ final class SakurupiahProviderSwitchTest extends TestCase
                 'expiry_confirmed' => true,
             ],
         ]));
-        Http::fake(fn () => Http::response([
+        Http::fake(fn () => $channelUnavailable ? Http::response([], 503) : Http::response([
             'status' => '200',
             'data' => [[
                 'kode' => 'QRISC',

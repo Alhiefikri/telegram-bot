@@ -96,7 +96,8 @@ final class CheckoutInstructionDeliveryPipeline
             }
 
             $payment = $this->paymentForEffect($order, $claimed);
-            if ($payment === null || $payment->status !== PaymentStatus::Pending) {
+            if ($payment === null || $payment->status !== PaymentStatus::Pending || $payment->manual_alternative_at !== null
+                || $payment->manual_alternative_retirement_token !== null) {
                 $this->ledger->finalizeNotDeliverable(
                     (string) $claimed->getKey(),
                     (string) $claimed->claim_token,
@@ -359,6 +360,8 @@ final class CheckoutInstructionDeliveryPipeline
         return Order::query()
             ->whereKey($effect->source_id)
             ->whereNull('manual_checkout_customer_notified_at')
+            ->when($effect->effect_type !== TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
+                fn ($query) => $query->whereDoesntHave('payments', fn ($payments) => $payments->whereNotNull('manual_alternative_at')))
             ->update([
                 'manual_checkout_customer_notified_at' => $at,
                 'manual_checkout_customer_notification_chat_id' => $effect->telegram_chat_id,

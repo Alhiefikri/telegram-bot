@@ -34,8 +34,9 @@ final readonly class CustomerApiOrderResult
     {
         $order = $this->order->loadMissing(['orderItems', 'payments']);
         $item = $order->orderItems->sortBy('id')->first();
-        $payment = $order->payments->firstWhere('status', PaymentStatus::Paid)
-            ?? $order->payments->sortByDesc('id')->first();
+        $payments = $order->payments->whereNull('manual_alternative_at');
+        $payment = $payments->firstWhere('status', PaymentStatus::Paid)
+            ?? $payments->sortByDesc('id')->first();
         $currency = $payment?->currency === UsdtMicroAmount::CURRENCY ? 'USD' : $payment?->currency;
 
         return [

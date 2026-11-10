@@ -194,6 +194,48 @@ Tidak ada migration baru: kolom generik `payments` dan
   signed top-up callback, no-credit contradiction/manual review, and fair
   cursor rotation beyond one sweep.
 - `ProductionConfigurationValidatorTest` — production config safety.
+- `Telegram/CheckoutManualAlternativeTest` dan
+  `Telegram/StoreBalanceTopUpManualAlternativeTest` menguji pilihan manual
+  eksplisit, ownership pesan, status tidak pasti, retirement QR, replay,
+  pembayaran dua jalur, serta larangan menghapus provenance lewat rollback.
+
+## Alternatif QR manual di Store Bot
+
+Checkout dan top-up IDR menawarkan **Gunakan QR Manual** tanpa mengubah
+Payment Provider Switch toko. Pelanggan mengonfirmasi bahwa ia belum
+membayar; status provider dibaca ulang sebelum perpindahan. Status tidak
+pasti menahan perpindahan, bukan dianggap belum bayar. QR otomatis harus
+terbukti sudah dihapus dari Telegram sebelum instruksi manual dikirim.
+Provider dan Telegram HTTP berjalan di luar transaksi keuangan; token
+retirement/switch membatasi worker yang boleh menyelesaikan perpindahan.
+
+Checkout mempertahankan Order dan invoice provider asli, lalu mencatat
+Payment manual yang tertaut secara unik ke Payment asli. Payment provider
+yang telah dialihkan tidak mengotorisasi fulfillment lagi: dana masuk
+berikutnya dicatat sebagai review `payment_after_manual_alternative`.
+Top-up mempertahankan target serta invoice provider, menggunakan
+`manual_alternative_at` untuk presentasi efektif dan `settled_provider`
+untuk sumber kredit sebenarnya. Pembayaran kedua dari jalur lain menjadi
+review tanpa kredit saldo kedua. Kedua migrasi menolak rollback yang
+menghapus riwayat perpindahan.
+
+Teks tersedia dalam Indonesia, Melayu, dan Inggris. Nominal final memakai
+entity Telegram `code`; hanya angkanya yang disalin, bukan subtotal,
+invoice, atau label mata uang. Nominal manual tidak mewarisi biaya invoice
+otomatis. Dukungan aplikasi Malaysia tetap bergantung pada QR merchant;
+fitur ini tidak menjamin semua aplikasi lintas negara dapat membayar.
+
+Verifikasi lokal: suite Telegram/provider/renderer menjalankan 1.490 tes
+(1.484 lulus, 6 dilewati), 13.707 assertions. Suite review, refund, top-up
+dan lifecycle tambahan lulus 126 tes / 939 assertions. Audit katalog bahasa
+lulus untuk `id`, `en`, dan `ms`. Smoke runtime dengan provider fixture
+membuktikan nominal otomatis 10.125 dan manual 10.000 pada ketiga bahasa,
+Order sama dan default toko tetap WijayaPay. Webhook ngrok serta `/start`
+ke `LhieStoreTestBot` berhasil. Koneksi Telegram berikutnya timeout dari PHP
+dan Python, sehingga E2E live pembayaran penuh belum terverifikasi.
+Backend fixture dan harness dihentikan/dibersihkan. Tidak ada transfer
+sungguhan atau perubahan produksi.
+
 
 ## Framework references
 
@@ -218,5 +260,6 @@ through Context7:
 - Perilaku callback bila `ref_id` sudah kedaluwarsa atau transaksi berstatus
   `expired` (docs hanya mencontohkan `paid`).
 
-Semua unknown di atas ditangani dengan fail-closed, bukan fallback provider
-lain atau pembuatan invoice kedua.
+Semua unknown di atas ditangani dengan fail-closed. Alternatif manual
+memerlukan pilihan eksplisit pelanggan dan bukti aman seperti dijelaskan
+di atas; kegagalan provider tidak pernah memindahkan metode secara diam-diam.

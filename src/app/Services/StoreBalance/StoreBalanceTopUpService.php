@@ -8,6 +8,7 @@ use App\Enums\StoreBalanceTopUpOutcome;
 use App\Enums\StoreBalanceTopUpStatus;
 use App\Events\StoreBalanceTopUpSettled;
 use App\Models\Customer;
+use App\Models\ExternalMoneyReceiptReservation;
 use App\Models\ManualPaymentSetting;
 use App\Models\StoreBalanceFundingIntent;
 use App\Models\StoreBalanceTopUp;
@@ -17,8 +18,13 @@ use App\Services\AuditLogger;
 use App\Services\KlikQris\KlikQrisCallback;
 use App\Services\KlikQris\KlikQrisTransaction;
 use App\Services\KlikQris\StoreBalanceTopUpEventLogger;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
+use App\Services\MoneyReceipts\MoneyReceiptIdentity;
+use App\Services\MoneyReceipts\MoneyReceiptTarget;
+use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
 use App\Services\Sakurupiah\SakurupiahChannelPolicy;
+use App\Services\Sakurupiah\SakurupiahCreatePreRequestException;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpInstructionAttachment;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResolver;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResult;
@@ -28,16 +34,21 @@ use App\Services\StoreBalance\TopUp\StoreBalanceTopUpProviderResolver;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpReconciliation;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpReviewMarker;
 use App\Services\StoreBalance\TopUp\StoreBalanceTopUpSettlementEvidence;
+use App\Services\Telegram\StoreBalanceTopUpInstructionCleaner;
+use App\Services\Telegram\TelegramAdminAccess;
+use App\Services\WijayaPay\WijayaPayCreatePreRequestException;
 use App\Support\PaymentProvider;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 final class StoreBalanceTopUpService
 {
-    private const ACTION_PATTERN = '/\Abalance:topup:([1-9][0-9]{0,18}):(check|retry)\z/D';
+    private const ACTION_PATTERN = '/\Abalance:topup:([1-9][0-9]{0,18}):(check|retry|manual|manual_confirm|manual_cancel)\z/D';
 
     public function __construct(
         private readonly StoreBalanceLedger $ledger,
@@ -53,7 +64,7 @@ final class StoreBalanceTopUpService
     {
         $action = strtolower(trim($action));
         $topUpId = (string) $topUpId;
-        if (! in_array($action, ['check', 'retry'], true)
+        if (! in_array($action, ['check', 'retry', 'manual', 'manual_confirm', 'manual_cancel'], true)
             || preg_match('/\A[1-9][0-9]{0,18}\z/D', $topUpId) !== 1) {
             throw new RuntimeException('Store Balance top-up action is invalid.');
         }
@@ -168,9 +179,147 @@ final class StoreBalanceTopUpService
             ->first();
     }
 
+    public function canOfferManualAlternative(StoreBalanceTopUp $topUp): bool
+    {
+        return is_readable(public_path('qr-lhie.jpg'))
+            && filesize(public_path('qr-lhie.jpg')) > 0
+            && preg_match('/\A[1-9][0-9]{0,18}\z/D', (string) app(TelegramAdminAccess::class)->adminChatId()) === 1
+            && in_array($topUp->provider, [PaymentProvider::WIJAYAPAY, PaymentProvider::KLIKQRIS, PaymentProvider::SAKURUPIAH], true)
+            && ! $topUp->usesManualPayment()
+            && $topUp->expires_at?->isFuture() === true
+            && ($topUp->status === StoreBalanceTopUpStatus::Payable || $this->definitelyNotCreated($topUp));
+    }
+
+    public function requestManualAlternative(Customer $customer, string $chatId, StoreBalanceTopUp $topUp): bool
+    {
+        return DB::transaction(function () use ($customer, $chatId, $topUp): bool {
+            $locked = StoreBalanceTopUp::query()->whereKey($topUp->getKey())->lockForUpdate()->first();
+            if ($locked === null || ! $this->currentAlternativeOwner($locked, $customer, $chatId)
+                || ! $this->canOfferManualAlternative($locked)) {
+                return false;
+            }
+
+            $locked->forceFill(['manual_alternative_requested_at' => now()])->save();
+
+            return true;
+        }, attempts: 5);
+    }
+
+    public function cancelManualAlternative(Customer $customer, string $chatId, StoreBalanceTopUp $topUp): void
+    {
+        DB::transaction(function () use ($customer, $chatId, $topUp): void {
+            $locked = StoreBalanceTopUp::query()->whereKey($topUp->getKey())->lockForUpdate()->first();
+            if ($locked !== null && $this->currentAlternativeOwner($locked, $customer, $chatId)
+                && $locked->manual_alternative_switch_token === null) {
+                $locked->forceFill(['manual_alternative_requested_at' => null])->save();
+            }
+        }, attempts: 5);
+    }
+
+    public function confirmManualAlternative(Customer $customer, string $chatId, StoreBalanceTopUp $topUp): bool
+    {
+        $token = Str::random(64);
+        $claimed = DB::transaction(function () use ($customer, $chatId, $topUp, $token): bool {
+            $locked = StoreBalanceTopUp::query()->whereKey($topUp->getKey())->lockForUpdate()->first();
+            if ($locked === null || ! $this->currentAlternativeOwner($locked, $customer, $chatId)
+                || ! $this->canOfferManualAlternative($locked)
+                || $locked->manual_alternative_requested_at === null
+                || $locked->manual_alternative_requested_at->lt(now()->subMinutes(5))
+                || ($locked->manual_alternative_switch_started_at?->gt(now()->subMinutes(10)) === true
+                    && $locked->manual_alternative_switch_token !== null)) {
+                return false;
+            }
+
+            $locked->forceFill([
+                'manual_alternative_switch_token' => $token,
+                'manual_alternative_switch_started_at' => now(),
+            ])->save();
+
+            return true;
+        }, attempts: 5);
+        if (! $claimed) {
+            return false;
+        }
+
+        try {
+            $topUp->refresh();
+            if (! $this->definitelyNotCreated($topUp)) {
+                $rail = $this->lifecycles->resolve((string) $topUp->provider);
+                $reconciliation = $rail?->reconcile($topUp);
+                if ($reconciliation?->evidence()?->isTrusted() === true) {
+                    $this->settleVerifiedEvidence(
+                        $topUp,
+                        $reconciliation->evidence(),
+                        fn (StoreBalanceTopUp $locked): StoreBalanceTopUpEvent => $this->reconciliationEvent($locked, $reconciliation),
+                    );
+                }
+                if ($reconciliation?->isAuthoritativelyUnpaid() !== true) {
+                    return false;
+                }
+            }
+
+            if (! app(StoreBalanceTopUpInstructionCleaner::class)->retireForManualAlternative($topUp)) {
+                return false;
+            }
+
+            return DB::transaction(function () use ($customer, $chatId, $topUp, $token): bool {
+                $locked = StoreBalanceTopUp::query()->whereKey($topUp->getKey())->lockForUpdate()->first();
+                if ($locked === null || $locked->manual_alternative_switch_token !== $token
+                    || ! $this->currentAlternativeOwner($locked, $customer, $chatId)
+                    || ! $this->canOfferManualAlternative($locked)) {
+                    return false;
+                }
+
+                $locked->forceFill([
+                    'manual_alternative_at' => now(),
+                    'manual_alternative_requested_at' => null,
+                    'manual_alternative_switch_token' => null,
+                    'manual_alternative_switch_started_at' => null,
+                    'status' => StoreBalanceTopUpStatus::AwaitingConfirmation,
+                ])->save();
+
+                return true;
+            }, attempts: 5);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return false;
+        } finally {
+            StoreBalanceTopUp::query()->whereKey($topUp->getKey())
+                ->where('manual_alternative_switch_token', $token)
+                ->update(['manual_alternative_switch_token' => null, 'manual_alternative_switch_started_at' => null]);
+        }
+    }
+
+    private function definitelyNotCreated(StoreBalanceTopUp $topUp): bool
+    {
+        return $topUp->status === StoreBalanceTopUpStatus::Failed
+            && blank($topUp->provider_reference)
+            && $topUp->provider_created_at === null
+            && $topUp->provider_total_payment === null
+            && (in_array($topUp->provider_create_state, ['create_failed'], true)
+                || ($topUp->provider_create_state === 'provider_unavailable'
+                    && ($topUp->provider_create_attempted_at === null
+                        || in_array($topUp->provider_create_last_error, [
+                            WijayaPayCreatePreRequestException::class,
+                            SakurupiahCreatePreRequestException::class,
+                        ], true))));
+    }
+
+    private function currentAlternativeOwner(StoreBalanceTopUp $topUp, Customer $customer, string $chatId): bool
+    {
+        return (int) $topUp->customer_id === (int) $customer->getKey()
+            && $topUp->chat_id === $chatId
+            && (string) $customer->telegram_id === $chatId
+            && TelegramNavigationRoot::query()->whereKey($topUp->telegram_navigation_root_id)
+                ->where('customer_id', $customer->getKey())
+                ->where('chat_id', $chatId)
+                ->where('message_id', $topUp->canonical_message_id)->exists();
+    }
+
     public function classify(StoreBalanceTopUp $topUp): StoreBalanceTopUpLifecycleResult
     {
-        $rail = $this->lifecycles->resolve((string) $topUp->provider);
+        $rail = $this->lifecycles->resolve($topUp->usesManualPayment() ? PaymentProvider::MANUAL : (string) $topUp->provider);
 
         return $rail === null
             ? StoreBalanceTopUpLifecycleResult::state(StoreBalanceTopUpOutcome::ProviderUnavailable)
@@ -179,7 +328,7 @@ final class StoreBalanceTopUpService
 
     public function presentation(StoreBalanceTopUp $topUp, bool $refresh = true): StoreBalanceTopUpPresentation
     {
-        $rail = $this->lifecycles->resolve((string) $topUp->provider);
+        $rail = $this->lifecycles->resolve($topUp->usesManualPayment() ? PaymentProvider::MANUAL : (string) $topUp->provider);
 
         return $rail === null
             ? StoreBalanceTopUpPresentation::fromLifecycle(
@@ -192,7 +341,11 @@ final class StoreBalanceTopUpService
 
     public function lifecycle(StoreBalanceTopUp $topUp): StoreBalanceTopUpLifecycleResult
     {
-        $rail = $this->lifecycles->resolve((string) $topUp->provider);
+        $topUp->refresh();
+        if ($topUp->manual_alternative_switch_token !== null) {
+            return $this->classify($topUp);
+        }
+        $rail = $this->lifecycles->resolve($topUp->usesManualPayment() ? PaymentProvider::MANUAL : (string) $topUp->provider);
         if ($rail === null) {
             return $this->markProviderUnavailable($topUp);
         }
@@ -209,7 +362,7 @@ final class StoreBalanceTopUpService
         StoreBalanceTopUp $topUp,
         StoreBalanceTopUpPayable $payable,
     ): StoreBalanceTopUpInstructionAttachment {
-        $rail = $this->lifecycles->resolve((string) $topUp->provider);
+        $rail = $this->lifecycles->resolve($topUp->usesManualPayment() ? PaymentProvider::MANUAL : (string) $topUp->provider);
         if ($rail === null) {
             throw new RuntimeException('Store Balance top-up has no payable payment rail.');
         }
@@ -367,6 +520,26 @@ final class StoreBalanceTopUpService
             }
 
             if ($lockedTopUp->status === StoreBalanceTopUpStatus::Paid) {
+                $secondRail = $lockedTopUp->manual_alternative_at !== null
+                    && (($lockedTopUp->settled_provider === PaymentProvider::MANUAL
+                            && $evidence->provider() === $lockedTopUp->provider
+                            && $this->settlementIdentityMatches($lockedTopUp, $evidence))
+                        || ($lockedTopUp->settled_provider === $lockedTopUp->provider
+                            && $evidence->provider() === PaymentProvider::MANUAL
+                            && $lockedTopUp->hasPaymentProof()
+                            && $evidence->isSuccess()
+                            && $evidence->totalAmount() === (int) $lockedTopUp->amount));
+                if ($secondRail) {
+                    $claim = $this->claimSettlementReceipt($lockedTopUp, $evidence);
+                    if (! $claim->isHeld()) {
+                        $lockedTopUp->forceFill(['manual_alternative_provider_paid_at' => now()])->save();
+                        $this->reviews->mark($lockedTopUp, 'manual_alternative_both_rails_paid');
+                        $lockedEvent->forceFill(['processed_at' => now()])->save();
+                    }
+
+                    return $lockedEvent->fresh();
+                }
+
                 if (! $this->matchesSettledEvidence($lockedTopUp, $evidence)) {
                     return $lockedEvent->fresh();
                 }
@@ -420,7 +593,7 @@ final class StoreBalanceTopUpService
             // The global receipt registry decides ownership before any credit:
             // a receipt already claimed by another target, or one held for
             // review, never funds this top-up.
-            $claim = $this->receipts->claimStoreBalanceTopUp($lockedTopUp, $evidence->providerReference());
+            $claim = $this->claimSettlementReceipt($lockedTopUp, $evidence);
             if ($claim->isHeld()) {
                 $this->reviews->mark(
                     $lockedTopUp,
@@ -440,9 +613,12 @@ final class StoreBalanceTopUpService
             $previousStatus = $lockedTopUp->status->value;
             $lockedTopUp->forceFill([
                 'status' => StoreBalanceTopUpStatus::Paid,
-                'provider_create_state' => $lateSettlement
-                    ? 'reconciled_'.$evidence->rawStatus()
-                    : 'provider_'.$evidence->rawStatus(),
+                'provider_create_state' => $lockedTopUp->manual_alternative_at !== null && $evidence->provider() === PaymentProvider::MANUAL
+                    ? $lockedTopUp->provider_create_state
+                    : ($lateSettlement ? 'reconciled_'.$evidence->rawStatus() : 'provider_'.$evidence->rawStatus()),
+                'settled_provider' => $evidence->provider(),
+                'manual_alternative_decision' => $lockedTopUp->manual_alternative_at !== null && $evidence->provider() === PaymentProvider::MANUAL
+                    ? 'confirmed' : $lockedTopUp->manual_alternative_decision,
                 'paid_at' => $evidence->paidAt() ?? now(),
                 'settled_at' => now(),
             ])->save();
@@ -618,7 +794,8 @@ final class StoreBalanceTopUpService
             $locked->forceFill([
                 'status' => StoreBalanceTopUpStatus::Failed,
                 'provider_create_state' => 'provider_unavailable',
-                'provider_create_last_error' => $reason,
+                'provider_create_last_error' => $locked->provider_create_state === 'provider_unavailable'
+                    ? ($locked->provider_create_last_error ?? $reason) : $reason,
             ])->save();
         }, attempts: 5);
 
@@ -631,6 +808,11 @@ final class StoreBalanceTopUpService
         StoreBalanceTopUp $topUp,
         StoreBalanceTopUpSettlementEvidence $evidence,
     ): bool {
+        if ($topUp->manual_alternative_at !== null && $evidence->provider() === PaymentProvider::MANUAL) {
+            return $evidence->merchantReference() === (string) $topUp->merchant_ref
+                && $evidence->amount() === (int) $topUp->amount;
+        }
+
         if (strtolower(trim((string) $topUp->provider)) !== $evidence->provider()) {
             return false;
         }
@@ -648,6 +830,14 @@ final class StoreBalanceTopUpService
         StoreBalanceTopUp $topUp,
         StoreBalanceTopUpSettlementEvidence $evidence,
     ): bool {
+        if ($topUp->manual_alternative_at !== null && $evidence->provider() === PaymentProvider::MANUAL) {
+            return $topUp->status === StoreBalanceTopUpStatus::AwaitingConfirmation
+                && $topUp->hasPaymentProof()
+                && $topUp->expires_at?->isFuture() === true
+                && $evidence->isSuccess()
+                && $evidence->totalAmount() === (int) $topUp->amount;
+        }
+
         return in_array($topUp->status, [
             StoreBalanceTopUpStatus::Pending,
             StoreBalanceTopUpStatus::Payable,
@@ -667,6 +857,10 @@ final class StoreBalanceTopUpService
         StoreBalanceTopUp $topUp,
         StoreBalanceTopUpSettlementEvidence $evidence,
     ): bool {
+        if ($evidence->provider() === PaymentProvider::MANUAL && $topUp->manual_alternative_at !== null) {
+            return false;
+        }
+
         return ! in_array($topUp->status, [
             StoreBalanceTopUpStatus::Paid,
             StoreBalanceTopUpStatus::Compensated,
@@ -842,5 +1036,33 @@ final class StoreBalanceTopUpService
 
         return in_array($sqlState, ['23000', '23505'], true)
             && str_contains($constraint, 'store_balance_top_ups_store_balance_funding_intent_id_unique');
+    }
+
+    private function claimSettlementReceipt(
+        StoreBalanceTopUp $topUp,
+        StoreBalanceTopUpSettlementEvidence $evidence,
+    ): ExternalMoneyReceiptClaimOutcome {
+        if ($topUp->manual_alternative_at === null || $evidence->provider() !== PaymentProvider::MANUAL) {
+            return $this->receipts->claimStoreBalanceTopUp($topUp, $evidence->providerReference());
+        }
+
+        return $this->receipts->claim(
+            new VerifiedMoneyReceipt(
+                identity: MoneyReceiptIdentity::providerReference(
+                    PaymentProvider::MANUAL,
+                    ExternalMoneyReceiptWriter::NAMESPACE_OWNER_ATTESTATION,
+                    (string) $topUp->merchant_ref,
+                ),
+                beneficiary: 'customer:'.$topUp->customer_id,
+                currency: 'IDR',
+                amountUnits: (string) $topUp->amount,
+                decimals: 0,
+                target: MoneyReceiptTarget::storeBalanceTopUp((string) $topUp->getKey()),
+                evidence: ['provider' => PaymentProvider::MANUAL, 'identity' => 'owner_attestation'],
+            ),
+            ExternalMoneyReceiptReservations::SOURCE_RUNTIME,
+            ExternalMoneyReceiptReservation::LEGACY_TYPE_STORE_BALANCE_TOP_UP,
+            (string) $topUp->getKey(),
+        );
     }
 }

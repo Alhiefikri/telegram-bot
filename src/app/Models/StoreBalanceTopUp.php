@@ -44,6 +44,13 @@ use Illuminate\Database\Eloquent\Model;
     'payment_proof_forwarded_at',
     'paid_at',
     'settled_at',
+    'manual_alternative_requested_at',
+    'manual_alternative_at',
+    'manual_alternative_switch_token',
+    'manual_alternative_switch_started_at',
+    'manual_alternative_decision',
+    'settled_provider',
+    'manual_alternative_provider_paid_at',
 ])]
 class StoreBalanceTopUp extends Model
 {
@@ -76,6 +83,10 @@ class StoreBalanceTopUp extends Model
             'payment_proof_forwarded_at' => 'datetime',
             'paid_at' => 'datetime',
             'settled_at' => 'datetime',
+            'manual_alternative_requested_at' => 'datetime',
+            'manual_alternative_at' => 'datetime',
+            'manual_alternative_switch_started_at' => 'datetime',
+            'manual_alternative_provider_paid_at' => 'datetime',
         ];
     }
 
@@ -133,6 +144,10 @@ class StoreBalanceTopUp extends Model
 
     public function isEligibleForOwnerAttention(): bool
     {
+        if ($this->manual_alternative_provider_paid_at !== null) {
+            return true;
+        }
+
         if ($this->status === StoreBalanceTopUpStatus::Paid
             || $this->status === StoreBalanceTopUpStatus::Compensated
             || $this->compensation !== null) {
@@ -169,9 +184,23 @@ class StoreBalanceTopUp extends Model
             && $this->expires_at?->isFuture() === true;
     }
 
+    public function usesManualPayment(): bool
+    {
+        return $this->provider === \App\Support\PaymentProvider::MANUAL
+            || $this->manual_alternative_at !== null;
+    }
+
+    public function settledPaymentTotal(): ?int
+    {
+        return $this->manual_alternative_at !== null && $this->settled_provider === \App\Support\PaymentProvider::MANUAL
+            ? (int) $this->amount : $this->provider_total_payment;
+    }
+
     public function canRetryCreate(): bool
     {
-        return $this->status === StoreBalanceTopUpStatus::Failed
+        return $this->manual_alternative_at === null
+            && $this->manual_alternative_switch_token === null
+            && $this->status === StoreBalanceTopUpStatus::Failed
             && in_array($this->provider_create_state, ['create_failed', 'provider_unavailable'], true);
     }
 

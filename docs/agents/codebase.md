@@ -39,6 +39,13 @@ evidence. Test entry points: `SakurupiahProviderReadinessTest`,
 `SakurupiahCheckoutRecoveryPostgresConcurrencyTest` (explicit isolated Redis opt-in).
 Worker counts and resource limits are intentionally unchanged.
 
+Sakurupiah provider selection is Owner-controlled even while readiness fails.
+`PaymentProviderSwitcher` and `UpdatePaymentModeRequest` do not perform a
+Sakurupiah readiness gate; `AdminDashboardStatsData` keeps activation available
+and reports selected/ready separately. Checkout preflight and payment
+verification remain enforced. A lookup failure never rewrites the selected
+provider. Regression entry point: `SakurupiahProviderSwitchTest`.
+
 ## WijayaPay provider
 
 `App\Services\WijayaPay\*` owns the QRIS-only provider contract: MD5 reference
