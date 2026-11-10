@@ -3,7 +3,10 @@
 namespace App\Services\Telegram\Callbacks;
 
 use App\Enums\ManualStoreBalanceTopUpDecision;
+use App\Enums\TelegramOutboundEffectState;
+use App\Models\Payment;
 use App\Models\StoreBalanceTopUp;
+use App\Models\TelegramOutboundEffect;
 use App\Services\StoreBalance\TopUp\ManualStoreBalanceTopUpConfirmationService;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\TelegramAdminAccess;
@@ -12,6 +15,7 @@ use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramManualPaymentIntents;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Throwable;
 
 class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
@@ -56,15 +60,15 @@ class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
             return false;
         }
 
-        $alternative = \App\Models\Payment::query()->where('order_id', $matches[2])
+        $alternative = Payment::query()->where('order_id', $matches[2])
             ->whereNotNull('manual_alternative_for_payment_id')->first();
         if ($alternative !== null && (! $context->isPrivate()
             || ! $this->adminAccess->isAdmin($context->customer, $context->chatId)
             || $alternative->payment_proof_submitted_at === null
             || $context->messageId === null
-            || ! \App\Models\TelegramOutboundEffect::query()
-                ->where('source_type', \App\Models\Payment::class)->where('source_id', $alternative->id)
-                ->where('effect_type', \App\Services\Telegram\TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF)
+            || ! TelegramOutboundEffect::query()
+                ->where('source_type', Payment::class)->where('source_id', $alternative->id)
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_MANUAL_PAYMENT_PROOF)
                 ->where('state', 'sent')->where('telegram_chat_id', $context->chatId)
                 ->where('telegram_message_id', (string) $context->messageId)->exists())) {
             $this->bot->answerCallbackQuery($context->callbackQueryId, 'Bukti pembayaran tidak cocok atau belum diterima.');
@@ -105,11 +109,11 @@ class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
 
         if ($topUp->manual_alternative_at !== null
             && (! $topUp->hasPaymentProof() || $context->messageId === null
-                || ! \App\Models\TelegramOutboundEffect::query()
+                || ! TelegramOutboundEffect::query()
                     ->where('source_type', StoreBalanceTopUp::class)
                     ->where('source_id', (string) $topUp->getKey())
-                    ->where('effect_type', \App\Services\Telegram\TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
-                    ->where('state', \App\Enums\TelegramOutboundEffectState::Sent->value)
+                    ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
+                    ->where('state', TelegramOutboundEffectState::Sent->value)
                     ->where('telegram_chat_id', $context->chatId)
                     ->where('telegram_message_id', (string) $context->messageId)
                     ->exists())) {

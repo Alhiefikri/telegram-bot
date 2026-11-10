@@ -238,6 +238,7 @@ class OrderStateMachine implements OrderLifecycle
     public function applyPaymentExpired(Payment $payment): OrderLifecycleResult
     {
         $payment = Payment::query()->findOrFail($payment->id);
+
         return DB::transaction(function () use ($payment): OrderLifecycleResult {
             return $this->withLockedOrderPayments($payment->order_id, function (Order $order, $payments) use ($payment): OrderLifecycleResult {
                 $lockedPayment = $payments->firstWhere('id', $payment->id);

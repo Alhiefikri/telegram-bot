@@ -375,7 +375,7 @@ class TelegramOutboundEffectService
             return null;
         }
 
-        $provider = $topUp->usesManualPayment() ? \App\Support\PaymentProvider::MANUAL : (string) $topUp->provider;
+        $provider = $topUp->usesManualPayment() ? PaymentProvider::MANUAL : (string) $topUp->provider;
         $effectKey = self::balanceTopUpEffectKey((string) $topUp->getKey(), $provider);
 
         return TelegramOutboundEffect::query()->firstOrCreate(
@@ -2119,6 +2119,7 @@ class TelegramOutboundEffectService
             return null;
         }
         $provider = $topUp->usesManualPayment() ? PaymentProvider::MANUAL : (string) $topUp->provider;
+
         return TelegramOutboundEffect::query()
             ->where('source_type', StoreBalanceTopUp::class)
             ->where('source_id', $topUpId)

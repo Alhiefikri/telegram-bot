@@ -180,6 +180,8 @@ Bukti top-up dan outbound effect admin disimpan dalam satu transaksi. `telegram:
 
 Verifikasi lokal perubahan bukti pembayaran (2026-11-10): 242 test lulus dan satu test dilewati pada 11 suite terkait, termasuk 43 skenario intake/recovery baru dan dua unit test formatting HTML. Smoke HTTP terisolasi menjalankan pembelian/top-up dalam `id`/`en`/`ms` sampai keputusan admin. Walkthrough `LhieStoreTestBot` mengirim pesan/foto melalui API Telegram nyata: tiga pembelian QR otomatis → manual dan tiga top-up manual, dengan approve/reject serta entity bold dari Telegram. Update buyer/admin disimulasikan melalui webhook HTTP lokal; ini bukan pengujian klik dari klien Telegram, pembayaran nyata, CI, atau deployment produksi.
 
+Gate PostgreSQL juga menjalankan `PaymentProofIntakeTest`. Query rekonstruksi effect memakai `CAST(store_balance_top_ups.id AS TEXT)` agar ID numerik top-up dapat dibandingkan dengan `source_id` polimorfik tanpa kegagalan tipe PostgreSQL. Verifikasi perbaikan CI: 43 skenario intake PostgreSQL lulus; lima skenario recovery top-up, penyesuaian saldo, dan receipt refund lulus; matriks browser pencarian enam viewport lulus memakai pencarian header yang tersedia pada ponsel maupun desktop.
+
 ### 3.4 Pakasir legacy settlement
 
 Pakasir is retired for new checkout. It is no longer available in the Payment Provider Switch, and neither Store Bot nor Web Storefront may create a new Pakasir Payment. Existing `provider=pakasir` Payments remain immutable historical records.

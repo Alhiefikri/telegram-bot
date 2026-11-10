@@ -635,10 +635,10 @@ class KlikQrisNativeQrisService
 
         try {
             $topUp->refresh();
-            if (($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== \App\Support\PaymentProvider::MANUAL)
+            if (($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== PaymentProvider::MANUAL)
                 || in_array($topUp->status, [
-                StoreBalanceTopUpStatus::Compensated,
-            ], true)) {
+                    StoreBalanceTopUpStatus::Compensated,
+                ], true)) {
                 return $this->classifyTopUp($topUp);
             }
 

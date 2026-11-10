@@ -283,8 +283,13 @@ final class StoreBalanceTopUpOutbound
                 ->whereNotNull('payment_proof_file_id')
                 ->whereNotNull('payment_proof_submitted_at')
                 ->whereNull('payment_proof_forwarded_at')
-                ->whereDoesntHave('outboundEffects', fn ($query) => $query
-                    ->where('effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)),
+                ->whereNotExists(function ($effects): void {
+                    $effects->selectRaw('1')
+                        ->from('telegram_outbound_effects')
+                        ->where('telegram_outbound_effects.source_type', StoreBalanceTopUp::class)
+                        ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectService::TYPE_BALANCE_TOP_UP_PAYMENT_PROOF)
+                        ->whereRaw('telegram_outbound_effects.source_id = CAST(store_balance_top_ups.id AS TEXT)');
+                }),
             $chunk,
             fn (StoreBalanceTopUp $topUp): StoreBalanceTopUpOutboundResult => $this->handoffPaymentProof($topUp),
         );

@@ -2113,7 +2113,11 @@ test("customer checkout: proves the Storefront release matrix at required viewpo
   for (const viewport of customerCheckoutViewports) {
     await page.setViewportSize(viewport);
     await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-    await expect(page.locator("#header-search")).toBeVisible();
+    const search = page.getByRole("searchbox", {
+      name: "Cari produk",
+      exact: true,
+    });
+    await expect(search).toBeVisible();
     await expect(
       page.locator('header a[href*="/shop/cart"]:visible')
     ).toHaveCount(1);
@@ -2121,7 +2125,6 @@ test("customer checkout: proves the Storefront release matrix at required viewpo
     await expect(
       page.locator('[data-storefront-carousel][aria-label="Banner toko"]')
     ).toBeVisible();
-    await expect(page.locator("#storefront-search")).toBeVisible();
 
     const menuButton = page.getByRole("button", {
       name: "Buka menu navigasi",
@@ -2132,10 +2135,34 @@ test("customer checkout: proves the Storefront release matrix at required viewpo
       await expect(menuButton).toBeHidden();
     }
 
+    const searchTerm = "Browser QA Produk A";
+    await search.fill(searchTerm);
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      page.getByRole("button", { name: "Cari", exact: true }).click(),
+    ]);
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/shop" && url.searchParams.get("q") === searchTerm
+    );
+    const searchResults = page.locator("#storefront-product-grid");
+    await expect(
+      searchResults
+        .locator("article.product-card")
+        .filter({ hasText: searchTerm })
+        .first()
+    ).toBeVisible();
+    await expect(
+      searchResults
+        .locator("article.product-card")
+        .filter({ hasText: "Browser QA Produk B" })
+    ).toHaveCount(0);
+    await expectNoDocumentOverflow(page);
+
     await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
     await expectNoDocumentOverflow(page);
     const catalogHeading = page.locator("#products").getByRole("heading", {
-      name: "Temukan produk pilihan Anda.",
+      level: 2,
     });
     await expect(catalogHeading).toBeVisible();
     if (viewport.width === 390) {

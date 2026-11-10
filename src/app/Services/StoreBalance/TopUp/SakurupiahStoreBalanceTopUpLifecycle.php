@@ -174,9 +174,9 @@ final class SakurupiahStoreBalanceTopUpLifecycle implements StoreBalanceTopUpLif
 
         if (($topUp->status === StoreBalanceTopUpStatus::Paid && $topUp->settled_provider !== PaymentProvider::MANUAL)
             || in_array($topUp->status, [
-            StoreBalanceTopUpStatus::InvalidProviderResult,
-            StoreBalanceTopUpStatus::Compensated,
-        ], true)) {
+                StoreBalanceTopUpStatus::InvalidProviderResult,
+                StoreBalanceTopUpStatus::Compensated,
+            ], true)) {
             return new StoreBalanceTopUpReconciliation($this->classify($topUp));
         }
         if ($topUp->status === StoreBalanceTopUpStatus::Expired && $topUp->manual_alternative_at === null) {

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\StoreBalanceTopUpStatus;
+use App\Support\PaymentProvider;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -186,13 +187,13 @@ class StoreBalanceTopUp extends Model
 
     public function usesManualPayment(): bool
     {
-        return $this->provider === \App\Support\PaymentProvider::MANUAL
+        return $this->provider === PaymentProvider::MANUAL
             || $this->manual_alternative_at !== null;
     }
 
     public function settledPaymentTotal(): ?int
     {
-        return $this->manual_alternative_at !== null && $this->settled_provider === \App\Support\PaymentProvider::MANUAL
+        return $this->manual_alternative_at !== null && $this->settled_provider === PaymentProvider::MANUAL
             ? (int) $this->amount : $this->provider_total_payment;
     }
 
