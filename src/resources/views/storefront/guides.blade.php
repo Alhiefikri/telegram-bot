@@ -11,7 +11,7 @@
             <section class="mx-auto max-w-6xl">
                 <div class="max-w-3xl">
                     <x-storefront.badge class="px-4 py-2 text-xs tracking-[0.18em]">Bantuan penggunaan produk</x-storefront.badge>
-                    <h1 class="mt-5 text-balance font-display text-4xl font-black leading-tight text-[var(--sf-ink)] sm:text-6xl">Pilih panduan yang Anda butuhkan.</h1>
+                    <h1 class="mt-3 text-balance font-display text-2xl font-black leading-tight text-[var(--sf-ink)] sm:mt-5 sm:text-6xl">Pilih panduan yang Anda butuhkan.</h1>
                     <p class="mt-5 text-base font-semibold leading-7 text-[var(--sf-muted)] sm:text-lg">Setiap produk dapat memiliki cara login dan pengamanan yang berbeda. Buka panduan yang sesuai dengan produk serta metode akses Anda.</p>
                 </div>
 

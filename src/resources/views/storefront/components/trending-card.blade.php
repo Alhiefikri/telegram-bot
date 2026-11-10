@@ -15,7 +15,7 @@
 >
     <a
         href="{{ $productUrl }}"
-        class="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-trend-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sf-trend-panel)]"
+        class="grid h-full grid-cols-[4.5rem_minmax(0,1fr)] items-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-trend-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sf-trend-panel)] sm:flex sm:flex-col sm:items-stretch"
         aria-label="Lihat detail {{ $presentation->name }}"
     >
         <div class="trending-product-card__media relative">

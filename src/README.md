@@ -76,6 +76,12 @@ Catatan:
 - Nilai icon katalog dapat diubah langsung dari Admin Dashboard tanpa mengubah `.env`, rebuild image, atau clear config.
 - Store Bot memakai `editMessageText` dengan `callback_query.message.message_id` untuk family, category, quote, detail, dan navigasi balik satu pesan. `sendMessage` hanya dipakai bila tidak ada pesan asal atau Telegram menolak edit secara definitif; timeout/connection failure tidak memicu blind resend.
 
+### Tampilan Web Storefront
+
+Navbar mengikuti scroll halaman, termasuk pada panduan login; tidak ada navbar sticky yang menutupi konten. Di bawah 640px, header menampilkan merek, keranjang, menu, dan pencarian. Akses akun serta pilihan tema tetap tersedia melalui menu mobile.
+
+Heading katalog memakai 20px dan judul halaman pembeli 24px pada mobile, dengan ukuran desktop dipertahankan lewat breakpoint. Kategori beranda memakai dua kolom; best seller memakai baris thumbnail agar daftar produk lebih cepat terlihat. Pencarian kedua di beranda hanya tampil mulai 640px karena mobile sudah memiliki pencarian di header. Padding bagian katalog, panduan pembelian, FAQ, dan bantuan menggunakan skala mobile yang lebih rapat; kontrol utama tetap memiliki area sentuh minimal 44px.
+
 ### Edit Product Details dan Refund Policy melalui Telegram
 
 Product Details (`description`) dan **Replacement / Refund Policy** (`warranty_policy`) punya tiga varian bahasa pelanggan: Indonesia, Melayu, dan English. Varian `id` memakai kolom `description`/`warranty_policy`, sedangkan `ms`/`en` memakai `description_ms`/`description_en` dan `warranty_policy_ms`/`warranty_policy_en`. Varian yang kosong tampil memakai teks bahasa default, dan mengubah satu varian tidak pernah menyentuh varian lain.

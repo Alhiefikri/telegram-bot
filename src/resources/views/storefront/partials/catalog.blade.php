@@ -1,19 +1,18 @@
-<section id="products" class="relative border-y border-[var(--sf-border)] bg-[var(--sf-surface)] py-10 sm:py-12">
+<section id="products" class="relative border-y border-[var(--sf-border)] bg-[var(--sf-surface)] py-5 sm:py-12">
     <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-70"></div>
-    <div class="relative z-10 mx-auto max-w-7xl px-5 sm:px-6">
-        <div class="reveal-item mx-auto mb-7 max-w-2xl text-center">
-            <div class="mx-auto mb-3 inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 py-2 text-[11px] font-black text-[var(--sf-ink)] shadow-[0_4px_12px_rgb(18_35_63_/_0.08)]">
-                <span class="neo-spin-slow inline-block" aria-hidden="true">✦</span>
+    <div class="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
+        <div class="reveal-item mx-auto mb-4 max-w-2xl text-left sm:mb-7 sm:text-center">
+            <div class="mb-2 inline-flex items-center gap-2 text-xs font-bold text-[var(--sf-muted)] sm:mx-auto sm:mb-3">
                 <span>Katalog aktif · {{ $catalogPage->productCount() }} item katalog</span>
             </div>
-            <h2 class="font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $copy['catalog']['title'] }}</h2>
-            <p class="mx-auto mt-2 max-w-md text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['catalog']['body'] }}</p>
+            <h2 class="font-display text-xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $copy['catalog']['title'] }}</h2>
+            <p class="mx-auto mt-2 max-w-md text-sm font-semibold leading-5 text-[var(--sf-muted)] sm:leading-relaxed">{{ $copy['catalog']['body'] }}</p>
         </div>
 
-        <div class="relative mx-auto mb-6 max-w-xl">
+        <div class="relative mx-auto mb-6 hidden max-w-xl sm:block">
             <form action="{{ $catalogPage->searchAction }}" method="GET" class="relative">
                 <label for="storefront-search" class="sr-only">Cari produk</label>
-                <input id="storefront-search" type="text" name="q" value="{{ $catalogPage->search }}" maxlength="{{ $catalogPage->searchMaxLength }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="neo-input h-14 w-full pl-12 pr-16 text-sm font-bold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] transition-all focus:outline-none">
+                <input id="storefront-search" type="text" name="q" value="{{ $catalogPage->search }}" maxlength="{{ $catalogPage->searchMaxLength }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="neo-input h-12 w-full pl-12 pr-16 text-base font-semibold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] transition-all focus:outline-none sm:h-14 sm:text-sm">
                 <div class="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--sf-ink)]">
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -27,21 +26,21 @@
 
     @if ($catalogPage->hasPublicCategories)
         @if ($catalogPage->isHome())
-            <section id="kategori" class="reveal-item mb-10 rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-4 sm:p-6" aria-labelledby="kategori-title">
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <section id="kategori" class="reveal-item mb-5 rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 sm:mb-10 sm:p-6" aria-labelledby="kategori-title">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                     <div>
-                        <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-accent)]">Jelajahi toko</p>
-                        <h3 id="kategori-title" class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Belanja berdasarkan kategori</h3>
-                        <p class="mt-1 max-w-xl text-sm font-semibold leading-6 text-[var(--sf-muted)]">Pilih kebutuhan Anda, lalu lihat produk yang siap dibeli di kategori tersebut.</p>
+                        <p class="text-xs font-bold text-[var(--sf-accent)]">Jelajahi toko</p>
+                        <h3 id="kategori-title" class="mt-1 font-display text-lg font-black tracking-tight text-[var(--sf-ink)] sm:text-2xl">Belanja berdasarkan kategori</h3>
+                        <p class="mt-1 max-w-xl text-sm font-semibold leading-5 text-[var(--sf-muted)] sm:leading-6">Pilih kebutuhan Anda, lalu lihat produk yang siap dibeli di kategori tersebut.</p>
                     </div>
                     <a href="{{ $catalogPage->allCategoryUrl }}" class="inline-flex min-h-11 shrink-0 items-center rounded-lg border border-[var(--sf-border)] bg-white px-4 py-2 text-xs font-black text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-yellow)]">Lihat semua produk</a>
                 </div>
-                <nav class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Filter kategori produk">
+                <nav class="mt-3 grid grid-cols-2 gap-2 sm:mt-5 sm:gap-3 lg:grid-cols-3" aria-label="Filter kategori produk">
                     @foreach ($catalogPage->categoryFilters as $category)
-                        <a href="{{ $category->url }}" class="category-btn group flex min-h-20 items-center gap-3 rounded-xl border border-[var(--sf-border)] bg-white p-3 transition-all hover:-translate-y-0.5 hover:bg-[var(--sf-yellow)] hover:shadow-[0_8px_18px_rgb(18_35_63_/_0.1)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" data-filter="{{ $category->id }}" @if ($category->isActive) aria-current="page" @endif aria-controls="storefront-product-grid">
-                            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[var(--sf-accent)] font-display text-lg font-black text-white" aria-hidden="true">{{ mb_strtoupper(mb_substr($category->name, 0, 1)) }}</span>
+                        <a href="{{ $category->url }}" class="category-btn group flex min-h-16 min-w-0 items-center gap-2 rounded-xl border border-[var(--sf-border)] bg-white p-2 transition-all hover:-translate-y-0.5 hover:bg-[var(--sf-yellow)] hover:shadow-[0_8px_18px_rgb(18_35_63_/_0.1)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] sm:min-h-20 sm:gap-3 sm:p-3" data-filter="{{ $category->id }}" @if ($category->isActive) aria-current="page" @endif aria-controls="storefront-product-grid">
+                            <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--sf-accent)] font-display text-base font-black text-white sm:h-11 sm:w-11 sm:text-lg" aria-hidden="true">{{ mb_strtoupper(mb_substr($category->name, 0, 1)) }}</span>
                             <span class="min-w-0">
-                                <span class="block truncate text-sm font-black text-[var(--sf-ink)]">{{ $category->name }}</span>
+                                <span class="block break-words text-sm font-black text-[var(--sf-ink)]">{{ $category->name }}</span>
                                 <span class="mt-1 block text-xs font-bold text-[var(--sf-accent)]">Jelajahi produk <span aria-hidden="true">→</span></span>
                             </span>
                         </a>
@@ -74,7 +73,7 @@
         @endif
     @endif
     @if ($catalogPage->popularProducts->isNotEmpty())
-        <section id="trending" class="storefront-trending-panel reveal-item mx-auto mb-10 max-w-7xl overflow-hidden rounded-2xl border border-[var(--sf-trend-border)] bg-[var(--sf-trend-panel)] text-[var(--sf-trend-text)]" aria-labelledby="trending-title" data-storefront-carousel>
+        <section id="trending" class="storefront-trending-panel reveal-item mx-auto mb-5 max-w-7xl overflow-hidden rounded-2xl border border-[var(--sf-trend-border)] bg-[var(--sf-trend-panel)] text-[var(--sf-trend-text)] sm:mb-10" aria-labelledby="trending-title" data-storefront-carousel>
             <div class="storefront-trending-header flex items-center justify-between gap-3 border-b border-[var(--sf-trend-border)] px-3 py-2.5 sm:px-4">
                 <div class="flex min-w-0 items-center gap-2.5">
                     <span class="storefront-trending-header__icon grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--sf-trend-accent)] text-[var(--sf-trend-panel)]" aria-hidden="true">
@@ -107,7 +106,7 @@
     <div class="mb-3 flex items-end justify-between gap-3">
         <div>
             <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Katalog aktif</p>
-            <h3 class="mt-1 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)]">Tersedia sekarang</h3>
+            <h3 class="mt-1 font-display text-lg font-black tracking-tight text-[var(--sf-ink)] sm:text-2xl">Tersedia sekarang</h3>
         </div>
         <span class="text-xs font-bold text-[var(--sf-muted)]">{{ $catalogPage->productCount() }} item</span>
     </div>

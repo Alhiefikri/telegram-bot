@@ -105,29 +105,6 @@ function initMediaFrames() {
   });
 }
 
-function initHeaderElevation() {
-  const header = document.querySelector("[data-storefront-header]");
-
-  if (!header) {
-    return;
-  }
-
-  let ticking = false;
-  const update = () => {
-    ticking = false;
-    header.classList.toggle("is-scrolled", window.scrollY > 8);
-  };
-  const requestUpdate = () => {
-    if (!ticking) {
-      ticking = true;
-      window.requestAnimationFrame(update);
-    }
-  };
-
-  window.addEventListener("scroll", requestUpdate, { passive: true });
-  update();
-}
-
 function initVerifiedPurchaseActivity() {
   const container = document.getElementById("verified-purchase-activity");
   const endpoint = container?.dataset.endpoint;
@@ -1106,7 +1083,6 @@ export default function initStorefront() {
 
     initCatalogFilterFocus();
     initScrollProgress();
-    initHeaderElevation();
     initMediaFrames();
     initCarousels();
     initImagePreview();

@@ -45,7 +45,7 @@
                             @if ($presentation->familyOptionLabel !== null)
                                 <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">{{ $presentation->familyOptionLabel }}</p>
                             @endif
-                            <h1 id="product-title" class="{{ $presentation->familyOptionLabel !== null ? 'mt-2' : '' }} font-display text-3xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $presentation->name }}</h1>
+                            <h1 id="product-title" class="{{ $presentation->familyOptionLabel !== null ? 'mt-2' : '' }} font-display text-2xl font-black leading-tight tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ $presentation->name }}</h1>
 
                             <div class="mt-4 flex flex-wrap items-center gap-2">
                                 <strong class="font-display text-2xl font-black text-[var(--sf-accent)] sm:text-3xl">{{ $storefront->idr($presentation->priceAmount) }}</strong>

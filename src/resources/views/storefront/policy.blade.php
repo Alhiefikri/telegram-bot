@@ -11,7 +11,7 @@
             <article class="mx-auto max-w-4xl">
                 <div class="max-w-3xl">
                     <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">{{ $policy['eyebrow'] }}</p>
-                    <h1 class="mt-4 text-balance font-display text-4xl font-black leading-tight text-[var(--sf-ink)] sm:text-5xl">{{ $policy['title'] }}</h1>
+                    <h1 class="mt-3 text-balance font-display text-2xl font-black leading-tight text-[var(--sf-ink)] sm:mt-4 sm:text-5xl">{{ $policy['title'] }}</h1>
                     <p class="mt-4 text-base font-semibold leading-7 text-[var(--sf-muted)] sm:text-lg sm:leading-8">{{ $policy['description'] }}</p>
                     <p class="mt-4 text-sm font-black text-[var(--sf-ink)]">Terakhir diperbarui: {{ $policy['updated'] }}</p>
                 </div>

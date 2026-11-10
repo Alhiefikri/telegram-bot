@@ -5,7 +5,7 @@
 </head>
 <body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white motion-reduce:animate-none">
     <div class="storefront-shell min-h-screen">
-        <header class="sticky top-4 z-50 mx-auto w-[calc(100%-2rem)] max-w-6xl rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[6px_6px_0_var(--sf-shadow)]">
+        <header class="relative z-50 mx-auto mt-4 w-[calc(100%-2rem)] max-w-6xl rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[6px_6px_0_var(--sf-shadow)]">
             <div class="flex min-h-16 items-center justify-between gap-4 px-5 py-3">
                 <a href="{{ route('storefront.home') }}" class="flex items-center gap-2" aria-label="Kembali ke beranda {{ $brand }}">
                     @include('storefront.components.brand-mark', ['brand' => $brand])
@@ -26,7 +26,7 @@
             <section class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
                 <div>
                     <x-storefront.badge class="px-4 py-2 text-xs tracking-[0.18em]">Panduan setelah pembelian</x-storefront.badge>
-                    <h1 class="mt-5 max-w-3xl font-display text-4xl font-black leading-[0.98] tracking-tight text-[var(--sf-ink)] text-balance sm:text-6xl lg:text-7xl">
+                    <h1 class="mt-3 max-w-3xl font-display text-2xl font-black leading-tight tracking-tight text-[var(--sf-ink)] text-balance sm:mt-5 sm:text-6xl lg:text-7xl">
                         Cara login ChatGPT pakai Outlook/iCloud + MFA.
                     </h1>
                     <p class="mt-5 max-w-2xl text-base font-semibold leading-relaxed text-[var(--sf-muted)]">
@@ -68,7 +68,7 @@
                 <div class="flex flex-wrap items-start justify-between gap-5">
                     <div class="max-w-2xl">
                         <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--sf-accent)]">Alur cepat</p>
-                        <h2 class="mt-3 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">Jangan loncat. Login MFA harus berurutan.</h2>
+                        <h2 class="mt-3 font-display text-xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">Jangan loncat. Login MFA harus berurutan.</h2>
                         <p class="mt-3 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">Kalau satu tahap dilewati, ChatGPT biasanya menolak kode atau mengembalikan kamu ke halaman login.</p>
                     </div>
                     <x-storefront.button href="#checklist" variant="green" size="sm" class="h-11 text-xs">Checklist akhir</x-storefront.button>
@@ -100,7 +100,7 @@
             <section id="langkah" class="mt-20 space-y-14 scroll-mt-28">
                 <div class="max-w-2xl">
                     <x-storefront.badge class="px-4 py-2 text-xs tracking-[0.18em]">Langkah lengkap</x-storefront.badge>
-                    <h2 class="mt-5 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">Ikuti bagian teks, lalu cocokkan dengan gambar.</h2>
+                    <h2 class="mt-3 font-display text-xl font-black tracking-tight text-[var(--sf-ink)] sm:mt-5 sm:text-5xl">Ikuti bagian teks, lalu cocokkan dengan gambar.</h2>
                     <p class="mt-4 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">Setiap screenshot hanya menampilkan bagian penting: kolom yang diisi, tombol yang ditekan, dan area keamanan yang harus dicek setelah login berhasil.</p>
                 </div>
 
@@ -111,7 +111,7 @@
                                 <span class="font-display text-xl font-black leading-none text-[var(--sf-ink)]">{{ $step['number'] }}</span>
                                 <span class="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--sf-ink)]">{{ $step['kicker'] }}</span>
                             </div>
-                            <h3 class="mt-5 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] text-balance sm:text-4xl">{{ $step['title'] }}</h3>
+                            <h3 class="mt-3 font-display text-xl font-black tracking-tight text-[var(--sf-ink)] text-balance sm:mt-5 sm:text-4xl">{{ $step['title'] }}</h3>
                             <p class="mt-4 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">{{ $step['body'] }}</p>
 
                             <ul class="mt-6 space-y-3">
@@ -141,7 +141,7 @@
             <x-storefront.panel as="section" id="bantuan" class="mt-20 grid scroll-mt-28 gap-8 md:grid-cols-[0.9fr_1.1fr]" padding="lg">
                 <div>
                     <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--sf-accent)]">Troubleshooting</p>
-                    <h2 class="mt-3 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">Kalau gagal, jangan ulang asal-asalan.</h2>
+                    <h2 class="mt-3 font-display text-xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">Kalau gagal, jangan ulang asal-asalan.</h2>
                     <p class="mt-4 text-sm font-semibold leading-relaxed text-[var(--sf-muted)] sm:text-base">Cek penyebab paling sering di bawah ini sebelum mencoba lagi. Simpan invoice dan screenshot kendala pribadi, tetapi jangan pernah membagikan password atau recovery key.</p>
                 </div>
                 <div class="grid gap-4 sm:grid-cols-2">
@@ -157,7 +157,7 @@
             <x-storefront.panel as="section" id="checklist" tone="accent" class="mt-10 grid scroll-mt-28 gap-8 md:grid-cols-[1fr_0.85fr]" padding="lg">
                 <div>
                     <p class="text-xs font-black uppercase tracking-[0.24em] text-white/80">Checklist keamanan</p>
-                    <h2 class="mt-3 font-display text-2xl font-black tracking-tight sm:text-4xl">Akun aman kalau empat poin ini sudah beres.</h2>
+                    <h2 class="mt-3 font-display text-xl font-black tracking-tight sm:text-4xl">Akun aman kalau empat poin ini sudah beres.</h2>
                     <p class="mt-4 max-w-xl text-sm font-semibold leading-relaxed text-white/85 sm:text-base">Selesaikan sebelum keluar dari halaman ini. Ini bagian yang paling sering dilewatkan setelah login berhasil.</p>
                     <ul class="mt-7 space-y-3">
                         @foreach ($guide['security_checklist'] as $item)

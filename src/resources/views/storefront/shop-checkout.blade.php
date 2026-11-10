@@ -79,7 +79,7 @@
 
                 <div class="mt-4 max-w-3xl">
                     <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Checkout web</p>
-                    <h1 class="mt-2 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $checkoutSource === 'direct' ? 'Review produk sebelum bayar.' : 'Review pesanan sebelum bayar.' }}</h1>
+                    <h1 class="mt-2 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $checkoutSource === 'direct' ? 'Review produk sebelum bayar.' : 'Review pesanan sebelum bayar.' }}</h1>
                     <p class="mt-2 max-w-2xl text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $checkoutSource === 'direct' ? 'Pastikan produk, jumlah, dan metode pembayaran sudah benar. Stok baru dicadangkan setelah checkout berhasil.' : 'Pastikan item, jumlah, dan metode pembayaran sudah benar. Stok baru dicadangkan setelah checkout berhasil.' }}</p>
                 </div>
 

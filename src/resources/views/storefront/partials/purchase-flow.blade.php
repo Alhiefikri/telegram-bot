@@ -1,13 +1,13 @@
-<section id="cara-beli" class="mx-auto max-w-6xl px-5 py-8 sm:px-6 sm:py-10">
-    <div class="neo-panel bg-[var(--sf-surface)] p-5 sm:p-7">
-        <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+<section id="cara-beli" class="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-10">
+    <div class="neo-panel bg-[var(--sf-surface)] p-4 sm:p-7">
+        <div class="flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div class="max-w-3xl">
                 <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">{{ $copy['payment_flow']['eyebrow'] }}</p>
-                <h2 class="mt-2 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-3xl">{{ $copy['payment_flow']['title'] }}</h2>
+                <h2 class="mt-2 font-display text-xl font-black tracking-tight text-[var(--sf-ink)] sm:text-3xl">{{ $copy['payment_flow']['title'] }}</h2>
                 <p class="mt-2 text-sm font-semibold leading-relaxed text-[var(--sf-muted)]">{{ $copy['payment_flow']['body'] }}</p>
             </div>
 
-            <div class="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col">
+            <div class="grid shrink-0 grid-cols-2 gap-2 lg:flex lg:flex-col">
                 <a href="{{ route('storefront.guides.index') }}" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">
                     Pusat Panduan
                 </a>

@@ -21,22 +21,22 @@
     $searchMaxLength = \App\Storefront\StorefrontCatalogSearch::MAX_LENGTH;
 @endphp
 
-<header class="storefront-header sticky top-4 z-50 mx-auto mb-4 mt-4 w-[calc(100%-2rem)] max-w-7xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] transition-all duration-300" data-storefront-header data-account-identity-url="{{ route('customer.identity') }}" x-data="mobileMenu">
-    <div class="flex min-h-[88px] w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:flex-nowrap">
+<header class="storefront-header relative z-50 mx-auto mb-2 mt-2 w-[calc(100%-2rem)] max-w-7xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] sm:mb-4 sm:mt-4" data-storefront-header data-account-identity-url="{{ route('customer.identity') }}" x-data="mobileMenu">
+    <div class="flex min-h-16 w-full flex-wrap items-center gap-2 px-3 py-2 sm:gap-3 sm:px-6 sm:py-3 xl:flex-nowrap">
         <a href="{{ $homeUrl }}" class="order-1 flex min-w-0 shrink-0 items-center gap-2 lg:w-[8rem] xl:w-[9rem]" aria-label="Beranda {{ $brand }}">
             @include('storefront.components.brand-mark', ['brand' => $brand])
         </a>
 
-        <form action="{{ $shopUrl }}" method="GET" class="order-3 min-w-0 basis-full md:order-2 md:flex md:flex-1 md:basis-auto lg:min-w-[6rem]" role="search">
+        <form action="{{ $shopUrl }}" method="GET" class="order-3 min-w-0 basis-full md:order-2 md:flex md:flex-1 md:basis-auto lg:min-w-64 xl:min-w-[6rem]" role="search">
             <label for="header-search" class="sr-only">Cari produk</label>
-            <div class="storefront-search relative flex h-14 w-full items-center rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-1 shadow-[0_6px_18px_rgb(18_35_63_/_0.08)]">
-                <button type="submit" class="inline-flex h-12 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--sf-muted)] transition-colors hover:bg-[var(--sf-surface)] hover:text-[var(--sf-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" aria-label="Cari produk">
-                    <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <div class="storefront-search relative flex h-12 w-full items-center rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-0.5 shadow-[0_6px_18px_rgb(18_35_63_/_0.08)] sm:h-14 sm:rounded-2xl sm:p-1">
+                <button type="submit" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--sf-muted)] transition-colors hover:bg-[var(--sf-surface)] hover:text-[var(--sf-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] sm:h-12" aria-label="Cari produk">
+                    <svg class="h-5 w-5 sm:h-7 sm:w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.35-4.35m1.35-5.15a6.5 6.5 0 1 1-13 0Z" />
                     </svg>
                 </button>
-                <input id="header-search" type="search" name="q" value="{{ $headerSearch }}" maxlength="{{ $searchMaxLength }}" placeholder="Cari produk digital, template, lisensi..." class="h-12 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm font-bold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] shadow-none focus:outline-none focus:ring-0">
-                <button type="submit" class="inline-flex h-12 shrink-0 items-center justify-center rounded-xl bg-[var(--sf-accent)] px-4 text-xs font-black text-white shadow-[0_4px_10px_rgb(18_35_63_/_0.12)] transition-colors hover:bg-[var(--sf-accent-deep)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] focus:ring-offset-2 focus:ring-offset-[var(--sf-surface-warm)]">
+                <input id="header-search" type="search" name="q" value="{{ $headerSearch }}" maxlength="{{ $searchMaxLength }}" placeholder="Cari produk digital..." class="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-base font-semibold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] shadow-none focus:outline-none focus:ring-0 sm:h-12 sm:px-2 sm:text-sm">
+                <button type="submit" class="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-[var(--sf-accent)] px-3 text-xs font-black text-white shadow-[0_4px_10px_rgb(18_35_63_/_0.12)] transition-colors hover:bg-[var(--sf-accent-deep)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] focus:ring-offset-2 focus:ring-offset-[var(--sf-surface-warm)] sm:h-12 sm:px-4">
                     Cari
                 </button>
             </div>
@@ -95,8 +95,10 @@
             <x-theme-toggle icon-class="h-7 w-7" class="h-11 w-11 shrink-0 rounded-xl text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
         </nav>
 
-        <div class="order-2 ml-auto flex min-w-0 basis-full items-center justify-between gap-2 sm:basis-auto sm:justify-end lg:order-4 lg:shrink-0">
-            <x-theme-toggle icon-class="h-7 w-7" class="h-11 w-11 shrink-0 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:hidden" />
+        <div class="order-2 ml-auto flex min-w-0 items-center justify-end gap-2 lg:order-4 lg:shrink-0">
+            <span class="hidden sm:contents lg:hidden">
+                <x-theme-toggle icon-class="h-7 w-7" class="h-11 w-11 shrink-0 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
+            </span>
             <a href="{{ route('storefront.order-access.create') }}" class="hidden min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--sf-accent)] bg-transparent px-2 text-[10px] font-black text-[var(--sf-accent)] transition-colors hover:bg-[var(--sf-accent-soft)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] lg:inline-flex xl:px-3 xl:text-[11px]" aria-label="Akses pesanan">
                 <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M7 3h10v18l-2-1.5L12 21l-3-1.5L7 21V3Z" />
@@ -104,7 +106,7 @@
                 </svg>
                 <span>Akses Pesanan</span>
             </a>
-            <a href="{{ $accountUrl }}" class="inline-flex min-h-11 min-w-0 max-w-[11rem] flex-1 items-center justify-center gap-2 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 text-xs font-bold text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)] sm:max-w-[8rem] sm:flex-none xl:max-w-[10rem] xl:px-3" data-account-link aria-label="{{ $accountAccessibleLabel }}" title="{{ $accountAccessibleLabel }}">
+            <a href="{{ $accountUrl }}" class="hidden min-h-11 min-w-0 max-w-[11rem] items-center justify-center gap-2 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-2 text-xs font-bold text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)] sm:inline-flex sm:max-w-[8rem] xl:max-w-[10rem] xl:px-3" data-account-link aria-label="{{ $accountAccessibleLabel }}" title="{{ $accountAccessibleLabel }}">
                 <span class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--sf-accent-soft)] text-xs font-black [&[hidden]]:hidden" data-account-initial aria-hidden="true" @if ($headerIdentity === null) hidden @endif>{{ $headerIdentity['initial'] ?? '' }}</span>
                 <span class="min-w-0 text-center @if ($headerIdentity !== null) truncate @endif" data-account-name>{{ $accountLabel }}</span>
             </a>

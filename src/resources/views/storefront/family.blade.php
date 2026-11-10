@@ -54,7 +54,7 @@
 
                         <div class="min-w-0 p-5 sm:p-7">
                             <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Pilih paket</p>
-                            <h1 id="family-title" class="mt-2 font-display text-3xl font-black leading-tight tracking-tight sm:text-5xl">{{ $family->name }}</h1>
+                            <h1 id="family-title" class="mt-2 font-display text-2xl font-black leading-tight tracking-tight sm:text-5xl">{{ $family->name }}</h1>
                             @if ($family->description)
                                 <p class="mt-3 max-w-3xl whitespace-pre-line break-words text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $family->description }}</p>
                             @endif

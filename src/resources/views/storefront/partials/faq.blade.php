@@ -1,5 +1,5 @@
-<section id="faq" class="mx-auto max-w-4xl px-5 py-8 sm:px-6 sm:py-10">
-    <h2 class="mb-5 text-center font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-3xl">
+<section id="faq" class="mx-auto max-w-4xl px-4 py-5 sm:px-6 sm:py-10">
+    <h2 class="mb-4 text-center font-display text-xl font-black tracking-tight text-[var(--sf-ink)] sm:mb-5 sm:text-3xl">
         Pertanyaan Umum (FAQ)
     </h2>
 

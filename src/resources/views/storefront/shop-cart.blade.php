@@ -12,7 +12,7 @@
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                         <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-accent)]">Keranjang web</p>
-                        <h1 class="mt-2 font-display text-3xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">Tinjau keranjang Anda.</h1>
+                        <h1 class="mt-2 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">Tinjau keranjang Anda.</h1>
                         <p class="mt-3 max-w-2xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">Item disimpan di sesi browser ini. Stok belum dicadangkan sampai Anda membuat order.</p>
                     </div>
                     <a href="{{ $shopUrl }}" class="neo-button neo-button-stable inline-flex min-h-11 items-center justify-center bg-white px-4 text-sm font-black text-[var(--sf-ink)]">Tambah produk</a>

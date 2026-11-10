@@ -1,9 +1,9 @@
-<section id="support" class="mx-auto max-w-6xl px-5 py-8 sm:px-6 sm:py-10">
-    <div class="neo-panel-pop relative overflow-hidden bg-[var(--sf-accent)] p-5 text-white sm:p-7">
-        <div class="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+<section id="support" class="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-10">
+    <div class="neo-panel-pop relative overflow-hidden bg-[var(--sf-accent)] p-4 text-white sm:p-7">
+        <div class="relative z-10 flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div class="max-w-2xl">
                 <p class="text-[11px] font-black uppercase tracking-[0.16em] text-white/80">Bantuan dan akses pesanan</p>
-                <h2 class="mt-2 font-display text-2xl font-black tracking-tight sm:text-3xl">{{ $supportContext['title'] ?? 'Butuh bantuan?' }}</h2>
+                <h2 class="mt-2 font-display text-xl font-black tracking-tight sm:text-3xl">{{ $supportContext['title'] ?? 'Butuh bantuan?' }}</h2>
                 <p class="mt-2 text-sm font-semibold leading-relaxed text-white/90">{{ $supportContext['body'] ?? $copy['support']['body'] }}</p>
             </div>
 

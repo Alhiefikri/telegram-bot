@@ -346,6 +346,31 @@
   .storefront-trending-grid > [role="listitem"] {
     scroll-snap-align: start;
   }
+  @media (max-width: 639px) {
+    /* Thumbnail rows keep best sellers discoverable without pushing the catalog
+       below a full cover-image rail on phones. */
+    .storefront-trending-panel .storefront-trending-grid > [role="listitem"] {
+      flex-basis: min(78vw, 18rem);
+    }
+    .storefront-trending-panel .trending-product-card__media {
+      border-bottom: 0;
+    }
+    .storefront-trending-panel .trending-product-card .storefront-media-frame {
+      aspect-ratio: 1;
+    }
+    .storefront-trending-panel .trending-product-card__name {
+      min-height: 0;
+      font-size: 0.875rem;
+    }
+    .storefront-trending-panel .trending-product-card__eyebrow,
+    .storefront-trending-panel .trending-product-card__sold,
+    .storefront-trending-panel .trending-product-card__stock {
+      font-size: 0.75rem;
+    }
+    .storefront-trending-panel .trending-product-card__meta {
+      flex-wrap: wrap;
+    }
+  }
   .storefront-purchase-activity {
     flex-shrink: 0;
     width: 100%;
