@@ -123,6 +123,7 @@ class OrderLifecycle:
 
     def _statuses(self, order, payment, *, order_status=None, payment_status=None):
         at = self.clock()
+        previous_order_status, previous_payment_status = order['order_status'], order['payment_status']
         if payment_status is not None and payment is not None:
             self.db.execute('UPDATE public.payments SET status=%s,paid_at=%s,updated_at=%s WHERE id=%s',
                 (payment_status, payment['paid_at'] or (at if payment_status == 'paid' else None), at, payment['id']))
@@ -134,6 +135,13 @@ class OrderLifecycle:
         self.db.execute('UPDATE public.orders SET order_status=%s,payment_status=%s,updated_at=%s WHERE id=%s',
             (order_status, payment_status, at, order['id']))
         order.update(order_status=order_status, payment_status=payment_status)
+        from ..notifications.guest_mail import record_guest_event
+        if payment_status == 'paid' and previous_payment_status != 'paid':
+            record_guest_event(self.db, order['id'], 'payment_confirmed')
+        event = {'completed': 'fulfillment_completed', 'expired': 'order_expired',
+                 'cancelled': 'order_cancelled'}.get(order_status)
+        if event and previous_order_status != order_status:
+            record_guest_event(self.db, order['id'], event)
 
     def review_locked(self, order, payment, reason):
         self.db.require_transaction()

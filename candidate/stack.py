@@ -1,4 +1,4 @@
-"""Supervise the candidate HTTP server and the three isolated queue workers."""
+"""Supervise candidate HTTP and disjoint interaction, payment, receipt and notice workers."""
 
 import argparse
 import os

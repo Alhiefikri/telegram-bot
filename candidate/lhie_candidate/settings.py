@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from .branding import APP_NAME
 from .runtime import load_runtime
 
 
@@ -59,6 +60,7 @@ STORAGES = {
 CANDIDATE_IDENTITY_FINGERPRINT_KEY = None
 CANDIDATE_ADMIN_ALLOWED_LOGINS = ()
 CANDIDATE_ADMIN_DASHBOARD_URL = None
+CANDIDATE_LEGACY_APP_URL = "http://127.0.0.1:18802"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 TIME_ZONE = "UTC"

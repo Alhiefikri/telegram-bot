@@ -1,6 +1,7 @@
 """Existing auth-mail ledger, attempt-fenced leases, and a disposable SMTP sink."""
 from datetime import timedelta
 from email.message import EmailMessage
+import html
 import hmac
 import re
 import smtplib
@@ -9,28 +10,100 @@ from django.db import transaction
 
 from ..checkout.db import Database
 from ..compat.identity import email_otp_digest, sha256_digest
+from ..branding import APP_NAME
 from .types import AuthError, legacy_now
+class DefiniteMailFailure(Exception):
+    """The SMTP peer explicitly rejected delivery before accepting message data."""
+
+
+class AmbiguousMailOutcome(Exception):
+    """The transport failed after acceptance could no longer be ruled out."""
+
+
+def _definite_mail_failure(error):
+    return isinstance(error, (DefiniteMailFailure, ConnectionRefusedError, smtplib.SMTPConnectError,
+                              smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused,
+                              smtplib.SMTPDataError, smtplib.SMTPHeloError,
+                              smtplib.SMTPNotSupportedError, smtplib.SMTPAuthenticationError))
+
+
+ 
 
 
 class LocalMailSink:
-    """The P01 discard-only sink. No user-selected host or logging transport."""
+    """Fixed loopback SMTP sink; no user-selected host or logging transport."""
+    def __init__(self, base_url=None, app_name=APP_NAME):
+        if base_url is None:
+            from django.conf import settings
+            base_url = getattr(settings, "CANDIDATE_LEGACY_APP_URL", "")
+        self.base_url = base_url.rstrip("/")
+        self.app_name = app_name
+
     def send(self, email, purpose, capability):
         if "\r" in email or "\n" in email:
             raise AuthError("invalid_mail")
         message = EmailMessage()
         message["From"] = "LhieStore <test@example.invalid>"
         message["To"] = email
-        message["Subject"] = "Kode masuk LhieStore" if purpose == "email_otp" else "Akses akun LhieStore"
         if purpose == "email_otp":
-            content = "Kode masuk Anda: " + capability + "\nKode berlaku selama 10 menit."
+            subject = "Kode login " + self.app_name
+            greeting = "Login ke " + self.app_name
+            before_action = [
+                "Masukkan kode berikut pada halaman akun di browser tempat Anda meminta kode:",
+                capability,
+                "Kode ini berlaku selama 10 menit dan hanya dapat digunakan sekali.",
+                "Jika Anda tidak meminta kode ini, abaikan email ini.",
+            ]
+            after_action = []
+            action = None
+        elif purpose in ("email_verification", "password_reset", "magic"):
+            route, subject, action, description, expiry = {
+                "email_verification": (
+                    "/akun/verifikasi-email", "Verifikasi email", "Verifikasi email saya",
+                    "Konfirmasikan alamat email Anda untuk menyelesaikan pendaftaran akun pelanggan.",
+                    "Link ini berlaku selama 30 menit dan hanya dapat digunakan sekali."),
+                "password_reset": (
+                    "/akun/password-reset/confirm", "Atur ulang password", "Atur ulang password saya",
+                    "Gunakan tombol berikut untuk memilih password baru akun pelanggan Anda.",
+                    "Link ini berlaku selama 30 menit dan hanya dapat digunakan sekali."),
+                "magic": (
+                    "/akun/login-link", "Link login", "Masuk ke akun",
+                    "Gunakan tombol di bawah untuk masuk ke akun pelanggan Anda. Link berlaku selama 15 menit dan hanya dapat digunakan sekali.",
+                    None),
+            }[purpose]
+            subject += " " + self.app_name
+            greeting = "Login ke " + self.app_name if purpose == "magic" else subject.removesuffix(" " + self.app_name)
+            before_action = [description]
+            after_action = (["Jika Anda tidak meminta link ini, abaikan email ini."]
+                            if purpose == "magic"
+                            else [expiry, "Jika Anda tidak meminta email ini, abaikan pesan ini."])
+            action = (action, self.base_url + route + "#token=" + capability)
         else:
-            route = {"email_verification": "verifikasi-email", "password_reset": "password-reset/confirm",
-                     "magic": "login-link"}[purpose]
-            content = "Konfirmasi akses akun Anda:\nhttps://localhost/akun/" + route + "#token=" + capability
-        message.set_content(content)
-        with smtplib.SMTP("127.0.0.1", 1025, timeout=5) as smtp:
-            if smtp.send_message(message):
-                raise AuthError("mail_unavailable", 503)
+            raise AuthError("invalid_mail")
+
+        message["Subject"] = subject
+        text = [greeting, *before_action]
+        if action is not None:
+            text.append(action[0] + ": " + action[1])
+        text.extend(after_action)
+        message.set_content("\n\n".join(text))
+        html_parts = ["<h1>" + html.escape(greeting) + "</h1>"]
+        html_parts.extend("<p>" + html.escape(line) + "</p>" for line in before_action)
+        if action is not None:
+            label, url = action
+            html_parts.append('<p><a href="' + html.escape(url, quote=True) + '">' + html.escape(label) + "</a></p>")
+        html_parts.extend("<p>" + html.escape(line) + "</p>" for line in after_action)
+        body_html = "<!doctype html><html><body>" + "".join(html_parts) + "</body></html>"
+        message.add_alternative(body_html, subtype="html")
+        try:
+            with smtplib.SMTP("127.0.0.1", 1025, timeout=5) as smtp:
+                refused = smtp.send_message(message)
+        except Exception as error:
+            if _definite_mail_failure(error):
+                raise DefiniteMailFailure() from None
+            raise AmbiguousMailOutcome() from None
+        if refused:
+            raise DefiniteMailFailure()
 
 
 class MailWork:
@@ -80,6 +153,10 @@ class MailWork:
             return False
         if grant["purpose"] == "email_verification":
             return customer["email_verified_at"] is None and customer["password"] is None
+        if grant["purpose"] == "email_otp":
+            return (customer["email_verified_at"] is not None
+                    and isinstance(grant["session_binding_hash"], str)
+                    and re.fullmatch(r"[0-9a-f]{64}", grant["session_binding_hash"]) is not None)
         return customer["email_verified_at"] is not None
 
     def _terminal(self, work_id, status, error=None):
@@ -101,9 +178,10 @@ class MailWork:
                 self._terminal(work_id, "failed", "attempt_limit")
                 return None
             work.update(attempts=work["attempts"] + 1, next_attempt_at=at + timedelta(seconds=120))
-            self.db.execute("""UPDATE public.customer_auth_mail_works SET attempts=%s,next_attempt_at=%s,
+            self.db.execute("""UPDATE public.customer_auth_mail_works SET status='sending',attempts=%s,next_attempt_at=%s,
                 updated_at=%s WHERE id=%s""", (work["attempts"], work["next_attempt_at"], at, work_id))
             return work, grant
+
 
     def _payload(self, work, grant):
         payload = self.encrypter.decrypt_json(work["payload"])
@@ -123,7 +201,7 @@ class MailWork:
     def _still_eligible(self, claim):
         with transaction.atomic(using=self.db.using, durable=True):
             customer, grant, work = self._lock(claim["id"])
-            if (not work or work["status"] != "pending" or work["attempts"] != claim["attempts"]
+            if (not work or work["status"] != "sending" or work["attempts"] != claim["attempts"]
                     or work["next_attempt_at"] != claim["next_attempt_at"]):
                 return False
             if work["expires_at"] <= self.clock() or not self._eligible(customer, grant):
@@ -133,9 +211,9 @@ class MailWork:
 
     def _finish(self, claim, status, *, error=None, retry_at=None):
         self.db.execute("""UPDATE public.customer_auth_mail_works SET status=%s,
-            payload=CASE WHEN %s='pending' THEN payload ELSE NULL END,last_error_code=%s,
+            payload=CASE WHEN %s IN ('pending','unknown') THEN payload ELSE NULL END,last_error_code=%s,
             next_attempt_at=COALESCE(%s,next_attempt_at),sent_at=CASE WHEN %s='sent' THEN %s ELSE sent_at END,
-            updated_at=%s WHERE id=%s AND status='pending' AND attempts=%s AND next_attempt_at=%s""",
+            updated_at=%s WHERE id=%s AND status='sending' AND attempts=%s AND next_attempt_at=%s""",
             (status, status, error, retry_at, status, self.clock(), self.clock(), claim["id"], claim["attempts"], claim["next_attempt_at"]))
 
     def deliver(self, work_id):
@@ -152,11 +230,14 @@ class MailWork:
             return False
         try:
             self.transport.send(payload["email"], grant["purpose"], payload["token"])
-        except Exception:
-            terminal = work["attempts"] >= 5
-            delay = 60 if work["attempts"] == 1 else 120 if work["attempts"] == 2 else 300
-            self._finish(work, "failed" if terminal else "pending", error="mail_delivery_failed",
-                         retry_at=self.clock() + timedelta(seconds=delay))
+        except Exception as error:
+            if _definite_mail_failure(error):
+                terminal = work["attempts"] >= 5
+                delay = 60 if work["attempts"] == 1 else 120 if work["attempts"] == 2 else 300
+                self._finish(work, "failed" if terminal else "pending", error="mail_delivery_failed",
+                             retry_at=self.clock() + timedelta(seconds=delay))
+                raise AuthError("mail_unavailable", 503) from None
+            self._finish(work, "unknown", error="mail_delivery_unknown")
             raise AuthError("mail_unavailable", 503) from None
         self._finish(work, "sent")
         return True
@@ -164,6 +245,11 @@ class MailWork:
     def recover(self, limit=100):
         if type(limit) is not int or not 1 <= limit <= 1000:
             raise ValueError("Invalid auth mail batch")
+        # A process may die after SMTP accepted DATA. Any claimed row left
+        # sending is therefore ambiguous, and must be held for manual review.
+        self.db.execute("""UPDATE public.customer_auth_mail_works SET status='unknown',
+            last_error_code='mail_delivery_unknown',updated_at=%s
+            WHERE status='sending' AND next_attempt_at<=%s""", (self.clock(), self.clock()))
         ids = self.db.rows("""SELECT w.id FROM public.customer_auth_mail_works w
             LEFT JOIN public.customer_auth_tokens t ON t.id=w.auth_token_id
             LEFT JOIN public.customer_login_links l ON l.id=w.login_link_id
@@ -176,3 +262,4 @@ class MailWork:
             except AuthError:
                 pass
         return sent
+

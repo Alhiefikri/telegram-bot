@@ -21,6 +21,7 @@
       <div><dt>Payment</dt><dd><span class="admin-status admin-status-{{ order.payment_status_tone }}">{{ order.payment_status_label }}</span></dd></div>
       <div><dt>Nilai</dt><dd class="admin-money">{% if order.currency == 'USDT' %}{{ order.total_amount|usdt }} USDT{% else %}{{ order.total_amount|idr }}{% endif %}</dd></div>
       <div><dt>Receipt Telegram</dt><dd>{{ order.receipt_sent_label }}</dd></div>
+      <div><dt>Sales Proof Post</dt><dd>{% if order.sales_proof %}{{ order.sales_proof.status }} · {{ order.sales_proof.attempts }} attempts{% else %}Belum ada{% endif %}</dd></div>
     </dl>
   </section>
   <section class="admin-card">
@@ -38,7 +39,9 @@
       {% if order.can_resend_mail %}
       <form method="post" action="/admin/orders/{{ order.id }}/credential-email">{% csrf_token %}<button class="admin-button" type="submit">Kirim ulang email akun</button></form>
       {% endif %}
-      <form method="post" action="/admin/orders/{{ order.id }}/sales-proof/retry">{% csrf_token %}<button class="admin-button" type="submit" disabled title="Sales Proof retry dimiliki P25">Retry Sales Proof</button></form>
+      {% if order.can_retry_sales_proof %}
+      <form method="post" action="/admin/orders/{{ order.id }}/sales-proof/retry">{% csrf_token %}<button class="admin-button" type="submit">Retry Sales Proof</button></form>
+      {% endif %}
     </div>
     <p class="admin-help">Tombol setujui/tolak hanya muncul saat Payment Binance manual menyimpan bukti mismatch. Approval manual biasa dilakukan di Manual Fulfillment Review.</p>
   </section>

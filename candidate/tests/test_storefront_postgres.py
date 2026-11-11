@@ -7,8 +7,8 @@ import json
 import os
 from pathlib import Path
 import re
-import threading
 import time
+import threading
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
@@ -346,11 +346,6 @@ def exercise_storefront(fixtures):
 
 
 def browser_wait(product_id, second_product_id):
-    from wsgiref.simple_server import make_server
-    from django.contrib.staticfiles.handlers import StaticFilesHandler
-    from django.core.wsgi import get_wsgi_application
-    from django.db import connections
-    from serve import BoundedServer, QuietHandler
     from PIL import Image
     from lhie_candidate.storefront import public_media
     public = TemporaryDirectory(prefix='p21-banner-')
@@ -369,6 +364,19 @@ def browser_wait(product_id, second_product_id):
     finally:
         admin.close()
 
+    try:
+        browser_wait_app({'product_id': product_id})
+    finally:
+        public_media.PUBLIC_ROOT = previous_root
+        public.cleanup()
+
+
+def browser_wait_app(fixture):
+    from wsgiref.simple_server import make_server
+    from django.contrib.staticfiles.handlers import StaticFilesHandler
+    from django.core.wsgi import get_wsgi_application
+    from django.db import connections
+    from serve import BoundedServer, QuietHandler
     evidence = Path('/evidence')
     discard = open(os.devnull, 'w')
     server = make_server('0.0.0.0', 8080, StaticFilesHandler(get_wsgi_application()),
@@ -384,7 +392,7 @@ def browser_wait(product_id, second_product_id):
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
     try:
-        (evidence / 'browser-fixture.json').write_text(json.dumps({'product_id': product_id}))
+        (evidence / 'browser-fixture.json').write_text(json.dumps(fixture))
         deadline = time.monotonic() + 900
         while not (evidence / 'browser-finished').exists():
             if time.monotonic() >= deadline:
@@ -397,5 +405,3 @@ def browser_wait(product_id, second_product_id):
         thread.join(timeout=5)
         server.server_close()
         discard.close()
-        public_media.PUBLIC_ROOT = previous_root
-        public.cleanup()

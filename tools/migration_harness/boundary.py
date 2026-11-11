@@ -303,8 +303,12 @@ def navigation_request(config, body, next_message_id):
                 raise ValueError("invalid disabled button")
             if "callback_data" in button and not 1 <= len(button["callback_data"].encode()) <= 64:
                 raise ValueError("invalid callback")
-            if "url" in button and not button["url"].startswith("https://"):
-                raise ValueError("unsupported button URL")
+            if "url" in button:
+                url = button["url"]
+                local = (config["mode"] == "fake" and isinstance(url, str)
+                         and re.fullmatch(r"http://(?:127\.0\.0\.1|localhost):1880[12]/[^\s\\]*", url))
+                if not isinstance(url, str) or not (url.startswith("https://") or local):
+                    raise ValueError("unsupported button URL")
     if config["mode"] == "sandbox":
         raise ValueError("sandbox mode cannot send Telegram navigation")
     if config["mode"] in ("testing-bot", "p08-sandbox-testing-bot"):

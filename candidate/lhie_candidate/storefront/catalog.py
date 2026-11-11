@@ -21,6 +21,7 @@ from lhie_candidate.navigation.repository import CatalogRepository
 from . import public_media
 from . import guide_content
 from .support import general_choices, product_choices
+from .waitlist import flash as waitlist_flash
 
 
 def _render(request, template, context):
@@ -362,7 +363,7 @@ def product(request, product_id):
               'offers': {'@type': 'Offer', 'url': canonical, 'priceCurrency': 'IDR',
                          'price': max(0, item['price_amount']), 'availability': 'https://schema.org/InStock' if item['available_stock'] else 'https://schema.org/OutOfStock'}}
     schema_json = json.dumps(schema, ensure_ascii=True).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
-    response = _render(request, 'storefront/catalog_product.html', {'product': item, 'title': item['name'], 'description': item['description'] or '', 'maintenance': maintenance, 'tiers': reachable_tiers, 'og_image': image, 'og_type': 'product', 'schema_json': schema_json, 'support_options': product_choices(item['name'], canonical, **_support_channels(repository))})
+    response = _render(request, 'storefront/catalog_product.html', {'product': item, 'title': item['name'], 'description': item['description'] or '', 'maintenance': maintenance, 'tiers': reachable_tiers, 'og_image': image, 'og_type': 'product', 'schema_json': schema_json, 'support_options': product_choices(item['name'], canonical, **_support_channels(repository)), **waitlist_flash(request)})
     response['Referrer-Policy'] = 'same-origin'
     return response
 

@@ -2,7 +2,7 @@
 
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from lhie_candidate.runtime import Runtime
 
@@ -51,6 +51,33 @@ class AdminOperationsUnitTests(unittest.TestCase):
         name = export_filename({"currency": "USDT"})
         self.assertTrue(name.startswith("lhie-earnings-usdt-"))
         self.assertTrue(name.endswith(".csv"))
+
+    def test_mail_delivery_success_actions_return_to_review_queue(self):
+        from types import SimpleNamespace
+        from django.test import RequestFactory
+        from lhie_candidate.admin import operations_views
+
+        actor = {"id": 7, "role": "owner"}
+        admin_service = SimpleNamespace(current=lambda _request: actor)
+        operations = Mock()
+        actions = (
+            ("mail_delivery_mark_sent", ("event", "event-1"),
+             {"evidence_reference": "P25-SMTP-SINK-1", "confirm_mark_sent": "1"}),
+            ("mail_delivery_resend", ("auth", "19"),
+             {"confirm_duplicate_risk": "1"}),
+        )
+        for view_name, args, post_data in actions:
+            with self.subTest(action=view_name):
+                request = RequestFactory().post(
+                    "/", data=post_data, HTTP_ACCEPT="text/html")
+                with patch("lhie_candidate.admin.access._service",
+                           return_value=admin_service), \
+                     patch("lhie_candidate.admin.operations_views.MailDeliveryReviewOperations",
+                           return_value=operations), \
+                     patch("lhie_candidate.admin.operations_views._flash_set"):
+                    response = getattr(operations_views, view_name)(request, *args)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["Location"], "/admin/mail-delivery-reviews")
 
 
 if __name__ == "__main__":

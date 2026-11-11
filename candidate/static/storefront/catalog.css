@@ -9,3 +9,9 @@
 .family-option-picker [role=radio][aria-checked=true]{background:var(--yellow);border-color:var(--accent)}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 .guide-page a.neo-button[href="#alur"]{color:#fff}
+#waitlist{color:#12233f}
+#waitlist>h2,#waitlist>p,#waitlist label,.waitlist-notice{color:#12233f}
+#waitlist-email{border-color:var(--sf-ink)}
+#waitlist-email::placeholder{color:var(--sf-muted);opacity:1}
+#waitlist button{background:#1d4ed8;color:#fff}
+#waitlist :is(input,button):focus-visible{outline:3px solid #12233f;outline-offset:3px}

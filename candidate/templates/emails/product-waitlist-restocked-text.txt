@@ -1,0 +1,7 @@
+Produk tersedia kembali
+
+Produk: {{ product_name }}
+Stok tersedia: {{ available_stock }}
+
+Buka produk: {{ product_url }}
+Berhenti menerima notifikasi produk ini: {{ unsubscribe_url }}

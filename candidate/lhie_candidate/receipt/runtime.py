@@ -7,8 +7,8 @@ from .source import ReceiptSource
 from .transport import RelayTransport
 
 
-def receipt_service(lease_seconds=600):
+def receipt_service(lease_seconds=600, *, using='default'):
     key = application_key()
-    source = ReceiptSource(LaravelEncrypter(key), signing_key=key,
+    source = ReceiptSource(LaravelEncrypter(key), using=using, signing_key=key,
                            invoice_base_url='http://127.0.0.1:18801', custom_emoji=True)
-    return ReceiptService(source, RelayTransport(), render_invoice, lease_seconds=lease_seconds)
+    return ReceiptService(source, RelayTransport(), render_invoice, using=using, lease_seconds=lease_seconds)

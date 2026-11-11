@@ -4,7 +4,7 @@ import json
 from django.db import transaction
 
 from ..receipt.protocol import _now
-from ..receipt.render import _tr
+from .bulk_content import freeze, frozen, icons, translate
 from .policy import BROADCAST, NotEligible
 
 
@@ -22,28 +22,38 @@ def markup(value, locale):
 
 
 def payload(broadcast, effect):
+    retained = frozen(effect) if 'telegram_method' in effect else None
+    if retained is not None:
+        return retained
     locale = effect['locale'] if effect['locale'] in ('id', 'en', 'ms') else 'en'
     text = broadcast['message']
     photo = broadcast.get('photo_file_id')
     if not isinstance(text, str) or (not photo and not text):
         raise NotEligible()
-    result = {'chat_id': effect['telegram_chat_id'],
-              'reply_markup': markup(broadcast.get('reply_markup'), locale), 'parse_mode': 'HTML'}
+    result = {'chat_id': effect['telegram_chat_id']}
+    reply_markup = markup(broadcast.get('reply_markup'), locale)
+    if reply_markup:
+        result['reply_markup'] = reply_markup
     if photo:
-        result.update(photo=photo, caption=text)
+        result['photo'] = photo
+        if text:
+            result['caption'] = text
     else:
-        result['text'] = '\n'.join((_tr(locale, 'notification.broadcast.title'), '━━━━━━━━━━━━━━',
-                                    text, '', _tr(locale, 'notification.broadcast.help')))
+        result['text'] = '\n'.join((translate(locale, 'notification.broadcast.title', broadcast.get('ui_icons', ())), '━━━━━━━━━━━━━━',
+                                    text, '', translate(locale, 'notification.broadcast.help', broadcast.get('ui_icons', ()))))
     return result
 
 
 def materialize(db, recipients, broadcast_id, record, *, limit=100):
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError('Invalid broadcast slice')
+    if not recipients.telegram:
+        return 0
     with transaction.atomic(using=db.using):
         broadcast = db.one('SELECT * FROM public.telegram_broadcasts WHERE id=%s FOR UPDATE', (broadcast_id,))
         if not broadcast:
             return 0
+        broadcast['ui_icons'] = icons(db)
         # Test-only admission filters both discovery and send, without changing
         # the source audience or pretending that the full audience was processed.
         customers = db.rows('''SELECT c.id,c.telegram_id,c.locale FROM public.customers c
@@ -66,11 +76,19 @@ def materialize(db, recipients, broadcast_id, record, *, limit=100):
             (broadcast_id, list(recipients.telegram), BROADCAST, limit))
         for recipient in rows:
             photo = bool(broadcast.get('photo_file_id'))
-            record(key=f"broadcast:{broadcast['broadcast_key']}:recipient:{recipient['id']}:v1",
+            effect = record(key=f"broadcast:{broadcast['broadcast_key']}:recipient:{recipient['id']}:v1",
                    kind=BROADCAST, model='TelegramBroadcastRecipient', source=recipient['id'],
                    chat=recipient['telegram_id'], target='customer', locale=recipient['locale'],
                    template='admin-broadcast-photo-v1' if photo else 'admin-broadcast-v1',
                    method='sendPhoto' if photo else 'sendMessage', legacy=recipient)
+            freeze(db, effect, payload(broadcast, effect))
+        remaining = db.one('''SELECT EXISTS(SELECT 1 FROM public.customers c
+            WHERE c.telegram_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM public.telegram_broadcast_recipients r
+                WHERE r.broadcast_id=%s AND r.telegram_id=c.telegram_id::text)) AS remaining''', (broadcast_id,))
+        if not remaining['remaining']:
+            db.execute('''UPDATE public.telegram_broadcasts SET recipients_materialized_at=COALESCE(recipients_materialized_at,%s),
+                updated_at=%s WHERE id=%s''', (_now(), _now(), broadcast_id))
         return len(rows)
 
 

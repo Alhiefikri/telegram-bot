@@ -14,12 +14,13 @@ INSERT = {
     'inventory_movements': set('product_id type quantity stock_before available_before available_after became_unavailable notes created_at'.split()),
 }
 UPDATE = {
-    'suppliers': set('name provider api_key currency currency_confirmed exchange_rate_idr is_active low_balance_threshold_micros version balance_micros balance_observed_at sync_token sync_attempted_at sync_lease_expires_at synced_at sync_expires_at sync_failures sync_next_attempt_at last_error updated_at'.split()),
+    'suppliers': set('name provider api_key currency currency_confirmed exchange_rate_idr is_active low_balance_threshold_micros version balance_micros balance_observed_at sync_token sync_attempted_at sync_lease_expires_at synced_at sync_expires_at sync_failures sync_next_attempt_at last_error low_balance_alerted_at updated_at'.split()),
     'supplier_catalog_items': set('name description currency unit_price_micros stock orderable requires_input price_tiers bulk_discounts synced_at updated_at'.split()),
     'product_supplier_sources': set('priority is_active version updated_at'.split()),
     'supplier_price_policies': set('mode markup_basis_points profit_idr minimum_profit_idr rounding_idr version updated_at'.split()),
     'supplier_currency_rates': set('exchange_rate_idr version updated_at'.split()),
     'products': set('supplier_available_stock supplier_available_until price_amount updated_at'.split()),
+    'supplier_health_states': {'error_recovered_at', 'balance_stale_active', 'low_active'},
 }
 DELETE = {'product_supplier_sources', 'supplier_catalog_items', 'suppliers'}
 SELECT_TABLES = {'products', 'suppliers', 'supplier_catalog_items', 'product_supplier_sources',
@@ -33,6 +34,7 @@ SELECT_COLUMNS = {
     'supplier_webhook_events': {'supplier_id'},
     'supplier_deposits': {'supplier_id', 'state'},
     'supplier_purchases': {'supplier_id', 'supplier_catalog_item_id', 'supplier_fulfillment_id', 'state', 'committed_at'},
+    'supplier_health_states': {'supplier_id', 'error_recovered_at', 'balance_stale_active', 'low_active'},
 }
 SEQUENCES = {'suppliers_id_seq', 'supplier_catalog_items_id_seq', 'product_supplier_sources_id_seq',
              'supplier_price_policies_id_seq', 'products_id_seq', 'audit_logs_id_seq', 'inventory_movements_id_seq'}

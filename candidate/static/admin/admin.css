@@ -214,6 +214,8 @@ body { margin: 0; }
 .admin-badge-muted { background: var(--admin-surface-muted); color: var(--admin-muted); }
 .admin-table-wrap { width: 100%; overflow-x: auto; }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.admin-broadcast-table { min-width: 36rem; }
+.admin-table-wrap:focus-visible { outline: 3px solid var(--admin-accent); outline-offset: 3px; }
 .admin-table th, .admin-table td { padding: 0.65rem 0.75rem; border-top: 1px solid var(--admin-line); text-align: left; vertical-align: top; }
 .admin-table th { background: var(--admin-surface-muted); color: var(--admin-muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; }
 .admin-table td strong { display: block; }

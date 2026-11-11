@@ -15,7 +15,8 @@ from . import access, navigation
 from .balance import BalanceAdmin, BalanceReads
 from .orders import OrderOperations, OrderReads
 from .reporting import Reporting, export_filename, normalize_filters
-from .reviews import DeliveryReviewOperations, DeliveryReviewReads, ManualReviewOperations, ManualReviewReads
+from .reviews import (DeliveryReviewOperations, DeliveryReviewReads, MailDeliveryReviewOperations,
+                      MailDeliveryReviewReads, ManualReviewOperations, ManualReviewReads)
 from .settings import SettingsService
 from .suppliers import SupplierAdmin, SupplierReads
 from .views import _flash_set, _headers, _page
@@ -91,6 +92,10 @@ SAFE_MESSAGES = {
     "funding_policy_conflict": "Kebijakan berubah. Muat ulang halaman.",
     "funding_policy_missing": "Kebijakan belum dikonfigurasi.",
     "owner_notification_unavailable": "Penerima notifikasi Owner belum dikonfigurasi.",
+    "sales_proof_not_failed": "Sales Proof Post tidak dalam status gagal. Retry tidak dijalankan.",
+    "sales_proof_not_ready": "Sales Proof Post belum memiliki target Store Channel yang dapat dikirimi.",
+    "fake_sales_proof_invalid": "Pilih produk aktif dengan stok tersedia dan muat ulang formulir info pembelian fake.",
+    "delivery_evidence_required": "Referensi bukti yang valid dan konfirmasi penerimaan wajib diisi.",
 }
 
 
@@ -196,8 +201,17 @@ def order_credential_mail(request, order_id):
 @require_POST
 @access.guard
 def order_sales_proof(request, order_id):
-    return _fail(request, CheckoutError("sales_proof_retry_owned_by_p25"),
-                 f"/admin/orders/{order_id}")
+    from ..notifications.proof_publication import SalesProofPublication
+    from ..notifications.runtime import notification_service
+    target = f"/admin/orders/{order_id}"
+    if not access.can_manage_operations(request):
+        raise Http404()
+    try:
+        SalesProofPublication(notification_service()).retry(
+            order_id, request.admin_user["id"], request.META.get("REMOTE_ADDR"))
+    except CheckoutError as error:
+        return _fail(request, error, target)
+    return _ok(request, "Retry Sales Proof Post dijalankan.", target)
 
 
 @require_POST
@@ -293,10 +307,12 @@ def delivery_mark_sent(request, effect_id):
     try:
         DeliveryReviewOperations().mark_sent(
             effect_id, message_id=request.POST.get("telegram_message_id", ""),
-            actor_id=request.admin_user["id"], ip=request.META.get("REMOTE_ADDR"))
+            actor_id=request.admin_user["id"], ip=request.META.get("REMOTE_ADDR"),
+            mail_confirmed=request.POST.get("confirm_mail_received") == "1",
+            evidence_reference=request.POST.get("evidence_reference", ""))
     except CheckoutError as error:
         return _fail(request, error, target)
-    return _ok(request, "Effect ditandai sent tanpa mengirim request Telegram.", target)
+    return _ok(request, "Effect ditandai sent tanpa mengirim pesan baru.", target)
 
 
 @require_POST
@@ -312,6 +328,50 @@ def delivery_resend(request, effect_id):
         return _fail(request, error, target)
     return _ok(request, "Versi resend baru dibuat. Periksa risiko duplikasi.",
                f"/admin/telegram-outbound-effects/{created['id']}")
+
+
+@access.guard
+def mail_delivery_reviews(request):
+    data = MailDeliveryReviewReads().index(_int(request.GET.get("page")))
+    return _page(request, "admin/mail_delivery_reviews.html", "Manual Delivery Review",
+                 navigation.navigation(None, "delivery"), **data)
+
+
+@access.guard
+def mail_delivery_review(request, kind, work_id):
+    data = MailDeliveryReviewReads().show(kind, work_id)
+    if data is None:
+        raise Http404()
+    return _page(request, "admin/mail_delivery_review.html", "Manual Delivery Review",
+                 navigation.navigation(None, "delivery"), item=data)
+
+
+@require_POST
+@access.guard
+def mail_delivery_mark_sent(request, kind, work_id):
+    target = f"/admin/mail-delivery-reviews/{kind}/{work_id}"
+    try:
+        MailDeliveryReviewOperations().mark_sent(
+            kind, work_id, evidence_reference=request.POST.get("evidence_reference", ""),
+            affirmative_evidence=request.POST.get("confirm_mark_sent") == "1",
+            actor_id=request.admin_user["id"], ip=request.META.get("REMOTE_ADDR"))
+    except CheckoutError as error:
+        return _fail(request, error, target)
+    return _ok(request, "Email ditandai terkirim berdasarkan referensi bukti.", "/admin/mail-delivery-reviews")
+
+
+@require_POST
+@access.guard
+def mail_delivery_resend(request, kind, work_id):
+    target = f"/admin/mail-delivery-reviews/{kind}/{work_id}"
+    try:
+        MailDeliveryReviewOperations().resend(
+            kind, work_id, actor_id=request.admin_user["id"],
+            confirm_duplicate_risk=_truth(request.POST.get("confirm_duplicate_risk")),
+            ip=request.META.get("REMOTE_ADDR"))
+    except CheckoutError as error:
+        return _fail(request, error, target)
+    return _ok(request, "Pengiriman ulang masuk antrean untuk diproses worker.", "/admin/mail-delivery-reviews")
 
 
 # -- Saldo IDR ----------------------------------------------------------

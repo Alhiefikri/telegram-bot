@@ -27,6 +27,7 @@ class Runtime:
     secret_key: str
     p08_internal_key: str = ""
     workers: bool = False
+    notifications: bool = False
 
 
 def _read_file(path, maximum, *, private=False):
@@ -77,6 +78,10 @@ def validate_document(document):
         if type(document["workers"]) is not bool or document["workers"] is not True:
             raise AdmissionError()
         expected["workers"] = True
+    if type(document) is dict and "notifications" in document:
+        if document["notifications"] is not True or document.get("workers") is not True:
+            raise AdmissionError()
+        expected["notifications"] = True
     if (type(document) is not dict or document.keys() != expected.keys()
             or type(document.get("dataset")) is not str
             or DATASET_PATTERN.fullmatch(document["dataset"]) is None):
@@ -108,6 +113,7 @@ def load_runtime():
             if re.fullmatch(r"[a-f0-9]{64}", p08_key) is None:
                 raise AdmissionError()
         return Runtime(dataset=dataset, secret_key=key, p08_internal_key=p08_key,
-                       workers=document.get("workers") is True)
+                       workers=document.get("workers") is True,
+                       notifications=document.get("notifications") is True)
     except Exception:
         raise AdmissionError() from None

@@ -1,0 +1,8 @@
+Konfirmasi permintaan stok
+
+Klik tautan berikut untuk mengaktifkan notifikasi saat produk tersedia kembali:
+{{ product_name }}
+
+Konfirmasi permintaan: {{ confirmation_url }}
+
+Tautan ini hanya untuk konfirmasi permintaan notifikasi dan akan kedaluwarsa. Kami tidak mengirim Recovery Key, kredensial, atau data pesanan melalui email ini.

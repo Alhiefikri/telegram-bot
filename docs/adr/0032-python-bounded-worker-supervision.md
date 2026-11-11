@@ -26,12 +26,14 @@ owner of receipt effects, payment events, navigation updates and money state.
   broker add a new service/dependency and a second scheduling vocabulary before
   a measured need exists. The bounded supervisor uses Python's standard library
   and the existing PostgreSQL/Redis primitives.
-- Start one process per family: `interaction`, `payment`, `receipt`. No family
-  shares an OS process with another. The process count is one supervisor plus
-  one HTTP process plus three workers; the supervisor holds no database
-  connection. The whole runtime stays inside P01's existing application
-  allocation (1.25 CPU / 1216 MiB), with at most four `candidate_runtime`
-  connections (HTTP plus three workers, one each).
+- Start one process per family: `interaction`, `payment`, `receipt`,
+  `notifications`, `bulk`, `mail` and `auth-mail`. P25 (#707) extends the three
+  original P10 consumers; no family shares an OS process with another. Including
+  the connection-free supervisor and HTTP process, the runtime has nine processes
+  and at most eight `candidate_runtime` connections. The role limit is ten,
+  reserving two connections for disposable diagnostics. The whole runtime remains
+  inside P01's application allocation (1.25 CPU / 1216 MiB), not an additional
+  allocation beyond the complete stack's 2 CPU / 2 GiB ceiling.
 - PostgreSQL remains the durable work source. Redis receives only a fixed
   Python JSON envelope with `version`, `kind` and a stable integer/UUID
   identity. PHP serialization, ORM snapshots, amounts, credentials and customer
@@ -68,13 +70,18 @@ owner of receipt effects, payment events, navigation updates and money state.
   or receipts because they have separate processes and disjoint families.
 - Redis loss no longer stops required work; the next sweep delivers due receipt
   effects directly from PostgreSQL. Unknown deliveries are never resent.
-- The candidate runs three more Python processes than the P05 bootstrap and one
-  more than an HTTP-only start. The measured ceilings and the distinction
-  between cgroup usage, process RSS and container limits are recorded in the
-  P10 evidence.
+- P10's original five-process evidence remains historical evidence for that
+  composition. P25 measures the extended nine-process composition separately;
+  see its source-bound manifest and [notification evidence](../migration/python-django/p25/README.md).
+  Short synthetic measurements prove the exercised isolation boundary, not
+  production capacity or a latency distribution.
 - A crashed child is restarted a bounded number of times inside a 60 s window.
   If the failure repeats, the supervisor stops the runtime rather than hiding a
   persistent fault.
-- Notification, broadcast, stock, Binance and supplier families remain
-  unported. The topology reserves them and forbids them from the three initial
-  workers; porting them in P25/later must add an isolated consumer first.
+- Notification/admin/proof effects use `notifications`; broadcast/stock/price use
+  `bulk`; credential, guest and waitlist mail use `mail`. Authentication mail
+  retains P19's authority in `auth-mail`. Empty recipient admission is a no-op.
+  These consumers are installed only by explicitly admitted worker composition;
+  importing a module or starting HTTP does not activate them. Supplier acquisition
+  remains payment-owned under its existing bounded contract, never moved onto
+  interaction or receipt by this extension.

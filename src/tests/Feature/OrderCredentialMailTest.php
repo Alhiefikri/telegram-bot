@@ -269,6 +269,23 @@ class OrderCredentialMailTest extends TestCase
         $this->assertSame('snapshot-recipient@example.test', $event->fresh()->recipient_email);
     }
 
+    public function test_missing_recipient_snapshot_never_falls_back_to_the_mutable_order_address(): void
+    {
+        Mail::fake();
+        $event = $this->paidOrderCredentialEvent('snapshot-recipient@example.test');
+        $event->forceFill(['recipient_email' => null])->save();
+        Order::query()->whereKey($event->order_id)->sole()
+            ->forceFill(['notification_email' => 'changed-recipient@example.test'])
+            ->save();
+
+        $this->deliver($event->id);
+
+        Mail::assertNothingSent();
+        $this->assertSame(OrderNotificationEvent::STATUS_CANCELLED, $event->fresh()->status);
+        $this->assertSame(OrderCredentialMailService::ERROR_RECIPIENT_MISSING, $event->fresh()->last_error);
+    }
+
+
     public function test_a_paid_order_never_retargets_its_notification_address(): void
     {
         $event = $this->paidOrderCredentialEvent('owner-recipient@example.test');

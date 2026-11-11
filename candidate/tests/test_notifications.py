@@ -15,6 +15,9 @@ from lhie_candidate.receipt.protocol import RECEIPT_TYPES, ReceiptProtocol
 from lhie_candidate.receipt.transport import ReceiptResult
 
 
+from lhie_candidate.notifications.publishing import BroadcastPublishing
+
+
 class NotificationTests(unittest.TestCase):
     def test_default_admission_is_disabled_and_reserved_mail_only(self):
         recipients = Recipients()
@@ -41,6 +44,49 @@ class NotificationTests(unittest.TestCase):
         self.assertNotIn('text', photo)
         self.assertEqual(markup(source['reply_markup'], 'unsupported'), source['reply_markup']['en'])
 
+    def test_photo_only_broadcast_is_valid_but_empty_text_is_not(self):
+        publishing = BroadcastPublishing(SimpleNamespace(db=SimpleNamespace(using='default'),
+                                                         recipients=Recipients(frozenset({'1'}))))
+        draft = publishing.draft('', 'synthetic-photo-reference')
+        self.assertEqual(draft['message'], '')
+        self.assertEqual(draft['photo_file_id'], 'synthetic-photo-reference')
+        photo = payload({'message': '', 'photo_file_id': draft['photo_file_id']},
+                        {'locale': 'en', 'telegram_chat_id': '1'})
+        self.assertEqual(photo['photo'], draft['photo_file_id'])
+        self.assertNotIn('text', photo)
+        with self.assertRaises(ValueError):
+            publishing.draft('')
+        with self.assertRaises(NotEligible):
+            payload({'message': '', 'photo_file_id': None}, {'locale': 'en', 'telegram_chat_id': '1'})
+
+    def test_button_custom_emoji_moves_to_icon_field_and_falls_back_only_after_rejection(self):
+        button = {'text': '<tg-emoji emoji-id="123" data-omp-icon="1">📦</tg-emoji> Product',
+                  'callback_data': 'product:42', 'style': 'primary',
+                  '_unicode_fallback': '📦 Product'}
+        ordinary = {'text': 'Ordinary action', 'callback_data': 'ordinary:1', 'style': 'secondary'}
+        transport = NotificationTransport()
+        transport.relay = SimpleNamespace(_request=Mock(return_value={'ok': True, 'result': {'message_id': 7}}))
+        self.assertEqual(transport.execute('sendMessage', {'chat_id': '1', 'text': 'notice',
+                         'reply_markup': {'inline_keyboard': [[button, ordinary]]}}).message_id, 7)
+        sent = transport.relay._request.call_args.args[1]['reply_markup']['inline_keyboard'][0][0]
+        self.assertEqual(sent['icon_custom_emoji_id'], '123')
+        self.assertEqual(sent['text'].strip(), 'Product')
+        self.assertEqual(sent['style'], 'primary')
+        sent_ordinary = transport.relay._request.call_args.args[1]['reply_markup']['inline_keyboard'][0][1]
+        self.assertEqual(sent_ordinary, ordinary)
+
+        transport = NotificationTransport()
+        transport.relay = SimpleNamespace(_request=Mock(side_effect=[
+            {'ok': False, 'error_code': 400, 'description': 'icon_custom_emoji_id unavailable'},
+            {'ok': True, 'result': {'message_id': 8}},
+        ]))
+        self.assertEqual(transport.execute('sendMessage', {'chat_id': '1', 'text': 'notice',
+                         'reply_markup': {'inline_keyboard': [[button, ordinary]]}}).message_id, 8)
+        fallback_button = transport.relay._request.call_args_list[1].args[1]['reply_markup']['inline_keyboard'][0][0]
+        self.assertEqual(fallback_button['text'], '📦 Product')
+        self.assertNotIn('icon_custom_emoji_id', fallback_button)
+        self.assertEqual(fallback_button['style'], 'primary')
+
     def test_unknown_or_missing_ack_never_triggers_fallback(self):
         for response in ({}, {'ok': True, 'result': {}},
                          {'ok': False, 'error_code': 500, 'description': 'custom emoji'}):
@@ -49,6 +95,23 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(transport.execute('sendMessage', {'chat_id': '1', 'text': 'test'}).outcome, 'ambiguous')
             self.assertEqual(transport.relay._request.call_count, 1)
 
+
+    def test_auth_mail_transport_diagnostics_never_enter_logs(self):
+        from lhie_candidate.auth.mail import MailWork
+        from lhie_candidate.auth.types import AuthError
+
+        transport = SimpleNamespace(
+            send=Mock(side_effect=TimeoutError('synthetic private SMTP secret')))
+        work = MailWork(None, app_key='synthetic', db=SimpleNamespace(), transport=transport)
+        claim = {'id': 7, 'attempts': 1, 'next_attempt_at': object()}
+        work._claim = Mock(return_value=(claim, {}))
+        work._payload = Mock(return_value={
+            'email': 'synthetic@example.invalid', 'token': 'synthetic-token'})
+        work._still_eligible = Mock(return_value=True)
+        work._finish = Mock()
+        with self.assertNoLogs(level='DEBUG'):
+            with self.assertRaises(AuthError):
+                work.deliver(7)
     def test_only_explicit_emoji_rejection_allows_unicode_fallback(self):
         transport = NotificationTransport()
         transport.relay = SimpleNamespace(_request=Mock(side_effect=[
@@ -67,7 +130,7 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(BroadcastRate(client).acquire(), allowed)
 
     def test_family_policy_is_closed_without_expanding_receipt_worker(self):
-        from lhie_candidate.notifications.policy import LIMITS
+        from lhie_candidate.notifications.families import LIMITS
         ordinary = ReceiptProtocol()
         notifications = ReceiptProtocol(family_limits=LIMITS)
         self.assertEqual(ordinary.effect_types, RECEIPT_TYPES)
@@ -96,7 +159,7 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(mask('', ''), 'Buyer')
 
     def test_credential_email_uses_paid_allocation_not_an_ownership_secret(self):
-        source = {'invoice_number': 'INV-SYNTHETIC', 'groups': [
+        source = {'invoice_number': 'INV-SYNTHETIC', 'recovery_key': 'synthetic-private-recovery-key', 'groups': [
             {'product_name': 'Product', 'accounts': [
                 {'number': 1, 'format': 'structured_account', 'email': 'stock@example.invalid',
                  'password': 'synthetic-password', 'access_method': 'auth_token', 'access_value': 'synthetic-token',
@@ -104,16 +167,16 @@ class NotificationTests(unittest.TestCase):
         text = credential_text(source)
         self.assertIn('stock@example.invalid', text)
         self.assertIn('synthetic-password', text)
-        self.assertIn('Auth Token: synthetic-token', text)
-        self.assertNotIn('Recovery Key', text)
+        self.assertIn('synthetic-token', text)
+        self.assertNotIn('synthetic-private-recovery-key', text)
 
     def service(self, result):
         from lhie_candidate.notifications.policy import BROADCAST
         transport = SimpleNamespace(execute=Mock(return_value=result))
         service = Notifications(transport, recipients=Recipients(frozenset({'1'})),
-                                rate=SimpleNamespace(acquire=Mock(return_value=True)))
+                                rate=SimpleNamespace(acquire=Mock(return_value=True)), queue='bulk')
         effect = {'id': 'safe-effect-id', 'claim_token': 'safe-token', 'effect_type': BROADCAST,
-                  'telegram_method': 'sendMessage', 'telegram_chat_id': '1'}
+                  'telegram_method': 'sendMessage', 'telegram_chat_id': '1', 'queue': 'bulk'}
         service.db = SimpleNamespace(one=Mock(return_value=effect))
         service.protocol = SimpleNamespace(effect_types=(BROADCAST,),
             claim=Mock(return_value=effect), finalize_unknown=Mock(return_value={'state': 'unknown'}),
@@ -121,7 +184,6 @@ class NotificationTests(unittest.TestCase):
         service._outside = Mock()
         service.payload = Mock(return_value={'chat_id': '1', 'text': 'Synthetic'})
         service.project = Mock()
-        service._aggregate = Mock()
         return service
 
     def test_nonadmitted_recipient_cannot_be_claimed(self):

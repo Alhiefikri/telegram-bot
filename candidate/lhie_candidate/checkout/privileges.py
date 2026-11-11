@@ -189,6 +189,10 @@ SUPPLIER_UPDATE = {
     'products': {'supplier_available_stock', 'supplier_available_until', 'price_amount', 'updated_at'},
     'warranty_claims': {'customer_id', 'settlement_choice', 'settlement_state', 'replacement_next_attempt_at', 'updated_at'},
 }
+SUPPLIER_UPDATE['supplier_fulfillments'].add('health_review_episode')
+SUPPLIER_UPDATE['supplier_purchases'].add('health_review_episode')
+SUPPLIER_UPDATE['supplier_health_states'] = {'error_recovered_at', 'balance_stale_active', 'low_active'}
+SUPPLIER_UPDATE['suppliers'].add('low_balance_alerted_at')
 
 
 AUTH_INSERT = {
@@ -242,19 +246,9 @@ def verify_public_writes(cursor):
     allowed_update = NAVIGATION_UPDATE | (CHECKOUT_UPDATE if checkout else {})
     cursor.execute("SELECT has_column_privilege(current_user,'public.order_notification_events','recipient_email','INSERT')")
     if cursor.fetchone()[0]:
-        allowed_insert = _merge(allowed_insert, {
-            'telegram_outbound_effects': {'sent_at', 'unknown_at'},
-            'order_notification_events': set('order_id event_type recipient_email status attempts next_attempt_at created_at updated_at'.split()),
-            'telegram_broadcast_recipients': set('broadcast_id customer_id telegram_id locale created_at updated_at'.split()),
-        })
-        allowed_update = _merge(allowed_update, {
-            'payments': {'payment_proof_forwarded_at'},
-            'telegram_broadcasts': set('recipient_count sent_count failed_count pending_count terminal_failed_count status completed_at updated_at'.split()),
-            'telegram_broadcast_recipients': set('sent_at failed_at terminal_failed_at retry_at last_error attempts updated_at'.split()),
-            'stock_notification_recipients': set('sent_at failed_at terminal_failed_at last_error attempts updated_at'.split()),
-            'product_price_change_notification_recipients': set('sent_at failed_at last_error attempts updated_at'.split()),
-            'order_notification_events': set('status attempts delivery_started_at next_attempt_at sent_at failed_at last_error updated_at'.split()),
-        })
+        from ..notifications.privileges import NOTIFICATION_INSERT, NOTIFICATION_UPDATE
+        allowed_insert = _merge(allowed_insert, NOTIFICATION_INSERT)
+        allowed_update = _merge(allowed_update, NOTIFICATION_UPDATE)
     cursor.execute("SELECT has_column_privilege(current_user,'public.payments','provider_reference','UPDATE')")
     if cursor.fetchone()[0]:
         allowed_insert = {**allowed_insert, **P08_INSERT}
@@ -310,7 +304,7 @@ def verify_public_writes(cursor):
     storefront = cursor.fetchone()[0]
     if checkout and auth and storefront:
         allowed_insert = _merge(allowed_insert, {'order_notification_events': {
-            'order_id', 'event_type', 'status', 'created_at', 'updated_at'}})
+            'order_id', 'event_type', 'recipient_email', 'attempts', 'status', 'created_at', 'updated_at'}})
         allowed_update = _merge(allowed_update, {
             'orders': {'credential_access_key_hash', 'notification_email',
                        'support_contact_channel', 'support_contact_value'},

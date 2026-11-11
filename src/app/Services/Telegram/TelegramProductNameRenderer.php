@@ -21,8 +21,9 @@ final class TelegramProductNameRenderer
         string $scope = CustomEmojiCapability::SCOPE_MESSAGES,
     ): string {
         $icon = $this->icons->resolve($glyph, $customEmojiId, $scope);
+        $copy = $this->html->icon($icon).' '.$name;
 
-        return $this->html->icon($icon).' '.$name;
+        return $this->html->escapeTextPreservingIcons($copy);
     }
 
     /**

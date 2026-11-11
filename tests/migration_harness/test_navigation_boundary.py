@@ -40,6 +40,22 @@ class NavigationBoundaryTests(unittest.TestCase):
             upstream.assert_not_called()
             relay.assert_not_called()
 
+    def test_local_dashboard_urls_are_admitted_only_for_the_fake_namespace(self):
+        def request(url):
+            return {'method': 'sendMessage', 'payload': {'chat_id': 1, 'text': 'Synthetic',
+                'reply_markup': {'inline_keyboard': [[{'text': 'Dashboard', 'url': url}]]}}}
+        for host in ('127.0.0.1', 'localhost'):
+            url = f'http://{host}:18802/admin/orders/synthetic'
+            self.assertTrue(navigation_request(default('candidate'), request(url), 1)['ok'])
+            live = {**default('candidate'), 'mode': 'testing-bot',
+                    'approval': {'gate': 'P06-approved-navigation-targets-only'}}
+            with self.assertRaises(ValueError):
+                navigation_request(live, request(url), 1)
+        for url in ('http://127.0.0.1:22/admin', 'http://127.0.0.1:18802.evil.invalid/admin',
+                    'http://127.0.0.1@evil.invalid:18802/admin', 'http://example.invalid/admin'):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                navigation_request(default('candidate'), request(url), 1)
+
     def test_navigation_never_enables_telegram_link_previews(self):
         config = {**default('candidate'), 'mode': 'p08-sandbox-testing-bot',
                   'bot_token': 'test-token',

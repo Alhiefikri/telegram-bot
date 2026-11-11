@@ -1,7 +1,7 @@
 """Price notices render immutable event economics, not current Product prices."""
 from html import escape
 
-from ..receipt.render import _tr
+from .bulk_content import PRICE_CHANNEL, button, frozen, translate
 from .policy import NotEligible
 
 
@@ -13,9 +13,12 @@ def usdt(amount):
 
 
 def payload(event, effect):
+    retained = frozen(effect) if 'telegram_method' in effect else None
+    if retained is not None:
+        return retained
     locale = effect['locale'] if effect['locale'] in ('id', 'en', 'ms') else 'en'
     def tr(key, **values):
-        return _tr(locale, 'notification.price.' + key, **values)
+        return translate(locale, 'notification.price.' + key, event.get('ui_icons', ()), **values)
     def idr(amount):
         if type(amount) is not int or amount < 0:
             raise NotEligible()
@@ -54,6 +57,10 @@ def payload(event, effect):
     else:
         lines.extend((tr('future_checkout'), tr('existing_orders')))
     lines.extend(('', tr('help')))
+    keyboard = button(translate(locale, 'notification.price.cta'), event.get('ui_icons', ()),
+                      style='primary', callback_data='product:' + str(event['product_id']))
+    if effect.get('effect_type') == PRICE_CHANNEL:
+        keyboard = button(translate('en', 'notification.store_channel.cta'),
+                          event.get('ui_icons', ()), style='primary', url=event['product_url'])
     return {'chat_id': effect['telegram_chat_id'], 'text': '\n'.join(lines), 'parse_mode': 'HTML',
-            'reply_markup': {'inline_keyboard': [[{'text': tr('cta'), 'style': 'primary',
-                                                 'callback_data': 'product:' + str(event['product_id'])}]]}}
+            'reply_markup': {'inline_keyboard': [[keyboard]]}}

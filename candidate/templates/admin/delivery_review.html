@@ -21,18 +21,20 @@
     {% if effect.can_review %}
     <form method="post" action="/admin/telegram-outbound-effects/{{ effect.id }}/mark-sent" class="admin-form" data-dirty-guard>
       {% csrf_token %}
+      {% if effect.is_mail %}
+      <label class="admin-field admin-field-checkbox"><input type="checkbox" name="confirm_mail_received" value="1" required> Saya telah memverifikasi email diterima berdasarkan bukti.</label>
+      <div class="admin-field"><label for="id_evidence_reference">Referensi bukti penerimaan email</label><input id="id_evidence_reference" name="evidence_reference" type="text" maxlength="200" pattern="[A-Za-z0-9][A-Za-z0-9._:/#-]{0,199}" required><p class="admin-help">Masukkan ID bukti yang tersimpan di sistem lain; jangan masukkan alamat email atau isi pesan.</p></div>
+      {% else %}
       <div class="admin-field"><label for="id_telegram_message_id">Telegram message ID</label><input id="id_telegram_message_id" name="telegram_message_id" type="text" inputmode="numeric" maxlength="19" required><p class="admin-help">Hanya jika pesan sudah terlihat di Telegram. Tidak ada request dikirim.</p></div>
+      {% endif %}
       <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" data-confirm="Tandai effect ini sudah terkirim?">Tandai sent</button></div>
     </form>
-    {% if effect.is_receipt %}
-    <p class="admin-help">Resend receipt group dimiliki flow receipt P25 dan tidak dijalankan dari halaman ini.</p>
-    {% else %}
+    {% if effect.is_receipt %}<p class="admin-help">Resend membuat satu grup receipt baru setelah kepemilikan dan kelayakan data akun diperiksa ulang. Grup lama tetap disimpan.</p>{% endif %}
     <form method="post" action="/admin/telegram-outbound-effects/{{ effect.id }}/resend" class="admin-form" data-confirm="Buat resend baru? Pesan bisa terkirim dua kali.">
       {% csrf_token %}
-      <label class="admin-field admin-field-checkbox"><input type="checkbox" name="confirm_duplicate_risk" value="1"> Saya menerima risiko duplikasi</label>
+      <label class="admin-field admin-field-checkbox"><input type="checkbox" name="confirm_duplicate_risk" value="1" required> Saya menerima risiko duplikasi</label>
       <div class="admin-form-actions"><button class="admin-button admin-button-danger" type="submit">Buat resend eksplisit</button></div>
     </form>
-    {% endif %}
     {% else %}<p>Effect ini sudah tidak berada dalam antrean review.</p>{% endif %}
   </section>
 </div>

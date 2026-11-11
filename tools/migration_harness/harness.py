@@ -268,7 +268,8 @@ def compose(config, directory):
                    volumes=["storage:/disposable",
                             f"{directory / 'candidate.json'}:/run/harness/candidate.json:ro",
                             f"{directory / 'django-key'}:/run/harness/django-key:ro",
-                            f"{directory / 'app-key'}:/run/harness/app-key:ro"])
+                            f"{directory / 'app-key'}:/run/harness/app-key:ro",
+                            f"{ROOT / 'src/public/qr-lhie.jpg'}:/run/harness/public-assets/qr-lhie.jpg:ro"])
         if config.get("p08_callback") is not None:
             app["volumes"].append(f"{directory / 'p08-internal-key'}:/run/harness/p08-internal-key:ro")
         app["healthcheck"] = {
@@ -429,11 +430,18 @@ def candidate_admission(config, directory, *, workers=False):
         "database": {"host": "127.0.0.1", "port": 5432, "name": "disposable", "user": "candidate_runtime"},
         "redis": {"host": "127.0.0.1", "port": 6379, "db": 0},
         # Whole-runtime ceilings: supervisor + HTTP + one process per queue,
-        # one thread each, and at most four candidate_runtime connections.
-        "limits": {"processes": 5, "threads": 5, "db_connections": 4},
+        # one thread each, and at most eight candidate_runtime connections.
+        "limits": {"processes": 9, "threads": 9, "db_connections": 8},
     }
     if workers:
         runtime["workers"] = True
+        # A dataset name never authorizes a transport. Only the generated fake
+        # relay chat and fixed loopback SMTP sink are admitted automatically.
+        if (config["mode"] == "fake" and config["safe_chat_ids"] == [1]
+                and not any(config.get(key) for key in (
+                    "bot_token", "bot_id", "bot_username", "sandbox_status_url",
+                    "sandbox_token", "approval", "p08_callback"))):
+            runtime["notifications"] = True
     if config.get("p08_callback") is not None:
         internal_key = directory / "p08-internal-key"
         try:

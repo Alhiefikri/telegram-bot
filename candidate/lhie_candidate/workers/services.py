@@ -1,4 +1,4 @@
-"""Trusted factories for the three initial worker families."""
+"""Trusted factories for isolated worker families."""
 
 from .contract import LEASE_SECONDS, validate_queue_name
 
@@ -106,4 +106,16 @@ def build_handler(queue, *, funding_klik=None, funding=None, usdt_funding=None, 
     if queue == "payment":
         return payment_handler(funding_klik=funding_klik, funding=funding, usdt_funding=usdt_funding,
                                usdt_settlement=usdt_settlement, reorg_monitor=reorg_monitor)
-    return receipt_handler()
+    if queue == "receipt":
+        return receipt_handler()
+    from ..notifications.policy import TestRecipients
+    from ..runtime import load_runtime
+    from .notifications import (NotificationHandler, auth_mail_service,
+                                mail_services, notification_services)
+    runtime = load_runtime()
+    recipients = TestRecipients(frozenset({'1'}) if runtime.notifications else frozenset())
+    if queue in ('notifications', 'bulk'):
+        return NotificationHandler(notification_services(queue, recipients=recipients), queue)
+    if queue == 'mail':
+        return mail_services(recipients=recipients)
+    return auth_mail_service(recipients=recipients)

@@ -78,3 +78,9 @@ GRANT SELECT (legacy_type,legacy_id,reason) ON public.external_money_receipt_res
 GRANT USAGE ON SEQUENCE public.bsc_payment_transfer_evidence_id_seq,
     public.external_money_receipt_parent_claims_id_seq, public.external_money_receipt_reservations_id_seq
     TO candidate_runtime;
+-- Lifecycle milestones retain their original encrypted checkout recipient.
+GRANT SELECT (notification_email) ON public.orders TO candidate_runtime;
+GRANT INSERT (order_id,event_type,recipient_email,status,attempts,created_at,updated_at)
+    ON public.order_notification_events TO candidate_runtime;
+GRANT SELECT (order_id,event_type) ON public.order_notification_events TO candidate_runtime;
+GRANT USAGE, SELECT ON SEQUENCE public.order_notification_events_id_seq TO candidate_runtime;

@@ -1,0 +1,37 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">{{ item.state_label }} · {{ item.kind_label }}</p><h2>Review pengiriman email</h2><p class="admin-help">{{ item.source_label }}{% if item.event_type %} · {{ item.event_type }}{% endif %}</p></div>
+  <a class="admin-button" href="/admin/mail-delivery-reviews">Kembali ke antrean</a>
+</section>
+<div class="admin-detail-grid">
+  <section class="admin-card">
+    <h2>Ringkasan</h2>
+    <dl class="admin-facts">
+      <div><dt>Status</dt><dd>{{ item.status }} · {{ item.error_code }}</dd></div>
+      <div><dt>Percobaan</dt><dd>{{ item.attempts }}</dd></div>
+      <div><dt>Diperbarui</dt><dd>{{ item.updated_label }}</dd></div>
+      {% if item.kind == 'auth' %}<div><dt>Grant berakhir</dt><dd>{{ item.expires_label }}</dd></div>{% endif %}
+    </dl>
+    <p class="admin-help">Alamat penerima, isi email, token, dan data kredensial tidak ditampilkan.</p>
+  </section>
+  <section class="admin-card">
+    <h2>Tindakan operator</h2>
+    <form method="post" action="/admin/mail-delivery-reviews/{{ item.kind }}/{{ item.work_id }}/mark-sent" class="admin-form" data-dirty-guard data-confirm="Tandai email sudah terkirim berdasarkan bukti ini?">
+      {% csrf_token %}
+      <p class="admin-help">Gunakan hanya setelah penerimaan email diverifikasi. Referensi harus menunjuk ke bukti yang tersimpan, bukan memuat data pribadi atau isi pesan.</p>
+      <div class="admin-field"><label for="id_evidence_reference">Referensi bukti</label><input id="id_evidence_reference" name="evidence_reference" type="text" maxlength="200" pattern="[A-Za-z0-9][A-Za-z0-9._:/#-]{0,199}" required></div>
+      <label class="admin-field admin-field-checkbox"><input type="checkbox" name="confirm_mark_sent" value="1" required> Saya menyatakan bukti ini mengonfirmasi email sudah diterima.</label>
+      <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Tandai terkirim</button></div>
+    </form>
+    {% if item.can_retry %}
+    <form method="post" action="/admin/mail-delivery-reviews/{{ item.kind }}/{{ item.work_id }}/resend" class="admin-form" data-confirm="Worker akan mencoba mengirim email lagi. Penerima mungkin menerima duplikat.">
+      {% csrf_token %}
+      <label class="admin-field admin-field-checkbox"><input type="checkbox" name="confirm_duplicate_risk" value="1" required> Saya mengizinkan satu percobaan baru dan menerima risiko email duplikat.</label>
+      <div class="admin-form-actions"><button class="admin-button admin-button-danger" type="submit">Jadwalkan percobaan baru</button></div>
+      <p class="admin-help">Percobaan dijalankan worker secara asynchronous dan memakai recipient snapshot yang sama.</p>
+    </form>
+    {% else %}<p class="admin-help">Percobaan baru tidak tersedia: grant tidak lagi berlaku, data tidak memenuhi syarat, atau batas percobaan tercapai.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

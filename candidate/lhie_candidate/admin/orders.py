@@ -356,6 +356,11 @@ class OrderReads:
             order["review"]["provider_reference"] = mask_identifier(
                 order["review"]["provider_reference"], visible=6)
         order["effects"] = self._effects(order["id"])
+        order["sales_proof"] = self.db.one(
+            "SELECT status,attempts,telegram_message_id,sent_at,last_error FROM public.sales_proof_posts WHERE order_id=%s",
+            (order["id"],))
+        order["can_retry_sales_proof"] = bool(
+            order["sales_proof"] and order["sales_proof"]["status"] == "failed")
         order["supplier"] = self._supplier(order["id"])
         order["audit"] = self._audit(order["id"])
         order["can_complete_manual"] = (

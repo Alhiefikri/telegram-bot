@@ -283,7 +283,7 @@ def _capture_contact(order_id, email, channel, value):
     cipher = LaravelEncrypter(application_key())
     now = datetime.now(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None)
     with transaction.atomic():
-        order = db.one('SELECT order_status,payment_status FROM public.orders WHERE id=%s FOR UPDATE', (order_id,))
+        order = db.one('''SELECT order_status,payment_status FROM public.orders WHERE id=%s FOR UPDATE''', (order_id,))
         if order is None or order['order_status'] != 'pending_payment' or order['payment_status'] != 'pending':
             return
         db.execute('''UPDATE public.orders SET support_contact_channel=%s,support_contact_value=%s,
@@ -291,11 +291,9 @@ def _capture_contact(order_id, email, channel, value):
                    (channel or None, cipher.encrypt_string(value) if value else None,
                     cipher.encrypt_string(email) if email else None, now, order_id))
         if email:
-            db.execute('''INSERT INTO public.order_notification_events
-                          (order_id,event_type,status,created_at,updated_at)
-                          VALUES (%s,'order_created','pending',%s,%s)
-                          ON CONFLICT (order_id,event_type) DO NOTHING''', (order_id, now, now))
-
+            from ..notifications.guest_mail import record_guest_event, refresh_pending_order_created
+            record_guest_event(db, order_id, 'order_created')
+            refresh_pending_order_created(db, order_id)
 
 
 

@@ -168,8 +168,7 @@ final class OrderCredentialMailService
             return;
         }
 
-        $recipient = $this->normalizeEmail($event->recipient_email)
-            ?? $this->normalizeEmail($order->notification_email);
+        $recipient = $this->normalizeEmail($event->recipient_email);
 
         if ($recipient === null) {
             $this->finish($claim, [

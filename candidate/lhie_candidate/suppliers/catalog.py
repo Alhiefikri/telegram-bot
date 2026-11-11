@@ -5,6 +5,7 @@ import hmac
 import json
 from uuid import uuid4
 from django.db import connections, transaction
+from ..checkout.db import Database
 from .pricing import PROVIDERS
 from .capacity import lock_checkout_resources, refresh_locked
 
@@ -99,6 +100,8 @@ def sync(supplier_id, client, now, *, encrypter, using='default'):
                 [blocked,snapshot.balance_micros,blocked,observed_at,observed_at,observed_at+timedelta(seconds=300),
                  observed_at+timedelta(seconds=max(60, ((len(products) + 2) * 5) if provider == 'prodseller' else 60)),
                  observed_at,supplier_id])
+            from ..notifications.supplier_health import observe_recovery
+            observe_recovery(Database(using), supplier_id, observed_at, balance_observed=not blocked)
             refresh_locked(product_ids, observed_at, using=using)
         return True
     except Exception:

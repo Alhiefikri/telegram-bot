@@ -1,0 +1,22 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Store Channel</p><h2>Fake Sales Proof</h2><p class="admin-help">Info pembelian fake memakai produk aktif. Tidak membuat Order, Payment, atau mengurangi stok.</p></div>
+  <a class="admin-button" href="/admin?tab=pengaturan">Kembali</a>
+</section>
+<section class="admin-card">
+  <h2>Kirim info pembelian fake</h2>
+  <p class="admin-help">Terakhir dikirim: {{ manual_last_sent|default:'Belum pernah' }}</p>
+  {% if disabled_reason %}<p class="admin-help" role="status">{{ disabled_reason }}</p>{% endif %}
+  <form method="post" action="/admin/store-channel/fake-sales-proof">
+    {% csrf_token %}
+    <input type="hidden" name="request_id" value="{{ request_id }}">
+    <label for="fake-proof-product">Produk aktif</label>
+    <select id="fake-proof-product" name="product_id" required{% if disabled_reason %} disabled{% endif %}>
+      <option value="">Pilih produk</option>
+      {% for product in products %}<option value="{{ product.id }}">{{ product.name }} · stok {{ product.available_stock }}</option>{% endfor %}
+    </select>
+    <button class="admin-button admin-button-primary" type="submit"{% if disabled_reason %} disabled{% endif %}>Kirim info pembelian fake</button>
+  </form>
+</section>
+{% endblock %}

@@ -18,7 +18,7 @@ DOCUMENT = {
     "quarantine": False,
     "database": {"host": "127.0.0.1", "port": 5432, "name": "disposable", "user": "candidate_runtime"},
     "redis": {"host": "127.0.0.1", "port": 6379, "db": 0},
-    "limits": {"processes": 5, "threads": 5, "db_connections": 4},
+    "limits": {"processes": 9, "threads": 9, "db_connections": 8},
 }
 
 
@@ -64,6 +64,15 @@ class AdmissionTests(unittest.TestCase):
         ):
             with self.subTest(limits=limits), self.assertRaises(runtime.AdmissionError):
                 runtime.validate_document({**DOCUMENT, "limits": limits})
+
+    def test_notification_admission_requires_private_explicit_worker_flag(self):
+        self.assertEqual(runtime.validate_document({**DOCUMENT, "workers": True, "notifications": True}),
+                         "synthetic-empty")
+        for value in (False, 1, "true", None):
+            with self.subTest(value=value), self.assertRaises(runtime.AdmissionError):
+                runtime.validate_document({**DOCUMENT, "workers": True, "notifications": value})
+        with self.assertRaises(runtime.AdmissionError):
+            runtime.validate_document({**DOCUMENT, "notifications": True})
 
     def test_fixed_files_private_key_and_duplicate_json_rejection(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -142,7 +151,7 @@ class ReadinessTests(unittest.TestCase):
         from lhie_candidate import readiness
         admitted = (
             "disposable", "candidate_runtime", "127.0.0.1", 5432, False,
-            False, False, False, False, 6, "django_candidate", "candidate_runtime",
+            False, False, False, False, 10, "django_candidate", "candidate_runtime",
             False, False,
         )
         denied = []

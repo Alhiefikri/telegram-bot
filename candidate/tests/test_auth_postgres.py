@@ -121,7 +121,7 @@ def race(specs):
         queue.close()
 
 
-def exercise_auth_protocol(fixtures):
+def exercise_auth_protocol(fixtures, *, include_http=True):
     from django.conf import settings
     from django.db import connections
     from django.test import override_settings
@@ -174,6 +174,12 @@ def exercise_auth_protocol(fixtures):
 
     original = snapshot()
     try:
+        from tests.test_auth_mail_postgres import exercise_auth_mail_parity
+        auth_oracles = fixtures.get("p25", {}).get("auth_mail")
+        auth_mail_parity = (
+            exercise_auth_mail_parity(service, admin, cipher, auth_oracles)
+            if auth_oracles is not None else "P25 source parity runs only with the P25 source fixture"
+        )
         # PHP raw and sha384-v1 hashes authenticate the same existing Customer.
         principals = []
         for scheme in ("raw", "sha384-v1"):
@@ -335,8 +341,10 @@ def exercise_auth_protocol(fixtures):
         assert enrolled.customer_id == magic_proof.customer_id and enrolled.auth_version == magic_proof.auth_version + 1
         assert service.login(email, password, browser).customer_id == magic_proof.customer_id
 
-        mail_faults = exercise_mail_faults(service, admin, mail, cipher, browser)
-        http = exercise_http(data, admin, mail, service, claimed_owner)
+        mail_faults = exercise_mail_faults(service, admin, mail, cipher, browser,
+                                           actor_id=int(fixtures["auth"]["admin"]["id"]))
+        http = exercise_http(data, admin, mail, service, claimed_owner) if include_http else {
+            "auth_http": "not part of P25; storefront owns the current account routes"}
         assert snapshot() == original, "Authentication changed money/stock/history"
         return {"password_compatibility": "PHP raw and sha384-v1 same-Customer; raw rehashed only after proof",
                 "shared_challenge": "one verification winner; purpose/expiry/replay denied",
@@ -346,6 +354,7 @@ def exercise_auth_protocol(fixtures):
                 "telegram": "private two-sided proof, separate browser consume, canonical conflict and replay denial",
                 "guest_claim": "one claimant, original Recovery Key retained, no admin audit actor",
                 "mail": "encrypted existing ledger, actual disposable SMTP ACK, terminal plaintext erased",
+                "auth_mail_presentation": auth_mail_parity,
                 "mail_recovery": mail_faults,
                 "financial_history": "unchanged exact snapshot", **http}
     finally:
@@ -353,60 +362,125 @@ def exercise_auth_protocol(fixtures):
         connections.close_all()
 
 
-def exercise_mail_faults(service, admin, mail, cipher, browser):
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event
-    from lhie_candidate.auth.mail import LocalMailSink, MailWork
+def exercise_mail_faults(service, admin, mail, cipher, browser, *, actor_id):
+    from datetime import timedelta
+    from lhie_candidate.auth.mail import MailWork
     from lhie_candidate.auth.types import AuthError, legacy_now
-    from django.db import connections
-    entered, release = Event(), Event()
+
     base = legacy_now()
-    email = "p19-mail-lease@example.invalid"
+    email = "p19-mail-unknown@example.invalid"
     service.request_magic(email, replace(browser, ip="127.0.9.19"))
     work_id, capability = mail(email)
+    attempts = []
 
-    class DelayedSink:
-        def send(self, email, purpose, token):
-            assert token == capability
-            entered.set()
-            assert release.wait(timeout=15)
-            LocalMailSink().send(email, purpose, token)
-
-    class UnavailableSink:
-        def send(self, email, purpose, token):
-            assert token == capability
+    class UnknownSink:
+        def send(self, recipient, purpose, token):
+            assert recipient == email and token == capability
+            attempts.append(token)
             raise TimeoutError("private SMTP diagnostic")
 
-    def delayed():
-        try:
-            return MailWork(cipher, app_key=service.app_key, clock=lambda: base,
-                            transport=DelayedSink()).deliver(work_id)
-        finally:
-            connections.close_all()
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(delayed)
-        try:
-            assert entered.wait(timeout=10)
-            newer = MailWork(cipher, app_key=service.app_key, clock=lambda: base + timedelta(seconds=121),
-                             transport=UnavailableSink())
-            try:
-                newer.deliver(work_id)
-            except AuthError:
-                pass
-            else:
-                raise AssertionError("Expected SMTP failure")
-        finally:
-            release.set()
-        assert future.result(timeout=10)
+    ambiguous = MailWork(cipher, app_key=service.app_key, clock=lambda: base,
+                         transport=UnknownSink())
+    try:
+        ambiguous.deliver(work_id)
+    except AuthError:
+        pass
+    else:
+        raise AssertionError("Expected ambiguous SMTP failure")
     assert admin.execute("SELECT status,attempts,payload IS NOT NULL,last_error_code FROM public.customer_auth_mail_works WHERE id=%s",
-                         (work_id,)).fetchone() == ("pending", 2, True, "mail_delivery_failed")
-    # A stale successful ACK cannot erase the newer attempt's durable retry.
-    recovered = MailWork(cipher, app_key=service.app_key, clock=lambda: base + timedelta(seconds=242))
-    recovered.recover(limit=100)
-    assert admin.execute("SELECT status,attempts,payload FROM public.customer_auth_mail_works WHERE id=%s",
-                         (work_id,)).fetchone() == ("sent", 3, None)
-    return "lost wakeup recovery; same capability retried; stale successful sender fenced"
+                         (work_id,)).fetchone() == ("unknown", 1, True, "mail_delivery_unknown")
+    assert ambiguous.recover(limit=100) == 0
+    assert attempts == [capability]
+    from lhie_candidate.admin.reviews import MailDeliveryReviewOperations, MailDeliveryReviewReads
+    from lhie_candidate.checkout.errors import CheckoutError
+    detail = MailDeliveryReviewReads().show("auth", work_id)
+    assert detail is not None and detail["can_retry"]
+    assert capability not in repr(detail) and email not in repr(detail)
+    review = MailDeliveryReviewOperations()
+    try:
+        review.resend("auth", work_id, confirm_duplicate_risk=False, actor_id=actor_id)
+    except CheckoutError:
+        pass
+    else:
+        raise AssertionError("Auth mail resend did not require duplicate-risk acknowledgement")
+    review.resend("auth", work_id, confirm_duplicate_risk=True, actor_id=actor_id)
+    assert admin.execute("SELECT status,attempts,payload IS NOT NULL FROM public.customer_auth_mail_works WHERE id=%s",
+                         (work_id,)).fetchone() == ("pending", 1, True)
+    assert attempts == [capability]
+    admin.execute("UPDATE public.customer_auth_mail_works SET status='cancelled',payload=NULL WHERE id=%s", (work_id,))
+    import smtplib
+    rejected_email = "p19-mail-rejected@example.invalid"
+    service.request_magic(rejected_email, replace(browser, ip="127.0.9.22"))
+    rejected_id, _ = mail(rejected_email)
+
+    class RejectedSink:
+        def send(self, *args):
+            raise smtplib.SMTPRecipientsRefused({rejected_email: (550, b"recipient rejected")})
+
+    try:
+        MailWork(cipher, app_key=service.app_key, clock=lambda: base,
+                 transport=RejectedSink()).deliver(rejected_id)
+    except AuthError:
+        pass
+    else:
+        raise AssertionError("Expected explicit SMTP rejection")
+    assert admin.execute("SELECT status,attempts,last_error_code,payload IS NOT NULL FROM public.customer_auth_mail_works WHERE id=%s",
+                         (rejected_id,)).fetchone() == ("pending", 1, "mail_delivery_failed", True)
+
+    crashed_email = "p19-mail-crash@example.invalid"
+    service.request_magic(crashed_email, replace(browser, ip="127.0.9.20"))
+    crashed_id, _ = mail(crashed_email)
+    admin.execute("""UPDATE public.customer_auth_mail_works SET status='sending',
+        next_attempt_at=%s WHERE id=%s""", (base - timedelta(seconds=1), crashed_id))
+    delivered = []
+
+    class MustNotRetry:
+        def send(self, *args):
+            delivered.append(args)
+
+    recovering = MailWork(cipher, app_key=service.app_key, clock=lambda: base,
+                          transport=MustNotRetry())
+    assert recovering.recover(limit=100) == 0
+    assert delivered == []
+    assert admin.execute("SELECT status,last_error_code,payload IS NOT NULL FROM public.customer_auth_mail_works WHERE id=%s",
+                         (crashed_id,)).fetchone() == ("unknown", "mail_delivery_unknown", True)
+    crash_link_id = admin.execute("SELECT login_link_id FROM public.customer_auth_mail_works WHERE id=%s",
+                                  (crashed_id,)).fetchone()[0]
+    admin.execute("UPDATE public.customer_login_links SET used_at=%s WHERE id=%s", (base, crash_link_id))
+    try:
+        review.resend("auth", crashed_id, confirm_duplicate_risk=True, actor_id=actor_id)
+    except CheckoutError:
+        pass
+    else:
+        raise AssertionError("Consumed auth grant was eligible for resend")
+    try:
+        review.mark_sent("auth", crashed_id, evidence_reference="", affirmative_evidence=False,
+                         actor_id=actor_id)
+    except CheckoutError:
+        pass
+    else:
+        raise AssertionError("Auth mail could be marked sent without affirmative evidence")
+    review.mark_sent("auth", crashed_id, evidence_reference="smtp-proof:auth-01",
+                     affirmative_evidence=True, actor_id=actor_id)
+    assert admin.execute("SELECT status,payload FROM public.customer_auth_mail_works WHERE id=%s",
+                         (crashed_id,)).fetchone() == ("sent", None)
+
+    expired_email = "p19-mail-expired@example.invalid"
+    service.request_magic(expired_email, replace(browser, ip="127.0.9.21"))
+    expired_id, _ = mail(expired_email)
+    link_id = admin.execute("SELECT login_link_id FROM public.customer_auth_mail_works WHERE id=%s",
+                            (expired_id,)).fetchone()[0]
+    admin.execute("""UPDATE public.customer_auth_mail_works SET status='unknown',last_error_code='mail_delivery_unknown',
+        expires_at=%s WHERE id=%s""", (base - timedelta(seconds=1), expired_id))
+    admin.execute("UPDATE public.customer_login_links SET expires_at=%s WHERE id=%s",
+                  (base - timedelta(seconds=1), link_id))
+    try:
+        review.resend("auth", expired_id, confirm_duplicate_risk=True, actor_id=actor_id)
+    except CheckoutError:
+        pass
+    else:
+        raise AssertionError("Expired auth grant was eligible for resend")
+    return "ambiguous SMTP and expired sending lease remain encrypted for manual review; recovery never resends"
 
 
 def exercise_http(data, admin, mail, service, claimed_owner):

@@ -34,7 +34,7 @@ _NON_RETRYABLE = frozenset({
     'receipt_txt_credentials_missing', 'receipt_txt_render_failed',
 })
 _FAILURE_CODES = _NON_RETRYABLE | frozenset({
-    'telegram_delivery_failed', 'telegram_render_failed',
+    'mail_delivery_failed', 'telegram_delivery_failed', 'telegram_render_failed',
     'telegram_response_missing_message_id',
 })
 
@@ -100,7 +100,7 @@ class ReceiptProtocol:
     def materialize(self, order_id, chat_id, locale, units, *, text_fallback=False, render_failed=False,
                     fallback_from=None, product_count=0, account_count=0,
                     credential_layout_version='fields-v1', caption_length_bucket='0-1024',
-                    continuation_length_bucket='0-1024'):
+                    continuation_length_bucket='0-1024', resend_of=None):
         """Create a deterministic group, or return the ready row of existing history.
 
         Caller must lock and reauthorize the order in the surrounding atomic
@@ -131,7 +131,21 @@ class ReceiptProtocol:
         order = self.db.one('SELECT id, telegram_receipt_sent_at FROM public.orders WHERE id = %s FOR UPDATE', (order_id,))
         if order is None:
             raise ValueError('Receipt order does not exist')
-        if fallback_from is not None:
+        if resend_of is not None:
+            if fallback_from is not None:
+                raise ValueError('Explicit resend cannot be an automatic fallback')
+            original = self.db.one('''SELECT * FROM public.telegram_outbound_effects
+                WHERE id=%s AND effect_type=%s AND source_type='App\\Models\\Order'
+                  AND source_id=%s AND telegram_chat_id=%s FOR UPDATE''',
+                (str(resend_of), EFFECT_TYPE, order_id, chat_id))
+            if original is None or original['state'] not in ('unknown', 'manual_review'):
+                return None
+            version = 2
+            while self.db.one('SELECT id FROM public.telegram_outbound_effects WHERE effect_group_key=%s LIMIT 1',
+                              (f'{group}:resend:v{version}',)):
+                version += 1
+            group = f'{group}:resend:v{version}'
+        elif fallback_from is not None:
             predecessor = self.db.one('''SELECT * FROM public.telegram_outbound_effects
                 WHERE id = %s AND effect_type = %s AND source_id = %s FOR UPDATE''',
                 (fallback_from, EFFECT_TYPE, order_id))
@@ -139,7 +153,7 @@ class ReceiptProtocol:
                     or predecessor['sequence'] != 1 or predecessor['telegram_method'] != 'sendPhoto'
                     or predecessor['template_version'] != PHOTO_TEMPLATE):
                 return None
-            group += ':text-fallback'
+            group = predecessor['effect_group_key'] + ':text-fallback'
             existing = self.db.one('SELECT id FROM public.telegram_outbound_effects WHERE effect_group_key = %s LIMIT 1', (group,))
             if existing:
                 return self.next_receipt_effect(group)
@@ -171,6 +185,9 @@ class ReceiptProtocol:
                                 ('text_document' if text_fallback else 'photo_document') if any(item[0] == 'sendDocument' for item in prepared) else
                                 'text_fallback' if text_fallback else 'photo_caption'),
             }
+            if resend_of is not None:
+                metadata.update(explicit_resend=True, duplicate_risk_acknowledged=True,
+                                supersedes_effect_id=str(resend_of))
             if not render_failed:
                 metadata.update({'contains_credentials': contains_credentials,
                                  'receipt_layout_version': 'v2', 'receipt_actions_version': 'v1',
@@ -189,7 +206,9 @@ class ReceiptProtocol:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'customer', %s, %s, %s, %s,
                         %s, %s, 0, %s, %s, %s, %s, %s::json, %s, %s)
                 RETURNING *
-            ''', (str(uuid.uuid4()), f'{group}:unit:{sequence}', group, fallback_from if index == 0 else None, sequence, EFFECT_TYPE,
+            ''', (str(uuid.uuid4()), f'{group}:unit:{sequence}', group,
+                  str(resend_of or fallback_from) if index == 0 and (resend_of or fallback_from) else None,
+                  sequence, EFFECT_TYPE,
                   'App\\Models\\Order', order_id, chat_id, QUEUE, method, locale, template,
                   'failed' if render_failed else 'pending', None if render_failed else now,
                   now if render_failed else None, 'receipt_render_changed' if render_failed else None,
@@ -202,6 +221,11 @@ class ReceiptProtocol:
     def _rows(self, group_key):
         return self.db.rows('''SELECT * FROM public.telegram_outbound_effects
             WHERE effect_type = %s AND effect_group_key = %s ORDER BY sequence''', (EFFECT_TYPE, group_key))
+
+    def is_terminal_failure(self, row):
+        return (row['effect_type'] in self.family_limits and row['state'] == 'failed'
+                and (row.get('last_error_code') in self.terminal_codes
+                     or row['attempts'] >= self.family_limits[row['effect_type']]))
 
     def _ready(self, row, at):
         if (row['effect_type'] not in self.family_limits or row['state'] not in ('pending', 'failed')
@@ -330,23 +354,99 @@ class ReceiptProtocol:
                 last_error = 'Telegram delivery outcome is unknown and requires review.',
                 updated_at = %s WHERE id = %s RETURNING *''', (now, now, effect_id))
 
-    def recover_expired_leases(self, limit=100, *, chats=None):
+    def request_manual_retry(self, effect_id):
+        """An authorized family may reopen a *definitely failed* delivery."""
+        self._require_postgres()
+        with transaction.atomic(using=self.using):
+            return self.db.one('''UPDATE public.telegram_outbound_effects SET state='pending',
+                attempts=0,next_attempt_at=%s,lease_until=NULL,claim_token=NULL,
+                failed_at=NULL,last_error_code=NULL,last_error=NULL,updated_at=%s
+                WHERE id=%s AND effect_type=ANY(%s) AND state='failed' RETURNING *''',
+                (_now(), _now(), str(effect_id), list(self.effect_types)))
+
+    def resolve_sent(self, effect_id, message_id, actor_id):
+        """Operator-confirmed ACK; it cannot race a worker's live claim."""
+        self._require_postgres()
+        if isinstance(message_id, bool) or not re.fullmatch(r'0*[1-9][0-9]{0,18}', str(message_id)):
+            raise ValueError('Invalid Telegram message identifier')
+        with transaction.atomic(using=self.using):
+            row = self.db.one('''SELECT * FROM public.telegram_outbound_effects
+                WHERE id=%s AND effect_type=ANY(%s) FOR UPDATE''',
+                (str(effect_id), list(self.effect_types)))
+            if row is None or row['state'] not in ('unknown', 'manual_review'):
+                return None
+            now = _now()
+            metadata = row['outcome_metadata'] or {}
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            metadata = dict(metadata)
+            metadata.update(resolution='operator_marked_sent', resolution_actor_id=int(actor_id),
+                            resolution_at=now.isoformat())
+            return self.db.one('''UPDATE public.telegram_outbound_effects SET state='sent',
+                telegram_message_id=%s,sent_at=%s,unknown_at=NULL,failed_at=NULL,
+                manual_review_at=NULL,next_attempt_at=NULL,lease_until=NULL,claim_token=NULL,
+                last_error_code=NULL,last_error=NULL,outcome_metadata=%s::json,updated_at=%s
+                WHERE id=%s RETURNING *''',
+                (str(message_id), now, json.dumps(metadata), now, str(effect_id)))
+
+    def resend_review(self, effect_id, *, duplicate_risk_acknowledged):
+        """Create a new auditable non-credential attempt, retaining the unknown."""
+        self._require_postgres()
+        if duplicate_risk_acknowledged is not True:
+            raise ValueError('Duplicate risk must be acknowledged')
+        with transaction.atomic(using=self.using):
+            row = self.db.one('''SELECT * FROM public.telegram_outbound_effects
+                WHERE id=%s AND effect_type=ANY(%s) FOR UPDATE''',
+                (str(effect_id), list(self.effect_types)))
+            if row is None or row['state'] not in ('unknown', 'manual_review') or row['effect_type'] == EFFECT_TYPE:
+                return None
+            group = row['effect_group_key'] or row['effect_key']
+            self.db.one('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', ('effect-resend:' + group,))
+            latest = self.db.one('''SELECT max(sequence) AS sequence FROM public.telegram_outbound_effects
+                WHERE effect_group_key=%s''', (group,))
+            sequence = max(int(row['sequence'] or 1), int(latest['sequence'] or 0)) + 1
+            metadata = row['outcome_metadata'] or {}
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            # Family presentation snapshots survive an explicit resend. Pickup
+            # and prior-resolution observations do not describe the new attempt.
+            metadata = {key: value for key, value in metadata.items()
+                        if key not in ('first_pickup_at', 'telegram_response', 'resolution',
+                                       'resolution_actor_id', 'resolution_at', 'reason',
+                                       'mail_attempt_snapshot')}
+            metadata.update(duplicate_risk_acknowledged=True, supersedes_effect_id=str(row['id']),
+                            explicit_resend=True)
+            now = _now()
+            return self.db.one('''INSERT INTO public.telegram_outbound_effects
+                (id,effect_key,effect_group_key,supersedes_effect_id,sequence,effect_type,
+                 source_type,source_id,target_type,telegram_chat_id,queue,telegram_method,
+                 locale,template_version,state,attempts,next_attempt_at,outcome_metadata,created_at,updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',0,%s,%s::json,%s,%s)
+                RETURNING *''',
+                (str(uuid.uuid4()), f'{group}:resend:v{sequence}', group, str(row['id']), sequence,
+                 row['effect_type'], row['source_type'], row['source_id'], row['target_type'],
+                 row['telegram_chat_id'], row['queue'], row['telegram_method'], row['locale'],
+                 row['template_version'], now, json.dumps(metadata), now, now))
+
+    def recover_expired_leases(self, limit=100, *, chats=None, queue=None):
         self._require_postgres()
         limit = max(1, min(1000, int(limit)))
         with transaction.atomic(using=self.using):
             now = _now()
             rows = self.db.rows('''WITH expired AS (
-                SELECT id FROM public.telegram_outbound_effects WHERE effect_type = ANY(%s) AND state = 'sending'
-                  AND lease_until IS NOT NULL AND lease_until <= %s
-                  AND (%s::text[] IS NULL OR telegram_chat_id=ANY(%s))
-                  ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED
+                SELECT e.id FROM public.telegram_outbound_effects AS e
+                WHERE e.effect_type = ANY(%s) AND e.state = 'sending'
+                  AND e.lease_until IS NOT NULL AND e.lease_until <= %s
+                  AND (%s::text[] IS NULL OR e.telegram_chat_id=ANY(%s))
+                  AND (%s::text IS NULL OR e.queue=%s)
+                  ORDER BY e.id LIMIT %s FOR UPDATE SKIP LOCKED
                 ) UPDATE public.telegram_outbound_effects AS effects SET state = 'unknown', lease_until = NULL,
                   claim_token = NULL, next_attempt_at = NULL, unknown_at = %s, manual_review_at = NULL,
                   last_error_code = 'lease_expired',
                   last_error = 'Worker lease expired before Telegram delivery was finalized.',
                   outcome_metadata = (COALESCE(effects.outcome_metadata::jsonb, '{}'::jsonb) || '{"reason":"worker_lease_expired"}'::jsonb)::json,
                   updated_at = %s FROM expired WHERE effects.id = expired.id RETURNING effects.id''',
-                (list(self.effect_types), now, chats, chats, limit, now, now))
+                (list(self.effect_types), now, chats, chats, queue, queue, limit, now, now))
             return len(rows)
 
     def completed_receipts_needing_projection(self, limit):
@@ -365,13 +465,14 @@ class ReceiptProtocol:
                     AND later.sequence>e.sequence AND later.state='sent')
             ORDER BY e.id LIMIT %s''', (EFFECT_TYPE, 'App\\Models\\Order', LEGACY_INVOICE_TEMPLATE, limit))
 
-    def ready_effects(self, limit, *, chats=None):
+    def ready_effects(self, limit, *, chats=None, queue=None):
         """Return only due units whose ordered predecessors are resolved."""
         self._require_postgres()
         return self.db.rows('''SELECT e.id FROM public.telegram_outbound_effects e
             WHERE e.effect_type=ANY(%s) AND e.state IN ('pending','failed')
               AND e.attempts < (%s::jsonb ->> e.effect_type)::int
               AND (%s::text[] IS NULL OR e.telegram_chat_id=ANY(%s))
+              AND (%s::text IS NULL OR e.queue=%s)
               AND (e.effect_type NOT IN ('usdt.refund_receipt','usdt.top_up_receipt') OR NOT EXISTS (
                   SELECT 1 FROM public.customer_usdt_funding_pauses WHERE scope='delivery'))
               AND (e.next_attempt_at IS NULL OR e.next_attempt_at<=%s)
@@ -382,5 +483,6 @@ class ReceiptProtocol:
                   WHERE p.effect_group_key=e.effect_group_key AND p.sequence<e.sequence
                     AND p.state <> 'sent' AND NOT COALESCE((p.sequence=1 AND p.state IN ('failed','unknown')
                       AND p.telegram_method='sendPhoto' AND p.template_version=%s),false)))
-            ORDER BY e.id LIMIT %s''', (list(self.effect_types), json.dumps(self.family_limits), chats, chats, _now(), list(self.terminal_codes),
-                EFFECT_TYPE, PHOTO_TEMPLATE, EFFECT_TYPE, LEGACY_INVOICE_TEMPLATE, limit))
+            ORDER BY e.id LIMIT %s''', (list(self.effect_types), json.dumps(self.family_limits), chats, chats,
+                queue, queue, _now(), list(self.terminal_codes), EFFECT_TYPE, PHOTO_TEMPLATE, EFFECT_TYPE,
+                LEGACY_INVOICE_TEMPLATE, limit))

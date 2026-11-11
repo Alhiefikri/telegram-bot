@@ -84,9 +84,9 @@ short-lived TXT confirmation-cache migration are not qualified by this slice.
 P10 [isolated workers](../migration/python-django/p10/README.md) owns
 `candidate/lhie_candidate/workers/`, `candidate/stack.py` and
 `candidate/workers.py` under [ADR-0032](../../adr/0032-python-bounded-worker-supervision.md).
-It adds a standard-library bounded supervisor with one process each for
-interaction, payment and receipt, one `candidate_runtime` connection per worker,
-ID-only shared wakeups, bounded PostgreSQL sweeps and bounded restart/drain.
+It adds a standard-library bounded supervisor, originally with one process each
+for interaction, payment and receipt, one `candidate_runtime` connection per
+worker, ID-only shared wakeups, bounded PostgreSQL sweeps and bounded restart/drain.
 `interaction` handles non-payment navigation; checkout and payment-check
 callbacks use ID-only wakeups and the same durable navigation inbox on the
 `payment` worker. A durable processing claim preserves same-chat order while the
@@ -99,9 +99,10 @@ P09 ordered effects directly from PostgreSQL and never resends an unknown.
 `tools/migration_harness/smoke_workers.py` runs the mixed-load and
 Redis-stopped recovery drills inside P01 isolation and writes
 `.local/migration-p10/verification.json`. It reuses P07/P08/P09 fixtures and
-evidence; a fake slow sandbox is harness-only. No notification/broadcast/
-supplier family is ported or allowed onto these workers; full scheduler,
-retention, metrics and Python-only operations remain P26.
+evidence; a fake slow sandbox is harness-only. P25 extends this topology with
+isolated notification/bulk/mail/auth-mail consumers, never placing those families
+on interaction/payment/receipt. Full scheduler, retention, metrics and
+Python-only operations remain P26.
 
 P12 [Order lifecycle and retained refunds](../migration/python-django/p05/README.md#p12-shared-order-lifecycle-and-retained-refunds-694)
 owns `checkout/lifecycle.py`, `fulfillment.py` and `refunds.py`. Checkout and the
@@ -206,6 +207,19 @@ consumption/registration/link/claim races and unchanged financial/stock history.
 The runbook states the H2 reauthentication policy, native-form same-origin CSRF
 exception, provider defaults and HD/live-qualification limits. Full storefront/
 dashboard presentation and automatic notification operations retain P21/P22/P25/P26.
+
+P25 [notification delivery](../migration/python-django/p25/README.md) owns
+`candidate/lhie_candidate/notifications/`: durable lifecycle/admin/balance
+notices, confirmed Broadcast publication, stock/price audiences and channel
+posts, safe Sales Proof publication, waitlist consent/restock, and multipart
+credential/guest mail. It reuses the existing effect and mail authorities,
+encrypted immutable snapshots and receipt protocol review seams; it introduces
+no financial writer or second outbox. The admitted supervisor has seven isolated
+queues, nine processes and eight runtime DB connections (role limit ten).
+`smoke_checkout.py --notifications-browser` exercises real PostgreSQL, the fake
+Telegram relay, loopback SMTP, browser forms and slow-mail/notification isolation;
+its single source-bound manifest is `.local/migration-p25/verification.json`.
+Live delivery, actual-history and production cutover remain separate gates.
 
 P20 [Customer API v1](../migration/python-django/p05/README.md#p20-customer-api-v1-702)
 owns `candidate/lhie_candidate/customer_api/`: PHP-compatible bearer keys,

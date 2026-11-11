@@ -9,7 +9,6 @@ PRICE = 'price_change.notification_recipient'
 PROOF = 'sales_proof.post'
 MANUAL = 'admin.manual_payment_proof'
 ADJUSTMENT = 'balance.adjustment_notice'
-LIMITS = {BROADCAST: 5, STOCK: 5, PRICE: 5, PROOF: 3, MANUAL: 3, ADJUSTMENT: 3}
 TERMINAL_CODES = frozenset({'notification_not_eligible', 'notification_render_invalid',
                            'legacy_notification_terminal'})
 

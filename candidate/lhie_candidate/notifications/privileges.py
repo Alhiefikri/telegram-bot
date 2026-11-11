@@ -1,0 +1,42 @@
+"""Exact write columns admitted by explicit disposable P25 provisioning."""
+
+NOTIFICATION_INSERT = {
+    'order_notification_events': set('attempts created_at event_type next_attempt_at order_id recipient_email status updated_at'.split()),
+    'product_price_change_notification_recipients': set('created_at customer_id event_id locale telegram_id updated_at'.split()),
+    'product_waitlist_events': set('available_stock created_at inventory_movement_id product_id status updated_at'.split()),
+    'product_waitlist_notifications': set('created_at product_waitlist_event_id status subscription_id updated_at'.split()),
+    'product_waitlist_subscriptions': set('confirmation_expires_at created_at email email_hash product_id status updated_at'.split()),
+    'sales_proof_posts': set('attempts created_at order_id status updated_at'.split()),
+    'stock_notification_events': set('created_at inventory_movement_id kind updated_at'.split()),
+    'stock_notification_recipients': set('created_at customer_id locale photo_path recipient_type reply_markup stock_notification_event_id telegram_id text updated_at'.split()),
+    'supplier_health_events': set('created_at id message supplier_id'.split()),
+    'supplier_health_reviews': set('active_identities supplier_fulfillment_id'.split()),
+    'supplier_health_states': set('balance_stale_active error_codes error_recovered_at low_active supplier_id'.split()),
+    'telegram_broadcast_recipients': set('broadcast_id created_at customer_id locale telegram_id updated_at'.split()),
+    'telegram_broadcasts': set('broadcast_key created_at message photo_file_id reply_markup source status updated_at'.split()),
+    'telegram_outbound_effects': set('sent_at unknown_at'.split()),
+}
+
+NOTIFICATION_UPDATE = {
+    'inventory_movements': set('stock_notification_sent_at'.split()),
+    'order_notification_events': set('attempts delivery_started_at failed_at last_error next_attempt_at recipient_email sent_at status updated_at'.split()),
+    'orders': set('admin_expired_order_notified_at admin_paid_order_notified_at admin_pending_order_notification_chat_id admin_pending_order_notification_message_id admin_pending_order_notified_at updated_at'.split()),
+    'payments': set('payment_proof_admin_chat_id payment_proof_forwarded_at'.split()),
+    'product_price_change_events': set('recipients_materialized_at store_channel_attempts store_channel_failed_at store_channel_last_error store_channel_message_id store_channel_sent_at updated_at'.split()),
+    'product_price_change_notification_recipients': set('attempts failed_at last_error sent_at updated_at'.split()),
+    'product_waitlist_events': set('materialization_cursor materialized_at skipped_at status updated_at'.split()),
+    'product_waitlist_notifications': set('attempts delivery_started_at failed_at last_error next_attempt_at sent_at status updated_at'.split()),
+    'product_waitlist_subscriptions': set('confirmation_attempts confirmation_delivery_started_at confirmation_expires_at confirmation_last_error confirmation_sent_at confirmed_at email notified_at status unsubscribed_at updated_at'.split()),
+    'sales_proof_posts': set('attempts last_error sent_at status telegram_message_id updated_at'.split()),
+    'stock_notification_events': set('promoted_tier_minimum promoted_tier_price_amount promoted_tier_usdt_price_amount recipients_snapshotted_at tier_promotion_snapshotted_at updated_at'.split()),
+    'stock_notification_recipients': set('attempts failed_at last_error sent_at terminal_failed_at updated_at'.split()),
+    'store_balance_top_ups': set('payment_proof_forwarded_at updated_at'.split()),
+    'supplier_health_reviews': set('active_identities'.split()),
+    'supplier_health_scans': set('fulfillment_cursor supplier_cursor'.split()),
+    'supplier_health_states': set('balance_stale_active error_codes error_recovered_at low_active'.split()),
+    'suppliers': set('low_balance_alerted_at'.split()),
+    'telegram_broadcast_recipients': set('attempts failed_at last_error retry_at sent_at terminal_failed_at updated_at'.split()),
+    'telegram_broadcasts': set('completed_at failed_count pending_count recipient_count recipients_materialized_at sent_count status terminal_failed_count updated_at'.split()),
+    'telegram_outbound_effects': set('sequence supersedes_effect_id telegram_method'.split()),
+    'users': {'updated_at'},
+}

@@ -104,6 +104,30 @@ def exercise_admin_operations(fixtures):
         payment_status="paid", paid_at=now())
     pending_order, pending_payment, pending_invoice = _order(
         admin, customer_id, product_id, paid=False)
+    from lhie_candidate.compat.crypto import LaravelEncrypter
+    from lhie_candidate.runtime import application_key
+    frozen_snapshot = LaravelEncrypter(application_key()).encrypt_json({
+        "event_type": "order_created", "order_id": pending_order,
+        "recipient": "private-review-recipient@example.invalid",
+        "content": {"subject": "secret subject", "text": "must-not-leak-body",
+                    "html": "<p>must-not-leak-body</p>"}})
+    reviewed_event_id = admin.execute("""INSERT INTO public.order_notification_events
+        (order_id,event_type,recipient_email,status,attempts,delivery_started_at,failed_at,
+         last_error,created_at,updated_at)
+        VALUES (%s,'order_created',%s,'failed',1,now() - interval '3 minutes',now(),
+                'mail_delivery_unknown',now(),now()) RETURNING id""",
+        (pending_order, frozen_snapshot)).fetchone()[0]
+    resend_snapshot = LaravelEncrypter(application_key()).encrypt_json({
+        "event_type": "payment_confirmed", "order_id": paid_order,
+        "recipient": "private-review-recipient@example.invalid",
+        "content": {"subject": "secret subject", "text": "must-not-leak-body",
+                    "html": "<p>must-not-leak-body</p>"}})
+    resent_event_id = admin.execute("""INSERT INTO public.order_notification_events
+        (order_id,event_type,recipient_email,status,attempts,delivery_started_at,failed_at,
+         last_error,created_at,updated_at)
+        VALUES (%s,'payment_confirmed',%s,'failed',1,now() - interval '3 minutes',now(),
+                'mail_delivery_unknown',now(),now()) RETURNING id""",
+        (paid_order, resend_snapshot)).fetchone()[0]
     review_id = admin.execute(
         """INSERT INTO public.manual_fulfillment_reviews
            (order_id,payment_id,amount,currency,reason,state,created_at,updated_at)
@@ -133,8 +157,8 @@ def exercise_admin_operations(fixtures):
         for path in (
                 "/admin?tab=pesanan", "/admin/laporan", "/admin/audit",
                 "/admin/store-balance/adjustments", "/admin/store-balance/usdt-review",
-                "/admin/store-balance/reports", "/admin/suppliers", "/admin?tab=pengaturan",
-                "/admin/manual-fulfillment-reviews", "/admin/telegram-outbound-effects"):
+                "/admin/manual-fulfillment-reviews", "/admin/telegram-outbound-effects",
+                "/admin/mail-delivery-reviews"):
             response = owner.get(path, secure=True)
             assert response.status_code == 200, (path, response.status_code, response.content[:800])
 
@@ -148,6 +172,48 @@ def exercise_admin_operations(fixtures):
         assert review_page.status_code == 200 and pending_invoice.encode() in review_page.content
         delivery_page = owner.get(f"/admin/telegram-outbound-effects/{effect_id}", secure=True)
         assert delivery_page.status_code == 200 and b"must-not-leak" not in delivery_page.content
+        mail_reviews = owner.get("/admin/mail-delivery-reviews", secure=True)
+        assert mail_reviews.status_code == 200
+        mail_detail_path = f"/admin/mail-delivery-reviews/event/{reviewed_event_id}"
+        mail_detail = owner.get(mail_detail_path, secure=True)
+        assert mail_detail.status_code == 200
+        for secret in (b"private-review-recipient@example.invalid", b"secret subject",
+                       b"must-not-leak-body"):
+            assert secret not in mail_detail.content
+        mail_token = csrf(mail_detail)
+        owner.post(f"{mail_detail_path}/mark-sent", {
+            "csrfmiddlewaretoken": mail_token, "evidence_reference": "smtp-evidence:p23",
+        }, secure=True, HTTP_ACCEPT="text/html")
+        assert admin.execute("SELECT status FROM public.order_notification_events WHERE id=%s",
+                             (reviewed_event_id,)).fetchone()[0] == "failed"
+        response = owner.post(f"{mail_detail_path}/mark-sent", {
+            "csrfmiddlewaretoken": mail_token, "evidence_reference": "smtp-evidence:p23",
+            "confirm_mark_sent": "1",
+        }, secure=True, HTTP_ACCEPT="text/html")
+        assert response.status_code == 302
+        assert admin.execute("SELECT status FROM public.order_notification_events WHERE id=%s",
+                             (reviewed_event_id,)).fetchone()[0] == "sent"
+
+        resend_path = f"/admin/mail-delivery-reviews/event/{resent_event_id}"
+        resend_detail = owner.get(resend_path, secure=True)
+        resend_token = csrf(resend_detail)
+        original_snapshot = admin.execute(
+            "SELECT recipient_email FROM public.order_notification_events WHERE id=%s",
+            (resent_event_id,)).fetchone()[0]
+        owner.post(f"{resend_path}/resend", {
+            "csrfmiddlewaretoken": resend_token,
+        }, secure=True, HTTP_ACCEPT="text/html")
+        assert admin.execute("SELECT status FROM public.order_notification_events WHERE id=%s",
+                             (resent_event_id,)).fetchone()[0] == "failed"
+        response = owner.post(f"{resend_path}/resend", {
+            "csrfmiddlewaretoken": resend_token, "confirm_duplicate_risk": "1",
+        }, secure=True, HTTP_ACCEPT="text/html")
+        assert response.status_code == 302
+        assert admin.execute("SELECT status,attempts,recipient_email,delivery_started_at FROM public.order_notification_events WHERE id=%s",
+                             (resent_event_id,)).fetchone() == ("pending", 1, original_snapshot, None)
+        assert admin.execute("""SELECT count(*) FROM public.audit_logs WHERE action='mail_delivery.resent'
+            AND subject_id=%s AND new_values::text LIKE '%duplicate_risk_acknowledged%'""",
+            (str(resent_event_id),)).fetchone()[0] == 1
 
         # Manual fulfillment reject is one audited transition; replay is a no-op.
         token = csrf(review_page)

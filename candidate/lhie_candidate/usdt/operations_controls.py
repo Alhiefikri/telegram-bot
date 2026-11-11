@@ -16,6 +16,14 @@ _ALERTS = frozenset(('reorg_pending', 'reorg_loss_unresolved', 'reconciliation_d
     'settlement_backlog', 'outbound_backlog'))
 
 
+def _open_message(severity, summary):
+    return f'[{"KRITIS" if severity == "critical" else "PERINGATAN"}] {summary}'
+
+
+def _resolved_message(summary):
+    return f'[SELESAI] Kondisi pulih: {summary}'
+
+
 class OperationalControls:
     def __init__(self, using='default'):
         self.using, self.db = using, Database(using)
@@ -116,7 +124,7 @@ class OperationalControls:
                 last_seen_at=EXCLUDED.last_seen_at,resolved_at=NULL,updated_at=EXCLUDED.updated_at RETURNING *''',
                 (key, severity, summary.strip(), fingerprint, payload, now, now, now, now))
             effect_key = f'balance-ops-alert:{episode["id"]}:{fingerprint}:{episode["open_count"]}'
-            message = f'USDT operations alert: {key}. Review the operational evidence.'
+            message = _open_message(severity, summary.strip())
             self.db.execute('''INSERT INTO public.telegram_outbound_effects
                 (id,effect_key,effect_group_key,sequence,effect_type,source_type,source_id,target_type,
                  telegram_chat_id,queue,telegram_method,locale,template_version,state,attempts,
@@ -149,7 +157,7 @@ class OperationalControls:
             if episode is None:
                 return False
             effect_key = f'balance-ops-alert:{episode["id"]}:resolved:{episode["open_count"]}'
-            message = f'USDT operations alert resolved: {key}.'
+            message = _resolved_message(episode['summary'])
             self.db.execute('''INSERT INTO public.telegram_outbound_effects
                 (id,effect_key,effect_group_key,sequence,effect_type,source_type,source_id,target_type,
                  telegram_chat_id,queue,telegram_method,locale,template_version,state,attempts,

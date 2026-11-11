@@ -1,4 +1,4 @@
-"""Run one bounded queue worker, or the three initial worker processes."""
+"""Run one bounded queue worker, or supervise every admitted isolated consumer."""
 
 import argparse
 import signal

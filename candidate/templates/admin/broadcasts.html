@@ -1,0 +1,35 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero"><div><p class="admin-eyebrow">Telegram</p><h2>Broadcast</h2><p class="admin-help">Tinjau pesan sebelum memasukkan broadcast ke antrean. Hanya penerima uji yang diizinkan menerima pesan.</p></div></section>
+{% if error %}<div class="admin-flash admin-flash-danger" role="alert">{{ error }}</div>{% endif %}
+{% if not enabled %}<div class="admin-flash" role="status">Broadcast dinonaktifkan. Belum ada penerima uji yang diizinkan.</div>{% endif %}
+{% if draft %}
+<section class="admin-card">
+  <h3>Konfirmasi broadcast</h3>
+  <p class="admin-help">Isi HTML ditampilkan sebagai teks di pratinjau ini. Pesan asli tidak diubah saat dikirim.</p>
+  <div class="admin-field"><label for="broadcast-preview">Pesan asli</label><textarea id="broadcast-preview" rows="8" readonly>{{ draft.message }}</textarea></div>
+  {% if draft.photo_file_id %}<p>Foto Telegram: <code>{{ draft.photo_file_id }}</code></p>{% endif %}
+  {% if draft.product_name %}<p>Produk pada tombol pembelian: {{ draft.product_name }}</p>{% endif %}
+  <form method="post" action="/admin/broadcast/publish" class="admin-form">
+    {% csrf_token %}<input type="hidden" name="confirmation" value="{{ draft.key }}">
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit">Konfirmasi kirim broadcast</button><a class="admin-button" href="/admin/broadcast/">Batal</a></div>
+  </form>
+</section>
+{% else %}
+<form method="post" action="/admin/broadcast/" class="admin-form">
+  {% csrf_token %}
+  <section class="admin-card">
+    <div class="admin-field"><label for="broadcast-message">Pesan broadcast</label><textarea id="broadcast-message" name="message" rows="8" maxlength="3500" {% if not enabled %}disabled{% endif %}>{{ message }}</textarea><p class="admin-help">Maksimal 3500 karakter. Untuk foto, caption maksimal 1024 karakter. Teks dan HTML yang ditulis dipertahankan. Teks tanpa foto tidak boleh kosong.</p></div>
+    <div class="admin-field"><label for="broadcast-product">Tombol pembelian (opsional)</label><select id="broadcast-product" name="product_id" {% if not enabled %}disabled{% endif %}><option value="">Tanpa tombol produk</option>{% for product in products %}<option value="{{ product.id }}" {% if product.selected %}selected{% endif %}>{{ product.name }}</option>{% endfor %}</select><p class="admin-help">Hanya produk aktif yang tersedia untuk dibeli saat ditinjau dan dikonfirmasi.</p></div>
+    <div class="admin-field"><label for="broadcast-photo-file-id">ID foto Telegram (opsional)</label><input id="broadcast-photo-file-id" name="photo_file_id" type="text" maxlength="255" value="{{ photo_file_id }}" autocomplete="off" {% if not enabled %}disabled{% endif %}><p class="admin-help">Gunakan file_id foto Telegram. Pesan menjadi caption (maksimal 1024 karakter); kosongkan pesan untuk foto tanpa caption.</p></div>
+    <div class="admin-form-actions"><button class="admin-button admin-button-primary" type="submit" {% if not enabled %}disabled{% endif %}>Tinjau broadcast</button></div>
+  </section>
+</form>
+{% endif %}
+<section class="admin-card">
+  <h3>Progres broadcast</h3>
+  <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Progres broadcast, geser untuk melihat semua kolom"><table class="admin-table admin-broadcast-table"><thead><tr><th scope="col">Broadcast</th><th scope="col">Status</th><th scope="col">Penerima</th><th scope="col">Terkirim</th><th scope="col">Gagal</th><th scope="col">Tertunda</th></tr></thead><tbody>
+  {% for row in broadcasts %}<tr><td>#{{ row.id }}</td><td>{{ row.status }}</td><td>{{ row.recipient_count }}</td><td>{{ row.sent_count }}</td><td>{{ row.failed_count }}</td><td>{{ row.pending_count }}</td></tr>{% empty %}<tr><td colspan="6">Belum ada broadcast.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

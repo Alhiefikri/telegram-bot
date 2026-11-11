@@ -22,7 +22,7 @@ RESTART_WINDOW_SECONDS = 60
 
 # One HTTP process, one supervisor parent and one process per queue. Each
 # process uses one thread and at most one candidate_runtime connection at a
-# time; the role ceiling is four. The supervisor never opens a connection.
+# time. The supervisor never opens a connection.
 HTTP_PROCESSES = 1
 SUPERVISOR_PROCESSES = 1
 DB_CONNECTIONS_PER_WORKER = 1
@@ -100,6 +100,26 @@ TOPOLOGY = {
         sweep_seconds=5,
         sweep_limit=50,
         max_attempts=3,
+    ),
+    "notifications": QueueSpec(
+        name="notifications", wakeup_queue="candidate:notifications",
+        kinds=("notification.effect",), batch=25, sweep_seconds=5,
+        sweep_limit=25, max_attempts=3,
+    ),
+    "bulk": QueueSpec(
+        name="bulk", wakeup_queue="candidate:bulk",
+        kinds=("bulk.effect",), batch=25, sweep_seconds=5,
+        sweep_limit=25, max_attempts=5,
+    ),
+    "mail": QueueSpec(
+        name="mail", wakeup_queue="candidate:mail",
+        kinds=("credential.mail", "waitlist.mail", "guest.mail"), batch=10, sweep_seconds=5,
+        sweep_limit=10, max_attempts=5,
+    ),
+    "auth-mail": QueueSpec(
+        name="auth-mail", wakeup_queue="candidate:auth-mail",
+        kinds=("auth.mail",), batch=10, sweep_seconds=2,
+        sweep_limit=10, max_attempts=5,
     ),
 }
 

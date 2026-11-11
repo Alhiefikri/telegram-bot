@@ -20,8 +20,10 @@ def cli(*args):
     # attested Testing Bot config and retained candidate volumes untouched.
     entry = ("import sys; from pathlib import Path; import harness; "
              "harness.STATE=Path(sys.argv[1]); harness.PREFIX=sys.argv[2]; harness.IMAGE=sys.argv[3]; "
-             "sys.argv=[harness.__file__,*sys.argv[4:]]; harness.main()")
-    result = subprocess.run([sys.executable,'-c',entry,str(harness.STATE),harness.PREFIX,harness.IMAGE,*args],
+             "harness.BOUNDARY_SOURCE=Path(sys.argv[4]) if sys.argv[4] else None; "
+             "sys.argv=[harness.__file__,*sys.argv[5:]]; harness.main()")
+    result = subprocess.run([sys.executable,'-c',entry,str(harness.STATE),harness.PREFIX,harness.IMAGE,
+                             str(harness.BOUNDARY_SOURCE or ''),*args],
         cwd=ROOT / 'tools/migration_harness',capture_output=True,text=True,timeout=180)
     if result.returncode:
         raise RuntimeError('P07 disposable lifecycle command failed: ' + ' '.join(args))
@@ -29,24 +31,26 @@ def cli(*args):
 
 
 def main():
-    notifications = sys.argv[1:] == ['--notifications']
+    notifications = sys.argv[1:] in (['--notifications'], ['--notifications-browser'])
     receipt = sys.argv[1:] == ['--receipt'] or notifications
     lifecycle = sys.argv[1:] == ['--lifecycle']
-    browser = sys.argv[1:] == ['--storefront-browser']
+    browser = sys.argv[1:] in (['--storefront-browser'], ['--notifications-browser'])
     storefront = sys.argv[1:] in (['--storefront'], ['--storefront-browser'])
     admin = sys.argv[1:] == ['--admin']
-    auth = sys.argv[1:] == ['--auth'] or storefront or admin
+    auth = sys.argv[1:] == ['--auth'] or storefront or admin or notifications
     supplier = sys.argv[1:] == ['--supplier']
     p16 = sys.argv[1:] == ['--p16']
     p17 = sys.argv[1:] == ['--p17']
     api = sys.argv[1:] == ['--api']
-    if sys.argv[1:] not in ([], ['--notifications'], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api'], ['--admin']):
-        raise ValueError('Usage: smoke_checkout.py [--notifications|--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api|--admin]')
+    if sys.argv[1:] not in ([], ['--notifications'], ['--notifications-browser'], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api'], ['--admin']):
+        raise ValueError('Usage: smoke_checkout.py [--notifications|--notifications-browser|--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api|--admin]')
     os.umask(0o077)
     scope = 'migration-p25' if notifications else 'migration-p22' if admin else 'migration-p21' if storefront else 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
     harness.STATE = ROOT / '.local' / scope / 'lifecycle'
     harness.PREFIX = 'lhie-p25-' if notifications else 'lhie-p22-' if admin else 'lhie-p21-' if storefront else 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
     harness.IMAGE = 'lhie-p19-boundary:local' if auth or api else 'lhie-p09-boundary:local' if receipt or lifecycle or supplier or p16 or p17 else 'lhie-p01-boundary:1'
+    if notifications:
+        harness.BOUNDARY_SOURCE = ROOT / 'tools/migration_harness/boundary.py'
     if not (harness.STATE / 'candidate/config.json').exists():
         cli('init','candidate')
     config = harness.validate(json.loads((harness.STATE / 'candidate/config.json').read_text()))
@@ -60,14 +64,14 @@ def main():
         (output / 'browser-finished').unlink(missing_ok=True)
         (output / 'browser-fixture.json').unlink(missing_ok=True)
     cli('reset','candidate')
-    harness.candidate_admission(config,harness.STATE / 'candidate')
+    harness.candidate_admission(config,harness.STATE / 'candidate', workers=notifications)
     try:
         manifest = cli('start','candidate','--quarantine')
         boundary = container('candidate','boundary')
         database = container('candidate','database')
         php(boundary,'php artisan migrate --force --no-interaction')
         fixture = (ROOT / 'tools/migration_harness/checkout_fixture.php').read_text().removeprefix('<?php')
-        fixtures = json.loads(php(boundary, ('P20_API_SMOKE=1 P16_USDT_SMOKE=1 ' if api else 'P17_USDT_SMOKE=1 ' if p17 else 'P21_STOREFRONT_SMOKE=1 P19_AUTH_SMOKE=1 ' if storefront else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
+        fixtures = json.loads(php(boundary, ('P25_NOTIFICATION_SMOKE=1 ' if notifications else '') + ('P20_API_SMOKE=1 P16_USDT_SMOKE=1 ' if api else 'P17_USDT_SMOKE=1 ' if p17 else 'P21_STOREFRONT_SMOKE=1 P19_AUTH_SMOKE=1 ' if storefront else 'P19_AUTH_SMOKE=1 ' if auth else 'P16_USDT_SMOKE=1 ' if p16 else '') + 'php -r ' + shlex.quote(fixture)))
         if receipt:
             customer_id = int(fixtures['python']['customer_id'])
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
@@ -75,12 +79,14 @@ def main():
         schema = '\n'.join((ROOT / 'candidate/lhie_candidate/navigation' / name).read_text()
             for name in ('schema.sql','ingress_schema.sql','assets_schema.sql','grants.sql'))
         schema += '\n' + (ROOT / 'candidate/lhie_candidate/checkout/grants.sql').read_text()
-        if lifecycle or supplier or p16 or p17 or api or storefront:
+        if lifecycle or supplier or p16 or p17 or api or storefront or notifications:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/payments/grants.sql').read_text()
         if receipt or lifecycle or supplier or p16 or p17 or api or storefront:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/receipt/grants.sql').read_text()
         if notifications:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/notifications/grants.sql').read_text()
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/admin/grants.sql').read_text()
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/navigation/bot_grants.sql').read_text()
         if p16 or p17:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/grants.sql').read_text()
         if p17:
@@ -88,7 +94,7 @@ def main():
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/usdt/operations_grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/adjustments/grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/auth/schema.sql').read_text()
-        if supplier or api or storefront:
+        if supplier or api or storefront or notifications:
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/grants.sql').read_text()
         if supplier:
             docker('exec',database,'psql','-v','ON_ERROR_STOP=1','-U','harness','-d','disposable',
@@ -123,6 +129,7 @@ def main():
             '--mount',f'type=bind,src={directory / "candidate.json"},dst=/run/harness/candidate.json,readonly',
             '--mount',f'type=bind,src={directory / "django-key"},dst=/run/harness/django-key,readonly',
             '--mount',f'type=bind,src={oracle_key if receipt or lifecycle or auth or supplier or p16 or p17 or api else directory / "app-key"},dst=/run/harness/app-key,readonly',
+            '--mount',f'type=bind,src={ROOT / "src/public/qr-lhie.jpg"},dst=/run/harness/public-assets/qr-lhie.jpg,readonly',
             '--mount',f'type=bind,src={output},dst=/evidence',
             '--env','P07_CHECKOUT_SMOKE=disposable-local-only',
             '--env',f'P07_RECEIPT_SMOKE={"1" if receipt else "0"}',
@@ -136,7 +143,7 @@ def main():
             '--env',f'P17_USDT_SMOKE={"1" if p17 else "0"}',
             '--env',f'P20_API_SMOKE={"1" if api else "0"}',
             '--env',f'P18_SUPPLIER_SMOKE={"1" if supplier else "0"}','--entrypoint','python',
-            'lhie-p13-candidate:local' if admin or supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
+            'lhie-p13-candidate:local' if admin or supplier or p17 or api or storefront or notifications else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','smoke_checkout.py']
         probe = subprocess.run(command,input=json.dumps(fixtures),capture_output=True,text=True,timeout=1200 if browser else 240)
         if probe.returncode:
             if receipt and not notifications:
@@ -163,6 +170,34 @@ def main():
             sources.extend(ROOT / name for name in (
                 'candidate/lhie_candidate/notifications/grants.sql', 'candidate/tests/test_notifications.py',
                 'candidate/tests/test_notifications_postgres.py', 'candidate/notifications.py'))
+            sources.extend(sorted((ROOT / 'candidate/lhie_candidate/workers').glob('*.py')))
+            sources.extend(sorted((ROOT / 'candidate/tests').glob('test_notif*.py')))
+            sources.extend(sorted((ROOT / 'candidate/tests').glob('test_waitlist*.py')))
+            sources.extend(sorted((ROOT / 'candidate/tests').glob('test_proof*.py')))
+            sources.extend(sorted((ROOT / 'candidate/templates/emails').glob('*')))
+            sources.extend(ROOT / name for name in (
+                'candidate/lhie_candidate/admin/reviews.py', 'candidate/lhie_candidate/admin/proof_views.py',
+                'candidate/lhie_candidate/admin/operations_views.py', 'candidate/lhie_candidate/storefront/waitlist.py',
+                'candidate/lhie_candidate/storefront/catalog.py', 'candidate/lhie_candidate/urls.py',
+                'candidate/lhie_candidate/branding.py', 'candidate/lhie_candidate/runtime.py',
+                'candidate/lhie_candidate/settings.py',
+                'candidate/lhie_candidate/checkout/privileges.py', 'candidate/postgres-init.sql'))
+            sources.extend(ROOT / name for name in (
+                'candidate/lhie_candidate/admin/views.py', 'candidate/static/admin/admin.css',
+                'candidate/static/storefront/catalog.css',
+                'candidate/lhie_candidate/storefront/checkout.py', 'candidate/lhie_candidate/storefront/grants.sql',
+                'candidate/lhie_candidate/suppliers/acquisition.py', 'candidate/lhie_candidate/suppliers/catalog.py',
+                'candidate/lhie_candidate/suppliers/grants.sql', 'candidate/lhie_candidate/payments/grants.sql'))
+            sources.extend(sorted((ROOT / 'candidate/templates/admin').glob('*.html')))
+            sources.extend(sorted((ROOT / 'candidate/templates/storefront').glob('waitlist*.html')))
+            sources.extend(sorted((ROOT / 'candidate/lhie_candidate/admin').glob('*.py')))
+            sources.extend(ROOT / name for name in (
+                'candidate/lhie_candidate/admin/grants.sql', 'candidate/stack.py', 'candidate/workers.py',
+                'candidate/tests/test_auth_mail_postgres.py', 'candidate/tests/test_admin_operations_postgres.py',
+                'candidate/tests/test_storefront_postgres.py',
+                'candidate/tests/test_p25_proof_presentation.py', 'tests/migration_harness/test_navigation_boundary.py',
+                'src/database/migrations/2026_10_11_110000_create_customer_auth_mail_works.php',
+                'src/database/migrations/2026_11_11_000001_allow_auth_mail_review_states.php'))
         if lifecycle:
             sources.extend(ROOT / name for name in (
                 'candidate/tests/test_order_lifecycle_postgres.py', 'candidate/tests/test_order_refunds.py',
@@ -241,7 +276,19 @@ def main():
         observed['source_sha256'] = {str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest()
                                       for path in sources if path.is_file()}
         observed['base_revision'] = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-        observed['dependency_image'] = docker('image','inspect','lhie-p13-candidate:local' if supplier or p17 or api or storefront else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','--format','{{.Id}}')
+        observed['dependency_image'] = docker('image','inspect','lhie-p13-candidate:local' if supplier or p17 or api or storefront or notifications else 'lhie-p09-candidate:local' if receipt or lifecycle or auth or p16 else 'lhie-p05-candidate:1','--format','{{.Id}}')
+        if notifications:
+            comparator = json.loads(docker('image','inspect','lhie-p01-laravel:1'))[0]
+            labels = comparator['Config'].get('Labels') or {}
+            if labels.get('lhie.p01.build-profile') != 'local-verified-dependencies':
+                raise RuntimeError('P25 requires the offline source-bound PHP comparator image')
+            observed['php_comparator_image'] = {
+                'id': comparator['Id'],
+                'source_tree_sha256': labels.get('lhie.p01.source-tree-sha256'),
+                'vendor_tree_sha256': labels.get('lhie.p01.vendor-tree-sha256'),
+                'composer_lock_sha256': labels.get('lhie.p01.composer-lock-sha256'),
+                'php_base_id': labels.get('lhie.p01.php-base-id'),
+            }
         if receipt or auth:
             observed['boundary_image'] = docker('image','inspect',harness.IMAGE,'--format','{{.Id}}')
         migration_digest = hashlib.sha256()
@@ -278,6 +325,72 @@ def main():
                     'src/app/Services/Telegram/TelegramBotIdentity.php',
                     'src/app/Storefront/StorefrontOrderAccess.php',
                     'src/app/Http/Controllers/Admin/AdminLoginController.php')})
+        if notifications:
+            observed['legacy_owner_sha256'].update({name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                for name in (
+                    'src/app/Services/Telegram/TelegramOutboundEffectLedgerProtocol.php',
+                    'src/app/Services/Telegram/TelegramOutboundEffectService.php',
+                    'src/app/Services/Telegram/TelegramOutboundEffectRecovery.php',
+                    'src/app/Services/Telegram/TelegramOutboundEffectReviewService.php',
+                    'src/app/Services/Telegram/AdminOrderNotificationDeliveryPipeline.php',
+                    'src/app/Services/Telegram/TelegramAdminOrderNotifier.php',
+                    'src/app/Services/Telegram/TelegramAdminPaidOrderNotifier.php',
+                    'src/app/Services/Telegram/AdminPaidOrderOutcome.php',
+                    'src/app/Services/Telegram/BalanceTopUpInstructionDeliveryPipeline.php',
+                    'src/app/Services/Telegram/BalanceTopUpReceiptDeliveryPipeline.php',
+                    'src/app/Services/Telegram/BalanceTopUpOwnerAlertDeliveryPipeline.php',
+                    'src/app/Services/Telegram/BalanceTopUpPaymentProofDeliveryPipeline.php',
+                    'src/app/Services/Telegram/BalanceTopUpChannelProofDeliveryPipeline.php',
+                    'src/app/Services/Telegram/BalanceAdjustmentNoticeDeliveryPipeline.php',
+                    'src/app/Services/Telegram/AdminBroadcastDeliveryPipeline.php',
+                    'src/app/Services/Telegram/TelegramBroadcastService.php',
+                    'src/app/Services/Telegram/TelegramBroadcastDrafts.php',
+                    'src/app/Services/Telegram/StockNotificationDeliveryPipeline.php',
+                    'src/app/Services/Telegram/TelegramProductNotificationService.php',
+                    'src/app/Services/Telegram/ProductPriceChangeNotificationService.php',
+                    'src/app/Services/Telegram/SalesProofDeliveryPipeline.php',
+                    'src/app/Services/Telegram/SalesProofPostFormatter.php',
+                    'src/app/Services/Telegram/SalesProofEligibility.php',
+                    'src/app/Services/Telegram/TelegramBotClient.php',
+                    'src/app/Services/Telegram/CustomEmojiCapability.php',
+                    'src/app/Services/Telegram/TelegramHtmlCaption.php',
+                    'src/app/Services/PaidInvoice/PaidInvoiceOrderPresentationAdapter.php',
+                    'src/app/Services/PaidInvoice/PaidInvoiceBuyerNameMasker.php',
+                    'src/app/Services/PaidInvoice/PaidInvoicePresentation.php',
+                    'src/app/Services/PaidInvoice/PaidInvoiceRenderer.php',
+                    'src/app/Services/PaymentReceiptReport.php',
+                    'src/app/Services/InventoryLedger.php',
+                    'src/app/Services/EloquentInventoryLedger.php',
+                    'src/app/Services/Credentials/CredentialDeliveryEligibility.php',
+                    'src/app/Services/OrderLifecycleProjection.php',
+                    'src/app/Services/Suppliers/SupplierFulfillmentService.php',
+                    'src/app/Models/ManualFulfillmentReview.php',
+                    'src/app/Services/Admin/ManualFulfillmentResolutionService.php',
+                    'src/app/Services/Telegram/SalesProofPostNumbering.php',
+                    'src/app/Services/Telegram/TelegramProductNameRenderer.php',
+                    'src/app/Services/Telegram/TelegramUiIcons.php',
+                    'src/app/Services/Telegram/TelegramTranslationCatalog.php',
+                    'src/app/Services/Telegram/TelegramLocale.php',
+                    'src/app/Services/ProductWaitlistNotificationService.php',
+                    'src/app/Services/ProductWaitlistSubscriptionService.php',
+                    'src/app/Services/OrderCredentialMailService.php',
+                    'src/app/Services/GuestOrderNotificationService.php',
+                    'src/app/Services/Customer/CustomerAuthMailDeliveryService.php',
+                    'src/app/Mail/ProductWaitlistRestockedMail.php',
+                    'src/app/Mail/ProductWaitlistConfirmationMail.php',
+                    'src/app/Mail/GuestOrderMilestoneMail.php',
+                    'src/resources/views/emails/order-credential.blade.php',
+                    'src/resources/views/emails/order-credential-text.blade.php',
+                    'src/resources/views/emails/guest-order-milestone.blade.php',
+                    'src/resources/views/emails/guest-order-milestone-text.blade.php',
+                    'src/resources/views/emails/product-waitlist-restocked.blade.php',
+                    'src/resources/views/emails/product-waitlist-restocked-text.blade.php',
+                    'src/resources/views/emails/product-waitlist-confirmation.blade.php',
+                    'src/resources/views/emails/product-waitlist-confirmation-text.blade.php')})
+            observed['legacy_owner_sha256'].update({name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                for name in (
+                    'src/database/migrations/2026_10_11_110000_create_customer_auth_mail_works.php',
+                    'src/database/migrations/2026_11_11_000001_allow_auth_mail_review_states.php')})
         if admin:
             observed['legacy_owner_sha256'].update({name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
                 for name in ('src/app/Services/ProductStockIntake.php',
@@ -313,6 +426,10 @@ def main():
                 'No real Google/Telegram identities, mail recipients, historical key qualification or production activation',
                 'Explicit additive browser session metadata; old PHP cookies require relogin at H2, never deserialized',
                 'No production, deployment, provider activation or CI/CD operations']
+        if notifications:
+            observed['limits'] = ['Synthetic disposable PostgreSQL/Redis, fake Telegram relay, and local SMTP sink; no live recipients or provider calls',
+                'PHP render baseline is generated from the checked-out Laravel source; Python candidate source is hash-bound in source_sha256',
+                'No actual-history/schema/key qualification or production delivery; parent H1/HD/H2/H3 and #684/#710 cutover gates remain separate']
         if storefront:
             observed['limits'] = ['Synthetic disposable PostgreSQL/Redis and local fixture transports only',
                 'Source mounted over cached dependency image; explicit grants, no production activation',

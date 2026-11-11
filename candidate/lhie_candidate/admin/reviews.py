@@ -16,7 +16,7 @@ from ..checkout.db import Database
 from ..checkout.errors import CheckoutError
 from ..checkout.lifecycle import OrderLifecycle, now as lifecycle_now
 from ..compat.crypto import LaravelEncrypter
-from ..receipt.protocol import EFFECT_TYPE, _now as receipt_now
+from ..receipt.protocol import EFFECT_TYPE, RECEIPT_TYPES, ReceiptProtocol
 from ..runtime import application_key
 from ..suppliers.manual import ManualSupplierRecovery
 from .sanitize import json_value, safe_error
@@ -175,115 +175,305 @@ class DeliveryReviewOperations:
         self.using = using
         self.db = Database(using)
 
-    def mark_sent(self, effect_id, *, message_id, actor_id, ip=None):
-        if type(message_id) is int:
-            message_id = str(message_id)
-        if not isinstance(message_id, str) or not re.fullmatch(r"0*[1-9][0-9]{0,18}", message_id):
-            raise CheckoutError("telegram_message_id_invalid")
+    def _protocol(self, effect):
+        from ..notifications.families import LIMITS
+        from ..notifications.policy import TERMINAL_CODES
+        from ..notifications.waitlist import LIMITS as MAIL_LIMITS, TERMINAL_CODES as MAIL_CODES
+        limits = {kind: 3 for kind in RECEIPT_TYPES} | LIMITS | MAIL_LIMITS
+        if effect["effect_type"] not in limits:
+            raise CheckoutError("delivery_review_unavailable")
+        return ReceiptProtocol(self.using, family_limits=limits, terminal_codes=TERMINAL_CODES | MAIL_CODES)
+
+    def mark_sent(self, effect_id, *, message_id, actor_id, ip=None, mail_confirmed=False,
+                  evidence_reference=None):
         with transaction.atomic(using=self.using):
-            effect = self.db.one(
-                "SELECT * FROM public.telegram_outbound_effects WHERE id=%s",
-                (str(effect_id),))
-            if effect is None or effect["state"] not in DELIVERY_REVIEW_STATES:
+            effect = self.db.one("SELECT * FROM public.telegram_outbound_effects WHERE id=%s", (str(effect_id),))
+            if effect is None:
                 raise CheckoutError("delivery_review_unavailable")
-            now = receipt_now()
-            metadata = effect["outcome_metadata"] or {}
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except ValueError:
-                    metadata = {}
-            metadata = dict(metadata) if isinstance(metadata, dict) else {}
-            metadata.update({
-                "resolution": "operator_marked_sent",
-                "resolution_actor_id": int(actor_id),
-                "resolution_at": now.isoformat(),
-            })
-            updated_id = self.db.one(
-                """UPDATE public.telegram_outbound_effects
-                   SET state='sent',telegram_message_id=%s,sent_at=%s,unknown_at=NULL,
-                       failed_at=NULL,manual_review_at=NULL,next_attempt_at=NULL,
-                       lease_until=NULL,claim_token=NULL,last_error_code=NULL,last_error=NULL,
-                       outcome_metadata=%s::json,updated_at=%s
-                   WHERE id=%s AND state IN ('unknown','manual_review') RETURNING id""",
-                (message_id, now, json.dumps(metadata), now, str(effect_id)))
-            if updated_id is None:
+            is_mail = effect["telegram_method"] == "smtp.send"
+            if is_mail:
+                evidence = _evidence_reference(evidence_reference)
+                if mail_confirmed is not True:
+                    raise CheckoutError("delivery_review_unavailable")
+                message_id = "1"
+            else:
+                evidence = None
+                if isinstance(message_id, bool) or not re.fullmatch(r"0*[1-9][0-9]{0,18}", str(message_id)):
+                    raise CheckoutError("telegram_message_id_invalid")
+            protocol = self._protocol(effect)
+            updated = protocol.resolve_sent(effect_id, message_id, actor_id)
+            if updated is None:
                 raise CheckoutError("delivery_review_unavailable")
-            updated = self.db.one(
-                "SELECT * FROM public.telegram_outbound_effects WHERE id=%s",
-                (str(effect_id),))
-            if effect["effect_type"] == EFFECT_TYPE and effect.get("effect_group_key"):
-                group = self.db.rows(
-                    """SELECT state FROM public.telegram_outbound_effects
-                       WHERE effect_type=%s AND effect_group_key=%s""",
-                    (EFFECT_TYPE, effect["effect_group_key"]))
-                if group and all(row["state"] == "sent" for row in group):
-                    self.db.execute(
-                        """UPDATE public.orders
-                           SET telegram_receipt_sent_at=COALESCE(telegram_receipt_sent_at,%s),
-                               updated_at=%s
-                           WHERE id=%s""",
-                        (now, now, str(effect["source_id"])))
+            if effect["effect_type"] in RECEIPT_TYPES:
+                if (effect["effect_type"] == EFFECT_TYPE
+                        and protocol.is_receipt_group_complete(effect["effect_group_key"])):
+                    self.db.execute("""UPDATE public.orders
+                        SET telegram_receipt_sent_at=COALESCE(telegram_receipt_sent_at,%s),updated_at=%s WHERE id=%s""",
+                        (updated["sent_at"], updated["sent_at"], effect["source_id"]))
+            elif effect["effect_type"] in ("waitlist.confirmation_mail", "waitlist.restock_mail"):
+                from django.conf import settings
+                from ..notifications.waitlist import WaitlistMail
+                key = application_key()
+                WaitlistMail(LaravelEncrypter(key), signing_key=key,
+                             base_url=settings.CANDIDATE_LEGACY_APP_URL,
+                             using=self.using).project(updated)
+            else:
+                from ..notifications.service import Notifications
+                from ..notifications.policy import TestRecipients
+                # Admission is read from the retained effect after operator
+                # authorization; this instance can only repair, never transport.
+                Notifications(None, using=self.using, recipients=TestRecipients(
+                    frozenset({str(updated["telegram_chat_id"])}))).project(updated)
             _audit(self.db, actor_id, "telegram_outbound_effect.marked_sent",
                    "App\\Models\\TelegramOutboundEffect", effect_id,
                    {"old_state": effect["state"], "telegram_message_id": message_id,
-                    "resolution": "operator_marked_sent"}, ip)
+                    "resolution": "operator_marked_sent",
+                    **({"evidence_reference": evidence} if is_mail else {})}, ip)
             return updated
 
     def resend(self, effect_id, *, actor_id, confirm_duplicate_risk, ip=None):
         if confirm_duplicate_risk is not True:
             raise CheckoutError("duplicate_risk_not_acknowledged")
-        with transaction.atomic(using=self.using):
-            effect = self.db.one(
-                "SELECT * FROM public.telegram_outbound_effects WHERE id=%s",
-                (str(effect_id),))
-            if effect is None or effect["state"] not in DELIVERY_REVIEW_STATES:
+        effect = self.db.one("SELECT * FROM public.telegram_outbound_effects WHERE id=%s", (str(effect_id),))
+        if effect is None or effect["state"] not in DELIVERY_REVIEW_STATES:
+            raise CheckoutError("delivery_review_unavailable")
+        if effect["effect_type"] == EFFECT_TYPE:
+            from ..receipt.runtime import receipt_service
+
+            def audit_resend(created):
+                _audit(self.db, actor_id, "telegram_outbound_effect.resent",
+                       "App\\Models\\TelegramOutboundEffect", effect_id,
+                       {"new_effect_id": str(created["id"]), "sequence": created["sequence"],
+                        "duplicate_risk_acknowledged": True}, ip)
+
+            created = receipt_service(using=self.using).materialize(
+                effect["source_id"], resend_of=str(effect_id), on_materialized=audit_resend)
+            if created is None:
                 raise CheckoutError("delivery_review_unavailable")
-            if effect["effect_type"] == EFFECT_TYPE:
-                raise CheckoutError("receipt_resend_requires_receipt_group")
-            group = effect["effect_group_key"] or effect["effect_key"]
-            self.db.one("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
-                        ("effect-resend:" + str(group),))
-            latest = self.db.one(
-                """SELECT sequence FROM public.telegram_outbound_effects
-                   WHERE effect_group_key=%s ORDER BY sequence DESC LIMIT 1""",
-                (group,))
-            sequence = max(int(effect["sequence"] or 1), int((latest or {}).get("sequence") or 0)) + 1
-            effect_key = f"{group}:resend:v{sequence}"
-            while self.db.one("SELECT id FROM public.telegram_outbound_effects WHERE effect_key=%s", (effect_key,)):
-                sequence += 1
-                effect_key = f"{group}:resend:v{sequence}"
-            metadata = effect["outcome_metadata"] or {}
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except ValueError:
-                    metadata = {}
-            metadata = dict(metadata) if isinstance(metadata, dict) else {}
-            metadata.update({
-                "delivery_context": "explicit_resend",
-                "duplicate_risk_acknowledged": True,
-                "supersedes_effect_id": str(effect["id"]),
-            })
-            now = receipt_now()
-            created = self.db.one(
-                """INSERT INTO public.telegram_outbound_effects
-                   (id,effect_key,effect_group_key,supersedes_effect_id,sequence,effect_type,
-                    source_type,source_id,target_type,telegram_chat_id,queue,telegram_method,
-                    locale,template_version,state,attempts,next_attempt_at,outcome_metadata,
-                    created_at,updated_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',0,%s,%s::json,%s,%s)
-                   RETURNING *""",
-                (str(uuid4()), effect_key, group, str(effect["id"]), sequence,
-                 effect["effect_type"], effect["source_type"], effect["source_id"],
-                 effect["target_type"], effect["telegram_chat_id"], effect["queue"],
-                 effect["telegram_method"], effect["locale"], effect["template_version"],
-                 now, json.dumps(metadata), now, now))
+            return created
+        with transaction.atomic(using=self.using):
+            created = self._protocol(effect).resend_review(
+                effect_id, duplicate_risk_acknowledged=True)
+            if created is None:
+                raise CheckoutError("delivery_review_unavailable")
             _audit(self.db, actor_id, "telegram_outbound_effect.resent",
-                   "App\\Models\\TelegramOutboundEffect", effect["id"],
-                   {"new_effect_id": str(created["id"]), "sequence": sequence,
+                   "App\\Models\\TelegramOutboundEffect", effect_id,
+                   {"new_effect_id": str(created["id"]), "sequence": created["sequence"],
                     "duplicate_risk_acknowledged": True}, ip)
             return created
+
+EVIDENCE_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/#-]{0,199}\Z")
+
+
+def _evidence_reference(value):
+    if not isinstance(value, str) or not EVIDENCE_REFERENCE.fullmatch(value):
+        raise CheckoutError("delivery_evidence_required")
+    return value
+
+
+class MailDeliveryReviewOperations:
+    """Resolve ambiguous SMTP outcomes without exposing stored mail snapshots."""
+
+    def __init__(self, using="default"):
+        self.using = using
+        self.db = Database(using)
+
+    def mark_sent(self, kind, work_id, *, evidence_reference, affirmative_evidence,
+                  actor_id, ip=None):
+        evidence = _evidence_reference(evidence_reference)
+        if affirmative_evidence is not True:
+            raise CheckoutError("delivery_evidence_required")
+        with transaction.atomic(using=self.using):
+            if kind == "auth":
+                try:
+                    numeric_id = int(work_id)
+                except (TypeError, ValueError):
+                    raise CheckoutError("delivery_review_unavailable") from None
+                row = self.db.one(
+                    "SELECT * FROM public.customer_auth_mail_works WHERE id=%s FOR UPDATE",
+                    (numeric_id,))
+                if not row or row["status"] != "unknown":
+                    raise CheckoutError("delivery_review_unavailable")
+                updated = self.db.execute("""UPDATE public.customer_auth_mail_works
+                    SET status='sent',payload=NULL,sent_at=%s,last_error_code='operator_marked_sent',
+                        updated_at=%s WHERE id=%s AND status='unknown'""",
+                    (lifecycle_now(), lifecycle_now(), numeric_id))
+                subject_type = "App\\Models\\CustomerAuthMailWork"
+                audit_id = numeric_id
+            elif kind == "event":
+                row = self.db.one("""SELECT * FROM public.order_notification_events
+                    WHERE id=%s AND event_type IN ('credentials_ready','order_created',
+                      'payment_confirmed','fulfillment_completed','order_expired','order_cancelled')
+                    FOR UPDATE""", (str(work_id),))
+                if (not row or row["status"] != "failed" or
+                        row["last_error"] != "mail_delivery_unknown" or
+                        row["delivery_started_at"] is None):
+                    raise CheckoutError("delivery_review_unavailable")
+                updated = self.db.execute("""UPDATE public.order_notification_events
+                    SET status='sent',sent_at=%s,failed_at=NULL,delivery_started_at=NULL,
+                        next_attempt_at=NULL,last_error='operator_marked_sent',updated_at=%s
+                    WHERE id=%s AND status='failed' AND last_error='mail_delivery_unknown'
+                      AND delivery_started_at IS NOT NULL""",
+                    (lifecycle_now(), lifecycle_now(), str(work_id)))
+                subject_type = "App\\Models\\OrderNotificationEvent"
+                audit_id = work_id
+            else:
+                raise CheckoutError("delivery_review_unavailable")
+            if not updated:
+                raise CheckoutError("delivery_review_unavailable")
+            _audit(self.db, actor_id, "mail_delivery.marked_sent", subject_type, audit_id,
+                   {"resolution": "operator_marked_sent", "evidence_reference": evidence}, ip)
+
+    def resend(self, kind, work_id, *, confirm_duplicate_risk, actor_id, ip=None):
+        if confirm_duplicate_risk is not True:
+            raise CheckoutError("duplicate_risk_not_acknowledged")
+        with transaction.atomic(using=self.using):
+            if kind == "auth":
+                from ..auth.mail import MailWork
+
+                try:
+                    numeric_id = int(work_id)
+                except (TypeError, ValueError):
+                    raise CheckoutError("delivery_review_unavailable") from None
+                mail = MailWork(None, app_key="", db=self.db)
+                customer, grant, row = mail._lock(numeric_id)
+                if (not row or row["status"] != "unknown" or row["payload"] is None
+                        or row["expires_at"] <= mail.clock()
+                        or not mail._eligible(customer, grant) or row["attempts"] >= 5):
+                    raise CheckoutError("delivery_review_unavailable")
+                changed = self.db.execute("""UPDATE public.customer_auth_mail_works
+                    SET status='pending',next_attempt_at=%s,last_error_code='manual_retry_authorized',
+                        updated_at=%s WHERE id=%s AND status='unknown'""",
+                    (lifecycle_now(), lifecycle_now(), numeric_id))
+                if not changed:
+                    raise CheckoutError("delivery_review_unavailable")
+                _audit(self.db, actor_id, "mail_delivery.resent",
+                       "App\\Models\\CustomerAuthMailWork", numeric_id,
+                       {"duplicate_risk_acknowledged": True, "attempt": row["attempts"] + 1}, ip)
+            elif kind == "event":
+                row = self.db.one("""SELECT * FROM public.order_notification_events
+                    WHERE id=%s AND event_type IN ('credentials_ready','order_created',
+                      'payment_confirmed','fulfillment_completed','order_expired','order_cancelled')
+                    FOR UPDATE""", (str(work_id),))
+                limit = 5 if row and row["event_type"] == "credentials_ready" else 3
+                if (not row or row["status"] != "failed" or
+                        row["last_error"] != "mail_delivery_unknown" or
+                        row["delivery_started_at"] is None or row["recipient_email"] is None
+                        or row["attempts"] >= limit):
+                    raise CheckoutError("delivery_review_unavailable")
+                changed = self.db.execute("""UPDATE public.order_notification_events
+                    SET status='pending',delivery_started_at=NULL,failed_at=NULL,next_attempt_at=%s,
+                        last_error='manual_retry_authorized',updated_at=%s
+                    WHERE id=%s AND status='failed' AND last_error='mail_delivery_unknown'
+                      AND delivery_started_at IS NOT NULL""",
+                    (lifecycle_now(), lifecycle_now(), str(work_id)))
+                if not changed:
+                    raise CheckoutError("delivery_review_unavailable")
+                _audit(self.db, actor_id, "mail_delivery.resent",
+                       "App\\Models\\OrderNotificationEvent", work_id,
+                       {"duplicate_risk_acknowledged": True, "attempt": row["attempts"] + 1}, ip)
+            else:
+                raise CheckoutError("delivery_review_unavailable")
+
+
+class MailDeliveryReviewReads:
+    def __init__(self, using="default"):
+        self.using = using
+        self.db = Database(using)
+
+    def index(self, page=1, limit=PAGE_SIZE):
+        page = max(1, int(page or 1))
+        total = self.db.one("""SELECT
+            (SELECT count(*) FROM public.customer_auth_mail_works WHERE status='unknown') +
+            (SELECT count(*) FROM public.order_notification_events
+             WHERE status='failed' AND last_error='mail_delivery_unknown'
+               AND delivery_started_at IS NOT NULL
+               AND event_type IN ('credentials_ready','order_created','payment_confirmed',
+                 'fulfillment_completed','order_expired','order_cancelled')) AS n""")["n"]
+        result = self.db.rows("""SELECT * FROM (
+            SELECT id::text AS work_id,'auth' AS kind,status,attempts,
+                   last_error_code AS error_code,updated_at,NULL::text AS event_type,
+                   NULL::text AS invoice_number
+            FROM public.customer_auth_mail_works WHERE status='unknown'
+            UNION ALL
+            SELECT e.id::text AS work_id,'event' AS kind,e.status,e.attempts,
+                   e.last_error AS error_code,e.updated_at,e.event_type,o.invoice_number
+            FROM public.order_notification_events e
+            LEFT JOIN public.orders o ON o.id=e.order_id
+            WHERE e.status='failed' AND e.last_error='mail_delivery_unknown'
+              AND e.delivery_started_at IS NOT NULL
+              AND e.event_type IN ('credentials_ready','order_created','payment_confirmed',
+                'fulfillment_completed','order_expired','order_cancelled')
+        ) review_rows ORDER BY updated_at DESC,work_id DESC LIMIT %s OFFSET %s""",
+            (limit, (page - 1) * limit))
+        for row in result:
+            row["kind_label"] = "Auth" if row["kind"] == "auth" else "Order mail"
+            row["source_label"] = row["invoice_number"] or "Auth request"
+            row["updated_label"] = _format_time(row["updated_at"])
+            row["error_code"] = safe_error(row["error_code"]) or "mail_delivery_unknown"
+            row["url"] = f"/admin/mail-delivery-reviews/{row['kind']}/{row['work_id']}"
+        pages = max(1, (total + limit - 1) // limit)
+        return {"rows": result, "total": total, "page": page, "pages": pages,
+                "has_previous": page > 1, "has_next": page < pages,
+                "previous": page - 1, "next": page + 1}
+
+    def show(self, kind, work_id):
+        if kind == "auth":
+            try:
+                work_id = int(work_id)
+            except (TypeError, ValueError):
+                return None
+            row = self.db.one("""SELECT id AS work_id,status,attempts,last_error_code AS error_code,
+                updated_at,expires_at,payload IS NOT NULL AS has_payload,
+                auth_token_id,login_link_id,NULL::text AS event_type,NULL::text AS invoice_number
+                FROM public.customer_auth_mail_works WHERE id=%s AND status='unknown'""", (work_id,))
+        elif kind == "event":
+            row = self.db.one("""SELECT e.id::text AS work_id,e.status,e.attempts,
+                e.last_error AS error_code,e.updated_at,o.invoice_number,e.event_type,
+                e.recipient_email IS NOT NULL AS has_snapshot,
+                NULL::timestamp AS expires_at
+                FROM public.order_notification_events e LEFT JOIN public.orders o ON o.id=e.order_id
+                WHERE e.id=%s AND e.status='failed' AND e.last_error='mail_delivery_unknown'
+                  AND e.delivery_started_at IS NOT NULL
+                  AND e.event_type IN ('credentials_ready','order_created','payment_confirmed',
+                    'fulfillment_completed','order_expired','order_cancelled')""", (str(work_id),))
+        else:
+            return None
+        if not row:
+            return None
+        row["kind"] = kind
+        row["kind_label"] = "Auth mail" if kind == "auth" else "Order mail"
+        row["state_label"] = "Tidak pasti"
+        row["source_label"] = row["invoice_number"] or "Auth request"
+        row["updated_label"] = _format_time(row["updated_at"])
+        row["expires_label"] = _format_time(row["expires_at"])
+        row["error_code"] = safe_error(row["error_code"]) or "mail_delivery_unknown"
+        if kind == "auth":
+            from ..auth.mail import MailWork
+            binding = row
+            if binding["auth_token_id"] is not None:
+                grant = self.db.one("""SELECT t.*,c.id AS customer_id
+                    FROM public.customer_auth_tokens t JOIN public.customers c ON c.id=t.customer_id
+                    WHERE t.id=%s""", (binding["auth_token_id"],))
+                customer = self.db.one("""SELECT id,email,email_verified_at,password,auth_version,enrollment_version
+                    FROM public.customers WHERE id=%s""", (grant["customer_id"],)) if grant else None
+            else:
+                grant = self.db.one("""SELECT *, 'magic' AS purpose FROM public.customer_login_links
+                    WHERE id=%s""", (binding["login_link_id"],))
+                customer = None
+            mail = MailWork(None, app_key="", db=self.db)
+            row["can_retry"] = bool(
+                row["has_payload"] and row["attempts"] < 5 and row["expires_at"] > mail.clock()
+                and mail._eligible(customer, grant))
+        else:
+            limit = 5 if row["event_type"] == "credentials_ready" else 3
+            row["can_retry"] = bool(row["has_snapshot"] and row["attempts"] < limit)
+        row.pop("has_payload", None)
+        row.pop("has_snapshot", None)
+        row.pop("auth_token_id", None)
+        row.pop("login_link_id", None)
+        row["audit"] = []
+        return row
 
 
 class DeliveryReviewReads:
@@ -333,15 +523,24 @@ class DeliveryReviewReads:
             return None
         row["id"] = str(row["id"])
         row["target_mask"] = "••••" + str(row["telegram_chat_id"] or "")[-4:]
-        row["outcome"] = json_value(row["outcome_metadata"])
+        metadata = json_value(row["outcome_metadata"])
+        metadata = metadata if isinstance(metadata, dict) else {}
+        row["outcome"] = {key: metadata[key] for key in (
+            "resolution", "resolution_actor_id", "resolution_at", "explicit_resend",
+            "duplicate_risk_acknowledged", "supersedes_effect_id", "unit_role",
+            "receipt_chunk_index", "receipt_chunk_count", "contains_credentials",
+            "first_pickup_at", "telegram_response") if key in metadata}
+        row.pop("outcome_metadata", None)
         row["last_error_code"] = safe_error(row["last_error_code"]) or "-"
         row["last_error"] = safe_error(row["last_error"]) or (
             "" if not row["last_error"] else "Pesan error disamarkan")
         row["created_label"] = _format_time(row["created_at"])
         row["updated_label"] = _format_time(row["updated_at"])
-        row["state_label"] = ("Manual Delivery Review"
-                              if row["state"] == "manual_review" else "Tidak pasti")
+        row["state_label"] = {"manual_review": "Manual Delivery Review", "unknown": "Tidak pasti",
+                              "sent": "Terkirim", "pending": "Tertunda", "sending": "Sedang dikirim",
+                              "failed": "Gagal"}.get(row["state"], row["state"])
         row["is_receipt"] = row["effect_type"] == EFFECT_TYPE
+        row["is_mail"] = row["telegram_method"] == "smtp.send"
         row["can_review"] = row["state"] in DELIVERY_REVIEW_STATES
         row["audit"] = self.db.rows(
             """SELECT a.action,a.old_values,a.new_values,a.created_at,u.name AS actor_name

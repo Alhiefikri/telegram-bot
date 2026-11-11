@@ -15,8 +15,8 @@ from lhie_candidate.workers.supervisor import commands, run
 
 class ContractTests(unittest.TestCase):
     def test_each_family_has_one_isolated_process(self):
-        self.assertEqual(contract.QUEUES, ("interaction", "payment", "receipt"))
-        self.assertEqual(len({spec.wakeup_queue for spec in contract.TOPOLOGY.values()}), 3)
+        self.assertEqual(contract.QUEUES, ("interaction", "payment", "receipt", "notifications", "bulk", "mail", "auth-mail"))
+        self.assertEqual(len({spec.wakeup_queue for spec in contract.TOPOLOGY.values()}), 7)
         self.assertEqual(contract.TOPOLOGY["receipt"].kinds, ("effect", "order"))
         self.assertEqual(contract.TOPOLOGY["payment"].kinds, ("payment.event", "payment.navigation", "funding.klikqris"))
         self.assertEqual(contract.TOPOLOGY["interaction"].kinds, ("navigation.update",))
@@ -24,7 +24,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(len(families), len(set(families)))
         self.assertFalse(set(families) & set(contract.RESERVED_FAMILIES))
         with self.assertRaises(ValueError):
-            contract.queue_spec("notifications")
+            contract.queue_spec("supplier")
         with self.assertRaises(ValueError):
             contract.queue_spec(None)
 
@@ -39,12 +39,13 @@ class ContractTests(unittest.TestCase):
                 self.assertLessEqual(spec.sweep_limit, 50)
                 self.assertLessEqual(spec.sweep_seconds, 5)
                 self.assertLess(contract.SHUTDOWN_GRACE_SECONDS, 180)
-                self.assertIsNone(spec.max_attempts) if spec.name == "interaction" else self.assertEqual(spec.max_attempts, 3)
+                expected = 5 if spec.name in ('bulk', 'mail', 'auth-mail') else 3
+                self.assertIsNone(spec.max_attempts) if spec.name == "interaction" else self.assertEqual(spec.max_attempts, expected)
 
     def test_runtime_budget_matches_process_ownership(self):
         self.assertEqual(contract.worker_connection_budget(),
-                         {"processes": 5, "threads": 5, "db_connections": 4})
-        contract.assert_admitted_limits({"processes": 5, "threads": 5, "db_connections": 4})
+                         {"processes": 9, "threads": 9, "db_connections": 8})
+        contract.assert_admitted_limits({"processes": 9, "threads": 9, "db_connections": 8})
         for limits in ({"processes": 4, "threads": 5, "db_connections": 4},
                        {"processes": 5, "threads": 5, "db_connections": 5},
                        None):

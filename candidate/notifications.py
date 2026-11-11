@@ -1,4 +1,4 @@
-"""Manual isolated fake-only P25 batch; never started by the P10 supervisor."""
+"""One bounded run of the explicitly admitted, isolated P25 consumers."""
 import argparse
 import json
 import signal
@@ -9,29 +9,26 @@ from lhie_candidate.workers.consumer import WorkerTimeout
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--once', action='store_true', required=True)
-    parser.add_argument('--family', choices=('telegram', 'credential-mail'), required=True)
+    parser.add_argument('--family', choices=('telegram', 'bulk', 'credential-mail', 'waitlist-mail', 'auth-mail'),
+                        required=True)
     args = parser.parse_args()
     from lhie_candidate.startup import configure_django
     configure_django()
     from lhie_candidate.readiness import verify_dependencies
-    from lhie_candidate.compat.crypto import LaravelEncrypter
-    from lhie_candidate.runtime import application_key
-    from lhie_candidate.notifications.mail import CredentialMail
-    from lhie_candidate.notifications.policy import TestRecipients
-    from lhie_candidate.notifications.service import Notifications
-    from lhie_candidate.notifications.transport import NotificationTransport
-    from lhie_candidate.receipt.source import ReceiptSource
+    from lhie_candidate.runtime import load_runtime
     from lhie_candidate.workers.consumer import _alarm_handler
+    from lhie_candidate.workers.services import build_handler
+    runtime = load_runtime()
+    if not runtime.workers or not runtime.notifications:
+        raise RuntimeError('Notification admission refused')
     verify_dependencies()
-    # Only P01's synthetic chat is admitted. This CLI is not a live recipient
-    # enrollment surface and accepts no recipient/content/transport arguments.
-    recipients = TestRecipients(frozenset({'1'}))
-    if args.family == 'telegram':
-        service = Notifications(NotificationTransport(), recipients=recipients)
+    queue = {'telegram': 'notifications', 'bulk': 'bulk', 'auth-mail': 'auth-mail'}.get(args.family, 'mail')
+    handler = build_handler(queue)
+    if queue == 'mail':
+        kind = 'credential.mail' if args.family == 'credential-mail' else 'waitlist.mail'
+        service = handler.services[kind]
     else:
-        cipher = LaravelEncrypter(application_key())
-        source = ReceiptSource(cipher, signing_key=application_key(), invoice_base_url='http://127.0.0.1:18801')
-        service = CredentialMail(source, cipher, recipients=recipients)
+        service = handler.service
     previous = signal.signal(signal.SIGALRM, _alarm_handler)
     signal.alarm(60)
     try:
@@ -39,7 +36,7 @@ def main():
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
-    print(json.dumps({'status': 'processed', **result}))
+    print(json.dumps({'status': 'processed', 'result': result}))
 
 
 if __name__ == '__main__':

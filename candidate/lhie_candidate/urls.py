@@ -7,10 +7,17 @@ from .payments.callback import receive as receive_sakurupiah
 from .payments.ingress import receive_klikqris, receive_klikqris_sandbox, receive_pakasir
 from .payments.ingress import receive_sakurupiah_production
 from .storefront.public_media import image as public_image
+from .storefront import waitlist
+from .admin.proof_views import fake_sales_proof
 
 
 urlpatterns = [
     path("", include("lhie_candidate.admin.urls")),
+    path("admin/broadcast/", include("lhie_candidate.notifications.broadcast_urls")),
+    path("admin/store-channel/fake-sales-proof", fake_sales_proof),
+    path("produk/<int:product_id>/waitlist", waitlist.subscribe),
+    path("waitlist/confirm/<int:subscription_id>", waitlist.confirm),
+    path("waitlist/unsubscribe/<int:subscription_id>", waitlist.unsubscribe),
     path("", include("lhie_candidate.storefront.account_urls")),
     path("", include("lhie_candidate.storefront.checkout_urls")),
     path("", include("lhie_candidate.auth.urls")),

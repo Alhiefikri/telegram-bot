@@ -70,7 +70,7 @@ class ReceiptService:
         return self.db.one('''SELECT c.telegram_id FROM public.orders o JOIN public.customers c ON c.id=o.customer_id
             WHERE o.id=%s''', (order_id,))
 
-    def materialize(self, order_id, *, fallback_from=None):
+    def materialize(self, order_id, *, fallback_from=None, resend_of=None, on_materialized=None):
         self._outside()
         owner = self._owner(order_id)
         if not owner or owner['telegram_id'] is None:
@@ -86,8 +86,13 @@ class ReceiptService:
                     order, _ = self.source.authorize(order_id, owner['telegram_id'], lock=True, receipt=True)
                 except ReceiptUnavailable:
                     return None
-                return self.protocol.materialize(order_id, owner['telegram_id'], order['locale'], (),
-                                                 render_failed=True)
+                effect = self.protocol.materialize(order_id, owner['telegram_id'], order['locale'], (),
+                                                   render_failed=True, resend_of=resend_of)
+                if effect:
+                    if on_materialized is not None:
+                        on_materialized(effect)
+                    wake_after_commit('effect', str(effect['id']), using=self.using)
+                return effect
         fallback = fallback_from is not None
         if not fallback:
             try:
@@ -108,8 +113,11 @@ class ReceiptService:
                 text_fallback=fallback, fallback_from=fallback_from, product_count=plan.product_count,
                 account_count=plan.account_count, credential_layout_version='copy-v1',
                 caption_length_bucket=_bucket(len(plan.photo_units[0].text)),
-                continuation_length_bucket=_bucket(max((len(u.text) for u in selected[1:]), default=0)))
+                continuation_length_bucket=_bucket(max((len(u.text) for u in selected[1:]), default=0)),
+                resend_of=resend_of)
             if effect:
+                if on_materialized is not None:
+                    on_materialized(effect)
                 wake_after_commit('effect', str(effect['id']), using=self.using)
             return effect
 

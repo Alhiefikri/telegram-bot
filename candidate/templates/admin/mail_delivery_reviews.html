@@ -1,0 +1,31 @@
+{% extends 'admin/base.html' %}
+{% block content %}
+<section class="admin-hero">
+  <div><p class="admin-eyebrow">Operasi</p><h2>Manual Delivery Review</h2><p class="admin-help">Email dengan hasil SMTP tidak pasti ditahan di sini. Tidak ada pengiriman ulang otomatis. Tinjau bukti penerimaan atau setujui risiko duplikasi sebelum worker mencoba kembali.</p></div>
+  <a class="admin-button" href="/admin/telegram-outbound-effects">Review Telegram</a>
+</section>
+<section class="admin-card">
+  <div class="admin-table-wrap"><table class="admin-table">
+    <thead><tr><th>Jenis</th><th>Sumber</th><th>Status</th><th>Percobaan</th><th>Pembaruan</th><th>Aksi</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{{ row.kind_label }}{% if row.event_type %}<small>{{ row.event_type }}</small>{% endif %}</td>
+        <td>{{ row.source_label }}</td>
+        <td><span class="admin-status admin-status-warning">Tidak pasti</span></td>
+        <td>{{ row.attempts }}</td>
+        <td>{{ row.updated_label }}<small><code>{{ row.error_code }}</code></small></td>
+        <td class="admin-row-actions"><a class="admin-button admin-button-small" href="{{ row.url }}">Buka</a></td>
+      </tr>
+    {% empty %}<tr><td colspan="6">Tidak ada email SMTP yang menunggu review.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% if pages > 1 %}
+<nav class="admin-pagination" aria-label="Halaman mail delivery review">
+  {% if has_previous %}<a class="admin-button" href="/admin/mail-delivery-reviews?page={{ previous }}">Sebelumnya</a>{% else %}<span class="admin-button admin-button-disabled">Sebelumnya</span>{% endif %}
+  <span>Halaman {{ page }} dari {{ pages }} · {{ total }} email</span>
+  {% if has_next %}<a class="admin-button" href="/admin/mail-delivery-reviews?page={{ next }}">Berikutnya</a>{% else %}<span class="admin-button admin-button-disabled">Berikutnya</span>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

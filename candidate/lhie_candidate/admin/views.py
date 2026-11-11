@@ -23,7 +23,9 @@ _FIELD_ERROR = re.compile(r"quantity_price_tiers\.(\d+)\.(minimum_quantity|price
 
 def _headers(response):
     response["Cache-Control"] = "no-store, private"
-    response["Referrer-Policy"] = "no-referrer"
+    # Native forms need a same-origin Origin header; no-referrer produces
+    # Origin:null in Chromium and the normal CSRF middleware rejects the POST.
+    response["Referrer-Policy"] = "same-origin"
     response["X-Robots-Tag"] = "noindex, nofollow"
     response["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data:; style-src 'self'; "

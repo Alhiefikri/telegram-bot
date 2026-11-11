@@ -91,7 +91,34 @@ def _dashed(draw, x1, y, x2):
     for x in range(x1, x2, 16):
         draw.line((x, y, min(x + 8, x2), y), fill=_LINE)
 
+def _paid_stamp(image, left, top):
+    stamp = Image.new('RGBA', (100, 100), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(stamp)
+    ink = (201, 72, 86, 245)
+    soft = (255, 238, 239, 30)
+    draw.ellipse((7, 7, 93, 93), fill=soft, outline=ink, width=1)
+    draw.ellipse((13, 13, 87, 87), outline=ink, width=1)
+    for angle in range(0, 360, 24):
+        draw.arc((18, 18, 82, 82), angle, angle + 12, fill=ink, width=1)
+    for text, size, center_y in (('LHIE STORE', 6, 28.5), ('PAID', 19, 51), ('VERIFIED', 6, 73.5)):
+        font = ImageFont.truetype(_BOLD, size)
+        bounds = draw.textbbox((0, 0), text, font=font)
+        x = round(50 - (bounds[0] + bounds[2]) / 2)
+        y = round(center_y - (bounds[1] + bounds[3]) / 2)
+        draw.text((x, y), text, font=font, fill=ink)
+    rotated = stamp.rotate(13, resample=Image.Resampling.BICUBIC, expand=True)
+    image.paste(rotated, (left, top), rotated)
 
+
+def _summary_top(draw, items):
+    cursor = 350
+    font = ImageFont.truetype(_BOLD, 19)
+    for item in items[:3]:
+        lines = _wrap(draw, _text(item['product_name'], 128), 270, font)
+        cursor += max(52, len(lines) * 18 + 20)
+    if len(items) > 3:
+        cursor += 26
+    return max(474, max(cursor, 412) + 12)
 def render_invoice(snapshot):
     """Return a 720x720 PNG of a paid, credential-free snapshot.
 
@@ -140,52 +167,59 @@ def render_invoice(snapshot):
         logo = source.convert('RGBA')
         logo.thumbnail((190, 132), Image.Resampling.LANCZOS)
         image.paste(logo, (48, 14), logo)
-    _draw(draw, 286, 42, 'INVOICE', 240, 29, _BLUE, True)
-    _draw(draw, 289, 78, 'DIGITAL PAYMENT RECEIPT', 240, 11, _MUTED, True)
+    _draw(draw, 286, 35, 'INVOICE', 240, 28, _BLUE, True)
+    _draw(draw, 289, 72, 'DIGITAL PAYMENT RECEIPT', 240, 12, _MUTED, True)
     draw.rounded_rectangle((552, 55, 674, 99), 4, fill=_INK)
     draw.rounded_rectangle((547, 50, 669, 94), 4, fill='#2fcb84')
-    _draw(draw, 578, 61, 'PAID', 75, 20, _INK, True)
+    paid_font = ImageFont.truetype(_BOLD, 16)
+    paid_width = draw.textlength('✓ PAID', font=paid_font)
+    _draw(draw, round((547 + 669 - paid_width) / 2), 61, '✓ PAID', 90, 16, _INK, True)
     draw.rectangle((48, 146, 672, 150), fill=_BLUE)
-    _draw(draw, 48, 159, 'INVOICE NO.', 105, 11, _MUTED, True)
-    _draw(draw, 158, 156, _text(snapshot['invoice_number'], 96) or 'ORDER', 510, 17, _INK, True)
-    _draw(draw, 48, 190, 'BUYER', 270, 11, _MUTED, True)
-    _draw(draw, 48, 211, buyer, 270, 16, _INK, True)
-    _draw(draw, 370, 190, 'PAID AT', 300, 11, _MUTED, True)
-    _draw(draw, 370, 211, paid_at.astimezone(ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y, %H:%M WIB'), 302, 15, _INK, True)
-    _draw(draw, 48, 250, 'PAYMENT METHOD', 270, 11, _MUTED, True)
-    _draw(draw, 48, 270, method, 270, 15, _INK, True)
+    _draw(draw, 48, 165, 'INVOICE NO.', 105, 12, _MUTED, True)
+    _draw(draw, 159, 160, _text(snapshot['invoice_number'], 96) or 'ORDER', 510, 19, _INK, True)
+    _draw(draw, 48, 191, 'BUYER', 270, 12, _MUTED, True)
+    _draw(draw, 48, 213, buyer, 270, 16, _INK, True)
+    _draw(draw, 370, 191, 'PAID AT', 300, 12, _MUTED, True)
+    _draw(draw, 370, 213, paid_at.astimezone(ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y, %H:%M WIB'), 302, 16, _INK, True)
+    _draw(draw, 48, 245, 'PAYMENT METHOD', 270, 12, _MUTED, True)
+    _draw(draw, 48, 267, method, 270, 16, _INK, True)
     _dashed(draw, 48, 298, 672)
-    _draw(draw, 48, 305, 'ORDER DETAILS', 300, 15, _INK, True)
-    for x, label in ((48, 'PRODUCT'), (348, 'QTY'), (414, 'UNIT PRICE'), (577, 'LINE TOTAL')):
-        _draw(draw, x, 331, label, 95, 11, _BLUE, True)
+    _draw(draw, 48, 305, 'ORDER DETAILS', 300, 16, _INK, True)
+    for x, label in ((48, 'PRODUCT'), (348, 'QTY'), (414, 'UNIT PRICE')):
+        _draw(draw, x, 334, label, 95, 12, _BLUE, True)
+    _draw(draw, 672, 334, 'LINE TOTAL', 102, 12, _BLUE, True, True)
     draw.rectangle((48, 350, 672, 353), fill=_BLUE)
-    product_font = ImageFont.truetype(_BOLD, 14)
-    for index, item in enumerate(items[:3]):
-        top = 362 + index * 50
-        for line_index, line in enumerate(_wrap(draw, _text(item['product_name'], 128), 270, product_font)):
-            draw.text((48, top + line_index * 17), line, font=product_font, fill=_INK)
-        _draw(draw, 390, top, str(max(0, int(item['quantity']))), 52, 14, _INK, True, True)
-        _draw(draw, 535, top, _money(item['unit_price'], item_currency), 130, 13, _INK, False, True)
-        _draw(draw, 672, top, _money(item['subtotal'], item_currency), 130, 13, _INK, True, True)
-        _dashed(draw, 48, top + 44, 672)
-    summary_top = 522
+    product_font = ImageFont.truetype(_BOLD, 19)
+    cursor = 350
+    for item in items[:3]:
+        lines = _wrap(draw, _text(item['product_name'], 128), 270, product_font)
+        row_height = max(52, len(lines) * 18 + 20)
+        for line_index, line in enumerate(lines):
+            draw.text((48, cursor + 9 + line_index * 18), line, font=product_font, fill=_INK)
+        _draw(draw, 390, cursor + 12, str(max(0, int(item['quantity']))), 52, 15, _INK, True, True)
+        _draw(draw, 535, cursor + 14, _money(item['unit_price'], item_currency), 130, 13, _INK, False, True)
+        _draw(draw, 672, cursor + 12, _money(item['subtotal'], item_currency), 130, 15, _INK, True, True)
+        _dashed(draw, 48, cursor + row_height - 2, 672)
+        cursor += row_height
+    summary_top = _summary_top(draw, items) + 2
     if len(items) > 3:
-        _draw(draw, 48, 513, f'+{len(items) - 3} other products', 250, 12, _BLUE, True)
-        summary_top = 540
-    _draw(draw, 238, summary_top, 'SUBTOTAL', 180, 12, _MUTED)
-    _draw(draw, 520, summary_top, _money(subtotal, currency), 135, 14, _INK, True, True)
-    _draw(draw, 238, summary_top + 24, 'PROVIDER / ADMIN FEE', 180, 12, _MUTED)
-    _draw(draw, 520, summary_top + 24, _money(snapshot['provider_fee'], currency), 135, 14, _INK, True, True)
-    draw.rectangle((188, summary_top + 47, 520, summary_top + 50), fill=_INK)
-    draw.rectangle((188, summary_top + 61, 318, summary_top + 88), fill='#ffe45c')
-    _draw(draw, 196, summary_top + 66, 'TOTAL PAID', 120, 14, _INK, True)
-    _draw(draw, 520, summary_top + 63, _money(snapshot['total_paid'], currency), 195, 21, _BLUE, True, True)
-    draw.ellipse((551, summary_top + 1, 651, summary_top + 101), outline=_BLUE, width=3)
-    _draw(draw, 571, summary_top + 28, 'PAID', 70, 21, _BLUE, True)
-    _draw(draw, 570, summary_top + 55, 'VERIFIED', 70, 10, _BLUE, True)
+        _draw(draw, 48, summary_top - 27, f'+{len(items) - 3} other products', 250, 16, _BLUE, True)
+    _draw(draw, 238, summary_top, 'SUBTOTAL', 180, 13, _MUTED)
+    _draw(draw, 520, summary_top, _money(subtotal, currency), 135, 15, _INK, True, True)
+    _draw(draw, 238, summary_top + 24, 'PROVIDER / ADMIN FEE', 180, 13, _MUTED)
+    _draw(draw, 520, summary_top + 24, _money(snapshot['provider_fee'], currency), 135, 15, _INK, True, True)
+    draw.rectangle((188, summary_top + 53, 520, summary_top + 56), fill=_INK)
+    draw.rectangle((188, summary_top + 67, 318, summary_top + 94), fill='#ffe45c')
+    _draw(draw, 196, summary_top + 71, 'TOTAL PAID', 120, 16, _INK, True)
+    _draw(draw, 520, summary_top + 60, _money(snapshot['total_paid'], currency), 195, 29, _BLUE, True, True)
+    _paid_stamp(image, 548, summary_top + 3)
     _dashed(draw, 48, 662, 520)
-    _draw(draw, 230, 672, 'Thank you for choosing Lhie Store.', 300, 13)
-    _draw(draw, 245, 692, 'Keep this invoice for your records.', 300, 11, _MUTED)
+    footer = 'Thank you for choosing Lhie Store.'
+    footer_font = ImageFont.truetype(_REGULAR, 15)
+    _draw(draw, round((WIDTH - draw.textlength(footer, font=footer_font)) / 2), 674, footer, 300, 15)
+    note = 'Keep this invoice for your records.'
+    note_font = ImageFont.truetype(_REGULAR, 12)
+    _draw(draw, round((WIDTH - draw.textlength(note, font=note_font)) / 2), 694, note, 300, 12, _MUTED)
     buffer = BytesIO()
     image.save(buffer, format='PNG', optimize=True)
     png = buffer.getvalue()

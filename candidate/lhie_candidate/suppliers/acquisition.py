@@ -63,7 +63,10 @@ class SupplierAcquisition:
         at = self.clock()
         self.db.execute("""UPDATE public.supplier_fulfillments SET
             state=CASE WHEN state='delivered' THEN state ELSE 'review' END,
-            last_error=%s,next_attempt_at=NULL,updated_at=%s WHERE id=%s""", (error, at, fulfillment['id']))
+            health_review_episode=CASE WHEN state='delivered' THEN health_review_episode
+                ELSE COALESCE(health_review_episode,%s) END,
+            last_error=%s,next_attempt_at=NULL,updated_at=%s WHERE id=%s""",
+            (str(uuid4()), error, at, fulfillment['id']))
         paid = next((p for p in payments if p['status'] == 'paid' and p['paid_at'] is not None), None)
         if paid:
             self.lifecycle.review_locked(order, paid, 'supplier_fulfillment')
@@ -100,7 +103,8 @@ class SupplierAcquisition:
                 self.db.execute("UPDATE public.supplier_purchases SET state='reserved',replay_count=replay_count+%s,updated_at=%s WHERE id=%s", (int(replay), at, p['id']))
             else:
                 self.db.execute("""UPDATE public.supplier_purchases SET state='ambiguous',last_error='dispatch_outcome_unknown',
-                    claim_token=NULL,lease_expires_at=NULL,updated_at=%s WHERE id=%s""", (at, p['id']))
+                    health_review_episode=COALESCE(health_review_episode,%s),
+                    claim_token=NULL,lease_expires_at=NULL,updated_at=%s WHERE id=%s""", (str(uuid4()), at, p['id']))
                 self._review(order, payments, f, 'dispatch_outcome_unknown')
                 return None
         if p is None:
@@ -156,7 +160,8 @@ class SupplierAcquisition:
         supplier = self.db.one('SELECT is_active FROM public.suppliers WHERE id=%s', (p['supplier_id'],))
         if not supplier or not supplier['is_active']:
             self.db.execute("""UPDATE public.supplier_purchases SET state='review',claim_token=NULL,
-                lease_expires_at=NULL,last_error='source_unavailable',updated_at=%s WHERE id=%s""", (at, purchase_id))
+                health_review_episode=COALESCE(health_review_episode,%s),
+                lease_expires_at=NULL,last_error='source_unavailable',updated_at=%s WHERE id=%s""", (str(uuid4()), at, purchase_id))
             self._review(order, payments, fulfillment, 'source_unavailable')
             return False
         self.db.execute("INSERT INTO public.supplier_purchase_dispatches (supplier_purchase_id,claim_token,started_at,outcome) VALUES (%s,%s,%s,'started')", (purchase_id, token, at))
@@ -311,7 +316,7 @@ class SupplierAcquisition:
             locked = self._lock(fulfillment_id)
             if locked is None:
                 raise CheckoutError('supplier_fulfillment_missing')
-            order, _, f = locked
+            order, payments, f = locked
             p = self.db.one('SELECT * FROM public.supplier_purchases WHERE id=%s', (f['current_purchase_id'],))
             if not p or p['id'] != expected_purchase_id:
                 raise CheckoutError('supplier_recovery_unavailable')
@@ -345,11 +350,10 @@ class SupplierAcquisition:
                 VALUES (%s,%s,'no_debit',%s,%s,%s,%s,%s,%s,%s)''',
                 (p['id'], actor_user_id, evidence_source, provider_reference, note, history_reconciliation_id, at, at, at))
             self._unhold(f, at)
-            self.db.execute("""UPDATE public.supplier_purchases SET state='rejected',
+            self.db.execute("""UPDATE public.supplier_purchases SET state='rejected',health_review_episode=NULL,
                 last_error='provider_no_debit_confirmed',next_attempt_at=NULL,updated_at=%s WHERE id=%s""", (at, p['id']))
             if f['state'] != 'delivered':
-                self.db.execute("""UPDATE public.supplier_fulfillments SET state='review',
-                    last_error='provider_no_debit_confirmed',next_attempt_at=NULL,updated_at=%s WHERE id=%s""", (at, f['id']))
+                self._review(order, payments, f, 'provider_no_debit_confirmed')
             self.lifecycle._audit('supplier_purchase.no_debit_confirmed', order, None, actor=actor_user_id)
 
     def confirm_owner_no_debit(self, fulfillment_id, *, actor_user_id, expected_purchase_id):
@@ -383,6 +387,7 @@ class SupplierAcquisition:
                 raise CheckoutError('supplier_evidence_conflict')
             self._unhold(f, at)
             self.db.execute("""UPDATE public.supplier_purchases SET state='rejected',last_error='owner_no_debit_confirmed',
+                health_review_episode=NULL,
                 next_attempt_at=NULL,claim_token=NULL,lease_expires_at=NULL,updated_at=%s WHERE id=%s""", (at, p['id']))
             self.lifecycle._audit('supplier_fulfillment.owner_no_debit_confirmed', order, None, actor=actor_user_id)
 
@@ -419,7 +424,7 @@ class SupplierAcquisition:
             self.db.execute('UPDATE public.suppliers SET reserved_balance_micros=reserved_balance_micros+%s,version=version+1,updated_at=%s WHERE id=%s', (cost, at, supplier['id']))
             self.db.execute('UPDATE public.supplier_catalog_items SET reserved_quantity=reserved_quantity+%s,updated_at=%s WHERE id=%s', (quantity, at, sku['id']))
             self.db.execute('''UPDATE public.supplier_fulfillments SET reserved_supplier_id=%s,reserved_catalog_item_id=%s,
-                reserved_cost_micros=%s,reserved_quantity=%s,state='pending',current_purchase_id=NULL,
+                reserved_cost_micros=%s,reserved_quantity=%s,state='pending',health_review_episode=NULL,current_purchase_id=NULL,
                 next_attempt_at=%s,updated_at=%s WHERE id=%s''',
                 (supplier['id'], sku['id'], cost, quantity, at + timedelta(seconds=10), at, f['id']))
             from .capacity import refresh_shared_wallet_after_commit
@@ -509,13 +514,13 @@ class SupplierAcquisition:
             p['committed_at'] = at
         handoff = self.db.one('SELECT id FROM public.supplier_manual_handoffs WHERE supplier_fulfillment_id=%s LIMIT 1', (f['id'],))
         if (f['state'] == 'delivered' or handoff) and economic and p['committed_at']:
-            self.db.execute('UPDATE public.supplier_purchases SET state=%s,next_attempt_at=NULL,updated_at=%s WHERE id=%s', ('delivered' if len(trusted) == p['quantity'] else 'settled', at, p['id']))
+            self.db.execute('UPDATE public.supplier_purchases SET state=%s,health_review_episode=NULL,next_attempt_at=NULL,updated_at=%s WHERE id=%s', ('delivered' if len(trusted) == p['quantity'] else 'settled', at, p['id']))
             if f['state'] != 'delivered':
                 self._review(order, payments, f, 'external_handoff_remaining')
             return
         if (result.status == 'rejected' and not read and p['replay_count'] == 0 and not observed and not result.order_id
                 and result.cost_micros in (None, 0) and not p['committed_at']):
-            self.db.execute("UPDATE public.supplier_purchases SET state='rejected',updated_at=%s WHERE id=%s", (at, p['id']))
+            self.db.execute("UPDATE public.supplier_purchases SET state='rejected',health_review_episode=NULL,updated_at=%s WHERE id=%s", (at, p['id']))
             self._unhold(f, at)
             if not self._fallback(f, at):
                 self._review(order, payments, f, result.error_code or 'purchase_rejected')
@@ -530,12 +535,14 @@ class SupplierAcquisition:
                     (product_id,order_item_id,secret,supplier_purchase_id,supplier_unit_index,created_at,updated_at)
                     VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (supplier_purchase_id,supplier_unit_index) DO NOTHING''',
                     (item['product_id'], item['id'], self.cipher.encrypt_string(secret), p['id'], number, at, at))
-            self.db.execute("UPDATE public.supplier_purchases SET state='delivered',next_attempt_at=NULL,updated_at=%s WHERE id=%s", (at, p['id']))
-            self.db.execute("UPDATE public.supplier_fulfillments SET state='delivered',delivered_at=%s,next_attempt_at=NULL,updated_at=%s WHERE id=%s", (at, at, f['id']))
+            self.db.execute("UPDATE public.supplier_purchases SET state='delivered',health_review_episode=NULL,next_attempt_at=NULL,updated_at=%s WHERE id=%s", (at, p['id']))
+            self.db.execute("UPDATE public.supplier_fulfillments SET state='delivered',health_review_episode=NULL,delivered_at=%s,next_attempt_at=NULL,updated_at=%s WHERE id=%s", (at, at, f['id']))
             if not self.lifecycle.fulfillment.pending(order['id']):
                 self.db.execute("""UPDATE public.manual_fulfillment_reviews SET state='fulfilled',resolved_at=%s,updated_at=%s
                     WHERE order_id=%s AND reason IN ('supplier_fulfillment','late_payment') AND state='pending'""", (at, at, order['id']))
                 self.db.execute("UPDATE public.orders SET order_status='completed',updated_at=%s WHERE id=%s", (at, order['id']))
+                from ..notifications.guest_mail import record_guest_event
+                record_guest_event(self.db, order['id'], 'fulfillment_completed')
                 wake_after_commit('order', str(order['id']), using=self.using)
         elif result.identity_trusted and result.delivery_trusted and not conflict and quantity_matches and len(trusted) == p['quantity'] and p['actual_cost_micros'] is None and p['supplier_order_id']:
             self._await(f, p, at)
@@ -553,5 +560,7 @@ class SupplierAcquisition:
             self.db.execute("UPDATE public.supplier_fulfillments SET state='awaiting_delivery',next_attempt_at=%s,updated_at=%s WHERE id=%s", (due, at, f['id']))
 
     def _fail(self, order, payments, f, p, state, error):
-        self.db.execute('UPDATE public.supplier_purchases SET state=%s,last_error=%s,updated_at=%s WHERE id=%s', (state, error, self.clock(), p['id']))
+        self.db.execute('''UPDATE public.supplier_purchases SET state=%s,last_error=%s,
+            health_review_episode=COALESCE(health_review_episode,%s),updated_at=%s WHERE id=%s''',
+            (state, error, str(uuid4()), self.clock(), p['id']))
         self._review(order, payments, f, error)

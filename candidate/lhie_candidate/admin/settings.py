@@ -40,6 +40,14 @@ def _audit(db, actor_id, action, subject_type, subject_id, old=None, new=None, i
          ip))
 
 
+def _receiver_notice_snapshot(action, label, address, actor):
+    normalized = str(address or '').lower()
+    return {'action': action, 'label': str(label),
+            'masked_address': normalized[:6] + '••••' + normalized[-4:] if len(normalized) >= 12 else '••••',
+            'actor': str(actor.get('name') or actor.get('email') or 'Owner'),
+            'at': lifecycle_now().isoformat(timespec='seconds') + '+07:00'}
+
+
 class SettingsService:
     def __init__(self, *, using="default", readiness=None, sakurupiah=None):
         self.using = using
@@ -216,7 +224,7 @@ class SettingsService:
             raise CheckoutError("bsc_receiver_invalid")
         normalized = address.lower()
         with transaction.atomic(using=self.using):
-            actor = self.db.one("SELECT role FROM public.users WHERE id=%s FOR SHARE", (actor_id,))
+            actor = self.db.one("SELECT role,name,email FROM public.users WHERE id=%s FOR SHARE", (actor_id,))
             if actor is None or actor["role"] != "owner":
                 raise CheckoutError("operator_forbidden")
             row = self.db.one(
@@ -233,7 +241,8 @@ class SettingsService:
                 raise CheckoutError("bsc_receiver_exists")
             _audit(self.db, actor_id, "bsc_receiver.created", "App\\Models\\BscPaymentReceiver",
                    row["id"], None, {"address_masked": mask_identifier(address, visible=6),
-                                     "verification_status": "pending_verification"}, ip)
+                                     "verification_status": "pending_verification",
+                                     "notification": _receiver_notice_snapshot('added', label.strip(), normalized, actor)}, ip)
             return row
 
     def deactivate_receiver(self, receiver_id, *, actor_id, ip=None):
@@ -244,7 +253,7 @@ class SettingsService:
 
     def _receiver_state(self, receiver_id, active, actor_id, ip):
         with transaction.atomic(using=self.using):
-            actor = self.db.one("SELECT role FROM public.users WHERE id=%s FOR SHARE", (actor_id,))
+            actor = self.db.one("SELECT role,name,email FROM public.users WHERE id=%s FOR SHARE", (actor_id,))
             if actor is None or actor["role"] != "owner":
                 raise CheckoutError("operator_forbidden")
             row = self.db.one(
@@ -263,7 +272,10 @@ class SettingsService:
             _audit(self.db, actor_id,
                    "bsc_receiver.activated" if active else "bsc_receiver.deactivated",
                    "App\\Models\\BscPaymentReceiver", row["id"],
-                   {"is_active": bool(row["is_active"])}, {"is_active": active}, ip)
+                   {"is_active": bool(row["is_active"])},
+                   {"is_active": active, "notification": _receiver_notice_snapshot(
+                       'activated' if active else 'deactivated', row['label'],
+                       row['address_normalized'] or row['address'], actor)}, ip)
             return updated
 
 
