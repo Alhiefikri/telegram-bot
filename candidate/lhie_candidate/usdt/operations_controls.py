@@ -13,7 +13,39 @@ _SCOPES = frozenset(('funding', 'spending', 'rail_binance_pay', 'rail_bsc_usdt',
 _ALERTS = frozenset(('reorg_pending', 'reorg_loss_unresolved', 'reconciliation_drift',
     'reconciliation_receipt_collision', 'treasury_coverage', 'restore_gate_open',
     'delivery_paused', 'account_frozen', 'receipt_registry_conflict', 'top_up_work_backlog',
-    'settlement_backlog', 'outbound_backlog'))
+    'settlement_backlog', 'outbound_backlog', 'scheduler_runtime_failure',
+    'telegram_recovery_runtime_failure'))
+
+_RUNTIME_COMPONENTS = {
+    'scheduler': ('scheduler_runtime_failure', ('schedule_exit', 'cycle_interrupted', 'oom_kill')),
+    'outbound-recovery': ('telegram_recovery_runtime_failure',
+                          ('recovery_exit', 'recovery_timeout', 'recovery_interrupted')),
+}
+_RUNTIME_REASONS = {
+    'schedule_exit': 'siklus scheduler keluar dengan status non-zero',
+    'cycle_interrupted': 'proses scheduler berhenti di tengah satu siklus',
+    'oom_kill': 'cgroup mencatat proses scheduler terkena OOM-kill',
+    'recovery_exit': 'proses recovery keluar dengan status non-zero',
+    'recovery_timeout': 'proses recovery melewati batas waktu eksekusi',
+    'recovery_interrupted': 'proses recovery berhenti saat sweep berjalan',
+}
+
+
+def runtime_alert_summary(component, healthy, reason=None):
+    """Sanitized copy shared by the alert episode and its outbound snapshot."""
+    if component not in _RUNTIME_COMPONENTS:
+        raise ValueError('Unknown runtime alert component.')
+    key, reasons = _RUNTIME_COMPONENTS[component]
+    if not isinstance(healthy, bool):
+        raise ValueError('Invalid runtime health state')
+    if not healthy:
+        if reason not in reasons or reason not in _RUNTIME_REASONS:
+            raise ValueError('Unknown runtime alert reason.')
+        label = 'Scheduler' if component == 'scheduler' else 'Recovery outbound Telegram'
+        return key, f'{label} gagal: {_RUNTIME_REASONS[reason]}.'
+    if reason is not None:
+        raise ValueError('Recovered runtime alert takes no reason.')
+    return key, 'Kondisi runtime pulih.'
 
 
 def _open_message(severity, summary):
@@ -98,13 +130,26 @@ class OperationalControls:
                  json.dumps({'account_id': account['id'], 'reason': reason.strip()}), legacy_now()))
             return 'unfrozen'
 
+    def reconcile_runtime(self, component, *, healthy, reason=None, admin_chat_id):
+        """Open or resolve one scheduler/recovery runtime episode.
+
+        Episode delivery uses the existing outbound ledger. Evaluating a
+        runtime outage never touches a balance, receipt, Order or allocation.
+        """
+        _outside(self.using)
+        key, summary = runtime_alert_summary(component, healthy, reason=reason)
+        if healthy:
+            return self.resolve(key, admin_chat_id=admin_chat_id)
+        return self.alert(key, 'critical', summary, {'component': component},
+                          admin_chat_id=admin_chat_id)
+
     def alert(self, key, severity, summary, evidence, *, admin_chat_id):
         _outside(self.using)
         if not isinstance(admin_chat_id, str) or not re.fullmatch(r'[1-9][0-9]{0,18}', admin_chat_id):
             raise ValueError('Authorized admin recipient required')
         if (key not in _ALERTS or severity not in ('warning', 'critical') or not isinstance(summary, str)
                 or not 1 <= len(summary.strip()) <= 500 or not isinstance(evidence, dict)
-                or any(k not in ('count', 'run_id', 'unexplained_micro', 'state') for k in evidence)
+                or any(k not in ('count', 'run_id', 'unexplained_micro', 'state', 'component') for k in evidence)
                 or any(type(v) not in (int, str, type(None)) for v in evidence.values())):
             raise ValueError('Invalid alert evidence')
         payload = json.dumps(evidence, sort_keys=True, separators=(',', ':'))

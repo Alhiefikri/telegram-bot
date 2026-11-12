@@ -7,8 +7,25 @@ class BalanceOperationsAlertSnapshotTests(unittest.TestCase):
 
         self.assertIn('reorg_pending', _ALERTS)
         self.assertIn('reorg_loss_unresolved', _ALERTS)
-        self.assertNotIn('scheduler_runtime_failure', _ALERTS)
-        self.assertNotIn('telegram_recovery_runtime_failure', _ALERTS)
+        self.assertIn('scheduler_runtime_failure', _ALERTS)
+        self.assertIn('telegram_recovery_runtime_failure', _ALERTS)
+    def test_runtime_alert_copy_and_reason_allowlist(self):
+        from lhie_candidate.usdt.operations_controls import runtime_alert_summary
+
+        self.assertEqual(runtime_alert_summary('scheduler', False, 'oom_kill'),
+                         ('scheduler_runtime_failure',
+                          'Scheduler gagal: cgroup mencatat proses scheduler terkena OOM-kill.'))
+        self.assertEqual(runtime_alert_summary('outbound-recovery', False, 'recovery_timeout'),
+                         ('telegram_recovery_runtime_failure',
+                          'Recovery outbound Telegram gagal: proses recovery melewati batas waktu eksekusi.'))
+        self.assertEqual(runtime_alert_summary('scheduler', True),
+                         ('scheduler_runtime_failure', 'Kondisi runtime pulih.'))
+        for component, healthy, reason in (('scheduler', False, 'recovery_timeout'),
+                                           ('unknown', False, 'oom_kill'),
+                                           ('scheduler', True, 'oom_kill')):
+            with self.subTest(component=component, reason=reason), self.assertRaises(ValueError):
+                runtime_alert_summary(component, healthy, reason)
+
     def test_open_and_updated_alert_copy_matches_php(self):
         from lhie_candidate.usdt.operations_controls import _open_message
 

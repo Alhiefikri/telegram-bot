@@ -101,8 +101,11 @@ Redis-stopped recovery drills inside P01 isolation and writes
 `.local/migration-p10/verification.json`. It reuses P07/P08/P09 fixtures and
 evidence; a fake slow sandbox is harness-only. P25 extends this topology with
 isolated notification/bulk/mail/auth-mail consumers, never placing those families
-on interaction/payment/receipt. Full scheduler, retention, metrics and
-Python-only operations remain P26.
+on interaction/payment/receipt. P26 [bounded operations, retention and recovery](../migration/python-django/p26/README.md)
+owns `candidate/lhie_candidate/operations/`: the parity/owner matrix, durable
+scheduler, bounded health and retention, and Python-only schema/backup/restore.
+Local synthetic PostgreSQL evidence is recorded at
+`.local/migration-p26/verification.json`; production and human cutover gates remain separate.
 
 P12 [Order lifecycle and retained refunds](../migration/python-django/p05/README.md#p12-shared-order-lifecycle-and-retained-refunds-694)
 owns `checkout/lifecycle.py`, `fulfillment.py` and `refunds.py`. Checkout and the

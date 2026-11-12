@@ -1,6 +1,7 @@
 """P12 changed-flow smoke and competing transitions on admitted PostgreSQL."""
 from dataclasses import asdict
 from datetime import timedelta
+from uuid import uuid4
 import multiprocessing
 
 from tests.test_checkout_postgres import admin_connection
@@ -151,6 +152,7 @@ def exercise_order_lifecycle(fixtures):
             created = rail.create(late.payment_id, phone='08000000000', callback_url='https://synthetic.invalid/callback/sakurupiah', return_url='https://synthetic.invalid/return')
             assert created.state == 'created'
             immutable = snapshot(late.order_id)
+            local_recovery = {}
             lifecycle.apply_pending_cancellation(late.order_id, customer_id=fixtures['release']['customer_id'])
             merchant = admin.execute('SELECT merchant_ref FROM public.payments WHERE id=%s', (late.payment_id,)).fetchone()[0]
             sandbox.rows[merchant]['status'] = 'berhasil'
@@ -169,6 +171,43 @@ def exercise_order_lifecycle(fixtures):
             lifecycle.resolve_review(review_id, actor_user_id=actor, action='fulfill', reason='Synthetic verified attribution')
             assert state(late.order_id) == ('completed', 'paid', 'paid', 1, 1)
             assert source.load(late.order_id, chat)['order_id'] == late.order_id
+            # Reconciliation respects review, payment and refund guards before repairing projection state.
+            admin.execute("UPDATE public.orders SET order_status='processing' WHERE id=%s", (late.order_id,))
+            admin.execute("UPDATE public.manual_fulfillment_reviews SET state='pending' WHERE id=%s", (review_id,))
+            review_guard = lifecycle.recover_local_completion(limit=1)
+            assert review_guard == {'examined': 1, 'recovered': 0, 'next_cursor': late.order_id}, review_guard
+            assert state(late.order_id)[:3] == ('processing', 'paid', 'paid')
+            admin.execute("UPDATE public.manual_fulfillment_reviews SET state='fulfilled' WHERE id=%s", (review_id,))
+            admin.execute("UPDATE public.orders SET order_status='completed' WHERE id=%s", (late.order_id,))
+            local_recovery['open_review_guard'] = review_guard
+
+            admin.execute("UPDATE public.orders SET order_status='processing' WHERE id=%s", (late.order_id,))
+            admin.execute("UPDATE public.payments SET status='pending' WHERE id=%s", (late.payment_id,))
+            unpaid_guard = lifecycle.recover_local_completion(limit=1)
+            assert unpaid_guard == {'examined': 1, 'recovered': 0, 'next_cursor': late.order_id}, unpaid_guard
+            admin.execute("UPDATE public.payments SET status='paid' WHERE id=%s", (late.payment_id,))
+            admin.execute("UPDATE public.orders SET order_status='completed' WHERE id=%s", (late.order_id,))
+            local_recovery['unpaid_guard'] = unpaid_guard
+
+            refund_id = str(uuid4())
+            admin.execute("""INSERT INTO public.order_refunds
+                (id,order_id,payment_id,customer_id,amount,currency,state,created_at,updated_at)
+                VALUES (%s,%s,%s,%s,1,'IDR','requested',now(),now())""",
+                (refund_id, late.order_id, late.payment_id, fixtures['release']['customer_id']))
+            admin.execute("UPDATE public.orders SET order_status='processing' WHERE id=%s", (late.order_id,))
+            refund_guard = lifecycle.recover_local_completion(limit=1)
+            assert refund_guard == {'examined': 1, 'recovered': 0, 'next_cursor': late.order_id}, refund_guard
+            admin.execute("DELETE FROM public.order_refunds WHERE id=%s", (refund_id,))
+            admin.execute("UPDATE public.orders SET order_status='completed' WHERE id=%s", (late.order_id,))
+            local_recovery['refund_guard'] = refund_guard
+
+            admin.execute("UPDATE public.orders SET order_status='processing' WHERE id=%s", (late.order_id,))
+            recovered = lifecycle.recover_local_completion(limit=1)
+            assert recovered == {'examined': 1, 'recovered': 1, 'next_cursor': late.order_id}, recovered
+            assert state(late.order_id)[0] == 'completed'
+            exhausted = lifecycle.recover_local_completion(limit=1, after_order_id=recovered['next_cursor'])
+            assert exhausted == {'examined': 0, 'recovered': 0, 'next_cursor': None}, exhausted
+            local_recovery['cursor_recovery'] = {'page': recovered, 'after_cursor': exhausted}
             refund = lifecycle.apply_payment_refunded(late.payment_id, actor_user_id=actor, reference='p12-external-remainder')
             assert refund.fully_refunded
             assert not lifecycle.apply_payment_refunded(late.payment_id, actor_user_id=actor, reference='p12-external-remainder').newly_applied
@@ -247,7 +286,7 @@ def exercise_order_lifecycle(fixtures):
         return {'lifecycle_e2e': 'manual paid/proof/reject; provider late review/fulfill/external refund; original snapshots preserved',
                 'postgres_competing_transitions': outcomes, 'refund_replay': 'one original IDR credit, no restock',
                 'atomic_rollback': 'status/stock/claim/audit rolled back', 'expiry_worker': sweep,
-                'refund_protocol': refunds}
+                'local_completion_recovery': local_recovery, 'refund_protocol': refunds}
     finally:
         admin.close()
         connections.close_all()

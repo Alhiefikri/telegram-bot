@@ -409,6 +409,48 @@ class OrderLifecycle:
             self._audit('order.refund_recorded', order, payment, actor=actor)
         return refund
 
+    def recover_local_completion(self, limit=100, *, after_order_id=None, using=None):
+        """Repair paid local-credential Orders stuck in processing.
+
+        The caller observes one bounded page; each candidate is revalidated
+        under its Order/payment locks before the single status update. This is a
+        projection repair only: it never allocates stock, moves money or sends a
+        receipt.
+        """
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError('Invalid local completion limit')
+        if after_order_id is not None and (not isinstance(after_order_id, str) or not after_order_id):
+            raise ValueError('Invalid local completion cursor')
+        from uuid import UUID
+        if after_order_id is not None:
+            UUID(after_order_id)
+        rows = self.db.rows('''SELECT o.id FROM public.orders o
+            WHERE o.order_status='processing' AND o.payment_status='paid'
+              AND (%s::uuid IS NULL OR o.id>%s::uuid)
+              AND EXISTS (SELECT 1 FROM public.order_items i JOIN public.product_stock_items s
+                  ON s.order_item_id=i.id WHERE i.order_id=o.id)
+            ORDER BY o.id LIMIT %s''', (after_order_id, after_order_id, limit))
+        recovered = 0
+        for row in rows:
+            with transaction.atomic(using=self.using):
+                order = self.db.one('SELECT id,order_status,payment_status FROM public.orders WHERE id=%s FOR UPDATE', (row['id'],))
+                if (order is None or order['order_status'] != 'processing'
+                        or order['payment_status'] != 'paid'):
+                    continue
+                payments = self.db.rows('SELECT id,provider,status FROM public.payments WHERE order_id=%s ORDER BY id FOR UPDATE',
+                                        (order['id'],))
+                if (not any(p['status'] == 'paid' and p['provider'] != 'manual' for p in payments)
+                        or self._open_review(order['id'])
+                        or self.db.one('SELECT id FROM public.order_refunds WHERE order_id=%s LIMIT 1', (order['id'],))
+                        or not self.db.one("SELECT id FROM public.inventory_movements WHERE order_id=%s AND type='sale' LIMIT 1", (order['id'],))
+                        or not self._complete_local(order['id'])):
+                    continue
+                self.db.execute('UPDATE public.orders SET order_status=%s,updated_at=%s WHERE id=%s',
+                                ('completed', self.clock(), order['id']))
+                recovered += 1
+        return {'examined': len(rows), 'recovered': recovered,
+                'next_cursor': str(rows[-1]['id']) if len(rows) == limit else None}
+
     def apply_payment_refunded(self, payment_id, *, actor_user_id, refund_id=None, reference=None, result='success'):
         def operation():
             actor = self._authorize(actor_user_id, review=True)
