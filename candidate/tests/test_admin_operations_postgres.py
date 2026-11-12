@@ -212,8 +212,8 @@ def exercise_admin_operations(fixtures):
         assert admin.execute("SELECT status,attempts,recipient_email,delivery_started_at FROM public.order_notification_events WHERE id=%s",
                              (resent_event_id,)).fetchone() == ("pending", 1, original_snapshot, None)
         assert admin.execute("""SELECT count(*) FROM public.audit_logs WHERE action='mail_delivery.resent'
-            AND subject_id=%s AND new_values::text LIKE '%duplicate_risk_acknowledged%'""",
-            (str(resent_event_id),)).fetchone()[0] == 1
+            AND subject_id=%s AND new_values::text LIKE %s""",
+            (str(resent_event_id), '%duplicate_risk_acknowledged%')).fetchone()[0] == 1
 
         # Manual fulfillment reject is one audited transition; replay is a no-op.
         token = csrf(review_page)

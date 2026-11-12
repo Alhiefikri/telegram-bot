@@ -1,5 +1,6 @@
 """P22 admin shell/catalog/stock proof inside the disposable P01 database."""
 
+import os
 import hashlib
 import json
 import multiprocessing
@@ -140,6 +141,12 @@ def exercise_admin(fixtures):
         assert b"admin-nojs-nav" in dashboard.content
         assert b"id=\"admin-drawer\"" in dashboard.content
         assert b"Ringkasan katalog" in dashboard.content
+        if os.environ.get("P27_ADMIN_BROWSER_SMOKE") == "1":
+            from tests.test_storefront_postgres import browser_wait_app
+            browser_wait_app({
+                "admin_email": fixtures["auth"]["admin"]["email"],
+                "admin_password": password,
+            })
         products_tab = owner.get("/admin?tab=produk", secure=True)
         assert products_tab.status_code == 200 and b"Produk dan stok" in products_tab.content
         for path in ("/admin/kategori", "/admin/family", "/admin/banner", "/admin/produk/baru"):

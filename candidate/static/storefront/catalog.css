@@ -15,3 +15,4 @@
 #waitlist-email::placeholder{color:var(--sf-muted);opacity:1}
 #waitlist button{background:#1d4ed8;color:#fff}
 #waitlist :is(input,button):focus-visible{outline:3px solid #12233f;outline-offset:3px}
+.api-docs #errors code{overflow-wrap:anywhere}

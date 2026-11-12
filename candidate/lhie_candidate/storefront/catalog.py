@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from django.core.paginator import Paginator
 from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import render
+from django.urls import reverse
 from django.views.decorators.http import require_GET
 
 from lhie_candidate.auth.limits import RateLimits
@@ -422,7 +423,7 @@ def robots(request):
 @require_GET
 def sitemap(request):
     products = CatalogRepository().products()
-    paths = ['/', '/shop', '/panduan', '/gpt/panduan-login-akun',
+    paths = ['/', '/shop', '/panduan', '/gpt/panduan-login-akun', reverse('storefront-api-docs'),
              '/privasi', '/syarat-ketentuan', '/refund', '/pemulihan-pesanan']
     families = {p['family']['slug'] for p in products if p.get('family') and p['family'].get('slug')}
     paths.extend('/pilihan/' + quote(slug, safe='') for slug in sorted(families))
@@ -437,13 +438,16 @@ def sitemap(request):
 @require_GET
 def llms(request):
     origin = request.build_absolute_uri('/').rstrip('/')
+    reference_url = request.build_absolute_uri(reverse('storefront-api-docs-reference'))
+    openapi_url = request.build_absolute_uri(reverse('storefront-api-docs-openapi'))
+    docs_url = request.build_absolute_uri(reverse('storefront-api-docs'))
     body = (
         '# Lhie Store\n\n'
         '> Lhie Store is a digital-goods storefront. The Supplier API lets the backend of a registered Customer read the public catalog and its own balances and create balance-funded orders on this origin. API keys are issued from the private Store Bot.\n\n'
         '## API documentation\n\n'
-        f'- [Supplier API reference (Markdown)]({origin}/api-docs/reference.md)\n'
-        f'- [OpenAPI 3.1 description]({origin}/api-docs/openapi.json)\n'
-        f'- [Bilingual documentation site]({origin}/api-docs)\n\n'
+        f'- [Supplier API reference (Markdown)]({reference_url})\n'
+        f'- [OpenAPI 3.1 description]({openapi_url})\n'
+        f'- [Bilingual documentation site]({docs_url})\n\n'
         '## Store\n\n'
         f'- [Storefront]({origin}/)\n'
         f'- [Order access]({origin}/akses-pesanan)\n'

@@ -1,10 +1,13 @@
-from django.urls import path
+from django.urls import path, re_path
 
-from . import catalog
+from . import api_docs, catalog
 
 urlpatterns = [
     path('robots.txt', catalog.robots, name='storefront-robots'),
     path('sitemap.xml', catalog.sitemap, name='storefront-sitemap'),
+    re_path(r'^api-docs/?$', api_docs.index, name='storefront-api-docs'),
+    path('api-docs/openapi.json', api_docs.openapi, name='storefront-api-docs-openapi'),
+    path('api-docs/reference.md', api_docs.reference, name='storefront-api-docs-reference'),
     path('llms.txt', catalog.llms, name='storefront-llms'),
     path('aktivitas-pembelian-terverifikasi', catalog.purchase_activity, name='storefront-purchase-activity'),
     path('panduan', catalog.guides, name='storefront-guides'),

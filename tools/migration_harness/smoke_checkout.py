@@ -34,20 +34,21 @@ def main():
     notifications = sys.argv[1:] in (['--notifications'], ['--notifications-browser'])
     receipt = sys.argv[1:] == ['--receipt'] or notifications
     lifecycle = sys.argv[1:] == ['--lifecycle']
-    browser = sys.argv[1:] in (['--storefront-browser'], ['--notifications-browser'])
+    admin_browser = sys.argv[1:] == ['--admin-browser']
+    browser = sys.argv[1:] in (['--storefront-browser'], ['--notifications-browser']) or admin_browser
     storefront = sys.argv[1:] in (['--storefront'], ['--storefront-browser'])
-    admin = sys.argv[1:] == ['--admin']
+    admin = sys.argv[1:] in (['--admin'], ['--admin-browser'])
     auth = sys.argv[1:] == ['--auth'] or storefront or admin or notifications
     supplier = sys.argv[1:] == ['--supplier']
     p16 = sys.argv[1:] == ['--p16']
     p17 = sys.argv[1:] == ['--p17']
     api = sys.argv[1:] == ['--api']
-    if sys.argv[1:] not in ([], ['--notifications'], ['--notifications-browser'], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api'], ['--admin']):
-        raise ValueError('Usage: smoke_checkout.py [--notifications|--notifications-browser|--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api|--admin]')
+    if sys.argv[1:] not in ([], ['--notifications'], ['--notifications-browser'], ['--receipt'], ['--lifecycle'], ['--auth'], ['--storefront'], ['--storefront-browser'], ['--supplier'], ['--p16'], ['--p17'], ['--api'], ['--admin'], ['--admin-browser']):
+        raise ValueError('Usage: smoke_checkout.py [--notifications|--notifications-browser|--receipt|--lifecycle|--auth|--storefront|--storefront-browser|--supplier|--p16|--p17|--api|--admin|--admin-browser]')
     os.umask(0o077)
-    scope = 'migration-p25' if notifications else 'migration-p22' if admin else 'migration-p21' if storefront else 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
+    scope = 'migration-p27' if admin_browser else 'migration-p25' if notifications else 'migration-p22' if admin else 'migration-p21' if storefront else 'migration-p20' if api else 'migration-p17' if p17 else 'migration-p16' if p16 else 'migration-p18' if supplier else 'migration-p19' if auth else 'migration-p12' if lifecycle else 'migration-p09' if receipt else 'migration-p07'
     harness.STATE = ROOT / '.local' / scope / 'lifecycle'
-    harness.PREFIX = 'lhie-p25-' if notifications else 'lhie-p22-' if admin else 'lhie-p21-' if storefront else 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
+    harness.PREFIX = 'lhie-p27-' if admin_browser else 'lhie-p25-' if notifications else 'lhie-p22-' if admin else 'lhie-p21-' if storefront else 'lhie-p20-' if api else 'lhie-p17-' if p17 else 'lhie-p16-' if p16 else 'lhie-p18-' if supplier else 'lhie-p19-' if auth else 'lhie-p12-' if lifecycle else 'lhie-p09-' if receipt else 'lhie-p07-'
     harness.IMAGE = 'lhie-p19-boundary:local' if auth or api else 'lhie-p09-boundary:local' if receipt or lifecycle or supplier or p16 or p17 else 'lhie-p01-boundary:1'
     if notifications:
         harness.BOUNDARY_SOURCE = ROOT / 'tools/migration_harness/boundary.py'
@@ -112,6 +113,8 @@ def main():
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/funding/policy_admin_grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/adjustments/grants.sql').read_text()
             schema += '\n' + (ROOT / 'candidate/lhie_candidate/suppliers/grants.sql').read_text()
+        if admin_browser:
+            schema += '\n' + (ROOT / 'candidate/lhie_candidate/notifications/grants.sql').read_text()
         if api:
             schema += '\n' + '\n'.join((ROOT / 'candidate/lhie_candidate/customer_api' / name).read_text()
                                        for name in ('credential_grants.sql','orders_grants.sql','reads_grants.sql'))
@@ -138,7 +141,8 @@ def main():
             '--env',f'P19_AUTH_SMOKE={"1" if auth else "0"}',
             '--env',f'P21_STOREFRONT_SMOKE={"1" if storefront else "0"}',
             '--env',f'P22_ADMIN_SMOKE={"1" if admin else "0"}',
-            '--env',f'P21_BROWSER_SMOKE={"1" if browser else "0"}',
+            '--env',f'P21_BROWSER_SMOKE={"1" if browser and not admin_browser else "0"}',
+            '--env',f'P27_ADMIN_BROWSER_SMOKE={"1" if admin_browser else "0"}',
             '--env',f'P16_USDT_SMOKE={"1" if p16 else "0"}',
             '--env',f'P17_USDT_SMOKE={"1" if p17 else "0"}',
             '--env',f'P20_API_SMOKE={"1" if api else "0"}',
@@ -237,7 +241,7 @@ def main():
             sources.extend(ROOT / name for name in (
                 'candidate/tests/test_admin_postgres.py', 'candidate/tests/test_admin_operations_postgres.py',
                 'candidate/tests/test_admin_pricing.py', 'candidate/tests/test_admin_operations.py',
-                'candidate/lhie_candidate/settings.py',
+                'candidate/tests/test_storefront_postgres.py', 'candidate/lhie_candidate/settings.py',
                 'candidate/lhie_candidate/urls.py', 'candidate/lhie_candidate/auth/admin.py',
                 'candidate/lhie_candidate/auth/http.py', 'candidate/lhie_candidate/compat/crypto.py',
                 'candidate/lhie_candidate/compat/identity.py', 'candidate/lhie_candidate/checkout/db.py',

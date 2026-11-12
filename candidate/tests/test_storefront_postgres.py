@@ -390,9 +390,11 @@ def browser_wait_app(fixture):
             connections.close_all()
 
     thread = threading.Thread(target=serve, daemon=True)
+    fixture_path = evidence / 'browser-fixture.json'
     thread.start()
     try:
-        (evidence / 'browser-fixture.json').write_text(json.dumps(fixture))
+        fixture_path.write_text(json.dumps(fixture))
+        fixture_path.chmod(0o600)
         deadline = time.monotonic() + 900
         while not (evidence / 'browser-finished').exists():
             if time.monotonic() >= deadline:
@@ -401,6 +403,8 @@ def browser_wait_app(fixture):
         if (evidence / 'browser-finished').read_text().strip() != 'PASS':
             raise RuntimeError('Browser verification was not completed')
     finally:
+        if os.environ.get('P27_ADMIN_BROWSER_SMOKE') == '1':
+            fixture_path.unlink(missing_ok=True)
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()

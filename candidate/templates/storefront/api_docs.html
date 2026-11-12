@@ -1,0 +1,83 @@
+{% extends 'storefront/catalog_base.html' %}
+{% block content %}
+<article class="wrap info api-docs" data-api-docs>
+  <header>
+    <h1>API Supplier Lhie Store</h1>
+    <p lang="id">Hubungkan backend Customer ke toko ini. API menyediakan pembacaan saldo dan katalog, pembuatan pesanan yang dibayar dari saldo, serta pemulihan hasil pengiriman yang sudah diotorisasi.</p>
+    <p lang="en">Connect a Customer backend to this store. The API supports balance and catalog reads, balance-funded order creation, and recovery of delivery results that have already been authorized.</p>
+    <p><strong>Base URL</strong> <code class="break-all">{{ api_base_url }}</code></p>
+    <p>Semua endpoint memakai key Customer API melalui <code>Authorization: Bearer &lt;secret&gt;</code> dan hanya untuk server ke server. Jangan kirim key ke browser. Browser request dengan header <code>Origin</code> ditolak.</p>
+  </header>
+
+  <section aria-labelledby="machine-files">
+    <h2 id="machine-files">Berkas referensi / Machine files</h2>
+    <ul>
+      <li><a class="inline-flex min-h-11 items-center" href="{% url 'storefront-api-docs-openapi' %}">OpenAPI 3.1 JSON (<code>application/json</code>)</a></li>
+      <li><a class="inline-flex min-h-11 items-center" href="{% url 'storefront-api-docs-reference' %}">Referensi Markdown (<code>text/markdown</code>)</a></li>
+      <li><a class="inline-flex min-h-11 items-center" href="{% url 'storefront-llms' %}">Indeks publik llms.txt (<code>text/plain</code>)</a></li>
+    </ul>
+  </section>
+
+  <nav aria-label="Isi dokumentasi API">
+    <h2>Daftar endpoint</h2>
+    <ul>
+      {% for operation in operations %}
+      <li><a href="#{{ operation.operationId }}" class="inline-flex min-h-11 items-center">{{ operation.method }} {{ operation.path }}</a></li>
+      {% endfor %}
+      <li><a href="#errors" class="inline-flex min-h-11 items-center">Format error</a></li>
+      <li><a href="#limits" class="inline-flex min-h-11 items-center">Batas penggunaan</a></li>
+      <li><a href="#schemas" class="inline-flex min-h-11 items-center">Skema JSON</a></li>
+    </ul>
+  </nav>
+
+  <section aria-labelledby="api-operations">
+    <h2 id="api-operations">Endpoint yang didukung</h2>
+    <p lang="id">Kutipan harga hanya informasi. Saat membuat pesanan, server menghitung ulang harga dan memeriksa stok. Setiap pesanan hanya memuat satu Product; <code>input_requirements</code> pada katalog selalu kosong. Endpoint pengiriman mengembalikan credential dari pembelian yang sudah diotorisasi, jadi perlakukan responsnya sebagai data rahasia dan jangan catat isinya ke log.</p>
+    <p lang="en">Price quotes are informational. Order creation recalculates price and checks stock. Each order contains one Product, and catalog <code>input_requirements</code> is always empty. Delivery returns credentials from an authorized purchase, so treat its response as secret and do not log its contents.</p>
+    {% for operation in operations %}
+    <article id="{{ operation.operationId }}" class="api-docs-operation">
+      <h3><code>{{ operation.method }} {{ operation.path }}</code></h3>
+      <p lang="id">{{ operation.summary_id }}</p>
+      <p lang="en">{{ operation.summary }}</p>
+      <h4>Parameter</h4>
+      {% if operation.parameters %}
+      <div role="region" aria-label="Parameter {{ operation.path }}" tabindex="0" class="max-w-full overflow-x-auto">
+        <table><thead><tr><th scope="col">Nama</th><th scope="col">Lokasi</th><th scope="col">Schema</th><th scope="col">Wajib</th></tr></thead><tbody>
+        {% for parameter in operation.parameters %}<tr><th scope="row"><code>{{ parameter.name }}</code></th><td>{{ parameter.location }}</td><td><code>{{ parameter.schema_text }}</code></td><td>{{ parameter.required|yesno:'Ya,Tidak' }}</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+      {% else %}<p>Tidak ada parameter.</p>{% endif %}
+      {% if operation.body %}<h4>Request body</h4><p>JSON dengan skema <code>{{ operation.body }}</code>; body maksimum 32 KiB. Field yang tidak dikenal ditolak.</p><pre tabindex="0" class="max-w-full overflow-x-auto" aria-label="Contoh JSON request">{"product_id":"123","quantity":1,"preference":"idr_first","expected_totals":{"IDR":"25000"}}</pre>{% endif %}
+      <h4>Respons berhasil</h4><p>JSON schema: <code>{{ operation.schema }}</code>.{% if operation.operationId == 'createOrder' %} Pesanan baru menghasilkan HTTP 201; replay key dan body yang sama menghasilkan HTTP 200 dengan <code>idempotent_replay: true</code>.{% endif %}</p>
+      <h4>Error</h4><ul>{% for code, status in operation.error_rows %}<li><code>{{ code }}</code> (HTTP {{ status }})</li>{% endfor %}</ul>
+    </article>
+    {% endfor %}
+  </section>
+
+  <section id="errors" aria-labelledby="error-heading">
+    <h2 id="error-heading">Format error / Error responses</h2>
+    <p lang="id">Semua error API menggunakan envelope <code>{"error":{"code":"...","message":"...","request_id":"&lt;uuid&gt;"}}</code>. Respons berhasil dan error membawa <code>Cache-Control: no-store, private</code>, <code>Referrer-Policy: no-referrer</code>, dan <code>X-Request-ID</code>.</p>
+    <p lang="en">API errors use the same JSON envelope. Success and error responses include <code>Cache-Control: no-store, private</code>, <code>Referrer-Policy: no-referrer</code>, and <code>X-Request-ID</code>.</p>
+    <ul>{% for code, details in error_rows %}<li><code>{{ code }}</code>, HTTP {{ details.0 }}: <span lang="en">{{ details.1 }}</span> <span lang="id">{{ details.2 }}</span></li>{% endfor %}</ul>
+  </section>
+
+  <section id="limits" aria-labelledby="limits-heading">
+    <h2 id="limits-heading">Batas penggunaan</h2>
+    <ul>
+      <li>Body maksimum 32 KiB; jumlah per pesanan 1 sampai 100.</li>
+      <li>Halaman katalog dan pesanan 1 sampai 100, default 20. Halaman pengiriman 1 sampai 100, default 100.</li>
+      <li>Payload JSON pengiriman maksimum 1,047,552 byte; hasil yang tidak muat dengan aman menghasilkan <code>temporarily_unavailable</code>.</li>
+      <li><code>Idempotency-Key</code> wajib untuk membuat pesanan, 1 sampai 128 karakter ASCII yang dapat dicetak.</li>
+      <li>Per akun: 120 pembacaan per 60 detik, 10 percobaan pesanan per 60 detik, dan 10 pembacaan pengiriman per 60 detik.</li>
+      <li>Per IP: 600 permintaan total dan 30 percobaan autentikasi hilang/tidak valid per 60 detik. Global: 300 pembacaan per detik dan 20 pesanan per detik; paling banyak 2 permit pesanan bersamaan per akun.</li>
+    </ul>
+    <p lang="en">Request bodies are limited to 32 KiB and order quantity to 1–100. Catalog and order pages accept 1–100 rows (default 20); delivery pages accept 1–100 units (default 100) and a JSON payload of at most 1,047,552 bytes. Idempotency-Key is required for order creation and accepts 1–128 printable ASCII characters. Per account, limits are 120 reads, 10 order attempts, and 10 delivery reads per 60 seconds. Per IP, limits are 600 total requests and 30 missing/invalid authentication attempts per 60 seconds. Store-wide limits are 300 reads and 20 orders per second, with at most 2 concurrent order permits per account.</p>
+  </section>
+
+  <section id="schemas" aria-labelledby="schemas-heading">
+    <h2 id="schemas-heading">Skema JSON</h2>
+    <p>Representasi di bawah adalah kontrak struktur respons dan request. Contoh request di atas memakai nilai sintetis, bukan data Customer.</p>
+    {% for name, schema_json in schema_rows %}<details><summary class="inline-flex min-h-11 items-center"><code>{{ name }}</code></summary><pre tabindex="0" class="max-w-full overflow-x-auto" aria-label="JSON schema {{ name }}">{{ schema_json }}</pre></details>{% endfor %}
+  </section>
+</article>
+{% endblock %}
