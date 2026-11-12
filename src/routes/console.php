@@ -109,11 +109,6 @@ Schedule::command('orders:recover-local-completion --limit=100')->everyTenMinute
 Schedule::command('orders:recover-credential-mails --limit=100 --since-hours=72')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->withoutOverlapping()->runInBackground();
 Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()->withoutOverlapping()->runInBackground();
-// The outbound recovery worker owns this bounded sweep in its dedicated container.
-Schedule::command('telegram:reconcile-stock-notifications --chunk=25')
-    ->everyMinute()
-    ->withoutOverlapping(45)
-    ->runInBackground();
 Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverlapping()->runInBackground();
 // Health episodes and outbound effects are PostgreSQL-durable. One existing
 // scheduler is sufficient; Redis overlap is not the dedupe authority.

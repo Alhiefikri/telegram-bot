@@ -11,8 +11,10 @@ use Illuminate\Support\Facades\DB;
 
 final class PaymentLifecycleRolloutReport
 {
+    private const LEGACY_STOCK_CANDIDATE_LIMIT = 1000;
+
     /** @return array<string, int|array<string, int>> */
-    public function unresolved(): array
+    private function unresolved(int $legacyStockUnmaterialized): array
     {
         $staleClaimBefore = now()->subMinutes(max(1, (int) config('services.payment_lifecycle_rollout.stale_claim_minutes', 15)));
         $uncertainStates = ['creating', 'outcome_unknown', 'provider_total_pending', 'financial_integrity_failed'];
@@ -41,16 +43,7 @@ final class PaymentLifecycleRolloutReport
                     ->whereNotNull('lease_until')
                     ->where('lease_until', '<=', $staleClaimBefore)
                     ->count(),
-                'legacy_stock_unmaterialized' => DB::table('stock_notification_recipients as recipient')
-                    ->whereNotExists(function ($effects): void {
-                        $effects
-                            ->selectRaw('1')
-                            ->from('telegram_outbound_effects')
-                            ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
-                            ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
-                            ->whereRaw('telegram_outbound_effects.source_id = CAST(recipient.id AS TEXT)');
-                    })
-                    ->count(),
+                'legacy_stock_unmaterialized' => $legacyStockUnmaterialized,
             ],
             'lifecycle_state_mismatches' => DB::table('payments')
                 ->join('orders', 'orders.id', '=', 'payments.order_id')
@@ -59,9 +52,10 @@ final class PaymentLifecycleRolloutReport
     }
 
     /** @return array<string, mixed> */
-    public function summary(PaymentLifecycleRollout $rollout): array
+    public function summary(PaymentLifecycleRollout $rollout, bool $exactLegacyStock = false): array
     {
-        $unresolved = $this->unresolved();
+        $legacyStock = $this->legacyStockObservation($exactLegacyStock);
+        $unresolved = $this->unresolved($legacyStock['unmaterialized']);
         $notificationClaims = $unresolved['notification_claims'];
         $total = (int) $unresolved['provider_uncertainty']
             + (int) $unresolved['stuck_pending_payments']
@@ -74,8 +68,54 @@ final class PaymentLifecycleRolloutReport
             'generated_at' => now()->utc()->toIso8601String(),
             'rollout' => $rollout->status(),
             'unresolved' => $unresolved,
-            'contract_safe' => $total === 0,
+            'legacy_stock_coverage' => $legacyStock['coverage'],
+            'contract_safe' => $legacyStock['coverage']['complete'] && $total === 0,
             'unresolved_total' => $total,
+            'unresolved_total_is_exact' => $legacyStock['coverage']['complete'],
+        ];
+    }
+
+    /** @return array{unmaterialized: int, coverage: array{mode: string, candidate_limit: ?int, candidates_scanned: ?int, complete: bool}} */
+    private function legacyStockObservation(bool $exact): array
+    {
+        $missing = DB::table('stock_notification_recipients as recipient')
+            ->whereNotExists(function ($effects): void {
+                $effects
+                    ->selectRaw('1')
+                    ->from('telegram_outbound_effects')
+                    ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
+                    ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
+                    ->whereRaw('telegram_outbound_effects.source_id = CAST(recipient.id AS TEXT)');
+            });
+
+        if ($exact) {
+            return [
+                'unmaterialized' => $missing->count(),
+                'coverage' => [
+                    'mode' => 'exact',
+                    'candidate_limit' => null,
+                    'candidates_scanned' => null,
+                    'complete' => true,
+                ],
+            ];
+        }
+
+        // Bound source candidates before the anti-join; limiting missing rows still scans clean history.
+        $candidates = DB::table('stock_notification_recipients')
+            ->orderBy('id')
+            ->limit(self::LEGACY_STOCK_CANDIDATE_LIMIT + 1)
+            ->pluck('id');
+        $complete = $candidates->count() <= self::LEGACY_STOCK_CANDIDATE_LIMIT;
+        $candidateIds = $candidates->take(self::LEGACY_STOCK_CANDIDATE_LIMIT);
+
+        return [
+            'unmaterialized' => $missing->whereIn('recipient.id', $candidateIds)->count(),
+            'coverage' => [
+                'mode' => 'bounded',
+                'candidate_limit' => self::LEGACY_STOCK_CANDIDATE_LIMIT,
+                'candidates_scanned' => $candidateIds->count(),
+                'complete' => $complete,
+            ],
         ];
     }
 }

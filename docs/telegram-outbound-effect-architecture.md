@@ -278,9 +278,21 @@ snapshot is still owed; `materialization_cursor` bounds each worker pass.
 
 The `telegram-stock` job snapshots at most 100 customers per pass, creates
 missing ledger effects idempotently, then claims at most 25 due recipient
-effects for delivery per job execution. It self-dispatches while the event or its effects still have
-work. `telegram:reconcile-stock-notifications` and the stock branch of
-`telegram:recover-outbound` discover null snapshot markers and lost dispatches.
+effects for delivery per job execution. It self-dispatches while the event or its
+effects still have work. The stock branch of `telegram:recover-outbound` owns
+scheduled discovery of null snapshot markers and lost dispatches.
+`telegram:reconcile-stock-notifications` remains an explicit operator command,
+not a second scheduled scan. Missing-effect discovery reads at most 1,000 raw
+recipient IDs per lane before checking eligibility and ledger existence.
+The newest-ID lane prioritizes fresh obligations independently of historical
+progress. A separate ascending historical lane freezes its upper ID bound so
+continuous arrivals cannot prevent it from wrapping. Each lane admits at most
+`chunk` distinct movements; a cap-rejected historical candidate is not consumed.
+Ready effects and unsnapshotted events retain their own `chunk` pages, so the
+combined stock pass queues at most `4 * chunk` movements before deduplication.
+Losing Redis restarts historical progress but does not block newest discovery
+or authorize a resend. Old gaps remain incremental repair, not an immediate
+full-backlog guarantee; repeatedly losing the cursor can delay historical work.
 The source event therefore closes the interval between the inventory commit and
 queue pickup without holding the inventory transaction during customer fan-out.
 
@@ -419,10 +431,24 @@ uses an allocated credential and asserts one sale/allocation with no review,
 and `test_paid_callback_with_numeric_only_stock_records_one_review_without_releasing_credentials`
 asserts the review path with no credential release.
 
-The scheduler runs `telegram:recover-outbound --queue=notifications` every
-minute with a bounded 10-minute `withoutOverlapping` mutex. Production cutover
-also clears stale scheduler mutexes. The command performs source discovery and
-delivery recovery in this order:
+The dedicated `telegram:recover-outbound-worker` runs one sweep every minute,
+with `--chunk=25 --max-items=25 --max-seconds=40 --queue=notifications`.
+The item limit applies per facet, not to the entire sweep. PostgreSQL statements
+retain a 10-second timeout; the child retains its 40-second hard deadline and
+the parent its 50-second kill deadline.
+
+Before starting another stage, the sweep checks a monotonic execution budget.
+The default budget reserves 12 seconds for an in-flight statement and shutdown.
+Budget exhaustion defers remaining stages without reporting a failed sweep;
+actual stage/query failures still fail the sweep. A cached next-stage cursor
+rotates deferred work ahead of earlier stages on the following sweep. The cursor
+advances before execution, so a hard-killed stage cannot monopolize every sweep.
+Losing the cursor restarts the normal order without losing durable obligations.
+An individual stuck stage can still hit the hard deadline.
+
+The normal starting order is below; resumed sweeps rotate through the same
+stages. Cleanup always rechecks its own eligibility, so a projection deferred
+by rotation can postpone cleanup but never authorize it prematurely.
 
 1. TelegramOutboundEffectRecovery asks the ledger protocol to turn expired
    sending leases into unknown, fencing the old claim token.
@@ -432,17 +458,17 @@ delivery recovery in this order:
    reconciliation scan then queues the idempotent cleanup handoff. It never
    dispatches a receipt effect.
 
-Before the cleanup reconciliation scan, `CheckoutInstructionDeliveryPipeline`
-scans sent checkout-instruction effects whose Order notification marker is
-still null. It conditionally restores the ledger message identifier, chat, and
-timestamp without claiming or redispatching the sent effect, so Binance/BSC
-cleanup can use the recovered message metadata.
+`CheckoutInstructionDeliveryPipeline` scans sent checkout-instruction effects
+whose Order notification marker is still null. It conditionally restores the
+ledger message identifier, chat, and timestamp without claiming or
+redispatching the sent effect, so Binance/BSC cleanup can use the recovered
+message metadata on an eligible cleanup pass.
 
-Before the cleanup reconciliation scan, `AdminOrderNotificationDeliveryPipeline`
-scans sent pending, paid, and expired Order-notification effects and
-conditionally restores their Order projection. Pending effects also restore
-the ledger chat and message metadata without clearing a recorded cleanup
-marker. It never claims or redispatches the already-sent effect.
+`AdminOrderNotificationDeliveryPipeline` scans sent pending, paid, and expired
+Order-notification effects and conditionally restores their Order projection.
+Pending effects also restore the ledger chat and message metadata without
+clearing a recorded cleanup marker. It never claims or redispatches the
+already-sent effect.
 
 3. ManualPaymentProofDeliveryPipeline scans sent manual payment-proof effects
    whose Payment forwarding marker is still null and conditionally restores
@@ -476,6 +502,37 @@ marker. It never claims or redispatches the already-sent effect.
 11. Non-ledger cleanup work, such as deleting old customer-facing checkout
    messages or settled Store Balance QR instructions, remains a separate
    cleanup job and is not treated as delivery claim authority.
+
+Local verification (2026-11-12): the expanded focused SQLite lane passed
+110 tests / 815 assertions, with two PostgreSQL-only skips; the PostgreSQL 16
+lane passed 44 tests / 227 assertions. Coverage includes exact/zero budget
+boundaries, repeated slow failures, renamed stages, real SIGKILL with a fresh
+process/file-cache resume, a real SQL statement timeout, capped historical
+progress, continuous arrivals and lost cursors. An actual recovery/adapter
+integration with a lost Telegram ACK and duplicate wakeups made one transport
+attempt, retained `unknown`, and left protected ledger rows unchanged.
+
+The final disposable load run used 100,000 historical recipients, 99,999
+existing unknown effects and a newly appended missing recipient. PHP ran with
+0.35 CPU / 384 MiB and no swap; PostgreSQL had 1 CPU / 896 MiB. The first stock
+reconciliation found the new work without moving its cursor manually, used
+eight queries and took 239.11 ms. The actual `telegram:recover-outbound` command
+exited zero in 519.27 ms. EXPLAIN ANALYZE showed two PK-index source scans of
+1,000 rows each. Peak PHP allocation was 20 MiB.
+
+While new recipients kept arriving, a historical hole at ID 50,501 was
+discovered on sweep 51 (49 additional passes after the initial reconciliation
+and command), without cursor manipulation. The incremental passes measured
+152.66 ms median / 242.79 ms maximum. Cursor loss still allowed newest discovery;
+all 99,999 unknown effects remained unchanged, with zero transport calls.
+The report inspected 1,000 candidates and refused complete/contract-safe status.
+
+An initial load attempt shared the test database and encountered a deadlock;
+the reported final load run used a separate cloned database. The fixture used
+temporary source/ledger tables and synthetic data: these are local functional
+and resource-bound observations, not production disk-I/O, provider-latency or
+full-backlog delivery guarantees. No production changes, migration, deploy or
+CI/CD run was performed.
 
 The command reports the number of dispatches and the number of leases moved to
 unknown. It must not turn unknown into pending or silently retry a delivery

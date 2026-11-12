@@ -73,6 +73,7 @@ class RecoverTelegramOutboundEffects extends Command
             exit(124);
         });
         pcntl_alarm($maxSeconds);
+        $startedAt = hrtime(true);
 
         try {
             if (DB::connection()->getDriverName() === 'pgsql') {
@@ -88,10 +89,9 @@ class RecoverTelegramOutboundEffects extends Command
             $dispatcher = app(TelegramOutboundEffectDispatcher::class);
             $recovery = app(TelegramOutboundEffectRecovery::class);
 
-            $staleLeases = (int) ($stages->run(
-                'recover_expired_leases',
-                fn (): int => $recovery->recoverExpiredLeases(now(), $pageLimit),
-            ) ?? 0);
+            $operations = [
+                'recover_expired_leases' => fn (): int => $recovery->recoverExpiredLeases(now(), $pageLimit),
+            ];
 
             foreach ([
                 'reconcile_completed_receipt_projections' => fn () => $recovery->reconcileCompletedReceiptProjections($pageLimit),
@@ -102,10 +102,10 @@ class RecoverTelegramOutboundEffects extends Command
                 'reconcile_sent_checkout_instruction_projections' => fn () => $recovery->reconcileSentCheckoutInstructionProjections($pageLimit),
                 'reconcile_sent_admin_order_projections' => fn () => $recovery->reconcileSentAdminOrderProjections($pageLimit),
             ] as $stage => $operation) {
-                $stages->run($stage, $operation);
+                $operations[$stage] = $operation;
             }
 
-            $stages->run('dispatch_ready_effects', function () use ($ledger, $pages, $pageLimit, $dispatcher, &$dispatched): void {
+            $operations['dispatch_ready_effects'] = function () use ($ledger, $pages, $pageLimit, $dispatcher, &$dispatched): void {
                 $dispatchTypes = [
                     TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
                     TelegramOutboundEffectType::BalanceOperationsAlert->value,
@@ -150,26 +150,14 @@ class RecoverTelegramOutboundEffects extends Command
                         );
                         $dispatched++;
                     });
-            });
+            };
 
-            $dispatched += (int) ($stages->run(
-                'recover_missing_store_balance_top_up_effects',
-                fn (): int => $recovery->recoverMissingStoreBalanceTopUpEffects($pageLimit),
-            ) ?? 0);
-            $dispatched += (int) ($stages->run(
-                'recover_missing_api_sales_proofs',
-                fn (): int => app(SalesProofDeliveryPipeline::class)->recoverMissingApiProofs($pageLimit),
-            ) ?? 0);
-            $dispatched += (int) ($stages->run(
-                'recover_admin_order_reviews',
-                fn (): int => app(AdminOrderNotificationDeliveryPipeline::class)->recoverMissingReviews($pageLimit),
-            ) ?? 0);
-            $dispatched += (int) ($stages->run(
-                'recover_admin_paid_outcome_updates',
-                fn (): int => app(AdminOrderNotificationDeliveryPipeline::class)->recoverPaidOutcomeUpdates($pageLimit),
-            ) ?? 0);
+            $operations['recover_missing_store_balance_top_up_effects'] = fn (): int => $recovery->recoverMissingStoreBalanceTopUpEffects($pageLimit);
+            $operations['recover_missing_api_sales_proofs'] = fn (): int => app(SalesProofDeliveryPipeline::class)->recoverMissingApiProofs($pageLimit);
+            $operations['recover_admin_order_reviews'] = fn (): int => app(AdminOrderNotificationDeliveryPipeline::class)->recoverMissingReviews($pageLimit);
+            $operations['recover_admin_paid_outcome_updates'] = fn (): int => app(AdminOrderNotificationDeliveryPipeline::class)->recoverPaidOutcomeUpdates($pageLimit);
 
-            $stages->run('recover_sales_proof_posts', function () use ($pages, $pageLimit, $outboundEffects, $dispatcher, &$dispatched): void {
+            $operations['recover_sales_proof_posts'] = function () use ($pages, $pageLimit, $outboundEffects, $dispatcher, &$dispatched): void {
                 $salesProofPosts = SalesProofPost::query()
                     ->whereIn('status', [
                         SalesProofPost::STATUS_PENDING,
@@ -205,19 +193,16 @@ class RecoverTelegramOutboundEffects extends Command
                             $dispatched++;
                         }
                     });
-            });
+            };
 
-            $dispatched += (int) ($stages->run(
-                'reconcile_stock_notifications',
-                fn (): int => app(StockNotificationDeliveryPipeline::class)->reconcile($pageLimit),
-            ) ?? 0);
+            $operations['reconcile_stock_notifications'] = fn (): int => app(StockNotificationDeliveryPipeline::class)->reconcile($pageLimit);
 
             // Source discovery is ledger-only: committed lifecycle rows without
             // an effect are materialized here, while every delivery attempt still
             // goes through the shared claim/finalization protocol. The SQL guards
             // mirror the per-order conditions below so a steady-state table is not
             // rescanned row by row on every sweep.
-            $stages->run('recover_order_lifecycle_effects', function () use ($pages, $pageLimit, $outboundEffects, $dispatcher, &$dispatched): void {
+            $operations['recover_order_lifecycle_effects'] = function () use ($pages, $pageLimit, $outboundEffects, $dispatcher, &$dispatched): void {
                 $orderDiscoveryQuery = Order::query()
                     ->with(['customer', 'payments'])
                     ->where(function ($orders): void {
@@ -369,13 +354,13 @@ class RecoverTelegramOutboundEffects extends Command
                             }
                         }
                     });
-            });
+            };
 
             // Cleanup eligibility must mirror the cleaner's own guards. When the
             // scan keeps selecting orders the cleaner skips, every sweep
             // rediscovers them and dispatches deletion jobs that can never do
             // anything.
-            $stages->run('cleanup_eligible_orders', function () use ($pages, $pageLimit, $cutoff, &$dispatched): void {
+            $operations['cleanup_eligible_orders'] = function () use ($pages, $pageLimit, $cutoff, &$dispatched): void {
                 $cleanupOrders = Order::query()
                     ->whereIn('order_status', ['completed', 'cancelled'])
                     ->where(function ($query) use ($cutoff): void {
@@ -449,9 +434,9 @@ class RecoverTelegramOutboundEffects extends Command
                             ->onQueue((string) $this->option('queue'));
                         $dispatched++;
                     });
-            });
+            };
 
-            $stages->run('recover_price_change_notifications', function () use ($pages, $pageLimit, &$dispatched): void {
+            $operations['recover_price_change_notifications'] = function () use ($pages, $pageLimit, &$dispatched): void {
                 $storeChannelTargetConfigured = StoreChannelSetting::query()
                     ->where('singleton_key', StoreChannelSetting::SINGLETON_KEY)
                     ->where(function ($setting): void {
@@ -501,9 +486,9 @@ class RecoverTelegramOutboundEffects extends Command
                             ->onQueue('telegram-broadcast');
                         $dispatched++;
                     });
-            });
+            };
 
-            $stages->run('recover_admin_broadcasts', function () use ($pages, $pageLimit, &$dispatched): void {
+            $operations['recover_admin_broadcasts'] = function () use ($pages, $pageLimit, &$dispatched): void {
                 $broadcastService = app(TelegramBroadcastService::class);
                 $recoverableBroadcasts = $broadcastService->recoverableBroadcastsQuery(now());
                 $pages->load('broadcasts', $recoverableBroadcasts, $pageLimit)
@@ -511,7 +496,23 @@ class RecoverTelegramOutboundEffects extends Command
                         $broadcastService->dispatchAdminBroadcastForRecovery($broadcast);
                         $dispatched++;
                     });
-            });
+            };
+
+            // Leave one statement-timeout window plus shutdown margin before
+            // SIGALRM. Individual stuck stages still retain the hard deadline.
+            $reserveSeconds = min(self::STATEMENT_TIMEOUT_MILLISECONDS / 1000 + 2, $maxSeconds / 2);
+            $elapsedSeconds = (hrtime(true) - $startedAt) / 1_000_000_000;
+            $results = $stages->run($operations, max(0, $maxSeconds - $reserveSeconds - $elapsedSeconds));
+            $staleLeases = (int) ($results['recover_expired_leases'] ?? 0);
+            foreach ([
+                'recover_missing_store_balance_top_up_effects',
+                'recover_missing_api_sales_proofs',
+                'recover_admin_order_reviews',
+                'recover_admin_paid_outcome_updates',
+                'reconcile_stock_notifications',
+            ] as $stage) {
+                $dispatched += (int) ($results[$stage] ?? 0);
+            }
 
             if ($stages->failed()) {
                 $this->error('telegram:recover-outbound completed with stage failures: '.implode(', ', array_keys($stages->failures())));

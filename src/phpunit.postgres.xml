@@ -89,6 +89,7 @@
             <file>tests/Feature/CustomerOrderClaimPostgresTest.php</file>
             <file>tests/Feature/OrderCredentialMailPostgresConcurrencyTest.php</file>
             <file>tests/Feature/TelegramOutboundDispatchPlanTest.php</file>
+            <file>tests/Feature/Telegram/TelegramOutboundRecoveryPostgresTimeoutTest.php</file>
         </testsuite>
     </testsuites>
     <source>

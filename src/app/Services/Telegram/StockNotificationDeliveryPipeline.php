@@ -14,7 +14,9 @@ use App\Services\Admin\ProductImageOptimizer;
 use App\Services\Pricing\ProductPriceTierQuote;
 use App\Support\DogfoodTiming;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -28,6 +30,10 @@ class StockNotificationDeliveryPipeline
     public const JOB_BATCH_SIZE = 25;
 
     private const RECIPIENT_MATERIALIZATION_BATCH_SIZE = 100;
+
+    private const RECOVERY_CANDIDATE_LIMIT = 1_000;
+
+    private const RECOVERY_CURSOR_TTL_SECONDS = 86_400;
 
     public function __construct(
         private TelegramProductNotificationService $notifications,
@@ -291,39 +297,40 @@ class StockNotificationDeliveryPipeline
         $ledgerRecipientIds = $pages->load(
             'stock_ready_recipients',
             $this->ledger()->readyToDispatchQuery(effectType: TelegramOutboundEffectType::StockNotificationRecipient->value)
-                ->where('source_type', StockNotificationRecipient::class),
+                ->where('source_type', StockNotificationRecipient::class)
+                ->select(['id', 'source_id']),
             $chunk,
         )->pluck('source_id');
         $recipientMovementIds = StockNotificationRecipient::query()
             ->whereIn('id', $ledgerRecipientIds)
+            ->select('stock_notification_event_id')
             ->with('event:id,inventory_movement_id')
             ->get()
             ->pluck('event.inventory_movement_id')->filter()->unique()->values();
-        $unmaterializedMovementIds = $pages->load(
-            'stock_unmaterialized_recipients',
-            StockNotificationRecipient::query()
-                ->whereNull('sent_at')
-                ->whereNull('terminal_failed_at')
-                ->where('attempts', '<', self::MAX_ATTEMPTS)
-                ->whereNotExists(function ($effects): void {
-                    $effects
-                        ->selectRaw('1')
-                        ->from('telegram_outbound_effects')
-                        ->where('telegram_outbound_effects.source_type', StockNotificationRecipient::class)
-                        ->where('telegram_outbound_effects.effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
-                        ->whereRaw('telegram_outbound_effects.source_id = CAST(stock_notification_recipients.id AS TEXT)');
-                })
-                ->with('event:id,inventory_movement_id'),
+        $newestCandidates = StockNotificationRecipient::query()
+            ->select(['id', 'stock_notification_event_id', 'sent_at', 'terminal_failed_at', 'attempts'])
+            ->orderByDesc('id')
+            ->limit(self::RECOVERY_CANDIDATE_LIMIT)
+            ->get();
+        $newestMissing = $this->missingRecoveryRecipients($newestCandidates);
+        $newestMovementIds = $newestMissing
+            ->pluck('event.inventory_movement_id')->filter()->unique()->take($chunk)->values();
+        $historicalMovementIds = $this->historicalRecoveryMovementIds(
+            (int) ($newestCandidates->first()?->id ?? 0),
             $chunk,
-        )->pluck('event.inventory_movement_id')->filter()->unique()->values();
+            $newestMovementIds->all(),
+        );
         $unmaterializedEventMovementIds = $pages->load(
             'stock_unmaterialized_events',
-            StockNotificationEvent::query()->whereNull('recipients_snapshotted_at'),
+            StockNotificationEvent::query()
+                ->select(['id', 'inventory_movement_id'])
+                ->whereNull('recipients_snapshotted_at'),
             $chunk,
         )->pluck('inventory_movement_id');
 
         $movementIds = $recipientMovementIds
-            ->merge($unmaterializedMovementIds)
+            ->merge($newestMovementIds)
+            ->merge($historicalMovementIds)
             ->merge($unmaterializedEventMovementIds)
             ->unique()
             ->values();
@@ -333,6 +340,68 @@ class StockNotificationDeliveryPipeline
         }
 
         return $movementIds->count();
+    }
+
+    /** @param Collection<int, StockNotificationRecipient> $candidates */
+    private function missingRecoveryRecipients(Collection $candidates): Collection
+    {
+        $eligible = $candidates->filter(fn (StockNotificationRecipient $recipient): bool => $recipient->sent_at === null
+            && $recipient->terminal_failed_at === null
+            && $recipient->attempts < self::MAX_ATTEMPTS);
+        $materializedRecipientIds = TelegramOutboundEffect::query()
+            ->where('source_type', StockNotificationRecipient::class)
+            ->where('effect_type', TelegramOutboundEffectType::StockNotificationRecipient->value)
+            ->whereIn('source_id', $eligible->map(fn (StockNotificationRecipient $recipient): string => (string) $recipient->id))
+            ->distinct()
+            ->pluck('source_id', 'source_id');
+
+        return $eligible
+            ->reject(fn (StockNotificationRecipient $recipient): bool => $materializedRecipientIds->has((string) $recipient->id))
+            ->load('event:id,inventory_movement_id');
+    }
+
+    /**
+     * @param  list<int>  $newestMovementIds
+     * @return list<int>
+     */
+    private function historicalRecoveryMovementIds(int $newestRecipientId, int $limit, array $newestMovementIds): array
+    {
+        $cursorKey = 'telegram:recover-outbound:cursor:stock_unmaterialized_recipients';
+        $cursor = Cache::get($cursorKey);
+        $after = (int) ($cursor['after'] ?? 0);
+        // Freeze the sweep ceiling so continuous arrivals cannot prevent wrapping to older holes.
+        $through = (int) ($cursor['through'] ?? $newestRecipientId);
+        $candidates = StockNotificationRecipient::query()
+            ->select(['id', 'stock_notification_event_id', 'sent_at', 'terminal_failed_at', 'attempts'])
+            ->where('id', '>', $after)
+            ->where('id', '<=', $through)
+            ->orderBy('id')
+            ->limit(self::RECOVERY_CANDIDATE_LIMIT)
+            ->get();
+        $missing = $this->missingRecoveryRecipients($candidates)->keyBy('id');
+        $movementIds = [];
+        foreach ($candidates as $candidate) {
+            $movementId = $missing->get($candidate->id)?->event?->inventory_movement_id;
+            if ($movementId !== null
+                && ! in_array($movementId, $newestMovementIds, true)
+                && ! in_array($movementId, $movementIds, true)) {
+                if (count($movementIds) >= $limit) {
+                    break;
+                }
+                $movementIds[] = $movementId;
+            }
+            // Never move past a missing candidate rejected by this pass's output cap.
+            $after = (int) $candidate->id;
+        }
+
+        if ($candidates->isEmpty() || $after >= $through
+            || ($candidates->count() < self::RECOVERY_CANDIDATE_LIMIT && $after === (int) $candidates->last()->id)) {
+            Cache::forget($cursorKey);
+        } else {
+            Cache::put($cursorKey, ['after' => $after, 'through' => $through], self::RECOVERY_CURSOR_TTL_SECONDS);
+        }
+
+        return $movementIds;
     }
 
     public function refreshAggregateProjection(int|string $movementId): void

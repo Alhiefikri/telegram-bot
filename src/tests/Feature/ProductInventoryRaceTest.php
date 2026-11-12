@@ -500,6 +500,188 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         Queue::assertNotPushed(SendProductStockNotifications::class);
     }
 
+    public function test_stock_reconcile_discovers_new_missing_work_on_first_pass_after_materialized_history(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        $history = $this->stockRecoveryEvent();
+        $effects = app(TelegramOutboundEffectService::class);
+        for ($index = 0; $index < 225; $index++) {
+            $recipient = $this->stockRecoveryRecipient($history, (string) (992000 + $index));
+            $state = $index % 2 === 0 ? TelegramOutboundEffectState::Unknown : TelegramOutboundEffectState::ManualReview;
+            $effects->recordStockNotificationRecipient($recipient, $history->inventory_movement_id, state: $state);
+        }
+        $missing = $this->stockRecoveryEvent();
+        $this->stockRecoveryRecipient($missing, '993000');
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+
+        $this->assertSame(1, $pipeline->reconcile(2));
+        Queue::assertPushedOn(
+            StockNotificationDeliveryPipeline::QUEUE,
+            SendProductStockNotifications::class,
+            fn (SendProductStockNotifications $job): bool => $job->movementId === $missing->inventory_movement_id,
+        );
+        Queue::assertPushed(SendProductStockNotifications::class, 1);
+        $this->assertSame(225, TelegramOutboundEffect::query()->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_stock_reconcile_preserves_unconsumed_holes_under_output_caps_and_new_arrivals(): void
+    {
+        Http::preventStrayRequests();
+        $holes = [];
+        for ($index = 0; $index < 3; $index++) {
+            $holes[] = $event = $this->stockRecoveryEvent();
+            $this->stockRecoveryRecipient($event, (string) (994000 + $index));
+        }
+        $this->stockRecoveryHistory($this->stockRecoveryEvent(), 1_000);
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+
+        foreach ($holes as $index => $hole) {
+            Queue::fake();
+            $new = $this->stockRecoveryEvent();
+            $this->stockRecoveryRecipient($new, (string) (994100 + $index));
+
+            $this->assertSame(2, $pipeline->reconcile(1));
+            Queue::assertPushed(SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $hole->inventory_movement_id);
+            Queue::assertPushed(SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $new->inventory_movement_id);
+            Queue::assertPushed(SendProductStockNotifications::class, 2);
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_stock_reconcile_wraps_historical_sweep_despite_full_pages_of_continuous_arrivals(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        $hole = $this->stockRecoveryEvent();
+        $recipient = $this->stockRecoveryRecipient($hole, '994200', ['sent_at' => now()]);
+        $history = $this->stockRecoveryEvent();
+        $this->stockRecoveryHistory($history, 2_000);
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        $this->assertSame(0, $pipeline->reconcile(1));
+        $recipient->forceFill(['sent_at' => null])->save();
+
+        for ($pass = 0; $pass < 2; $pass++) {
+            $this->stockRecoveryHistory($history, 1_000, 2_000 + $pass * 1_000);
+            $this->assertSame(0, $pipeline->reconcile(1));
+        }
+        $this->stockRecoveryHistory($history, 1_000, 4_000);
+        $this->assertSame(1, $pipeline->reconcile(1));
+        Queue::assertPushed(SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $hole->inventory_movement_id);
+        Queue::assertPushed(SendProductStockNotifications::class, 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_stock_reconcile_rediscovers_old_holes_and_prioritizes_new_work_after_cache_loss(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        $history = $this->stockRecoveryEvent();
+        $this->stockRecoveryHistory($history, 1_000);
+        $old = $this->stockRecoveryEvent();
+        $this->stockRecoveryRecipient($old, '994300');
+        $this->stockRecoveryHistory($history, 1_000, 1_000);
+        $pipeline = app(StockNotificationDeliveryPipeline::class);
+        $this->assertSame(0, $pipeline->reconcile(1));
+
+        Cache::flush();
+        $new = $this->stockRecoveryEvent();
+        $this->stockRecoveryRecipient($new, '994301');
+        $this->assertSame(1, $pipeline->reconcile(1));
+        Queue::assertPushed(SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $new->inventory_movement_id);
+        Queue::assertNotPushed(SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $old->inventory_movement_id);
+
+        Queue::fake();
+        $this->assertSame(2, $pipeline->reconcile(1));
+        Queue::assertPushed(SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $old->inventory_movement_id);
+        Queue::assertPushed(SendProductStockNotifications::class, 2);
+        Http::assertNothingSent();
+    }
+
+    public function test_stock_reconcile_bounds_each_lane_and_deduplicates_movement_jobs(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        for ($index = 0; $index < 2; $index++) {
+            $this->stockRecoveryRecipient($this->stockRecoveryEvent(), (string) (994400 + $index));
+        }
+        $this->stockRecoveryHistory($this->stockRecoveryEvent(), 1_000);
+        $new = $this->stockRecoveryEvent();
+        $this->stockRecoveryRecipient($new, '994410');
+        $this->stockRecoveryRecipient($new, '994411');
+        $effects = app(TelegramOutboundEffectService::class);
+        for ($index = 0; $index < 2; $index++) {
+            $event = $this->stockRecoveryEvent();
+            $recipient = $this->stockRecoveryRecipient($event, (string) (994420 + $index));
+            $effects->recordStockNotificationRecipient($recipient, $event->inventory_movement_id);
+            $this->stockRecoveryEvent()->forceFill(['recipients_snapshotted_at' => null])->save();
+        }
+
+        $this->assertSame(4, app(StockNotificationDeliveryPipeline::class)->reconcile(1));
+        Queue::assertPushed(SendProductStockNotifications::class, 4);
+        Queue::assertPushed(SendProductStockNotifications::class, fn (SendProductStockNotifications $job): bool => $job->movementId === $new->inventory_movement_id);
+        Http::assertNothingSent();
+    }
+
+    public function test_stock_reconcile_excludes_ineligible_and_materialized_recipients_but_recovers_unsnapshotted_events(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        foreach ([
+            ['sent_at' => now()],
+            ['terminal_failed_at' => now()],
+            ['attempts' => StockNotificationDeliveryPipeline::MAX_ATTEMPTS],
+        ] as $index => $attributes) {
+            $this->stockRecoveryRecipient($this->stockRecoveryEvent(), (string) (992010 + $index), $attributes);
+        }
+        $effects = app(TelegramOutboundEffectService::class);
+        foreach ([
+            TelegramOutboundEffectState::Sent,
+            TelegramOutboundEffectState::Unknown,
+            TelegramOutboundEffectState::ManualReview,
+            TelegramOutboundEffectState::Sending,
+            TelegramOutboundEffectState::Failed,
+            TelegramOutboundEffectState::Pending,
+        ] as $index => $state) {
+            $event = $this->stockRecoveryEvent();
+            $recipient = $this->stockRecoveryRecipient($event, (string) (992020 + $index));
+            $effects->recordStockNotificationRecipient(
+                $recipient,
+                $event->inventory_movement_id,
+                state: $state,
+                nextAttemptAt: $state === TelegramOutboundEffectState::Pending ? now()->addHour() : now()->subMinute(),
+                lastErrorCode: $state === TelegramOutboundEffectState::Failed ? 'telegram_http_403' : null,
+            );
+        }
+        foreach ([
+            [TelegramOutboundEffectState::Pending, StockNotificationDeliveryPipeline::MAX_ATTEMPTS, null],
+            [TelegramOutboundEffectState::Failed, StockNotificationDeliveryPipeline::MAX_ATTEMPTS, 'telegram_http_500'],
+            [TelegramOutboundEffectState::Failed, 0, 'telegram_http_400'],
+        ] as $index => [$state, $attempts, $errorCode]) {
+            $event = $this->stockRecoveryEvent();
+            $recipient = $this->stockRecoveryRecipient($event, (string) (992030 + $index), ['attempts' => $attempts]);
+            $effects->recordStockNotificationRecipient(
+                $recipient,
+                $event->inventory_movement_id,
+                state: $state,
+                nextAttemptAt: now()->subMinute(),
+                lastErrorCode: $errorCode,
+            );
+        }
+        $unfinished = $this->stockRecoveryEvent();
+        $unfinished->forceFill(['recipients_snapshotted_at' => null])->save();
+
+        $this->assertSame(1, app(StockNotificationDeliveryPipeline::class)->reconcile(20));
+        Queue::assertPushed(
+            SendProductStockNotifications::class,
+            fn (SendProductStockNotifications $job): bool => $job->movementId === $unfinished->inventory_movement_id,
+        );
+        Queue::assertPushed(SendProductStockNotifications::class, 1);
+        $this->assertSame(9, TelegramOutboundEffect::query()->count());
+        Http::assertNothingSent();
+    }
+
     public function test_legacy_stock_notification_recipients_are_finalized_before_delivery(): void
     {
         $this->fakeTelegramHttp();
@@ -1082,6 +1264,53 @@ class ProductInventoryRaceTest extends TelegramBotTestSupport
         }
 
         return $product;
+    }
+
+    private function stockRecoveryHistory(StockNotificationEvent $event, int $count, int $offset = 0): void
+    {
+        for ($start = 0; $start < $count; $start += 500) {
+            $rows = [];
+            for ($index = $start; $index < min($start + 500, $count); $index++) {
+                $rows[] = [
+                    'stock_notification_event_id' => $event->id,
+                    'recipient_type' => 'customer',
+                    'telegram_id' => 'history-'.($offset + $index),
+                    'text' => 'Historical stock notification',
+                    'sent_at' => now(),
+                ];
+            }
+            StockNotificationRecipient::query()->insert($rows);
+        }
+    }
+
+    private function stockRecoveryEvent(): StockNotificationEvent
+    {
+        $product = $this->stockedProduct(stock: 1, secrets: []);
+        $movement = InventoryMovement::create([
+            'product_id' => $product->id,
+            'type' => InventoryMovementType::Adjustment,
+            'quantity' => 1,
+            'stock_before' => 0,
+            'available_before' => 0,
+            'created_at' => now(),
+        ]);
+
+        return StockNotificationEvent::create([
+            'inventory_movement_id' => $movement->id,
+            'kind' => InventoryMovementType::Adjustment->value,
+            'recipients_snapshotted_at' => now(),
+        ]);
+    }
+
+    private function stockRecoveryRecipient(StockNotificationEvent $event, string $telegramId, array $attributes = []): StockNotificationRecipient
+    {
+        return $event->recipients()->create(array_merge([
+            'recipient_type' => 'customer',
+            'telegram_id' => $telegramId,
+            'locale' => 'id',
+            'text' => 'Stok masuk',
+            'reply_markup' => [],
+        ], $attributes));
     }
 
     private function assertInventoryInvariants(Product $product): void
