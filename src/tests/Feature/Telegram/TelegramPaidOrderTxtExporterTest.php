@@ -290,7 +290,10 @@ final class TelegramPaidOrderTxtExporterTest extends TelegramBotTestSupport
 
         $stockQueries = array_filter(
             $queries,
-            static fn (array $query): bool => str_contains(strtolower((string) ($query['query'] ?? '')), 'product_stock_items'),
+            static fn (array $query): bool => preg_match(
+                '/^\s*select\s+\*\s+from\s+[`"]?product_stock_items[`"]?(?:\s|$)/i',
+                (string) ($query['query'] ?? ''),
+            ) === 1,
         );
         $this->assertCount(1, $stockQueries, json_encode($queries, JSON_THROW_ON_ERROR));
     }
