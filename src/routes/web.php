@@ -31,6 +31,7 @@ use App\Http\Controllers\Admin\AdminProductDeleteController;
 use App\Http\Controllers\Admin\AdminProductFamilyCreateController;
 use App\Http\Controllers\Admin\AdminProductFamilyDeleteController;
 use App\Http\Controllers\Admin\AdminProductFamilyMembershipController;
+use App\Http\Controllers\Admin\AdminProductFamilyReorderController;
 use App\Http\Controllers\Admin\AdminProductFamilyUpdateController;
 use App\Http\Controllers\Admin\AdminProductStockController;
 use App\Http\Controllers\Admin\AdminProductStockItemDeleteController;
@@ -291,6 +292,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
 
             Route::prefix('product-families')->name('product-families.')->group(function (): void {
                 Route::post('/', AdminProductFamilyCreateController::class)->name('store');
+                Route::patch('order', AdminProductFamilyReorderController::class)->name('reorder');
                 Route::patch('{productFamily}', AdminProductFamilyUpdateController::class)->name('update');
                 Route::delete('{productFamily}', AdminProductFamilyDeleteController::class)->name('destroy');
             });

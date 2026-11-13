@@ -17,7 +17,7 @@ final readonly class CatalogBrowseQuery
         'newest' => 'Terbaru',
         'price_asc' => 'Harga terendah',
         'price_desc' => 'Harga tertinggi',
-        'recommended' => 'Urutan katalog (tersedia, family, prioritas, nama)',
+        'recommended' => 'Urutan katalog (Family dahulu, urutan Admin)',
     ];
 
     public const DEFAULT_PER_PAGE = 24;

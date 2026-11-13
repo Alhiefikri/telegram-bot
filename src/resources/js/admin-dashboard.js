@@ -3,6 +3,7 @@ import accountInputWorkflow, {
 } from "./admin-dashboard/account-input-workflow.js";
 import dashboardNavigation from "./admin-dashboard/navigation.js";
 import modalFocus from "./admin-dashboard/modal-focus.js";
+import familyOrdering from "./admin-dashboard/family-ordering.js";
 
 const COPY_RESET_DELAY_MS = 1600;
 const EMPTY_IMAGE_FILE_NAME = "Tidak ada file yang dipilih";
@@ -249,6 +250,13 @@ export default function adminDashboard(initialState = {}) {
   return {
     ...modalFocus,
     ...dashboardNavigation(),
+    ...familyOrdering(initialState),
+    get familyOrderDirty() {
+      return this.isFamilyOrderDirty();
+    },
+    get familyMoveTargets() {
+      return this.familyOrderMoveTargets();
+    },
     activeTab: initialState.activeTab ?? "stats",
     copied: false,
     storeLink: initialState.storeLink ?? "",
@@ -936,6 +944,7 @@ export default function adminDashboard(initialState = {}) {
     },
 
     openProductFamilyForm() {
+      if (this.familyOrderSaving) return;
       this.familyModalOpener = document.activeElement;
       Object.assign(this, {
         activeTab: "produk",
@@ -944,7 +953,7 @@ export default function adminDashboard(initialState = {}) {
         familyFormAction: this.familyCreateUrl,
         ...emptyProductFamilyForm(),
       });
-      this.$nextTick(() => this.$refs.familyName?.focus());
+      this.$nextTick(() => this.$refs.familyOrderTitle?.focus());
       this.resetImageInput("familyImage", "familyImageFileName");
       this.resetImageInput(
         "telegramFamilyImage",
@@ -953,6 +962,13 @@ export default function adminDashboard(initialState = {}) {
     },
 
     openProductFamilyEditModal(family) {
+      if (
+        this.familyOrderSaving ||
+        (this.familyOrderDirty &&
+          !confirm("Batalkan draf urutan sebelum mengedit family?"))
+      )
+        return;
+      if (this.familyOrderDirty) this.resetFamilyOrder();
       if (!this.familyModalOpen) {
         this.familyModalOpener = document.activeElement;
       }
@@ -968,7 +984,11 @@ export default function adminDashboard(initialState = {}) {
         familyName: family.name,
         familyIcon: family.icon ?? "",
         familyDescription: family.description ?? "",
-        familySortOrder: family.sortOrder ?? 0,
+        familySortOrder:
+          this.familyOrderSaved.find((item) => item.id === family.id)
+            ?.sort_order ??
+          family.sortOrder ??
+          0,
         familyImageUrl: family.imageUrl ?? "",
         telegramFamilyImageUrl: family.telegramImageUrl ?? "",
       });
@@ -995,6 +1015,13 @@ export default function adminDashboard(initialState = {}) {
     },
 
     closeProductFamilyModal() {
+      if (this.familyOrderSaving) return;
+      if (
+        this.familyOrderDirty &&
+        !confirm("Tutup tanpa menyimpan perubahan urutan?")
+      )
+        return;
+      if (this.familyOrderDirty) this.resetFamilyOrder();
       const opener = this.familyModalOpener;
       this.familyFormSubmitting = false;
       this.familyModalOpen = false;
@@ -1003,6 +1030,10 @@ export default function adminDashboard(initialState = {}) {
     },
 
     submitProductFamilyForm(event) {
+      if (this.familyOrderSaving || this.familyOrderDirty) {
+        event.preventDefault();
+        return;
+      }
       if (!event.target.checkValidity()) {
         return;
       }

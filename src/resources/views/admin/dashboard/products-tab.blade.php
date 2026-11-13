@@ -117,6 +117,9 @@
                         </div>
                     </form>
                     <p class="text-xs text-admin-muted" role="status">Urutan: <span x-text="sortLabels[sort]">{{ \App\Catalog\CatalogBrowseQuery::ADMIN_SORTS[$productFilters['sort']] }}</span>. Pencarian mencakup semua halaman; family tetap dikelompokkan. <span x-cloak x-show="ready" x-text="filteredGroups.length + ' family ditemukan.'"></span></p>
+                    @if ($canManageProducts)
+                        <p class="text-xs leading-5 text-admin-muted">Pilihan urutan di atas hanya mengubah tampilan Admin. Untuk mengubah urutan bot dan toko web, buka <button type="button" class="min-h-11 rounded px-1 font-semibold text-admin-accent-strong underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-focus" x-on:click="openProductFamilyForm()">Kelola Product Family</button>, lalu simpan urutan family.</p>
+                    @endif
 
                     <div x-cloak x-show="ready" class="space-y-4">
                         <template x-for="group in pageGroups" :key="group.id">

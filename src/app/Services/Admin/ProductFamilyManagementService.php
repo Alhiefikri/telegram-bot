@@ -37,6 +37,7 @@ final class ProductFamilyManagementService
                         'icon' => $this->nullableTrim($attributes['icon'] ?? null),
                         'image_path' => $attributes['image_path'] ?? null,
                         'telegram_image_path' => $attributes['telegram_image_path'] ?? null,
+                        'sort_order' => (int) ($attributes['sort_order'] ?? 0),
                     ]);
 
                     $this->auditLogger->log(
@@ -115,6 +116,56 @@ final class ProductFamilyManagementService
             }
 
             return $locked;
+        }, 5);
+    }
+
+    /**
+     * @param  list<int>  $familyIds
+     * @param  list<array{id: int, sort_order: int}>  $expectedOrder
+     * @return list<array{id: int, sort_order: int}>
+     */
+    public function reorder(array $familyIds, array $expectedOrder, User $user, ?string $ip = null): array
+    {
+        return DB::transaction(function () use ($familyIds, $expectedOrder, $user, $ip): array {
+            $families = ProductFamily::withTrashed()->orderBy('id')->lockForUpdate()->get()
+                ->filter(fn (ProductFamily $family): bool => ! $family->trashed())->keyBy('id');
+            $currentIds = $families->modelKeys();
+            $submittedIds = $familyIds;
+            sort($currentIds, SORT_NUMERIC);
+            sort($submittedIds, SORT_NUMERIC);
+            abort_unless(
+                $currentIds === $submittedIds && count(array_unique($familyIds)) === count($familyIds),
+                409,
+                'Daftar family telah berubah. Muat ulang halaman sebelum mengatur urutan lagi.',
+            );
+            $currentOrder = $families->map(fn (ProductFamily $family): array => [
+                'id' => (int) $family->id,
+                'sort_order' => (int) $family->sort_order,
+            ])->values()->all();
+            usort($expectedOrder, fn (array $left, array $right): int => $left['id'] <=> $right['id']);
+            abort_unless($currentOrder === $expectedOrder, 409, 'Urutan family telah berubah. Muat ulang halaman sebelum menyimpan lagi.');
+
+            $before = $families->sort(function (ProductFamily $left, ProductFamily $right): int {
+                return ((int) $left->sort_order <=> (int) $right->sort_order)
+                    ?: strcmp($left->name, $right->name)
+                    ?: ($left->id <=> $right->id);
+            })->map(fn (ProductFamily $family): array => [
+                'id' => (int) $family->id,
+                'sort_order' => (int) $family->sort_order,
+            ])->values()->all();
+            $after = [];
+            foreach ($familyIds as $position => $familyId) {
+                $family = $families->get($familyId);
+                $family->sort_order = $position;
+                $family->save();
+                $after[] = ['id' => $familyId, 'sort_order' => $position];
+            }
+
+            if ($before !== $after) {
+                $this->auditLogger->log('product_family.reordered', null, ['families' => $before], ['families' => $after], $user, $ip);
+            }
+
+            return $after;
         }, 5);
     }
 

@@ -13,8 +13,8 @@ final class TelegramCatalogProjectionCache
 
     private const TTL_MINUTES = 30;
 
-    /** Bumped whenever the packed read models change shape, so old keys are never read. */
-    private const DESIGN_VERSION = 6;
+    /** Bumped when packed read models or projection semantics change, so old keys are never read. */
+    private const DESIGN_VERSION = 7;
 
     /**
      * Cache raw arrays, not read models: a cache store unserializes with

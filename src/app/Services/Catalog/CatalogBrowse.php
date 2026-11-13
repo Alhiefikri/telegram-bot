@@ -196,7 +196,7 @@ final class CatalogBrowse
         $ranks = [];
         foreach (array_keys(CatalogBrowseQuery::ADMIN_SORTS) as $sort) {
             $entries
-                ->sort(fn (CatalogBrowseEntry $left, CatalogBrowseEntry $right): int => $this->compareEntries($left, $right, $sort, []))
+                ->sort(fn (CatalogBrowseEntry $left, CatalogBrowseEntry $right): int => $this->compareEntries($left, $right, $sort))
                 ->values()
                 ->each(function (CatalogBrowseEntry $entry, int $rank) use (&$ranks, $sort): void {
                     $ranks[$entry->type.':'.$entry->id()][$sort] = $rank;
@@ -291,21 +291,10 @@ final class CatalogBrowse
                 ->sort(fn (CatalogProductReadModel $left, CatalogProductReadModel $right): int => $this->compareProducts($left, $right, $query->sort))
                 ->values();
 
-        $familySoldQuantities = [];
-        if ($public && $query->sort === CatalogBrowseQuery::DEFAULT_SORT) {
-            foreach ($familyModels as $family) {
-                $soldQuantity = 0;
-                foreach ($family->members as $member) {
-                    $soldQuantity += $member->soldQuantity;
-                }
-                $familySoldQuantities[$family->id] = $soldQuantity;
-            }
-        }
-
         $entries = $familyModels
             ->map(fn (CatalogFamilyReadModel $family): CatalogBrowseEntry => CatalogBrowseEntry::family($family))
             ->concat($standalone->map(fn (CatalogProductReadModel $product): CatalogBrowseEntry => CatalogBrowseEntry::product($product)))
-            ->sort(fn (CatalogBrowseEntry $left, CatalogBrowseEntry $right): int => $this->compareEntries($left, $right, $query->sort, $familySoldQuantities))
+            ->sort(fn (CatalogBrowseEntry $left, CatalogBrowseEntry $right): int => $this->compareEntries($left, $right, $query->sort))
             ->values();
         if (! $public && ! $familiesOnly && $query->search === '' && $query->category === null && $query->sort === CatalogBrowseQuery::DEFAULT_SORT) {
             $this->unfilteredAdminEntries ??= $entries->all();
@@ -547,7 +536,6 @@ final class CatalogBrowse
         CatalogBrowseEntry $left,
         CatalogBrowseEntry $right,
         string $sort,
-        array $familySoldQuantities,
     ): int {
         if (in_array($sort, ['name_asc', 'name_desc', 'members_asc', 'members_desc'], true)) {
             $comparison = match ($sort) {
@@ -575,18 +563,10 @@ final class CatalogBrowse
             return $comparison ?: $this->compareNames($left->name(), $right->name()) ?: ($left->id() <=> $right->id());
         }
 
-        if ($sort === CatalogBrowseQuery::DEFAULT_SORT && $left->family !== null && $right->family !== null) {
-            $soldComparison = ($familySoldQuantities[$right->family->id] ?? 0)
-                <=> ($familySoldQuantities[$left->family->id] ?? 0);
-
-            if ($soldComparison !== 0) {
-                return $soldComparison;
-            }
-        }
-
-        return ((int) ! $left->isAvailable() <=> (int) ! $right->isAvailable())
-            ?: ($left->isFamily() !== $right->isFamily() ? ($left->isFamily() ? -1 : 1) : 0)
-            ?: (($left->family?->sortOrder ?? PHP_INT_MAX) <=> ($right->family?->sortOrder ?? PHP_INT_MAX))
+        return ($left->isFamily() !== $right->isFamily() ? ($left->isFamily() ? -1 : 1) : 0)
+            ?: ($left->family !== null && $right->family !== null
+                ? ($left->family->sortOrder <=> $right->family->sortOrder)
+                : ((int) ! $left->isAvailable() <=> (int) ! $right->isAvailable()))
             ?: $this->compareNames($left->name(), $right->name())
             ?: ($left->id() <=> $right->id());
     }

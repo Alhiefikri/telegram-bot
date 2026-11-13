@@ -1057,10 +1057,11 @@ pada top-up dan merchant reference yang sama.
 
 `TelegramCatalogIntents` consumes `CatalogBrowse::browsePublic()` for the
 Product Family and standalone Product discovery list. On the default public
-sort, family entries rank by descending total `sold_quantity` across their
-Product options before pagination. `sold_quantity` counts quantities in paid
-Processing or Completed Orders; ties keep the existing availability and family
-admin-order rules. Other sort modes and Admin ordering are unchanged.
+sort, family entries follow Admin `sort_order` ascending before pagination,
+with name and ID as stable tie-breakers, regardless of sales or availability.
+Families precede standalone Products; standalone availability ordering and
+explicit sort modes are unchanged. `sold_quantity` remains available for sales
+display and counts quantities in paid Processing or Completed Orders.
 
 The discovery list shows up to fifteen entries per page, with entries pressed
 against their divider rule instead of padded by blank lines, while category

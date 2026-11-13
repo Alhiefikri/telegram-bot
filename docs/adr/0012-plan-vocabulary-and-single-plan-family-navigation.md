@@ -20,11 +20,10 @@ Customer-facing Product Family discovery names one **Product option** a
   rendered from, so pressing it opens that Product Detail and never renders a
   one-item Plan list screen. The Web Storefront family-card list also displays
   the Product name.
-- The default public sort ranks family entries by descending total sold units
-  across their Product options. A sold unit is a quantity from a paid
-  Processing or Completed Order. Ranking happens before pagination; ties keep
-  the existing availability and family admin-order rules. Other sort modes
-  and Admin family ordering are unchanged.
+- The default public sort follows Admin family `sort_order` ascending before
+  pagination, with name and ID as stable tie-breakers. Sales and availability
+  do not override the family order. Families precede standalone Products,
+  whose availability ordering is unchanged; explicit sort modes are unchanged.
 - The Plan list screen and the Web Storefront family page use the same
   vocabulary (`Pilih Plan`, `Choose a plan for`, `N Plan`).
 
@@ -48,8 +47,9 @@ checkout, order, inventory, waitlist, and delivery.
   when the origin token is no longer current. Multi-Plan families keep the
   origin-preserving family flow, and their Plan list back button carries the
   same token.
-- Committed Order and OrderItem changes invalidate the cached catalog
-  projection so the default family sales ranking refreshes.
+- Committed Product Family changes invalidate the cached catalog projection,
+  including Admin ordering edits. Order and OrderItem changes still invalidate
+  the projection so paid sold-unit displays refresh.
 - `/start family_<id>` still opens the Plan list, including for a one-Plan
   family, because the link explicitly targets the family.
 - `catalog.family.button_plans` replaces

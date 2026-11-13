@@ -5,7 +5,7 @@
             show="familyModalOpen"
             title="Kelola Product Family"
             title-expression="familyFormMode === 'edit' ? 'Edit Product Family' : 'Kelola Product Family'"
-            description="Atur identitas grouping tanpa mengubah harga, stok, credentials, atau checkout Product."
+            description="Atur urutan katalog Telegram dan toko web, lalu kelola identitas Product Family."
             data-admin-return-target
             tabindex="-1"
             size="2xl"
@@ -20,10 +20,75 @@
                 </x-admin-dashboard.notice>
             @endif
 
+            <x-admin-dashboard.card as="section" padding="compact" shadow="none" class="mb-4" aria-labelledby="product-family-list-title" x-bind:aria-busy="familyOrderSaving">
+                <h3 id="product-family-list-title" class="text-lg font-semibold text-admin-ink" x-ref="familyOrderTitle" tabindex="-1">Urutan family di katalog</h3>
+                <p id="product-family-order-help" class="mt-1 text-sm leading-6 text-admin-muted">Posisi paling atas tampil lebih dulu di Telegram dan toko web. Ini berbeda dari filter urutan tampilan Admin. Family kosong tetap bisa diatur, tetapi belum tampil ke pelanggan.</p>
+                <x-admin-dashboard.button type="button" variant="neutral" size="sm" class="mt-3" x-bind:disabled="familyOrderSaving || familyOrderDirty || familyFormSubmitting" x-on:click="resetProductFamilyForm()">Tambah family</x-admin-dashboard.button>
+
+                <fieldset class="mt-4 min-w-0" x-bind:disabled="familyOrderSaving || familyFormSubmitting || familyOrderStale || familyOrder.length < 2" aria-describedby="product-family-order-help">
+                    <legend class="text-sm font-semibold text-admin-ink">Pindah langsung</legend>
+                    <div class="mt-2 grid min-w-0 gap-3 sm:grid-cols-2">
+                        <div class="min-w-0">
+                            <x-admin-dashboard.field-label for="product-family-move-id">Pindahkan family</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.select id="product-family-move-id" class="mt-1.5 w-full min-w-0" x-model="familyMoveId" x-on:change="if (familyMoveAfterId === familyMoveId) familyMoveAfterId = ''">
+                                <option value="">Pilih family</option>
+                                <template x-for="family in familyOrder" x-bind:key="family.id"><option x-bind:value="String(family.id)" x-text="family.name"></option></template>
+                            </x-admin-dashboard.select>
+                        </div>
+                        <div class="min-w-0">
+                            <x-admin-dashboard.field-label for="product-family-move-after-id">Letakkan setelah</x-admin-dashboard.field-label>
+                            <x-admin-dashboard.select id="product-family-move-after-id" class="mt-1.5 w-full min-w-0" x-model="familyMoveAfterId">
+                                <option value="">Paling atas</option>
+                                <template x-for="family in familyMoveTargets" x-bind:key="family.id"><option x-bind:value="String(family.id)" x-text="family.name"></option></template>
+                            </x-admin-dashboard.select>
+                        </div>
+                    </div>
+                    <x-admin-dashboard.button id="product-family-apply-move" type="button" variant="neutral" class="mt-3 w-full sm:w-auto" x-bind:disabled="!familyMoveId" x-on:click="moveFamilyAfter()">Pindahkan</x-admin-dashboard.button>
+                </fieldset>
+                <div class="mt-4 border-t border-admin-line pt-3">
+                    <p class="text-sm text-admin-ink" role="status" aria-live="polite" aria-atomic="true" x-text="familyOrderMessage || (familyOrderDirty ? 'Urutan berubah. Simpan urutan untuk menerapkannya ke katalog.' : '')"></p>
+                    <p class="mt-1 text-sm text-admin-ink" role="alert" x-show="familyOrderError" x-text="familyOrderError"></p>
+                    <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                        <x-admin-dashboard.button id="product-family-save-order" type="button" variant="primary" x-bind:disabled="!familyOrderDirty || familyOrderSaving || familyFormSubmitting || familyOrderStale" x-on:click="saveFamilyOrder()"><span x-text="familyOrderSaving ? 'Menyimpan urutan...' : (familyOrderError && !familyOrderStale ? 'Coba simpan lagi' : 'Simpan urutan')">Simpan urutan</span></x-admin-dashboard.button>
+                        <x-admin-dashboard.button id="product-family-reset-order" type="button" variant="neutral" x-bind:disabled="!familyOrderDirty || familyOrderSaving" x-on:click="resetFamilyOrder()">Batalkan perubahan urutan</x-admin-dashboard.button>
+                        <x-admin-dashboard.button type="button" variant="neutral" x-show="familyOrderError" x-bind:disabled="familyOrderSaving" x-on:click="window.location.reload()">Muat ulang halaman</x-admin-dashboard.button>
+                    </div>
+                    <p x-show="familyOrderDirty" class="mt-2 text-xs leading-5 text-admin-muted">Simpan atau batalkan urutan sebelum menambah, mengedit, atau menghapus family. Hapus hanya melepas grouping; state Product tetap ada.</p>
+                </div>
+
+                <ol class="mt-4 space-y-2" aria-label="Posisi family di katalog">
+                    <template x-for="(family, index) in familyOrder" x-bind:key="family.id">
+                        <li x-bind:id="'admin-product-family-' + family.id" class="rounded-lg border border-admin-line bg-admin-surface p-3">
+                            <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div class="min-w-0">
+                                    <h4 class="break-words text-base font-semibold text-admin-ink"><span x-text="(index + 1) + '. '"></span><span x-text="family.name"></span></h4>
+                                    <p class="mt-1 break-words text-xs text-admin-muted" x-text="family.description || 'Tanpa deskripsi'"></p>
+                                    <p class="mt-2 text-xs text-admin-muted" x-text="family.member_count === 0 ? 'Family kosong: belum tampil ke pelanggan' : family.member_count + ' Product · ' + family.available_member_count + ' tersedia · ' + family.sold_out_member_count + ' habis'"></p>
+                                    <p class="mt-1 text-xs text-admin-muted" x-text="'Urutan tersimpan: ' + family.sort_order"></p>
+                                </div>
+                                <div class="flex shrink-0 flex-wrap gap-2 sm:max-w-56">
+                                    <x-admin-dashboard.button type="button" variant="neutral" size="sm" data-family-move="up" x-bind:aria-label="'Naikkan ' + family.name" x-bind:disabled="index === 0 || familyOrderSaving || familyFormSubmitting || familyOrderStale" x-on:click="moveFamily(family.id, -1)">Naik</x-admin-dashboard.button>
+                                    <x-admin-dashboard.button type="button" variant="neutral" size="sm" data-family-move="down" x-bind:aria-label="'Turunkan ' + family.name" x-bind:disabled="index === familyOrder.length - 1 || familyOrderSaving || familyFormSubmitting || familyOrderStale" x-on:click="moveFamily(family.id, 1)">Turun</x-admin-dashboard.button>
+                                    <x-admin-dashboard.button type="button" variant="neutral" size="sm" x-bind:disabled="familyOrderSaving || familyOrderDirty || familyFormSubmitting" x-on:click="openProductFamilyEditModal(family.edit_payload)" x-bind:aria-label="'Edit ' + family.name">Edit</x-admin-dashboard.button>
+                                    <form method="POST" x-bind:action="family.delete_url" x-on:submit="if (familyOrderSaving || familyOrderDirty || !confirm(family.delete_confirmation)) $event.preventDefault()">
+                                        @csrf
+                                        @method('DELETE')
+                                        <input type="hidden" name="confirm_delete" value="1">
+                                        <x-admin-dashboard.button type="submit" variant="destructive" size="sm" x-bind:disabled="familyOrderSaving || familyOrderDirty || familyFormSubmitting" x-bind:aria-label="'Hapus ' + family.name">Hapus</x-admin-dashboard.button>
+                                    </form>
+                                </div>
+                            </div>
+                        </li>
+                    </template>
+                </ol>
+                <p x-show="familyOrder.length === 0" class="mt-3 text-sm text-admin-muted">Belum ada Product Family. Tambahkan family melalui formulir di bawah.</p>
+            </x-admin-dashboard.card>
+
             <form method="POST" enctype="multipart/form-data" x-bind:action="familyFormAction" x-on:submit="submitProductFamilyForm($event)" class="rounded-lg border border-admin-line bg-admin-surface p-3 sm:p-4">
                 @csrf
                 <input type="hidden" x-bind:name="familyFormMethod ? '_method' : ''" x-bind:value="familyFormMethod">
                 <input type="hidden" name="family_id" x-bind:value="familyId">
+                <fieldset class="min-w-0" x-bind:disabled="familyOrderSaving || familyOrderDirty">
 
                 <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -43,7 +108,7 @@
                     <div>
                         <x-admin-dashboard.field-label for="product-family-sort-order">Urutan</x-admin-dashboard.field-label>
                         <x-admin-dashboard.input id="product-family-sort-order" type="number" name="sort_order" min="0" max="999999" step="1" inputmode="numeric" class="mt-1.5" x-model="familySortOrder" required />
-                        <p class="mt-1 text-xs leading-5 text-admin-muted">Menentukan urutan family di katalog bot dan toko web.</p>
+                        <p class="mt-1 text-xs leading-5 text-admin-muted">Angka lebih kecil tampil lebih dulu. Untuk memindah tanpa menghitung angka, gunakan daftar urutan di atas.</p>
                         @error('sort_order', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                         @error('sort_order', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     </div>
@@ -115,49 +180,9 @@
                     <x-admin-dashboard.button type="button" variant="neutral" x-on:click="closeProductFamilyModal()" x-bind:disabled="familyFormSubmitting">Batal</x-admin-dashboard.button>
                     <x-admin-dashboard.button type="submit" variant="primary" x-bind:disabled="familyFormSubmitting"><span x-text="familyFormSubmitting ? 'Menyimpan...' : (familyFormMode === 'edit' ? 'Simpan' : 'Tambah family')">Tambah family</span></x-admin-dashboard.button>
                 </div>
+                </fieldset>
             </form>
 
-            <x-admin-dashboard.card as="section" padding="compact" shadow="none" class="mt-4" aria-labelledby="product-family-list-title">
-                <div class="flex flex-wrap items-end justify-between gap-3">
-                    <div class="min-w-0">
-                        <h3 id="product-family-list-title" class="text-lg font-semibold text-admin-ink">Daftar Product Family</h3>
-                        <p class="mt-1 text-sm leading-6 text-admin-muted">Hapus family hanya melepas grouping; semua state Product tetap ada.</p>
-                    </div>
-                    <x-admin-dashboard.badge tone="emerald">{{ count($familyManagement['families']) }} total</x-admin-dashboard.badge>
-                </div>
-
-                <div class="mt-3 space-y-2">
-                    @forelse ($familyManagement['families'] as $family)
-                        <article id="admin-product-family-{{ $family['id'] }}" x-data="{ familyEditPayload: @js($family['edit_payload']) }" class="rounded-lg border border-admin-line bg-admin-surface p-3">
-                            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div class="min-w-0">
-                                    <div class="flex flex-wrap items-center gap-2">
-                                        <h4 class="break-words text-base font-semibold text-admin-ink">{{ $family['name'] }}</h4>
-                                        <x-admin-dashboard.badge tone="purple">{{ $family['member_count'] }} Product</x-admin-dashboard.badge>
-                                    </div>
-                                    <p class="mt-1 break-words text-xs text-admin-muted">{{ $family['description'] ?: 'Tanpa deskripsi' }}</p>
-                                    <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-admin-muted">
-                                        <span>{{ $family['available_member_count'] }} tersedia</span>
-                                        <span>{{ $family['sold_out_member_count'] }} habis</span>
-                                        <span>Urutan {{ $family['sort_order'] }}</span>
-                                    </div>
-                                </div>
-                                <div class="flex shrink-0 gap-2 sm:w-44 sm:flex-col">
-                                    <x-admin-dashboard.button type="button" variant="secondary" size="sm" class="flex-1" x-on:click="openProductFamilyEditModal(familyEditPayload)">Edit</x-admin-dashboard.button>
-                                    <form method="POST" action="{{ $family['delete_url'] }}" class="flex-1" x-on:submit="if (! confirm(@js($family['delete_confirmation']))) $event.preventDefault()">
-                                        @csrf
-                                        @method('DELETE')
-                                        <input type="hidden" name="confirm_delete" value="1">
-                                        <x-admin-dashboard.button type="submit" variant="destructive" size="sm" class="w-full">Hapus</x-admin-dashboard.button>
-                                    </form>
-                                </div>
-                            </div>
-                        </article>
-                    @empty
-                        <x-admin-dashboard.empty-state title="Belum ada Product Family." />
-                    @endforelse
-                </div>
-            </x-admin-dashboard.card>
         </x-admin-dashboard.modal-shell>
     </x-admin-dashboard.modal-backdrop>
 @endif

@@ -11,6 +11,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\Credentials\StructuredCredentialPayload;
@@ -544,8 +545,12 @@ final class AdminDashboardProductsData
     /** @param list<array<string, mixed>> $families */
     private function familyManagement(array $families): array
     {
+        $positions = ProductFamily::query()->catalogOrder()->pluck('id')->flip()->all();
+        usort($families, fn (array $left, array $right): int => $positions[$left['id']] <=> $positions[$right['id']]);
+
         return [
             'createUrl' => route('admin.product-families.store'),
+            'reorderUrl' => route('admin.product-families.reorder'),
             'families' => array_map(function (array $family): array {
                 return $family + [
                     'update_url' => route('admin.product-families.update', ['productFamily' => $family['id']]),

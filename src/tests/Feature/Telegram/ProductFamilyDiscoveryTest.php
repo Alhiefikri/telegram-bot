@@ -4,6 +4,7 @@ namespace Tests\Feature\Telegram;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\UserRole;
 use App\Models\Cart;
 use App\Models\Category;
 use App\Models\Customer;
@@ -13,6 +14,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\User;
 use App\Services\Telegram\CustomEmojiCapability;
 use App\Services\Telegram\TelegramCatalogIntents;
 use App\Services\Telegram\TelegramCatalogQuerySession;
@@ -1439,6 +1441,63 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             $largeCatalogQueries,
             sprintf('Query count grew from %d to %d for fifteen additional families.', $smallCatalogQueries, $largeCatalogQueries),
         );
+    }
+
+    public function test_admin_family_order_edit_reorders_a_warm_telegram_catalog_despite_sales_and_stock(): void
+    {
+        $this->fakeTelegramHttp();
+        $customer = Customer::factory()->create(['telegram_id' => 41162, 'locale' => 'en']);
+        $canva = ProductFamily::factory()->create(['name' => 'Canva', 'slug' => 'canva', 'sort_order' => 10]);
+        $capcut = ProductFamily::factory()->create(['name' => 'Capcut', 'slug' => 'capcut', 'sort_order' => 20]);
+        Product::factory()->create([
+            'name' => 'Canva Plan',
+            'product_family_id' => $canva->id,
+            'stock' => 0,
+            'reserved_stock' => 0,
+        ]);
+        $popular = Product::factory()->create([
+            'name' => 'Capcut Plan',
+            'product_family_id' => $capcut->id,
+            'stock' => 10,
+            'reserved_stock' => 0,
+        ]);
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $popular->id, 'quantity' => 100]);
+
+        $catalog = app(TelegramCatalogIntents::class);
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+        $initial = $this->lastMessageContaining('Choose a family')['reply_markup']['inline_keyboard'];
+        $this->assertStringContainsString('Canva Plan', $initial[0][0]['text']);
+        $this->assertStringContainsString('Capcut Plan', $initial[1][0]['text']);
+        $this->assertSame('danger', $initial[0][0]['style']);
+
+        $catalogQueries = [];
+        $measuring = true;
+        DB::listen(function (QueryExecuted $query) use (&$catalogQueries, &$measuring): void {
+            if ($measuring && str_contains(strtolower($query->sql), 'products')) {
+                $catalogQueries[] = $query->sql;
+            }
+        });
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+        $measuring = false;
+        $this->assertSame([], $catalogQueries, 'The catalog must be warm before the Admin edit.');
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+            ->patch(route('admin.product-families.update', $canva), [
+                'name' => 'Canva',
+                'sort_order' => 30,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $catalog->sendCatalogPage($customer, (string) $customer->telegram_id);
+        $updated = $this->lastMessageContaining('Choose a family')['reply_markup']['inline_keyboard'];
+        $this->assertStringContainsString('Capcut Plan', $updated[0][0]['text']);
+        $this->assertStringContainsString('Canva Plan', $updated[1][0]['text']);
+        $this->assertSame('danger', $updated[1][0]['style']);
     }
 
     public function test_public_catalog_projection_is_cached_until_catalog_changes(): void

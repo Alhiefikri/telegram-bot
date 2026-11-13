@@ -121,6 +121,8 @@ class AdminProductDashboardState
                 'categorySortOrder' => old('sort_order', $editingCategory['sort_order'] ?? 0),
             ],
             'familyCreateUrl' => $familyManagement['createUrl'],
+            'familyReorderUrl' => $familyManagement['reorderUrl'] ?? '',
+            'familyOrder' => $familyManagement['families'],
             'familyModalOpen' => $hasFamilyFormState || $hasFamilyErrors,
             'familyForm' => [
                 'familyFormMode' => $isFamilyEdit ? 'edit' : 'create',

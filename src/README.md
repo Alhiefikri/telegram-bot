@@ -76,6 +76,16 @@ Catatan:
 - Nilai icon katalog dapat diubah langsung dari Admin Dashboard tanpa mengubah `.env`, rebuild image, atau clear config.
 - Store Bot memakai `editMessageText` dengan `callback_query.message.message_id` untuk family, category, quote, detail, dan navigasi balik satu pesan. `sendMessage` hanya dipakai bila tidak ada pesan asal atau Telegram menolak edit secara definitif; timeout/connection failure tidak memicu blind resend.
 
+### Mengatur urutan Product Family
+
+Di Admin, buka **Produk → Kelola Product Family**. Daftar bernomor mengikuti `sort_order` terkecil, lalu nama dan ID. Semua family yang belum dihapus ikut ditampilkan, termasuk family kosong; family kosong belum tampil di katalog pelanggan.
+
+Untuk menaruh Canva tepat di bawah Capcut, pilih **Canva** pada **Pindahkan family**, pilih **Capcut** pada **Letakkan setelah**, klik **Pindahkan**, lalu **Simpan urutan**. Tombol **Naik** dan **Turun** juga bisa digunakan dengan keyboard atau layar sentuh. Nomor daftar langsung mengikuti draf; perubahan baru berlaku setelah server mengonfirmasi penyimpanan. **Batalkan perubahan urutan** mengembalikan daftar ke urutan terakhir yang dikonfirmasi.
+
+Penyimpanan menulis ulang seluruh urutan menjadi angka berurutan mulai dari nol dalam satu transaksi dan mencatat actor serta urutan sebelum/sesudah di audit log. Cache katalog Telegram dan toko web diinvalidasi melalui event model. Buka kembali katalog Telegram atau muat ulang toko web untuk melihat hasilnya; pesan Telegram yang sudah terkirim tidak diubah otomatis. Filter **Urutkan family / produk** di Admin hanya mengubah tampilan Admin, bukan urutan katalog publik. Field angka **Urutan** pada edit family tetap tersedia: angka lebih kecil tampil lebih dulu.
+
+Jika family ditambah, dihapus, atau urutannya berubah sejak halaman dibuka, penyimpanan ditolak tanpa menimpa daftar terbaru. Klik **Muat ulang halaman** lalu atur ulang. Saat koneksi terputus, status penyimpanan bisa belum diketahui; draf dipertahankan agar bisa dicoba lagi atau diperiksa dengan memuat ulang. Jangan menganggap draf sudah tersimpan sebelum ada konfirmasi.
+
 ### Tampilan Web Storefront
 
 Navbar mengikuti scroll halaman, termasuk pada panduan login; tidak ada navbar sticky yang menutupi konten. Di bawah 640px, header menampilkan merek, keranjang, menu, dan pencarian. Akses akun serta pilihan tema tetap tersedia melalui menu mobile.
