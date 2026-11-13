@@ -12,10 +12,26 @@
 <body class="admin-page min-h-screen bg-admin-paper text-admin-ink">
     <x-admin-dashboard.linked-shell active-tab="penjualan" title="Manual Fulfillment Review">
         <a href="{{ route('admin.manual-fulfillment-reviews.index') }}" class="text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Kembali ke antrean</a>
+        @if (session('status'))
+            <x-admin-dashboard.notice tone="success" class="mt-4">{{ session('status') }}</x-admin-dashboard.notice>
+        @endif
+        @if ($errors->any())
+            <x-admin-dashboard.notice tone="danger" class="mt-4">
+                <ul class="space-y-1">
+                    @foreach ($errors->all() as $error)
+                        <li>{{ $error }}</li>
+                    @endforeach
+                </ul>
+            </x-admin-dashboard.notice>
+        @endif
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4">
             <p class="text-xs font-medium text-admin-muted">Manual Fulfillment Review</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">{{ $review->order->invoice_number }}</h1>
-            <x-admin-dashboard.notice tone="warning" class="mt-4">Evidence pembayaran ini membutuhkan keputusan manual. Fulfillment tidak dijalankan otomatis.</x-admin-dashboard.notice>
+            @if ($review->reason === \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)
+                <x-admin-dashboard.notice tone="warning" class="mt-4">Pembayaran sudah diterima. Lengkapi akun lokal dengan email yang belum pernah dialokasikan kepada pelanggan ini untuk Product yang sama. Password berbeda tetap dihitung sebagai email yang sama.</x-admin-dashboard.notice>
+            @else
+                <x-admin-dashboard.notice tone="warning" class="mt-4">Evidence pembayaran ini membutuhkan keputusan manual. Fulfillment tidak dijalankan otomatis.</x-admin-dashboard.notice>
+            @endif
             <dl class="mt-5 grid gap-3 sm:grid-cols-2">
                 <div><dt class="text-xs font-medium text-admin-muted">Status review</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->state }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Alasan</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->reason }}</dd></div>
@@ -48,6 +64,71 @@
                 </section>
             @endif
         </x-admin-dashboard.card>
+        @if ($credentialEmailHistory->isNotEmpty())
+            <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4">
+                <h2 class="text-lg font-semibold text-admin-ink">Riwayat email akun pelanggan</h2>
+                <p class="mt-1 text-sm leading-6 text-admin-muted">Riwayat ini hanya untuk Admin. Email yang sudah dialokasikan, termasuk pesanan yang masih diproses dan akun yang dipensiunkan, tidak boleh dikirim lagi untuk Product yang sama.</p>
+                @foreach ($credentialEmailHistory as $row)
+                    <section class="mt-4">
+                        <h3 class="font-semibold text-admin-ink">{{ $row['item']->product_name }}</h3>
+                        @if ($row['error'])
+                            <x-admin-dashboard.notice tone="warning" class="mt-2">{{ $row['error'] }}</x-admin-dashboard.notice>
+                        @else
+                            <ul class="mt-2 space-y-2 text-sm">
+                                @forelse ($row['history'] as $entry)
+                                    <li class="break-all">
+                                        {{ $entry['email'] }} ·
+                                        <a href="{{ route('admin.orders.show', $entry['order_id']) }}" class="font-medium text-admin-accent-strong underline-offset-4 hover:underline">{{ $entry['invoice_number'] }}</a>
+                                    </li>
+                                @empty
+                                    <li class="text-admin-muted">Belum ada email akun yang dialokasikan untuk pelanggan dan Product ini.</li>
+                                @endforelse
+                            </ul>
+                        @endif
+                    </section>
+                @endforeach
+            </x-admin-dashboard.card>
+        @endif
+        @can('resolve', $review)
+            @if ($review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING
+                && $review->reason === \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+                && $review->order->order_status === \App\Enums\OrderStatus::Processing
+                && $review->order->payment_status === \App\Enums\PaymentStatus::Paid
+                && $localCredentialItems->contains(fn ($row) => $row['missing'] > 0))
+                <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4">
+                    <h2 class="text-lg font-semibold text-admin-ink">Lengkapi akun lokal</h2>
+                    <p class="mt-1 text-sm leading-6 text-admin-muted">Kirim seluruh unit lokal yang kurang dalam satu pengajuan. Akun ini langsung menjadi milik pesanan, tanpa menambah stok tersedia atau membuat pembelian supplier. Input akun tidak disimpan di formulir setelah gagal.</p>
+                    <form method="POST" action="{{ route('admin.manual-fulfillment-reviews.credentials', $review) }}" class="mt-4 grid gap-4" autocomplete="off">
+                        @csrf
+                        @foreach ($localCredentialItems as $row)
+                            @if ($row['missing'] > 0)
+                                <fieldset class="min-w-0 rounded-lg border border-admin-line p-3">
+                                    <legend class="px-1 font-semibold text-admin-ink">{{ $row['item']->product_name }} · kurang {{ $row['missing'] }} unit</legend>
+                                    <x-admin-dashboard.field-label>
+                                        Format akun
+                                        <x-admin-dashboard.select name="items[{{ $row['item']->id }}][format]" class="mt-1">
+                                            <option value="legacy">Legacy: satu akun per baris</option>
+                                            <option value="structured_account">Input Akun: daftar JSON</option>
+                                        </x-admin-dashboard.select>
+                                    </x-admin-dashboard.field-label>
+                                    <x-admin-dashboard.field-label class="mt-3">
+                                        Data {{ $row['missing'] }} akun
+                                        <x-admin-dashboard.textarea name="items[{{ $row['item']->id }}][credentials]" required rows="6" class="mt-1" spellcheck="false" />
+                                        <small class="mt-1 block text-xs leading-5 text-admin-muted">Legacy mengikuti format email | password atau email----password----MFA. Input Akun memakai daftar JSON berisi email, password, access_method (none, otp_mail_link, auth_token), dan access_value bila diperlukan. Panduan mengikuti Product.</small>
+                                    </x-admin-dashboard.field-label>
+                                </fieldset>
+                            @endif
+                        @endforeach
+                        <x-admin-dashboard.field-label>
+                            Catatan resolusi
+                            <x-admin-dashboard.textarea name="reason" required maxlength="2000" class="mt-1" />
+                            <small class="mt-1 block text-xs text-admin-muted">Tulis catatan pemeriksaan tanpa password atau data akun.</small>
+                        </x-admin-dashboard.field-label>
+                        <x-admin-dashboard.button type="submit" variant="primary">Simpan akun dan lanjutkan pengiriman</x-admin-dashboard.button>
+                    </form>
+                </x-admin-dashboard.card>
+            @endif
+        @endcan
         @can('resolve', $review)
             @if ($review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING)
                 <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4">
@@ -59,7 +140,9 @@
                         <x-admin-dashboard.field-label>
                             Decision
                             <x-admin-dashboard.select name="action" class="mt-1">
-                                <option value="fulfill">Fulfill</option>
+                                @if ($review->reason !== \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)
+                                    <option value="fulfill">Fulfill</option>
+                                @endif
                                 @if ($review->reason === 'supplier_fulfillment')
                                     <option value="hand_off">Sudah diserahkan di luar bot</option>
                                 @endif

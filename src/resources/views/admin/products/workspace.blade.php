@@ -56,6 +56,12 @@
                             <label>{{ $label }}<input name="{{ $field }}" maxlength="{{ $field === 'usage_guide_title' ? 160 : 2048 }}" x-model="draft.detail.{{ $field }}" x-bind:aria-invalid="Boolean(error('detail', '{{ $field }}'))" aria-describedby="workspace-error-{{ $field }}"><span id="workspace-error-{{ $field }}" class="workspace-field-error" x-text="error('detail', '{{ $field }}')"></span></label>
                         @endforeach
                         <label class="workspace-full">Catatan pengiriman rahasia<textarea name="delivery_note" rows="5" autocomplete="off" x-model="draft.detail.delivery_note" x-bind:aria-invalid="Boolean(error('detail', 'delivery_note'))" aria-describedby="workspace-error-delivery-note"></textarea><span id="workspace-error-delivery-note" class="workspace-field-error" x-text="error('detail', 'delivery_note')"></span></label></div></fieldset>
+                        <fieldset class="workspace-fieldset">
+                            <legend>Aturan akun internal</legend>
+                            <label class="workspace-checkbox"><input type="checkbox" name="unique_credential_email" x-model="draft.detail.unique_credential_email" x-bind:aria-invalid="Boolean(error('detail', 'unique_credential_email'))" aria-describedby="workspace-unique-credential-email-help workspace-error-unique-credential-email"><span>Email akun unik per pembeli untuk produk ini</span></label>
+                            <p id="workspace-unique-credential-email-help" class="workspace-muted">Khusus Admin. Pembeli yang sama tidak boleh menerima email akun yang sama pada produk ini, meski kata sandinya berbeda. Pembeli lain boleh menerima email tersebut. Jika stok lokal yang sesuai tidak tersedia, pembayaran tetap berjalan dan pesanan menunggu Admin mengisi akun secara manual.</p>
+                            <span id="workspace-error-unique-credential-email" class="workspace-field-error" x-text="error('detail', 'unique_credential_email')"></span>
+                        </fieldset>
                         @include('admin.products.workspace-feedback', ['formKey' => 'detail', 'saveLabel' => 'Simpan detail'])
                     </form>
                     <form data-workspace-form="family" class="workspace-fieldset" x-on:submit.prevent="save('family')"><h4>Family / pengelompokan</h4><p class="workspace-muted">Grouping hanya mengatur tampilan. Harga dan stok tetap milik produk ini; kategori harus sesuai family.</p><div class="workspace-grid">

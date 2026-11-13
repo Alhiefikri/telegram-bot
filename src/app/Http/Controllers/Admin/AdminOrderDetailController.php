@@ -7,6 +7,7 @@ use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\OrderNotificationEvent;
 use App\Models\Payment;
@@ -122,6 +123,8 @@ class AdminOrderDetailController extends Controller
 
         return view('admin.orders.show', [
             'order' => $order,
+            'localCredentialReview' => $order->payments->pluck('manualFulfillmentReview')->filter()
+                ->first(fn (ManualFulfillmentReview $review): bool => $review->reason === ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE && $review->state === ManualFulfillmentReview::STATE_PENDING),
             'customerLabel' => $order->customer?->first_name ?: ($order->customer?->username ? '@'.$order->customer->username : 'Pelanggan'),
             'createdAtLabel' => $order->created_at?->format('d M Y H:i'),
             'total' => Money::idr($order->total_amount),

@@ -18,6 +18,7 @@ use App\Models\CustomerBalanceAccount;
 use App\Models\InventoryMovement;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
@@ -27,6 +28,7 @@ use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
 use App\Models\User;
+use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\CustomerApi\CustomerApiCredentials;
@@ -50,6 +52,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\NonTransactionalDatabaseTestCase as TestCase;
 
@@ -60,6 +63,82 @@ class SupplierFulfillmentTest extends TestCase
         parent::setUp();
         Queue::fake();
         Http::preventStrayRequests();
+    }
+
+    public function test_unique_email_supplier_delivery_is_held_and_manual_submission_rejects_the_same_email(): void
+    {
+        [$product, $supplier, , $cart] = $this->fixture();
+        $product->update(['unique_credential_email' => true]);
+        $history = Order::factory()->create(['customer_id' => $cart->customer_id, 'payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Completed]);
+        $historicalItem = OrderItem::factory()->create(['order_id' => $history->id, 'product_id' => $product->id, 'quantity' => 1]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $historicalItem->id, 'secret' => 'repeat@example.test|old-password']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(fn () => Http::response(['status' => 'delivered', 'orderId' => 'unique-supplier', 'quantity' => 1, 'total_cost' => '1', 'deliveredKeys' => ['REPEAT@example.test|changed-password']]));
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+        $service->process($f->id);
+
+        $this->assertSame('review', $f->fresh()->state);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(0, $order->orderItems()->sole()->stockItems()->count());
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        try {
+            $service->provideManualCredentials($f->id, ['repeat@example.test|manual-password']);
+            $this->fail('Duplicate manual supplier email was accepted.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('credentials', $exception->errors());
+        }
+        $this->assertSame(0, $order->orderItems()->sole()->stockItems()->count());
+        $service->provideManualCredentials($f->id, ['fresh@example.test|fresh-password']);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame('fresh@example.test|fresh-password', $order->orderItems()->sole()->stockItems()->sole()->secret);
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+    }
+
+    public static function uniqueMixedSupplierEmails(): array
+    {
+        return ['fresh supplier account' => [false], 'duplicate supplier account' => [true]];
+    }
+
+    #[DataProvider('uniqueMixedSupplierEmails')]
+    public function test_mixed_unique_order_finishes_only_after_both_local_and_supplier_accounts_are_ready(bool $duplicate): void
+    {
+        [$product, , , $cart] = $this->fixture(local: 1, quantity: 2);
+        $product->update(['unique_credential_email' => true]);
+        $history = Order::factory()->create(['customer_id' => $cart->customer_id, 'payment_status' => PaymentStatus::Paid, 'order_status' => OrderStatus::Completed]);
+        $historicalItem = OrderItem::factory()->create(['order_id' => $history->id, 'product_id' => $product->id, 'quantity' => 1]);
+        ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $historicalItem->id, 'secret' => 'repeat@example.test|old-password']);
+        $available = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'repeat@example.test|changed-password']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
+        $item = $order->orderItems()->sole();
+        $this->assertSame(1, $item->deferred_local_quantity);
+        $this->assertSame(1, $item->supplier_quantity);
+        $email = $duplicate ? 'repeat@example.test' : 'supplier@example.test';
+        Http::fake(fn () => Http::response(['status' => 'delivered', 'orderId' => 'mixed-unique-supplier', 'quantity' => 1, 'total_cost' => '1', 'deliveredKeys' => [$email.'|supplier-password']]));
+        $f = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($f->id);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertFalse(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $resolved = app(ManualFulfillmentResolutionService::class)->provideLocalCredentials(
+            $review, $owner, [$item->id => ['local-fresh@example.test|local-password']], 'Complete missing local account.',
+        );
+        if ($duplicate) {
+            $this->assertSame('supplier_fulfillment', $resolved->reason);
+            $this->assertSame('pending', $resolved->state);
+            $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+            app(SupplierFulfillmentService::class)->provideManualCredentials($f->id, ['supplier-fresh@example.test|supplier-password']);
+        }
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertTrue(app(CredentialDeliveryEligibility::class)->allows($order->fresh()));
+        $this->assertSame(2, $item->stockItems()->whereNull('retired_at')->count());
+        $this->assertNull($available->fresh()->order_item_id);
+        $this->assertSame(1, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
     }
 
     public function test_invoice_recovery_delivers_manual_accounts_once_without_releasing_an_undispatched_hold(): void

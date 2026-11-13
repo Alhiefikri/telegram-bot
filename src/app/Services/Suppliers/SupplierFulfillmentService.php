@@ -33,6 +33,7 @@ use App\Models\SupplierPurchaseEvidence;
 use App\Models\User;
 use App\Models\WarrantyClaim;
 use App\Services\AuditLogger;
+use App\Services\Credentials\UniqueCredentialEmailPolicy;
 use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
 use App\Services\OrderCredentialMailService;
@@ -45,6 +46,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 final class SupplierFulfillmentService
@@ -466,7 +468,14 @@ final class SupplierFulfillmentService
             }
             $purchase->forceFill(['state' => 'delivered'])->save();
             if ($f->state !== 'delivered') {
-                $this->materialize($f, $purchase, $deliveries);
+                try {
+                    $this->materialize($f, $purchase, $deliveries);
+                } catch (ValidationException) {
+                    $purchase->update(['state' => 'review', 'last_error' => 'credential_email_unavailable', 'next_attempt_at' => null]);
+                    $this->review($f, $order, 'credential_email_unavailable');
+
+                    return;
+                }
                 $this->finish($f, $order);
             }
         } elseif ($result->identityTrusted && $result->deliveryTrusted && ! $conflictingDelivery && $quantityMatches && count($deliveries) === $purchase->quantity && $purchase->actual_cost_micros === null && $purchase->supplier_order_id !== null) {
@@ -599,6 +608,21 @@ final class SupplierFulfillmentService
         $payment = $order->payments()->whereNull('manual_alternative_at')->where('status', PaymentStatus::Paid)->first();
         if ($payment !== null) {
             $review = ManualFulfillmentReview::query()->firstOrCreate(['payment_id' => $payment->id], ['order_id' => $order->id, 'amount' => $payment->amount, 'currency' => $payment->currency, 'reason' => 'supplier_fulfillment', 'state' => ManualFulfillmentReview::STATE_PENDING]);
+            if ($review->reason === ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+                && $review->state === ManualFulfillmentReview::STATE_FULFILLED) {
+                $before = $review->only(['state', 'reason', 'resolution_reason', 'actor_user_id', 'resolved_at']);
+                $review->update([
+                    'reason' => 'supplier_fulfillment',
+                    'state' => ManualFulfillmentReview::STATE_PENDING,
+                    'resolution_reason' => null,
+                    'actor_user_id' => null,
+                    'resolved_at' => null,
+                ]);
+                $this->audit->log('manual_fulfillment_review.supplier_review_resumed', $review, $before, [
+                    'state' => ManualFulfillmentReview::STATE_PENDING,
+                    'reason' => 'supplier_fulfillment',
+                ]);
+            }
             $effect = app(TelegramOutboundEffectService::class)->recordAdminOrderReviewNotification($review);
             if ($effect !== null) {
                 app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
@@ -609,6 +633,13 @@ final class SupplierFulfillmentService
     private function materialize(SupplierFulfillment $f, SupplierPurchase $purchase, array $deliveries): void
     {
         $item = OrderItem::findOrFail($f->order_item_id);
+        $candidates = [];
+        foreach (array_values($deliveries) as $index => $secret) {
+            if (! ProductStockItem::query()->where('supplier_purchase_id', $purchase->id)->where('supplier_unit_index', $index + 1)->exists()) {
+                $candidates[] = new ProductStockItem(['product_id' => $item->product_id, 'secret' => $secret]);
+            }
+        }
+        app(UniqueCredentialEmailPolicy::class)->assertCanAssign($item, $candidates);
         foreach (array_values($deliveries) as $index => $secret) {
             ProductStockItem::firstOrCreate(
                 ['supplier_purchase_id' => $purchase->id, 'supplier_unit_index' => $index + 1],
@@ -666,6 +697,17 @@ final class SupplierFulfillmentService
     {
         if ($this->hasPending($order)) {
             return;
+        }
+        if (ManualFulfillmentReview::query()->where('order_id', $order->id)
+            ->where('reason', ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)
+            ->where('state', ManualFulfillmentReview::STATE_PENDING)->exists()) {
+            return;
+        }
+        foreach ($order->orderItems()->with('product')->get() as $item) {
+            if (($item->unique_credential_email || $item->product?->unique_credential_email || $item->deferred_local_quantity > 0)
+                && $item->stockItems()->whereNull('supplier_purchase_id')->whereNull('retired_at')->count() < $item->localQuantity()) {
+                return;
+            }
         }
         ManualFulfillmentReview::query()->where('order_id', $order->id)->whereIn('reason', ['supplier_fulfillment', ManualFulfillmentReview::REASON_LATE_PAYMENT])->where('state', ManualFulfillmentReview::STATE_PENDING)->update(['state' => ManualFulfillmentReview::STATE_FULFILLED, 'resolved_at' => now()]);
         $order->update(['order_status' => OrderStatus::Completed]);
@@ -1068,6 +1110,12 @@ final class SupplierFulfillmentService
                     throw new InvalidOrderTransition('Invalid manual delivery.');
                 }
             }
+            $item = OrderItem::findOrFail($f->order_item_id);
+            $candidates = array_map(
+                fn (string $secret): ProductStockItem => new ProductStockItem(['product_id' => $item->product_id, 'secret' => $secret]),
+                $credentials,
+            );
+            app(UniqueCredentialEmailPolicy::class)->assertCanAssign($item, $candidates);
             $purchase = $f->current_purchase_id ? SupplierPurchase::findOrFail($f->current_purchase_id) : null;
             if ($purchase?->lease_expires_at?->isFuture()) {
                 throw new InvalidOrderTransition('A purchase is still in flight.');

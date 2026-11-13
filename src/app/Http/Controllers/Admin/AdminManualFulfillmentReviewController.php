@@ -2,17 +2,22 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\InvalidOrderTransition;
 use App\Http\Controllers\Controller;
 use App\Models\ManualFulfillmentReview;
 use App\Models\SupplierFulfillment;
 use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Admin\SupplierOperationConfirmation;
+use App\Services\Credentials\UniqueCredentialEmailPolicy;
 use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use JsonException;
 
 class AdminManualFulfillmentReviewController extends Controller
 {
@@ -29,20 +34,41 @@ class AdminManualFulfillmentReviewController extends Controller
         return view('admin.manual-fulfillment-reviews.index', compact('reviews'));
     }
 
-    public function show(Request $request, ManualFulfillmentReview $review): View
+    public function show(Request $request, ManualFulfillmentReview $review, UniqueCredentialEmailPolicy $emailPolicy): View
     {
         Gate::authorize('view', $review);
 
-        $review->load(['order.customer', 'order.orderItems', 'payment', 'actor']);
+        $review->load(['order.customer', 'order.orderItems.product', 'payment', 'actor']);
         $handoffFulfillments = $review->reason === 'supplier_fulfillment'
             ? SupplierFulfillment::query()->where('order_id', $review->order_id)->with('manualHandoffs.actor')->orderBy('id')->get()
             : collect();
+        $localCredentialItems = $review->reason === ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+            ? $review->order->orderItems->map(function ($item): array {
+                $allocated = $item->stockItems()->whereNull('supplier_purchase_id')->whereNull('retired_at')->count();
+
+                return [
+                    'item' => $item,
+                    'missing' => max(0, $item->localQuantity() - $allocated),
+                ];
+            })->filter(fn (array $row): bool => $row['item']->localQuantity() > 0)
+            : collect();
+        $credentialEmailHistory = $review->order->orderItems
+            ->filter(fn ($item): bool => (bool) ($item->unique_credential_email || $item->product?->unique_credential_email))
+            ->map(function ($item) use ($emailPolicy): array {
+                try {
+                    return ['item' => $item, 'history' => $emailPolicy->history($item), 'error' => null];
+                } catch (ValidationException $exception) {
+                    return ['item' => $item, 'history' => [], 'error' => collect($exception->errors())->flatten()->first()];
+                }
+            });
 
         return view('admin.manual-fulfillment-reviews.show', [
             'review' => $review,
             'amount' => $this->amount($review->amount, $review->currency),
             'handoffFulfillments' => $handoffFulfillments,
             'handoffKey' => (string) Str::uuid(),
+            'localCredentialItems' => $localCredentialItems,
+            'credentialEmailHistory' => $credentialEmailHistory,
         ]);
     }
 
@@ -87,6 +113,52 @@ class AdminManualFulfillmentReviewController extends Controller
         }
 
         return redirect()->route('admin.manual-fulfillment-reviews.show', $resolved)->with('status', 'Review resolved as '.$resolved->state.'.');
+    }
+
+    public function provideCredentials(Request $request, ManualFulfillmentReview $review, ManualFulfillmentResolutionService $resolutions): RedirectResponse
+    {
+        Gate::authorize('resolve', $review);
+
+        try {
+            $data = Validator::make($request->all(), [
+                'reason' => ['required', 'string', 'max:2000'],
+                'items' => ['required', 'array'],
+                'items.*' => ['required', 'array'],
+                'items.*.format' => ['required', 'in:legacy,structured_account'],
+                'items.*.credentials' => ['required', 'string', 'max:1048576'],
+            ])->validate();
+            $credentials = [];
+            foreach ($data['items'] as $itemId => $input) {
+                if ($input['format'] === 'structured_account') {
+                    $accounts = json_decode($input['credentials'], true, 512, JSON_THROW_ON_ERROR);
+                    if (! is_array($accounts) || ! array_is_list($accounts)
+                        || count(array_filter($accounts, 'is_array')) !== count($accounts)) {
+                        throw ValidationException::withMessages(['credentials' => 'Input Akun harus berupa daftar JSON akun.']);
+                    }
+                    $credentials[$itemId] = $accounts;
+                } else {
+                    $credentials[$itemId] = array_values(array_filter(
+                        array_map('trim', preg_split('/\r\n|\r|\n/', $input['credentials'])),
+                        fn (string $line): bool => $line !== '',
+                    ));
+                }
+            }
+            $resolutions->provideLocalCredentials(
+                $review,
+                $request->attributes->get('adminUser'),
+                $credentials,
+                $data['reason'],
+                $request->ip(),
+            );
+        } catch (ValidationException $exception) {
+            return back()->withErrors($exception->errors());
+        } catch (JsonException) {
+            return back()->withErrors(['credentials' => 'JSON akun tidak valid. Periksa format lalu kirim ulang.']);
+        } catch (InvalidOrderTransition $exception) {
+            return back()->withErrors(['credentials' => $exception->getMessage()]);
+        }
+
+        return redirect()->route('admin.manual-fulfillment-reviews.show', $review)->with('status', 'Akun lokal disimpan. Pengiriman dilanjutkan setelah seluruh unit pesanan siap.');
     }
 
     private function amount(int $amount, string $currency): string

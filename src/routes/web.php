@@ -318,6 +318,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::get('/', [AdminManualFulfillmentReviewController::class, 'index'])->name('index');
                 Route::get('{review}', [AdminManualFulfillmentReviewController::class, 'show'])->name('show');
                 Route::post('{review}/resolve', [AdminManualFulfillmentReviewController::class, 'resolve'])->name('resolve');
+                Route::post('{review}/credentials', [AdminManualFulfillmentReviewController::class, 'provideCredentials'])->name('credentials');
             });
 
             Route::prefix('telegram-outbound-effects')->name('telegram-outbound-effects.')->group(function (): void {

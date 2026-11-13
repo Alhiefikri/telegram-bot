@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\ProductStockItem;
 use App\Services\OrderLifecycleProjection;
@@ -42,6 +43,12 @@ final class CredentialDeliveryEligibility
         $ids = $orders->modelKeys();
         $pending = collect(app(SupplierFulfillmentService::class)->pendingOrderIds($ids))->flip();
         $review = ManualFulfillmentReview::query()->whereIn('order_id', $ids)->openLatePayment()->pluck('order_id')->flip();
+        $uniqueReview = ManualFulfillmentReview::query()->whereIn('order_id', $ids)
+            ->where('reason', ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)->open()->pluck('order_id')->flip();
+        $missingUniqueLocal = OrderItem::query()->whereIn('order_id', $ids)
+            ->where('deferred_local_quantity', '>', 0)
+            ->whereRaw('(SELECT COUNT(*) FROM product_stock_items WHERE product_stock_items.order_item_id = order_items.id AND supplier_purchase_id IS NULL AND retired_at IS NULL) < COALESCE(local_quantity, quantity)')
+            ->pluck('order_id')->flip();
 
         $reasons = [];
         foreach ($orders as $order) {
@@ -54,6 +61,8 @@ final class CredentialDeliveryEligibility
                 $payment->paid_at === null => 'payment_not_confirmed',
                 $order->payment_status !== PaymentStatus::Paid => 'payment_not_paid',
                 $pending->has($order->id) => 'fulfillment_processing',
+                $uniqueReview->has($order->id) => 'fulfillment_processing',
+                $missingUniqueLocal->has($order->id) => 'fulfillment_processing',
                 $review->has($order->id) => 'late_payment_review',
                 ! OrderLifecycleProjection::from($order, $payment)->isPaid => 'lifecycle_ineligible',
                 default => null,

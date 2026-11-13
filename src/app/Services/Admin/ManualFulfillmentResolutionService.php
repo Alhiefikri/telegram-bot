@@ -2,6 +2,7 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\CredentialFormat;
 use App\Enums\ExternalMoneyReceiptClaimOutcome;
 use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
@@ -9,18 +10,25 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\SendTelegramReceipt;
+use App\Models\AuditLog;
 use App\Models\BscPaymentTransferEvidence;
 use App\Models\ExternalMoneyReceiptReservation;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\OrderRefund;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
 use App\Models\ProductStockItem;
+use App\Models\SalesProofPost;
+use App\Models\StoreChannelSetting;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierManualHandoff;
 use App\Models\SupplierPurchase;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\Credentials\StructuredCredentialPayload;
+use App\Services\Credentials\UniqueCredentialEmailPolicy;
 use App\Services\GuestOrderNotificationService;
 use App\Services\InventoryLedger;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
@@ -30,11 +38,15 @@ use App\Services\OrderLifecycle;
 use App\Services\ProductCredentialAllocator;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
+use App\Services\Telegram\SalesProofEligibility;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\Warranty\RemainderRefundService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 class ManualFulfillmentResolutionService
@@ -74,6 +86,152 @@ class ManualFulfillmentResolutionService
                 default => throw new InvalidOrderTransition('Unknown manual fulfillment resolution.'),
             };
         }, attempts: 5);
+    }
+
+    /** @param array<int, list<string|array<string, mixed>>> $credentials */
+    public function provideLocalCredentials(ManualFulfillmentReview $review, User $actor, array $credentials, string $reason, ?string $ip = null): ManualFulfillmentReview
+    {
+        abort_unless($actor->role?->canManagePaymentSettings(), 403);
+
+        return DB::transaction(function () use ($review, $actor, $credentials, $reason, $ip): ManualFulfillmentReview {
+            $initial = ManualFulfillmentReview::query()->findOrFail($review->id);
+            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            app(SupplierFulfillmentService::class)->lockForReview($order);
+            $locked = ManualFulfillmentReview::query()->lockForUpdate()->findOrFail($review->id);
+            if ($locked->reason === 'supplier_fulfillment'
+                && AuditLog::query()->where('subject_type', ManualFulfillmentReview::class)->where('subject_id', (string) $locked->id)
+                    ->where('action', 'manual_fulfillment_review.local_credentials_provided')->exists()) {
+                return $locked;
+            }
+            if ($locked->reason !== ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE) {
+                throw new InvalidOrderTransition('This review does not accept local credentials.');
+            }
+            if ($locked->state === ManualFulfillmentReview::STATE_FULFILLED) {
+                return $locked;
+            }
+            $payment = Payment::query()->findOrFail($locked->payment_id);
+            if ($locked->state !== ManualFulfillmentReview::STATE_PENDING
+                || $order->payment_status !== PaymentStatus::Paid
+                || $payment->status !== PaymentStatus::Paid
+                || $order->order_status !== OrderStatus::Processing
+                || OrderRefund::query()->where('order_id', $order->id)->exists()) {
+                throw new InvalidOrderTransition('Only an active paid local credential review can accept accounts.');
+            }
+            if (trim($reason) === '' || mb_strlen($reason) > 2000) {
+                throw ValidationException::withMessages(['reason' => 'Catatan resolusi wajib diisi, maksimal 2000 karakter.']);
+            }
+
+            $items = $order->orderItems()->orderBy('product_id')->orderBy('id')->get();
+            $missing = $items->mapWithKeys(function (OrderItem $item): array {
+                $allocated = $item->stockItems()->whereNull('supplier_purchase_id')->whereNull('retired_at')->count();
+
+                return [$item->id => max(0, $item->localQuantity() - $allocated)];
+            })->filter(fn (int $quantity): bool => $quantity > 0);
+            if ($missing->isEmpty() || count($credentials) !== $missing->count()
+                || array_diff(array_keys($credentials), $missing->keys()->all()) !== []) {
+                throw ValidationException::withMessages(['credentials' => 'Kirim seluruh unit lokal yang masih kurang, tanpa item tambahan.']);
+            }
+
+            $candidates = [];
+            $byProduct = [];
+            foreach ($items as $item) {
+                if (! $missing->has($item->id)) {
+                    continue;
+                }
+                $input = $credentials[$item->id] ?? null;
+                if (! is_array($input) || ! array_is_list($input) || count($input) !== $missing[$item->id]) {
+                    throw ValidationException::withMessages(['credentials' => $item->product_name.': jumlah akun harus '.$missing[$item->id].' unit.']);
+                }
+                foreach ($input as $account) {
+                    $candidate = $this->localCredentialCandidate($item, $account);
+                    $candidates[$item->id][] = $candidate;
+                    $byProduct[$item->product_id][] = $candidate;
+                }
+            }
+            $policy = app(UniqueCredentialEmailPolicy::class);
+            foreach ($items as $item) {
+                if (isset($candidates[$item->id])) {
+                    $policy->assertCanAssign($item, $byProduct[$item->product_id]);
+                }
+            }
+            foreach ($candidates as $itemId => $accounts) {
+                foreach ($accounts as $account) {
+                    $account->order_item_id = $itemId;
+                    $account->save();
+                }
+            }
+
+            $resolved = $this->markResolved($locked, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
+            if (SupplierFulfillment::query()->where('order_id', $order->id)->where('state', 'review')->exists()) {
+                $resolved->update([
+                    'reason' => 'supplier_fulfillment',
+                    'state' => ManualFulfillmentReview::STATE_PENDING,
+                    'resolution_reason' => null,
+                    'actor_user_id' => null,
+                    'resolved_at' => null,
+                ]);
+                $this->audit->log('manual_fulfillment_review.supplier_review_resumed', $resolved, [
+                    'state' => ManualFulfillmentReview::STATE_FULFILLED,
+                    'reason' => ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE,
+                    'resolution_reason' => $reason,
+                ], ['state' => ManualFulfillmentReview::STATE_PENDING, 'reason' => 'supplier_fulfillment'], $actor, $ip);
+            }
+            $complete = $items->every(fn (OrderItem $item): bool => $item->stockItems()->whereNull('retired_at')->count() === $item->quantity)
+                && ! app(SupplierFulfillmentService::class)->hasPending($order)
+                && ! ManualFulfillmentReview::query()->where('order_id', $order->id)->open()->exists();
+            if ($complete) {
+                $order->update(['order_status' => OrderStatus::Completed]);
+                $this->guestOrderNotifications->record($order, GuestOrderNotificationEvent::FulfillmentCompleted);
+                $this->credentialMails->record($order);
+                if ((bool) StoreChannelSetting::current()->sales_proof_enabled
+                    && app(SalesProofEligibility::class)->rejectionReason($order) === null) {
+                    $post = SalesProofPost::query()->firstOrCreate(['order_id' => $order->id], ['status' => SalesProofPost::STATUS_PENDING]);
+                    $effect = app(TelegramOutboundEffectService::class)->recordSalesProofPost($order, $post);
+                    if ($effect !== null) {
+                        app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
+                    }
+                }
+                app(AdminOrderNotificationDeliveryPipeline::class)->wakePaidOrder((string) $order->id);
+                SendTelegramReceipt::dispatch(
+                    (string) $order->getKey(),
+                    false,
+                    now()->toISOString(),
+                    null,
+                    SendTelegramReceipt::ENQUEUE_FIRST,
+                    SendTelegramReceipt::REASON_MANUAL_FULFILLMENT,
+                )->onQueue(TelegramOutboundEffectService::RECEIPT_QUEUE);
+            }
+            $this->audit->log('manual_fulfillment_review.local_credentials_provided', $locked, ['state' => ManualFulfillmentReview::STATE_PENDING], [
+                'state' => $resolved->state,
+                'reason' => $reason,
+                'units' => array_sum($missing->all()),
+                'order_status' => $order->order_status->value,
+            ], $actor, $ip);
+
+            return $resolved;
+        }, attempts: 5);
+    }
+
+    private function localCredentialCandidate(OrderItem $item, mixed $account): ProductStockItem
+    {
+        if (is_string($account) && trim($account) !== '' && strlen($account) <= 16384) {
+            return new ProductStockItem(['product_id' => $item->product_id, 'credential_format' => CredentialFormat::Legacy, 'secret' => trim($account)]);
+        }
+        if (is_array($account)) {
+            try {
+                if (isset($account['tutorial_override']) && $account['tutorial_override'] !== '') {
+                    throw new InvalidArgumentException('Tutorial akun sekarang mengikuti panduan Product.');
+                }
+                $payload = StructuredCredentialPayload::fromArray($account + ['version' => StructuredCredentialPayload::VERSION, 'access_method' => 'none']);
+            } catch (InvalidArgumentException $exception) {
+                throw ValidationException::withMessages(['credentials' => $exception->getMessage()]);
+            }
+
+            return new ProductStockItem(['product_id' => $item->product_id, 'credential_format' => CredentialFormat::StructuredAccount, 'credential_payload' => $payload->toArray()]);
+        }
+
+        throw ValidationException::withMessages(['credentials' => 'Data akun tidak valid.']);
     }
 
     /**
@@ -205,6 +363,10 @@ class ManualFulfillmentResolutionService
             return $review->fresh();
         }
         $order = Order::query()->lockForUpdate()->findOrFail($review->order_id);
+        if ($review->reason === ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+            || $order->orderItems()->where('deferred_local_quantity', '>', 0)->exists()) {
+            throw new InvalidOrderTransition('Provide all missing local credentials through the account submission form.');
+        }
         $payment = Payment::query()->lockForUpdate()->findOrFail($review->payment_id);
         $isPendingBscReview = $payment->status === PaymentStatus::Pending
             && $order->order_status === OrderStatus::PendingPayment

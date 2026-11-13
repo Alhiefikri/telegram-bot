@@ -7,12 +7,33 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Services\Credentials\UniqueCredentialEmailPolicy;
 
 class ProductCredentialAllocator
 {
-    public function allocate(OrderItem $orderItem, Product $product, int $quantity): void
+    public function allocate(OrderItem $orderItem, Product $product, int $quantity, bool $allowDeferred = false): void
     {
         if ($quantity === 0) {
+            return;
+        }
+        if ($orderItem->unique_credential_email || $product->unique_credential_email) {
+            $policy = app(UniqueCredentialEmailPolicy::class);
+            // Every allocation path shares the Product lock, including manual delivery.
+            Product::withTrashed()->whereKey($product->id)->lockForUpdate()->firstOrFail();
+            $missing = max(0, $quantity - $orderItem->stockItems()->whereNull('retired_at')->count());
+            if ($missing === 0) {
+                return;
+            }
+            $selected = $policy->selectAvailable($orderItem, $missing);
+            if (count($selected) < $missing && ! $allowDeferred) {
+                throw new InsufficientStock('Not enough account credentials are available.');
+            }
+            ProductStockItem::whereKey(array_map(fn (ProductStockItem $stock) => $stock->id, $selected))
+                ->update(['order_item_id' => $orderItem->id, 'updated_at' => now()]);
+            if ($allowDeferred) {
+                $orderItem->update(['deferred_local_quantity' => $missing - count($selected)]);
+            }
+
             return;
         }
         $credentialCount = ProductStockItem::where('product_id', $product->id)->whereNull('supplier_purchase_id')->count();

@@ -67,6 +67,12 @@
                     Ada purchase supplier yang belum memiliki hasil ekonomi final. Lihat state dan hold per purchase sebelum mengambil keputusan berikutnya.
                 </x-admin-dashboard.notice>
             @endif
+            @if ($localCredentialReview !== null)
+                <x-admin-dashboard.notice tone="warning" class="mt-3 text-sm">
+                    Pesanan menunggu akun lokal dari Admin.
+                    <a href="{{ route('admin.manual-fulfillment-reviews.show', $localCredentialReview) }}" class="font-medium underline underline-offset-4">Lihat riwayat email dan lengkapi akun</a>
+                </x-admin-dashboard.notice>
+            @endif
 
             <div class="mt-3 grid gap-3 sm:grid-cols-2">
                 <x-admin-dashboard.card padding="sm" tone="slate" shadow="none">

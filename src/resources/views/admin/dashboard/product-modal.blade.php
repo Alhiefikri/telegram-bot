@@ -146,6 +146,23 @@
                                                             @enderror
                                                         </div>
                                                     </div>
+
+                            <div>
+                                <input type="hidden" name="unique_credential_email" value="0">
+                                <label class="flex min-h-11 items-center gap-3 text-sm font-medium text-admin-ink" for="product-unique-credential-email">
+                                    <input id="product-unique-credential-email" type="checkbox" name="unique_credential_email" value="1" x-model="productUniqueCredentialEmail" aria-describedby="product-unique-credential-email-help product-unique-credential-email-error" class="h-5 w-5 shrink-0 rounded border-admin-line accent-admin-accent focus:ring-2 focus:ring-admin-focus focus:ring-offset-2 focus:ring-offset-admin-paper">
+                                    Email akun unik per pembeli untuk produk ini
+                                </label>
+                                <p id="product-unique-credential-email-help" class="mt-1 text-xs leading-5 text-admin-muted">Khusus Admin. Pembeli yang sama tidak boleh menerima email akun yang sama pada produk ini, meski kata sandinya berbeda. Pembeli lain boleh menerima email tersebut. Jika stok lokal yang sesuai tidak tersedia, pembayaran tetap berjalan dan pesanan menunggu Admin mengisi akun secara manual.</p>
+                                <div id="product-unique-credential-email-error">
+                                    @error('unique_credential_email', 'productCreate')
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                    @enderror
+                                    @error('unique_credential_email', 'productUpdate')
+                                        <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error>
+                                    @enderror
+                                </div>
+                            </div>
                         
                             <x-admin-dashboard.card as="section" padding="sm" shadow="none" aria-labelledby="product-quantity-price-tiers-title">
                                                         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

@@ -13,6 +13,7 @@ const detailFields = [
   "delivery_note",
   "usage_guide_title",
   "usage_guide_url",
+  "unique_credential_email",
 ];
 const appearanceFields = ["icon", "is_active", "featured_rank"];
 const policyFields = [
@@ -58,6 +59,9 @@ export function basisPointsToPercent(value) {
 
 function formsFor(workspace) {
   const detail = pick(workspace.product, detailFields);
+  detail.unique_credential_email = Boolean(
+    workspace.product?.unique_credential_email
+  );
   return {
     detail,
     price: {

@@ -50,7 +50,7 @@ class AdminProductUpdateController extends Controller
                 if ($section !== null) {
                     abort_unless(hash_equals($workspace->version($locked, $section), $validated['workspace_version']), 409, 'Bagian ini telah berubah. Muat ulang sebelum menyimpan.');
                 }
-                $auditFields = ['category_id', 'name', 'icon', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'featured_rank', 'stock', 'reserved_stock'];
+                $auditFields = ['category_id', 'name', 'icon', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'unique_credential_email', 'featured_rank', 'stock', 'reserved_stock'];
                 $oldValues = $locked->only($auditFields);
                 $tierAudit = [
                     'before' => $tierPricing->snapshot($locked),
@@ -82,6 +82,7 @@ class AdminProductUpdateController extends Controller
                         'reseller_usdt_price_amount' => $request->exists('reseller_usdt_price_amount') ? ($validated['reseller_usdt_price_amount'] ?? null) : $locked->reseller_usdt_price_amount,
                         'currency' => 'IDR',
                         'is_active' => $request->boolean('is_active'),
+                        'unique_credential_email' => $request->boolean('unique_credential_email'),
                     ]);
                 }
 

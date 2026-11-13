@@ -114,7 +114,9 @@ class OrderStateMachine implements OrderLifecycle
                 }
 
                 $lockedOrder->refresh();
-                if ($this->supplierFulfillment()->hasPending($lockedOrder)) {
+                if ($this->supplierFulfillment()->hasPending($lockedOrder)
+                    || ManualFulfillmentReview::query()->where('order_id', $lockedOrder->id)
+                        ->where('reason', ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)->open()->exists()) {
                     return $paidOrder;
                 }
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
@@ -359,8 +361,8 @@ class OrderStateMachine implements OrderLifecycle
                 order: $fresh,
                 payment: $fresh->payments->firstWhere('id', $payment->id),
                 newlyApplied: false,
-                receiptEligible: ! $this->supplierFulfillment()->hasPending($order),
-                salesProofEligible: ! $this->supplierFulfillment()->hasPending($order),
+                receiptEligible: ! $this->uniqueEmailReviewOpen($order) && ! $this->supplierFulfillment()->hasPending($order),
+                salesProofEligible: ! $this->uniqueEmailReviewOpen($order) && ! $this->supplierFulfillment()->hasPending($order),
             );
         }
 
@@ -376,14 +378,17 @@ class OrderStateMachine implements OrderLifecycle
             'payment_status' => PaymentStatus::Paid,
             'order_status' => $this->supplierFulfillment()->hasPending($order) ? OrderStatus::Processing : $this->paidOrderStatus($payment, $order),
         ]);
-        if ($this->needsLocalCredentialReview($order)) {
+        $uniqueEmailHold = $order->orderItems()->where('deferred_local_quantity', '>', 0)->exists();
+        if ($uniqueEmailHold || $this->needsLocalCredentialReview($order)) {
             $review = ManualFulfillmentReview::query()->firstOrCreate(
                 ['payment_id' => $payment->id],
                 [
                     'order_id' => $order->id,
                     'amount' => $payment->provider_total_payment ?? $payment->amount,
                     'currency' => $payment->currency,
-                    'reason' => ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING,
+                    'reason' => $uniqueEmailHold
+                        ? ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+                        : ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING,
                     'state' => ManualFulfillmentReview::STATE_PENDING,
                     'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
                 ],
@@ -396,7 +401,7 @@ class OrderStateMachine implements OrderLifecycle
         }
         $this->dispatchAdminPendingNotificationDelete($order);
 
-        $salesProofEnabled = ! $this->supplierFulfillment()->hasPending($order)
+        $salesProofEnabled = ! $uniqueEmailHold && ! $this->supplierFulfillment()->hasPending($order)
             && ($order->api_order_claim_id === null || app(SalesProofEligibility::class)->rejectionReason($order) === null)
             && (bool) StoreChannelSetting::current()->sales_proof_enabled;
 
@@ -416,7 +421,7 @@ class OrderStateMachine implements OrderLifecycle
         $this->recordAndDispatchAdminOrderPaid($order);
 
         $paid = $order->fresh(['payments']);
-        if (! $this->supplierFulfillment()->hasPending($paid)) {
+        if (! $uniqueEmailHold && ! $this->supplierFulfillment()->hasPending($paid)) {
             $this->dispatchReceiptMaterialization($paid);
         }
         $this->credentialMails()->record($paid);
@@ -425,9 +430,15 @@ class OrderStateMachine implements OrderLifecycle
             order: $paid,
             payment: $paid->payments->firstWhere('id', $payment->id),
             newlyApplied: true,
-            receiptEligible: ! $this->supplierFulfillment()->hasPending($paid) && in_array($paid->order_status, [OrderStatus::Processing, OrderStatus::Completed], true),
+            receiptEligible: ! $uniqueEmailHold && ! $this->supplierFulfillment()->hasPending($paid) && in_array($paid->order_status, [OrderStatus::Processing, OrderStatus::Completed], true),
             salesProofEligible: $salesProofEnabled,
         );
+    }
+
+    private function uniqueEmailReviewOpen(Order $order): bool
+    {
+        return ManualFulfillmentReview::query()->where('order_id', $order->id)
+            ->where('reason', ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)->open()->exists();
     }
 
     private function needsLocalCredentialReview(Order $order): bool

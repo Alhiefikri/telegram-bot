@@ -28,6 +28,8 @@ class ManualFulfillmentReview extends Model
 
     public const REASON_LOCAL_CREDENTIALS_MISSING = 'local_credentials_missing';
 
+    public const REASON_UNIQUE_EMAIL_UNAVAILABLE = 'unique_email_unavailable';
+
     public const REASON_BSC_MISMATCH = 'bsc_mismatch';
 
     public const REASON_BSC_TRANSACTION_ALREADY_USED = 'bsc_transaction_already_used';
@@ -41,6 +43,7 @@ class ManualFulfillmentReview extends Model
         $query->where(function (Builder $eligible): void {
             $eligible->whereHas('order', fn (Builder $order) => $order->whereNotNull('api_order_claim_id'))
                 ->orWhere('reason', self::REASON_LOCAL_CREDENTIALS_MISSING)
+                ->orWhere('reason', self::REASON_UNIQUE_EMAIL_UNAVAILABLE)
                 ->orWhere('reason', self::REASON_PAYMENT_AFTER_MANUAL_ALTERNATIVE)
                 ->orWhere(function (Builder $late): void {
                     $late->where('reason', self::REASON_LATE_PAYMENT)

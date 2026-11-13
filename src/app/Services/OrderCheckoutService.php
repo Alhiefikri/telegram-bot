@@ -339,13 +339,14 @@ class OrderCheckoutService
                 'quantity' => $item->quantity,
                 'local_quantity' => $localQuantity,
                 'supplier_quantity' => $supplierQuantity,
+                'unique_credential_email' => (bool) $product->unique_credential_email,
                 'quantity_price_tier_minimum' => $quote->appliedTierMinimum,
                 'unit_price' => $quote->effectiveIdrUnitAmount,
                 'usdt_unit_price' => $usdtUnitPrice,
                 'subtotal' => $quote->idrSubtotal,
                 'usdt_subtotal' => $usdtSubtotal,
             ]);
-            $this->credentials->allocate($orderItem, $product, $localQuantity);
+            $this->credentials->allocate($orderItem, $product, $localQuantity, allowDeferred: true);
             if ($supplierQuantity > 0) {
                 $this->supplierFulfillment->reserve($orderItem, $product, $supplierQuantity, $quote->idrSubtotal);
             }

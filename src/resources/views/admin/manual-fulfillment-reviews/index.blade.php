@@ -15,7 +15,7 @@
         <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4">
             <p class="text-xs font-medium text-admin-muted">Antrean operasional</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">Manual Fulfillment Review</h1>
-            <p class="mt-2 text-sm leading-6 text-admin-muted">BSC evidence yang ambigu atau Late Payment tidak diselesaikan otomatis. Tidak ada stok atau kredensial yang dikirim dari antrean ini sampai ada keputusan Owner.</p>
+            <p class="mt-2 text-sm leading-6 text-admin-muted">Tinjau evidence BSC, Late Payment, dan pesanan lunas yang menunggu akun lokal. Owner dapat memeriksa riwayat email pelanggan, melengkapi akun, atau mencatat keputusan resolusi.</p>
 
             <div class="mt-5 space-y-3">
                 @forelse ($reviews as $review)
@@ -24,6 +24,9 @@
                             <div>
                                 <p class="font-semibold text-admin-ink">{{ $review->order->invoice_number }}</p>
                                 <p class="mt-1 text-sm font-medium text-admin-muted">{{ strtoupper($review->payment->provider) }} · {{ $review->payment->method }} · {{ $review->currency }} {{ number_format($review->amount, 0, ',', '.') }}</p>
+                                @if ($review->reason === \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)
+                                    <p class="mt-1 text-sm font-medium text-admin-ink">Menunggu akun lokal dengan email baru untuk pelanggan</p>
+                                @endif
                             </div>
                             <x-admin-dashboard.badge tone="{{ $review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING ? 'amber' : 'emerald' }}">{{ $review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING ? 'Menunggu review' : $review->state }}</x-admin-dashboard.badge>
                         </div>

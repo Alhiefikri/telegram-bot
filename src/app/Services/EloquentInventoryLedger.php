@@ -27,7 +27,7 @@ class EloquentInventoryLedger implements InventoryLedger
     {
         $item = $order->orderItems()->where('product_id', $product->id)->firstOrFail();
         $this->assertLocalQuantity($item);
-        $product->increment('reserved_stock', $item->localQuantity());
+        $product->increment('reserved_stock', $item->localStockQuantity());
         $product->refresh();
         InventoryMovement::create(['product_id' => $product->id, 'order_id' => $order->id, 'type' => InventoryMovementType::Reservation, 'quantity' => $quantity, 'notes' => 'Order reservation', 'created_at' => now()]);
     }
@@ -144,7 +144,7 @@ class EloquentInventoryLedger implements InventoryLedger
             $product = $products[$item->product_id] ?? throw new InvalidOrderTransition('Order product is missing.');
             $this->assertMatchingReservation($item, $movements);
             $this->assertLocalQuantity($item);
-            $localQuantity = $item->localQuantity();
+            $localQuantity = $item->localStockQuantity();
             if ($product->reserved_stock < $localQuantity || $product->stock < $localQuantity) {
                 throw new InvalidOrderTransition('Reserved stock invariant violated.');
             }
@@ -191,12 +191,12 @@ class EloquentInventoryLedger implements InventoryLedger
             }
 
             $this->assertLocalQuantity($item);
-            if (! $product->isPublicVisible() || $product->localAvailableStock() < $item->localQuantity()) {
+            if (! $product->isPublicVisible() || $product->localAvailableStock() < $item->localStockQuantity()) {
                 throw new InsufficientStock('Ordered product no longer has valid available inventory.');
             }
 
             $stockBefore = $product->stock;
-            $product->decrement('stock', $item->localQuantity());
+            $product->decrement('stock', $item->localStockQuantity());
             $product->refresh();
             $becameUnavailable = $product->stock <= 0
                 || ($product->isCredentialManaged() && $product->availableStockItemCount() <= 0);
@@ -241,12 +241,12 @@ class EloquentInventoryLedger implements InventoryLedger
             }
 
             $this->assertLocalQuantity($item);
-            if ($product->reserved_stock < $item->localQuantity()) {
+            if ($product->reserved_stock < $item->localStockQuantity()) {
                 throw new InvalidOrderTransition('Reserved stock invariant violated.');
             }
             $release = InventoryMovement::firstOrCreate(['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Release], ['quantity' => -$item->quantity, 'notes' => 'Order reservation release', 'created_at' => now()]);
             if ($release->wasRecentlyCreated) {
-                $product->decrement('reserved_stock', $item->localQuantity());
+                $product->decrement('reserved_stock', $item->localStockQuantity());
             }
         }
     }
@@ -254,6 +254,7 @@ class EloquentInventoryLedger implements InventoryLedger
     private function assertLocalQuantity($item): void
     {
         if ($item->localQuantity() < 0 || $item->supplier_quantity < 0
+            || $item->deferred_local_quantity < 0 || $item->localStockQuantity() < 0
             || $item->localQuantity() + $item->supplier_quantity !== $item->quantity) {
             throw new InvalidOrderTransition('Order inventory quantity invariant violated.');
         }

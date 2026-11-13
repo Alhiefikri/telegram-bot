@@ -312,6 +312,7 @@ abstract class AdminProductFormRequest extends FormRequest
             'support_policy' => ['nullable', 'string'],
             'featured_rank' => ['nullable', 'integer', 'min:1', 'max:999'],
             'delivery_note' => ['nullable', 'string', 'max:2000'],
+            'unique_credential_email' => ['sometimes', 'boolean'],
             'usage_guide_title' => ['nullable', 'string', 'max:160', 'required_with:usage_guide_url'],
             'usage_guide_url' => [
                 'nullable',
