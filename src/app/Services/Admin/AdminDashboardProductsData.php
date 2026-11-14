@@ -32,6 +32,7 @@ final class AdminDashboardProductsData
         private readonly CatalogBrowse $catalog,
         private readonly StorefrontBanners $banners,
         private readonly SupplierAvailability $supplierAvailability,
+        private readonly AdminPaidStockHistory $paidHistory,
     ) {}
 
     /**
@@ -227,13 +228,13 @@ final class AdminDashboardProductsData
         $stockItemSummaries = $includeManageableStockItems && $includeStockItems
             ? $this->stockItemSummaries($productIds)
             : collect();
-        if ($includeManageableStockItems && $includeStockItems) {
-            $this->loadOrderedStockItems($orderedProducts);
-        }
+        $paidPagination = $includeManageableStockItems && $includeStockItems
+            ? $this->loadOrderedStockItems($orderedProducts)
+            : [];
 
         $placeholderUrl = $this->placeholder->imageUrl();
         $productPayloadsById = $orderedProducts
-            ->mapWithKeys(function (Product $product) use ($stockItemSummaries, $includeManageableStockItems, $includeStockItems, $placeholderUrl, $catalogProducts): array {
+            ->mapWithKeys(function (Product $product) use ($stockItemSummaries, $paidPagination, $includeManageableStockItems, $includeStockItems, $placeholderUrl, $catalogProducts): array {
                 $availableStockItemCount = $product->availableStockItemCount();
                 $availableStock = $product->availableStock();
                 $stockItems = $includeManageableStockItems
@@ -361,6 +362,7 @@ final class AdminDashboardProductsData
                         'stockSummary' => $stockSummary,
                         'stockItemsTruncated' => (int) ($summary?->total ?? 0) > count($stockItems),
                         'stockItems' => $stockItems,
+                        'paidPagination' => $paidPagination[$product->id] ?? ['previousUrl' => null, 'nextUrl' => null],
                         'bulkDeleteUrl' => route('admin.products.stock-items.bulk-destroy', $product),
                         'stockItemsUrl' => route('admin.products.stock-items.index', ['product' => $product]),
                     ],
@@ -375,16 +377,25 @@ final class AdminDashboardProductsData
      * modal. Product-list requests otherwise avoid hydrating credentials and
      * their Order/Payment relations.
      *
-     * @return array{stockItems: list<array<string, mixed>>, availableStockItemCount: int, stockSummary: array{available: int, reserved: int, paid: int}, stockItemsTruncated: bool}
+     * @return array<string, mixed>
      */
-    public function stockManagementFor(Product $product): array
+    public function stockManagementFor(Product $product, bool $paidOnly = false, ?string $paidCursor = null): array
     {
+        if ($paidOnly) {
+            $page = $this->paidHistory->page($product, $paidCursor);
+
+            return [
+                'stockItems' => $page['items']->map(fn (ProductStockItem $item): array => $this->stockItemPayload($item, $product))->all(),
+                'paidPagination' => $page['pagination'],
+            ];
+        }
+
         $summary = $this->stockItemSummaries(collect([(int) $product->getKey()]))->get($product->getKey());
         // Availability must use full counts, not the bounded history relation.
         $product->loadExists(['stockItems as local_stock_items_exists' => fn ($query) => $query->whereNull('supplier_purchase_id')]);
         $product->loadCount(['stockItems as local_available_stock_items_count' => fn ($query) => $query->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
         $products = new EloquentCollection([$product]);
-        $this->loadOrderedStockItems($products);
+        $paidPagination = $this->loadOrderedStockItems($products);
         $stockItems = $product->stockItems
             ->map(fn (ProductStockItem $stockItem): array => $this->stockItemPayload($stockItem, $product))
             ->all();
@@ -399,6 +410,7 @@ final class AdminDashboardProductsData
                 ? $this->supplierAvailability->explainZeroCapacity($product)
                 : [],
             'stockItems' => $stockItems,
+            'paidPagination' => $paidPagination[$product->id],
             'bulkDeleteUrl' => route('admin.products.stock-items.bulk-destroy', $product),
             'availableStockItemCount' => $product->availableStockItemCount(),
             'stockSummary' => [
@@ -579,8 +591,11 @@ final class AdminDashboardProductsData
             .' Product tidak lagi tergabung dalam family. Visibility, stok, credentials, waitlist, notifikasi, dan history tetap dipertahankan.';
     }
 
-    /** @param Collection<int, Product> $products */
-    private function loadOrderedStockItems(Collection $products): void
+    /**
+     * @param EloquentCollection<int, Product> $products
+     * @return array<int, array{previousUrl: ?string, nextUrl: ?string}>
+     */
+    private function loadOrderedStockItems(EloquentCollection $products): array
     {
         $stockItemsTable = (new ProductStockItem)->getTable();
 
@@ -590,6 +605,18 @@ final class AdminDashboardProductsData
                 ->leftJoin('order_items', "{$stockItemsTable}.order_item_id", '=', 'order_items.id')
                 ->leftJoin('orders', 'order_items.order_id', '=', 'orders.id')
                 ->select("{$stockItemsTable}.*")
+                ->where(function ($query) use ($stockItemsTable): void {
+                    $query->whereNotNull("{$stockItemsTable}.retired_at")
+                        ->orWhereNull('orders.id')
+                        ->orWhere(function ($query): void {
+                            $query->where('orders.payment_status', '<>', PaymentStatus::Paid->value)
+                                ->whereNotExists(function ($query): void {
+                                    $query->selectRaw('1')->from('payments')
+                                        ->whereColumn('payments.order_id', 'orders.id')
+                                        ->where('payments.status', PaymentStatus::Paid->value);
+                                });
+                        });
+                })
                 ->orderByRaw(
                     "CASE
                         WHEN {$stockItemsTable}.order_item_id IS NULL THEN 0
@@ -609,12 +636,22 @@ final class AdminDashboardProductsData
                 ->orderByDesc("{$stockItemsTable}.id")
                 ->limit(25);
         }]);
+        $pages = $this->paidHistory->firstPages($products);
+        $pagination = [];
+        foreach ($products as $product) {
+            $page = $pages[(int) $product->id];
+            $product->setRelation('stockItems', $product->stockItems->concat($page['items']));
+            $pagination[(int) $product->id] = $page['pagination'];
+        }
+
+        return $pagination;
     }
 
     private function stockItemPayload(ProductStockItem $stockItem, Product $product): array
     {
         $order = $stockItem->orderItem?->order;
-        $payment = $order?->payments?->sortByDesc('paid_at')->first();
+        $payment = $order?->payments?->where('status', PaymentStatus::Paid)->sortByDesc('paid_at')->first()
+            ?? $order?->payments?->sortByDesc('paid_at')->first();
         $format = $stockItem->safeCredentialFormat();
         $structuredPayload = $format === CredentialFormat::StructuredAccount
             ? $this->structuredPayload($stockItem)

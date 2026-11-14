@@ -370,7 +370,7 @@
                         </x-admin-dashboard.notice>
 
                         <x-admin-dashboard.notice tone="neutral" x-show="manageStockTruncated" class="mb-2 text-xs">
-                            Ringkasan menghitung semua akun. Hanya 25 akun terbaru per status yang ditampilkan di riwayat.
+                            Ringkasan menghitung semua akun. Riwayat PAID dibatasi 30 hari terakhir, 25 akun per halaman.
                         </x-admin-dashboard.notice>
 
                         <x-admin-dashboard.notice tone="danger" x-show="manageStockErrorMessages().length > 0" role="alert" aria-live="assertive" class="mb-3">
@@ -417,6 +417,17 @@
                                         <x-admin-dashboard.badge><span x-text="`${group.items.length} akun`">0 akun</span></x-admin-dashboard.badge>
                                     </div>
                                     <p class="mt-2 text-xs leading-5 text-admin-muted" x-text="group.helper"></p>
+                                    <template x-if="group.key === 'paid'">
+                                        <div class="mt-2 space-y-2" x-bind:aria-busy="manageStockPaidLoading">
+                                            <p x-show="!group.items.length && !manageStockPaidLoading" class="text-xs text-admin-muted">Tidak ada akun PAID dalam 30 hari terakhir.</p>
+                                            <p x-show="manageStockPaidLoading" role="status" class="text-xs text-admin-muted">Memuat riwayat PAID…</p>
+                                            <p x-show="manageStockPaidError" x-text="manageStockPaidError" role="alert" class="text-xs text-neo-danger-text"></p>
+                                            <nav aria-label="Halaman riwayat PAID" class="flex flex-wrap gap-2">
+                                                <x-admin-dashboard.button type="button" variant="secondary" size="sm" x-bind:disabled="manageStockPaidLoading || !manageStockPaidPagination.previousUrl" x-on:click="loadManageStockPaidPage(manageStockPaidPagination.previousUrl)">Sebelumnya</x-admin-dashboard.button>
+                                                <x-admin-dashboard.button type="button" variant="secondary" size="sm" x-bind:disabled="manageStockPaidLoading || !manageStockPaidPagination.nextUrl" x-on:click="loadManageStockPaidPage(manageStockPaidPagination.nextUrl)">Berikutnya</x-admin-dashboard.button>
+                                            </nav>
+                                        </div>
+                                    </template>
 
                                     <div class="mt-2 space-y-2">
                                         <template x-for="item in group.items" :key="item.id">

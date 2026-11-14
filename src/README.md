@@ -86,6 +86,12 @@ Penyimpanan menulis ulang seluruh urutan menjadi angka berurutan mulai dari nol 
 
 Jika family ditambah, dihapus, atau urutannya berubah sejak halaman dibuka, penyimpanan ditolak tanpa menimpa daftar terbaru. Klik **Muat ulang halaman** lalu atur ulang. Saat koneksi terputus, status penyimpanan bisa belum diketahui; draf dipertahankan agar bisa dicoba lagi atau diperiksa dengan memuat ulang. Jangan menganggap draf sudah tersimpan sebelum ada konfirmasi.
 
+### Audit akun PAID
+
+Di **Produk → Kelola akun**, grup **PAID** menampilkan pembayaran dalam **30 hari terakhir**, terbaru lebih dulu, maksimal **25 akun per halaman**. Gunakan **Sebelumnya** dan **Berikutnya** untuk berpindah tanpa mengganti grup stok lain atau menghilangkan draf edit akun tersedia.
+
+Rentang tanggal tetap selama menelusuri halaman; buka ulang Kelola akun untuk memulai rentang terbaru. Ringkasan PAID di atas tetap menghitung seluruh riwayat, sehingga bisa lebih besar daripada daftar 30 hari. Akun lama dan akun PAID tanpa tanggal pembayaran sukses tetap tersimpan, tetapi tidak masuk daftar bertanggal ini. Akun retired tetap berada di grup read-only tersendiri.
+
 ### Tampilan Web Storefront
 
 Navbar mengikuti scroll halaman, termasuk pada panduan login; tidak ada navbar sticky yang menutupi konten. Di bawah 640px, header menampilkan merek, keranjang, menu, dan pencarian. Akses akun serta pilihan tema tetap tersedia melalui menu mobile.

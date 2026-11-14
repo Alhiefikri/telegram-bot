@@ -103,6 +103,7 @@ test("paid stock credentials can be copied and selected without becoming editabl
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
+  await page.locator("article").filter({ has: page.getByRole("heading", { name: "Browser Paid Invoice Product", exact: true }) }).getByRole("button", { name: "Lihat product", exact: true }).click();
   const card = await getAdminProductCard(page, "Browser Paid Invoice Product");
   await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
   const modal = page.locator("#manage-stock-modal");
@@ -110,9 +111,11 @@ test("paid stock credentials can be copied and selected without becoming editabl
     name: "Salin kredensial",
     exact: true,
   });
+  const legacyCopy = modal.locator("article").filter({ hasText: "browser-paid@example.test|BrowserPaidSecret" }).getByRole("button", { name: "Salin kredensial", exact: true });
+  const structuredCopy = modal.locator("article").filter({ has: page.getByRole("textbox", { name: /Kredensial akun stok/ }) }).getByRole("button", { name: "Salin kredensial", exact: true });
   await expect(copyButtons).toHaveCount(2);
-  await expect(copyButtons.first()).toBeEnabled();
-  await copyButtons.first().click();
+  await expect(legacyCopy).toBeEnabled();
+  await legacyCopy.click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe("browser-paid@example.test|BrowserPaidSecret");
@@ -129,10 +132,10 @@ test("paid stock credentials can be copied and selected without becoming editabl
   await field.focus();
   await page.keyboard.type("must-not-change");
   await expect(field).toHaveValue(expected);
-  await copyButtons.last().focus();
+  await structuredCopy.focus();
   await page.keyboard.press("Enter");
   await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, "\n")))
     .toBe(expected);
   await page.evaluate(() =>
     Object.defineProperty(navigator, "clipboard", {
@@ -144,7 +147,7 @@ test("paid stock credentials can be copied and selected without becoming editabl
       },
     })
   );
-  await copyButtons.last().click();
+  await structuredCopy.click();
   await expect(field).toBeFocused();
   expect(
     await field.evaluate((e) =>
@@ -152,7 +155,7 @@ test("paid stock credentials can be copied and selected without becoming editabl
     )
   ).toBe(expected);
   await expect(modal.getByText(/Salin otomatis tidak tersedia/)).toBeVisible();
-  await copyButtons.first().click();
+  await legacyCopy.click();
   expect(await page.evaluate(() => window.getSelection().toString())).toBe(
     "browser-paid@example.test|BrowserPaidSecret"
   );
@@ -176,13 +179,13 @@ test("paid stock credentials can be copied and selected without becoming editabl
       },
     });
   });
-  await copyButtons.last().dblclick();
+  await structuredCopy.dblclick();
   await expect(modal.getByRole("button", { name: "Menyalin…" })).toBeDisabled();
   expect(await page.evaluate(() => window.stockCopyCalls)).toBe(1);
   await page.keyboard.press("Escape");
   await expect(modal).toBeHidden();
   await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
-  await expect(copyButtons.last()).toBeEnabled();
+  await expect(structuredCopy).toBeEnabled();
   await page.evaluate(async () => {
     window.rejectStockCopy(new Error("late clipboard rejection"));
     await new Promise(requestAnimationFrame);
@@ -190,6 +193,53 @@ test("paid stock credentials can be copied and selected without becoming editabl
   });
   await expect(modal.getByText(/Salin otomatis tidak tersedia/)).toBeHidden();
   expect(pageErrors).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(modal).toBeHidden();
+});
+
+test("PAID history paginates 25 accounts within 30 days without replacing ready stock", async ({ page }) => {
+  runArtisan(["tinker", "--execute", `
+    $product = \\App\\Models\\Product::factory()->create(['name' => 'Audit Pagination Product', 'stock' => 1]);
+    \\App\\Models\\ProductStockItem::create(['product_id' => $product->id, 'secret' => 'audit-ready@example.test|ready']);
+    $order = \\App\\Models\\Order::factory()->create(['payment_status' => 'paid', 'order_status' => 'processing']);
+    $item = \\App\\Models\\OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'quantity' => 26]);
+    \\App\\Models\\Payment::factory()->create(['order_id' => $order->id, 'status' => 'paid', 'paid_at' => now()->subDays(2)]);
+    for ($i = 1; $i <= 26; $i++) {
+      \\App\\Models\\ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $item->id, 'secret' => sprintf('audit-%02d@example.test|paid', $i)]);
+    }
+    $oldOrder = \\App\\Models\\Order::factory()->create(['payment_status' => 'paid', 'order_status' => 'processing']);
+    $oldItem = \\App\\Models\\OrderItem::factory()->create(['order_id' => $oldOrder->id, 'product_id' => $product->id]);
+    \\App\\Models\\Payment::factory()->create(['order_id' => $oldOrder->id, 'status' => 'paid', 'paid_at' => now()->subDays(31)]);
+    \\App\\Models\\ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $oldItem->id, 'secret' => 'audit-old@example.test|excluded']);
+  `]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.goto(`${baseUrl}/admin?tab=produk`);
+  await page.locator("article").filter({ has: page.getByRole("heading", { name: "Audit Pagination Product", exact: true }) }).getByRole("button", { name: "Lihat product", exact: true }).click();
+  const card = await getAdminProductCard(page, "Audit Pagination Product");
+  await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
+  const modal = page.locator("#manage-stock-modal");
+  const paid = modal.locator("section").filter({ has: page.getByRole("navigation", { name: "Halaman riwayat PAID" }) });
+  const next = paid.getByRole("button", { name: "Berikutnya", exact: true });
+  const previous = paid.getByRole("button", { name: "Sebelumnya", exact: true });
+  await expect(paid.locator("article")).toHaveCount(25);
+  await expect(paid.locator("article").first()).toContainText("audit-26@example.test|paid");
+  await expect(previous).toBeDisabled();
+  await expect(next).toBeEnabled();
+  await next.click();
+  await expect(paid.locator("article")).toHaveCount(1);
+  await expect(paid).toContainText("audit-01@example.test|paid");
+  await expect(next).toBeDisabled();
+  await expect(modal.getByText("audit-ready@example.test|ready", { exact: true })).toBeVisible();
+  await expect(modal.getByText("audit-old@example.test|excluded", { exact: true })).toHaveCount(0);
+  await previous.click();
+  await expect(paid.locator("article")).toHaveCount(25);
+  await expect(paid.locator("article").first()).toContainText("audit-26@example.test|paid");
+  await expect(previous).toBeDisabled();
+  await page.screenshot({ path: path.join(tmpdir(), "paid-pagination-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(next).toBeVisible();
+  await page.screenshot({ path: path.join(tmpdir(), "paid-pagination-desktop.png"), fullPage: true });
   await page.keyboard.press("Escape");
   await expect(modal).toBeHidden();
 });

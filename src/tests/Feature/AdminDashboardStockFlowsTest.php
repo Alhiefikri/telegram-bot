@@ -443,6 +443,154 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertSame('INV-PAID-LATEST', $stockItemsById[$latestPaidStockItem->id]['invoice']);
     }
 
+    public function test_paid_history_pages_forward_and_backward_without_ready_rows_starving_it(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 30]);
+        foreach (range(1, 30) as $index) {
+            ProductStockItem::create(['product_id' => $product->id, 'secret' => 'ready-'.$index]);
+        }
+        $paidIds = [];
+        foreach (range(1, 52) as $index) {
+            $paidIds[] = $this->paidHistoryStockItem($product, now()->subDays(30)->toDateTimeString())->id;
+        }
+        $expectedIds = array_reverse($paidIds);
+        $url = route('admin.products.stock-items.index', $product);
+        $first = $this->actingAs($admin)->getJson($url)->assertOk();
+        $paidRows = array_values(array_filter($first->json('stockItems'), fn (array $row): bool => $row['status'] === 'PAID'));
+        $this->assertSame(array_slice($expectedIds, 0, 25), array_column($paidRows, 'id'));
+        $this->assertCount(50, $first->json('stockItems'));
+        $first->assertJsonPath('stockSummary', ['available' => 30, 'reserved' => 0, 'paid' => 52])
+            ->assertJsonPath('paidPagination.previousUrl', null);
+        $this->assertNotNull($first->json('paidPagination.nextUrl'));
+
+        // The cutoff remains the original 30-day window while navigating.
+        $this->travel(2)->days();
+        $this->paidHistoryStockItem($product, now()->toDateTimeString());
+        $second = $this->getJson($first->json('paidPagination.nextUrl'))->assertOk();
+        $this->assertSame(array_slice($expectedIds, 25, 25), array_column($second->json('stockItems'), 'id'));
+        $this->assertSame(['PAID'], array_values(array_unique(array_column($second->json('stockItems'), 'status'))));
+        $third = $this->getJson($second->json('paidPagination.nextUrl'))->assertOk();
+        $this->assertSame(array_slice($expectedIds, 50), array_column($third->json('stockItems'), 'id'));
+        $third->assertJsonPath('paidPagination.nextUrl', null);
+        $backToSecond = $this->getJson($third->json('paidPagination.previousUrl'))->assertOk();
+        $this->assertSame($second->json('stockItems'), $backToSecond->json('stockItems'));
+        $backToFirst = $this->getJson($backToSecond->json('paidPagination.previousUrl'))->assertOk();
+        $this->assertSame(array_slice($expectedIds, 0, 25), array_column($backToFirst->json('stockItems'), 'id'));
+        $backToFirst->assertJsonPath('paidPagination.previousUrl', null);
+    }
+
+    public function test_paid_history_uses_successful_payment_time_and_preserves_other_groups_and_global_totals(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create(['stock' => 2, 'reserved_stock' => 1]);
+        $newestPaid = $this->paidHistoryStockItem($product, now()->subHour()->toDateTimeString());
+        $newestPaid->forceFill(['created_at' => now()->subYear()])->save();
+        $olderPaid = $this->paidHistoryStockItem($product, now()->subDays(2)->toDateTimeString());
+        $oldPaid = $this->paidHistoryStockItem($product, now()->subDays(30)->subSecond()->toDateTimeString());
+        $undatedPaid = $this->paidHistoryStockItem($product, null);
+        $futurePaid = $this->paidHistoryStockItem($product, now()->addDay()->toDateTimeString());
+        // A prior in-window success must not hide the latest out-of-window success.
+        $futurePaid->orderItem->order->payments()->create([
+            'provider' => 'manual', 'merchant_ref' => 'MR-PRIOR-SUCCESS', 'method' => 'manual',
+            'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Paid, 'paid_at' => now()->subDay(),
+        ]);
+        $retiredPaid = $this->paidHistoryStockItem($product, now()->subMinute()->toDateTimeString());
+        $retiredPaid->forceFill(['retired_at' => now()])->save();
+        $ready = ProductStockItem::create(['product_id' => $product->id, 'secret' => 'ready']);
+        $reservedOrder = Order::factory()->create(['order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
+        $reservedItem = OrderItem::factory()->create(['order_id' => $reservedOrder->id, 'product_id' => $product->id]);
+        $reserved = ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $reservedItem->id, 'secret' => 'reserved']);
+        // A later pending attempt must not override the successful payment date/status.
+        $newestPaid->orderItem->order->payments()->create([
+            'provider' => 'manual', 'merchant_ref' => 'MR-LATER-PENDING', 'method' => 'manual',
+            'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Pending, 'paid_at' => now(),
+        ]);
+        $newestPaid->orderItem->order->update(['payment_status' => PaymentStatus::Pending]);
+
+        $response = $this->actingAs($admin)->getJson(route('admin.products.stock-items.index', $product))->assertOk();
+        $rows = array_column($response->json('stockItems'), null, 'id');
+        $this->assertSame('TERSEDIA', $rows[$ready->id]['status']);
+        $this->assertSame('DIPESAN', $rows[$reserved->id]['status']);
+        $this->assertSame('RETIRED', $rows[$retiredPaid->id]['status']);
+        $this->assertFalse($rows[$retiredPaid->id]['editable']);
+        $this->assertNull($rows[$retiredPaid->id]['update_url']);
+        $this->assertNull($rows[$retiredPaid->id]['delete_url']);
+        $paidRows = array_values(array_filter($response->json('stockItems'), fn (array $row): bool => $row['status'] === 'PAID'));
+        $this->assertSame([$newestPaid->id, $olderPaid->id], array_column($paidRows, 'id'));
+        $this->assertSame(now()->subHour()->toDateTimeString(), $paidRows[0]['paid_at']);
+        foreach ([$oldPaid, $undatedPaid, $futurePaid] as $excluded) {
+            $this->assertArrayNotHasKey($excluded->id, $rows);
+        }
+        $response->assertJsonPath('stockSummary', ['available' => 1, 'reserved' => 1, 'paid' => 6])
+            ->assertJsonPath('paidPagination', ['previousUrl' => null, 'nextUrl' => null]);
+        $inline = app(AdminDashboardProductsData::class)->forProducts(true)['products'][0];
+        $this->assertSame(array_keys($rows), array_column($inline['edit_payload']['stockItems'], 'id'));
+        $this->assertSame($response->json('paidPagination'), $inline['edit_payload']['paidPagination']);
+    }
+
+    public function test_paid_history_validates_navigation_and_keeps_product_and_permission_scopes(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $product = Product::factory()->create();
+        $other = Product::factory()->create();
+        foreach (range(1, 26) as $index) {
+            $this->paidHistoryStockItem($product, now()->subMinute()->toDateTimeString());
+        }
+        $otherRow = $this->paidHistoryStockItem($other, now()->toDateTimeString());
+        $url = route('admin.products.stock-items.index', $product);
+        $first = $this->actingAs($admin)->getJson($url)->assertOk();
+        $this->assertStringContainsString('no-store', $first->headers->get('Cache-Control'));
+        $this->assertNotContains($otherRow->id, array_column($first->json('stockItems'), 'id'));
+        $nextUrl = $first->json('paidPagination.nextUrl');
+        $this->assertNotNull($nextUrl);
+        $this->getJson(route('admin.products.stock-items.index', $other).'?'.parse_url($nextUrl, PHP_URL_QUERY))
+            ->assertUnprocessable()->assertJsonValidationErrors('paid_cursor');
+        $this->getJson($url.'?paid_only=1&paid_cursor=invalid')->assertUnprocessable()->assertJsonValidationErrors('paid_cursor');
+        $this->getJson($url.'?paid_only=invalid')->assertUnprocessable()->assertJsonValidationErrors('paid_only');
+        $this->getJson($url.'?paid_only=1&paid_cursor[]=invalid')->assertUnprocessable()->assertJsonValidationErrors('paid_cursor');
+        $otherPage = $this->getJson(route('admin.products.stock-items.index', ['product' => $other, 'paid_only' => 1]))->assertOk();
+        $this->assertSame([$otherRow->id], array_column($otherPage->json('stockItems'), 'id'));
+        $this->actingAs(User::factory()->create(['role' => UserRole::Finance]))
+            ->getJson($nextUrl)->assertForbidden();
+        $this->actingAs($admin)->getJson(route('admin.products.stock-items.index', ['product' => 999999999]))
+            ->assertNotFound();
+    }
+
+    public function test_inline_paid_pages_keep_each_products_25_row_limit_and_cursor_independent(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $this->actingAs($admin);
+        $expected = [];
+        foreach (range(1, 3) as $index) {
+            $product = Product::factory()->create();
+            $ids = [];
+            foreach (range(1, $index === 3 ? 1 : 26) as $row) {
+                $ids[] = $this->paidHistoryStockItem($product, now()->subHours($row)->toDateTimeString())->id;
+            }
+            $expected[$product->id] = $ids;
+        }
+        $products = app(AdminDashboardProductsData::class)->forProducts(true)['products'];
+        foreach ($products as $product) {
+            $payload = $product['edit_payload'];
+            $ids = $expected[$product['id']];
+            $this->assertSame(array_slice($ids, 0, 25), array_column($payload['stockItems'], 'id'));
+            $this->assertNull($payload['paidPagination']['previousUrl']);
+            $next = $payload['paidPagination']['nextUrl'];
+            if (count($ids) > 25) {
+                $this->assertNotNull($next);
+                $page = $this->getJson($next)->assertOk();
+                $this->assertSame([$ids[25]], array_column($page->json('stockItems'), 'id'));
+                $page->assertJsonPath('paidPagination.nextUrl', null);
+            } else {
+                $this->assertNull($next);
+            }
+        }
+    }
+
     public function test_dashboard_cancel_release_pending_order_restores_credential_stock(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);
@@ -909,6 +1057,23 @@ class AdminDashboardStockFlowsTest extends TestCase
         $this->assertDatabaseHas('product_stock_items', ['id' => $stockItem->id]);
         $this->assertSame(1, $product->fresh()->stock);
         $this->assertSame(1, $product->fresh()->reserved_stock);
+    }
+
+    private function paidHistoryStockItem(Product $product, ?string $paidAt): ProductStockItem
+    {
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $order->payments()->create([
+            'provider' => 'manual', 'merchant_ref' => 'MR-HISTORY-'.$order->id, 'method' => 'manual',
+            'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Paid, 'paid_at' => $paidAt,
+        ]);
+        $orderItem = OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id]);
+
+        return ProductStockItem::create([
+            'product_id' => $product->id, 'order_item_id' => $orderItem->id, 'secret' => 'history-'.$order->id,
+        ]);
     }
 
     private function productCardHtml(User $admin, array $productIds): string

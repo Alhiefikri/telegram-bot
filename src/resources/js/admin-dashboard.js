@@ -126,7 +126,7 @@ const STOCK_GROUPS = [
     key: "paid",
     label: "PAID",
     helper:
-      "Sudah terjual/terkonfirmasi. Grup ini sengaja ditaruh paling bawah.",
+      "Riwayat 30 hari terakhir berdasarkan waktu pembayaran. Maksimal 25 akun per halaman.",
     statuses: ["PAID"],
     color: "#7BD10A",
   },
@@ -144,7 +144,7 @@ const editableStockItems = (items = []) =>
     .sort(
       (first, second) =>
         stockGroupRank(first.status) - stockGroupRank(second.status) ||
-        Number(first.id) - Number(second.id)
+        (first.status === "PAID" ? 0 : Number(first.id) - Number(second.id))
     )
     .map((item, index) => ({
       ...item,
@@ -319,6 +319,10 @@ export default function adminDashboard(initialState = {}) {
     manageStockSupplierCapacityReasons: [],
     manageStockSummary: { available: 0, reserved: 0, paid: 0 },
     manageStockTruncated: false,
+    manageStockPaidPagination: { previousUrl: null, nextUrl: null },
+    manageStockPaidLoading: false,
+    manageStockPaidError: "",
+    manageStockPaidRequestId: 0,
     manageStockAddPayload: null,
     manageStockLoading: false,
     manageStockLoadError: "",
@@ -403,6 +407,11 @@ export default function adminDashboard(initialState = {}) {
       });
     },
     destroy() {
+      this.manageStockRequestId += 1;
+      this.manageStockPaidRequestId += 1;
+      this.manageStockPaidLoading = false;
+      this.manageStockPaidPagination = { previousUrl: null, nextUrl: null };
+      this.manageStockItems = [];
       this.destroyNavigation();
     },
 
@@ -700,7 +709,7 @@ export default function adminDashboard(initialState = {}) {
         items: this.manageStockItems.filter(
           (item) => item.groupKey === group.key
         ),
-      })).filter((group) => group.items.length > 0);
+      })).filter((group) => group.items.length > 0 || group.key === "paid");
     },
 
     stockCredentialText(item) {
@@ -1225,6 +1234,10 @@ export default function adminDashboard(initialState = {}) {
           paid: 0,
         },
         manageStockTruncated: Boolean(product.stockItemsTruncated),
+        manageStockPaidPagination: product.paidPagination ?? {
+          previousUrl: null,
+          nextUrl: null,
+        },
         manageStockLoadError: "",
         manageStockAddPayload: {
           id: product.id,
@@ -1244,6 +1257,10 @@ export default function adminDashboard(initialState = {}) {
       this.manageStockLoadEditingItemId = editingItemId;
       this.manageStockLoadError = "";
       this.manageStockLoading = true;
+      this.manageStockPaidRequestId += 1;
+      this.manageStockPaidLoading = false;
+      this.manageStockPaidError = "";
+      this.manageStockPaidPagination = { previousUrl: null, nextUrl: null };
       this.manageStockSelectedIds = [];
       this.manageStockItems = [];
       this.manageStockSummary = { available: 0, reserved: 0, paid: 0 };
@@ -1295,6 +1312,37 @@ export default function adminDashboard(initialState = {}) {
         this.manageStockLoadEditingItemId
       );
     },
+    async loadManageStockPaidPage(url) {
+      if (!url || this.manageStockPaidLoading || this.manageStockLoading) return;
+      const requestId = ++this.manageStockPaidRequestId;
+      this.manageStockPaidLoading = true;
+      this.manageStockPaidError = "";
+      try {
+        const response = await fetch(url, {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !Array.isArray(body.stockItems) || !body.paidPagination) {
+          throw new Error(body.message ?? "Riwayat PAID tidak dapat dimuat.");
+        }
+        if (requestId !== this.manageStockPaidRequestId) return;
+        this.manageStockItems = [
+          ...this.manageStockItems.filter((item) => item.groupKey !== "paid"),
+          ...editableStockItems(body.stockItems),
+        ];
+        this.manageStockPaidPagination = body.paidPagination;
+      } catch (error) {
+        if (requestId === this.manageStockPaidRequestId) {
+          this.manageStockPaidError =
+            error instanceof Error ? error.message : "Riwayat PAID tidak dapat dimuat.";
+        }
+      } finally {
+        if (requestId === this.manageStockPaidRequestId) {
+          this.manageStockPaidLoading = false;
+        }
+      }
+    },
 
     async openManageStockModal(product) {
       if (this.manageStockDeleting) return;
@@ -1330,6 +1378,10 @@ export default function adminDashboard(initialState = {}) {
       this.manageStockDeleteError = "";
       const opener = this.manageStockModalOpener;
       this.manageStockRequestId += 1;
+      this.manageStockPaidRequestId += 1;
+      this.manageStockPaidLoading = false;
+      this.manageStockPaidError = "";
+      this.manageStockPaidPagination = { previousUrl: null, nextUrl: null };
       this.manageStockModalOpen = false;
       this.manageStockLoading = false;
       this.manageStockLoadError = "";
