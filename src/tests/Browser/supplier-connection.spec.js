@@ -115,6 +115,9 @@ test("supplier creation confirms password without losing the unsaved API key", a
   await page.getByText("Tambah supplier", { exact: true }).click();
   const form = page.locator('form[action$="/admin/suppliers"]').first();
   await form.locator('[name="api_key"]').fill(apiKey);
+  await form.getByLabel("Pilih supplier").selectOption("akunding");
+  await expect(form.locator('[name="name"]')).toHaveValue("Akunding");
+  await expect(form).toContainText("Mata uang otomatis: USDT");
   await form.getByLabel("Pilih supplier").selectOption("prodseller");
   await expect(form).toContainText("Kurs global");
   await form

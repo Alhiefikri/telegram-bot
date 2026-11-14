@@ -289,7 +289,7 @@ Receipt hanya bisa dikirim ulang untuk order yang sudah paid, memiliki seluruh c
 
 ### 4.1 Supplier API Reseller — release 2026-10-02
 
-Owner/Admin mengelola nama supplier dan API key melalui **Admin → Supplier**; key disimpan terenkripsi di database, tidak di ENV, dan tidak ditampilkan kembali. Satu koneksi mendukung banyak SKU dari ProdSeller, CSxStore, ARRS, Warzone, atau AI Vault Hub.
+Owner/Admin mengelola nama supplier dan API key melalui **Admin → Supplier**; key disimpan terenkripsi di database, tidak di ENV, dan tidak ditampilkan kembali. Satu koneksi mendukung banyak SKU dari ProdSeller, CSxStore, ARRS, Warzone, AI Vault Hub, NyStore Official, ToolOraX (ShopBot), Canboso, Nastele, MiraiAPI, atau Akunding.
 
 - Sinkronisasi katalog/saldo, impor draft nonaktif dengan copy milik toko, dan pemetaan SKU ekuivalen ke Product yang sudah ada.
 - Harga manual atau otomatis (persentase, profit tetap, hybrid), kurs modal, buffer, pembulatan dan minimum profit; snapshot harga order serta quantity tiers tetap berwenang.

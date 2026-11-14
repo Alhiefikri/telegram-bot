@@ -42,6 +42,7 @@ use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierMoney;
+use App\Services\Suppliers\SupplierPricing;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -1497,6 +1498,149 @@ class SupplierFulfillmentTest extends TestCase
                 'items' => [['quantity' => 1, 'unitPrice' => 69000, 'accounts' => $recoveredAccounts]],
             ]]);
         });
+    }
+
+    public function test_akunding_lost_response_replays_once_with_the_same_idempotency_key_and_body(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture(provider: 'akunding');
+        $supplier->forceFill(['currency' => 'USDT'])->save();
+        $sku->update(['external_id' => '41', 'currency' => 'USDT']);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $references = [];
+        $bodies = [];
+        Http::fake(function ($request) use (&$references, &$bodies) {
+            $this->assertSame('POST', $request->method());
+            $references[] = $request->header('X-Idempotency-Key');
+            $bodies[] = $request->data();
+            if (count($references) === 1) {
+                throw new ConnectionException('Response lost after supplier accepted purchase');
+            }
+
+            return Http::response([
+                'id' => 959,
+                'status' => 'delivered',
+                'product' => ['id' => 41],
+                'quantity' => 1,
+                'unit_price' => '1.0000',
+                'subtotal' => '1.0000',
+                'discount' => '0.0000',
+                'payable' => '1.0000',
+                'payment_method' => 'wallet',
+                'items' => ['AK-REPLAY-ITEM'],
+                'charged' => '1.0000',
+                'idempotent' => true,
+            ]);
+        });
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $service = app(SupplierFulfillmentService::class);
+
+        $service->process($fulfillment->id);
+        $reference = SupplierPurchase::sole()->reference;
+        $service->process($fulfillment->id);
+        $this->assertSame([[$reference]], $references);
+        $this->travel(2)->minutes();
+        Queue::fake();
+        $service->recover();
+        Queue::assertPushed(ProcessSupplierFulfillment::class, fn ($job) => $job->fulfillmentId === $fulfillment->id);
+        $service->process($fulfillment->id);
+        $service->process($fulfillment->id);
+
+        $this->assertSame([[$reference], [$reference]], $references);
+        $this->assertSame([
+            ['product_id' => 41, 'quantity' => 1],
+            ['product_id' => 41, 'quantity' => 1],
+        ], $bodies);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(1, SupplierPurchase::sole()->replay_count);
+        $this->assertSame('AK-REPLAY-ITEM', ProductStockItem::sole()->secret);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
+    }
+
+    public function test_akunding_capacity_and_checkout_ceiling_follow_the_1000_unit_contract(): void
+    {
+        [$product, $supplier, $sku] = $this->fixture(quantity: 1001, provider: 'akunding');
+        $supplier->forceFill(['currency' => 'USDT', 'balance_micros' => 2_000_000_000])->save();
+        $sku->update(['external_id' => '41', 'currency' => 'USDT', 'stock' => 1200]);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+
+        $capacity = app(SupplierPricing::class)->capacity(
+            $product->fresh(),
+            $supplier->fresh(),
+            $sku->fresh(),
+            SupplierPricePolicy::where('product_id', $product->id)->sole(),
+        );
+
+        $this->assertSame(1000, $capacity);
+        $this->assertFalse(app(SupplierPricing::class)->isEligible(
+            $product->fresh(),
+            $supplier->fresh(),
+            $sku->fresh(),
+            SupplierPricePolicy::where('product_id', $product->id)->sole(),
+            1001,
+            5_005_000,
+        ));
+    }
+
+    public function test_akunding_refund_response_enters_review_and_keeps_the_purchase_hold(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture(provider: 'akunding');
+        $supplier->forceFill(['currency' => 'USDT'])->save();
+        $sku->update(['external_id' => '41', 'currency' => 'USDT']);
+        app(SupplierAvailability::class)->refreshProducts([$product->id]);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        Http::fake(fn () => Http::response([
+            'id' => 955,
+            'status' => 'failed',
+            'product' => ['id' => 41],
+            'quantity' => 1,
+            'payment_method' => 'wallet',
+            'items' => [],
+            'charged' => '1.0000',
+            'idempotent' => false,
+        ]));
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+
+        $purchase = SupplierPurchase::where('supplier_fulfillment_id', $fulfillment->id)->sole();
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertSame('provider_refunded', $fulfillment->fresh()->last_error);
+        $this->assertSame('review', $purchase->state);
+        $this->assertSame('provider_refunded', $purchase->last_error);
+        $this->assertSame('955', $purchase->supplier_order_id);
+        $this->assertNull($purchase->next_attempt_at);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, $order->orderItems()->sole()->stockItems()->count());
+        Http::assertSent(fn ($request) => $request->method() === 'POST'
+            && $request->url() === 'https://akunding.shop/api/v1/orders'
+            && $request->hasHeader('X-Idempotency-Key', $purchase->reference));
+    }
+
+    public function test_akunding_sync_rejects_two_credentials_for_the_same_wallet(): void
+    {
+        [, $first] = $this->fixture(provider: 'akunding');
+        $first->forceFill(['currency' => 'USDT'])->save();
+        $second = $first->replicate();
+        $second->name = 'Other fixture connection';
+        $second->api_key = 'another-synthetic-akunding-key';
+        $second->save();
+        Http::fake(fn ($request) => str_ends_with($request->url(), '/v1/me')
+            ? Http::response(['user_id' => 765, 'balance' => 10, 'referral_credit' => 1, 'paid_balance' => 9])
+            : Http::response([]));
+
+        $sync = app(SupplierCatalogSync::class);
+        $this->assertTrue($sync->sync($first->fresh()));
+        $this->assertFalse($sync->sync($second->fresh()));
+        $this->assertSame('765', $first->fresh()->external_account_id);
+        $this->assertNull($second->fresh()->external_account_id);
+        $this->assertSame('duplicate_account', $second->fresh()->last_error);
+        $this->assertNull($second->fresh()->sync_expires_at);
+        Http::assertSentCount(4);
     }
 
     protected function fixture(int $local = 0, int $quantity = 1, string $provider = 'prodseller'): array

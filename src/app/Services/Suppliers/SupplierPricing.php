@@ -80,7 +80,8 @@ final class SupplierPricing
 
     public function isEligible(Product $product, Supplier $supplier, SupplierCatalogItem $item, SupplierPricePolicy $policy, int $quantity, int $retailSubtotal): bool
     {
-        if (SupplierProvider::tryFrom($supplier->provider) === null || $quantity < 1 || $quantity > 10000 || ! $supplier->is_active || ! $supplier->currency_confirmed
+        $provider = SupplierProvider::tryFrom($supplier->provider);
+        if ($provider === null || $quantity < 1 || $quantity > $provider->maxOrderQuantity() || ! $supplier->is_active || ! $supplier->currency_confirmed
             || ! SupplierExchangeRate::isStorable($supplier->currency, $supplier->exchange_rate_idr)
             || $supplier->synced_at === null
             || $supplier->sync_expires_at === null || ! $supplier->sync_expires_at->isFuture()
@@ -106,7 +107,8 @@ final class SupplierPricing
     /** A contiguous purchasable range; never advertise a quantity across an unprofitable tier gap. */
     public function capacity(Product $product, Supplier $supplier, SupplierCatalogItem $item, SupplierPricePolicy $policy): int
     {
-        $limit = min(10000, max(0, (int) $item->stock - (int) $item->reserved_quantity));
+        $provider = SupplierProvider::tryFrom($supplier->provider);
+        $limit = min($provider?->maxOrderQuantity() ?? 0, max(0, (int) $item->stock - (int) $item->reserved_quantity));
         if ($limit === 0) {
             return 0;
         }

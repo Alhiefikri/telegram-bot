@@ -14,7 +14,7 @@ $app->make(Kernel::class)->bootstrap();
 
 if (! app()->environment('testing') || config('database.default') !== 'sqlite'
     || config('database.connections.sqlite.database') !== getenv('DB_DATABASE')
-    || ! str_starts_with(config('database.connections.sqlite.database'), sys_get_temp_dir().'/supplier-connection-browser-')) {
+    || ! str_starts_with(str_replace('\\', '/', config('database.connections.sqlite.database')), str_replace('\\', '/', sys_get_temp_dir()).'/supplier-connection-browser-')) {
     throw new RuntimeException('Supplier connection browser fixtures require a disposable SQLite test database.');
 }
 if (($argv[1] ?? null) === 'prepare') {

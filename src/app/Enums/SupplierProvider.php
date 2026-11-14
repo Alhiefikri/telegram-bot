@@ -5,6 +5,7 @@ namespace App\Enums;
 enum SupplierProvider: string
 {
     case ProdSeller = 'prodseller';
+    case Akunding = 'akunding';
     case CSxStore = 'csxstore';
     case Arrs = 'arrs';
     case Warzone = 'warzone';
@@ -18,6 +19,7 @@ enum SupplierProvider: string
     public function baseUrl(): string
     {
         return match ($this) {
+            self::Akunding => 'https://akunding.shop/api',
             self::ProdSeller => 'https://prodseller.com/v1',
             self::CSxStore => 'https://api.cssx.store/api/v1',
             self::Arrs => 'https://arrsnetworkzone.in/api/v1',
@@ -34,6 +36,7 @@ enum SupplierProvider: string
     public function label(): string
     {
         return match ($this) {
+            self::Akunding => 'Akunding',
             self::ProdSeller => 'ProdSeller',
             self::CSxStore => 'CSxStore',
             self::Arrs => 'ARRS',
@@ -49,13 +52,18 @@ enum SupplierProvider: string
 
     public function supportsIdempotency(): bool
     {
-        return in_array($this, [self::ProdSeller, self::AiVault, self::NyStore, self::Canboso, self::MiraiApi], true);
+        return in_array($this, [self::ProdSeller, self::AiVault, self::NyStore, self::Canboso, self::MiraiApi, self::Akunding], true);
+    }
+
+    public function maxOrderQuantity(): int
+    {
+        return $this === self::Akunding ? 1000 : 10_000;
     }
 
     public function defaultCurrency(): string
     {
         return match ($this) {
-            self::ProdSeller => 'USDT',
+            self::ProdSeller, self::Akunding => 'USDT',
             self::Nastele, self::MiraiApi => 'VND',
             default => 'USD',
         };

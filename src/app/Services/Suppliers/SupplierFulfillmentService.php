@@ -457,6 +457,9 @@ final class SupplierFulfillmentService
             } else {
                 $this->review($f, $order, $result->errorCode ?? 'purchase_rejected');
             }
+        } elseif (in_array($result->errorCode, ['provider_refunded', 'unpaid_draft'], true)) {
+            $purchase->forceFill(['state' => 'review', 'last_error' => $result->errorCode, 'next_attempt_at' => null])->save();
+            $this->review($f, $order, $result->errorCode);
         } elseif ($result->identityTrusted && $result->deliveryTrusted && ! $conflictingDelivery && $quantityMatches && count($deliveries) === $purchase->quantity && $purchase->committed_at !== null && $order->payment_status === PaymentStatus::Paid && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
             $cost = $purchase->actual_cost_micros;
             if ($cost < 0 || SupplierMoney::costIdr($cost, $purchase->exchange_rate_idr) > $f->maximum_cost_idr) {
@@ -517,7 +520,8 @@ final class SupplierFulfillmentService
             $supplier = $suppliers->get($candidate['supplier_id']);
             $source = ProductSupplierSource::find($candidate['source_id']);
             $cost = $sku ? $this->pricing->costMicros($sku, $quantity) : null;
-            if (! $source?->is_active || ! $supplier?->is_active || ! $supplier->currency_confirmed || ! $sku?->orderable || $sku->requires_input || $sku->external_id !== $candidate['external_id'] || $supplier->currency !== $candidate['currency'] || ! $supplier->synced_at || $supplier->synced_at->lt(now()->subMinutes(5)) || ! $sku->synced_at || $sku->synced_at->lt(now()->subMinutes(5)) || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $this->remainingCostLimit($f) || ($sku->stock ?? 0) - $sku->reserved_quantity < $quantity || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost) {
+            $provider = $supplier ? SupplierProvider::tryFrom($supplier->provider) : null;
+            if ($provider === null || $quantity > $provider->maxOrderQuantity() || ! $source?->is_active || ! $supplier?->is_active || ! $supplier->currency_confirmed || ! $sku?->orderable || $sku->requires_input || $sku->external_id !== $candidate['external_id'] || $supplier->currency !== $candidate['currency'] || ! $supplier->synced_at || $supplier->synced_at->lt(now()->subMinutes(5)) || ! $sku->synced_at || $sku->synced_at->lt(now()->subMinutes(5)) || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $this->remainingCostLimit($f) || ($sku->stock ?? 0) - $sku->reserved_quantity < $quantity || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost) {
                 continue;
             }
             $this->hold($f, $supplier, $sku, $cost, $quantity);
@@ -770,7 +774,8 @@ final class SupplierFulfillmentService
             $supplier = $suppliers->get($candidate['supplier_id']);
             $quantity = $this->outstandingQuantity($f);
             $cost = $this->pricing->costMicros($sku, $quantity);
-            if ($quantity < 1 || ! $supplier->is_active || ! $supplier->currency_confirmed || ! $supplier->sync_expires_at?->isFuture() || ! $sku->orderable || $sku->requires_input || $supplier->currency !== $candidate['currency'] || $sku->external_id !== $candidate['external_id'] || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $this->remainingCostLimit($f) || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost || ($sku->stock ?? 0) - $sku->reserved_quantity < $quantity) {
+            $provider = SupplierProvider::tryFrom($supplier->provider);
+            if ($quantity < 1 || $provider === null || $quantity > $provider->maxOrderQuantity() || ! $supplier->is_active || ! $supplier->currency_confirmed || ! $supplier->sync_expires_at?->isFuture() || ! $sku->orderable || $sku->requires_input || $supplier->currency !== $candidate['currency'] || $sku->external_id !== $candidate['external_id'] || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $this->remainingCostLimit($f) || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost || ($sku->stock ?? 0) - $sku->reserved_quantity < $quantity) {
                 throw new InsufficientStock('The original order cannot currently be fulfilled within its purchase limit.');
             }
             $this->hold($f, $supplier, $sku, $cost, $quantity);

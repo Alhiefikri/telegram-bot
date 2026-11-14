@@ -36,6 +36,9 @@ final class SupplierClient
     public function snapshot(Supplier $supplier): SupplierCatalogSnapshot
     {
         $provider = $this->ready($supplier);
+        if ($provider === SupplierProvider::Akunding) {
+            return $this->akundingSnapshot($supplier);
+        }
         $deadline = hrtime(true) + 40_000_000_000;
         $account = $this->read($supplier, in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::Canboso, SupplierProvider::Nastele, SupplierProvider::MiraiApi], true) ? '/balance' : '/me', $deadline);
         $catalog = $this->read($supplier, $provider === SupplierProvider::MiraiApi ? '/packages' : '/products', $deadline);
@@ -109,7 +112,7 @@ final class SupplierClient
     {
         try {
             $provider = $this->ready($supplier);
-            if ((int) $item->supplier_id !== (int) $supplier->id || ! $item->orderable || $item->requires_input || $quantity < 1 || $quantity > self::MAX_QUANTITY) {
+            if ((int) $item->supplier_id !== (int) $supplier->id || ! $item->orderable || $item->requires_input || $quantity < 1 || $quantity > $provider->maxOrderQuantity()) {
                 throw new SupplierUnavailable('unsupported_product');
             }
             if ($item->currency !== null && $item->currency !== $supplier->currency) {
@@ -123,7 +126,11 @@ final class SupplierClient
             if ($provider === SupplierProvider::Nastele) {
                 $this->integer(ctype_digit($id) && strlen($id) <= 10 ? (int) $id : null, 1, 2_147_483_647);
             }
+            if ($provider === SupplierProvider::Akunding) {
+                $this->integer(ctype_digit($id) && strlen($id) <= 10 ? (int) $id : null, 1, 2_147_483_647);
+            }
             $body = match ($provider) {
+                SupplierProvider::Akunding => ['product_id' => (int) $id, 'quantity' => $quantity],
                 SupplierProvider::ProdSeller => ['productId' => $id, 'quantity' => $quantity],
                 SupplierProvider::ToolOrax => ['product_id' => (int) $id, 'quantity' => $quantity],
                 SupplierProvider::Nastele => ['productId' => (int) $id, 'qty' => $quantity],
@@ -132,8 +139,8 @@ final class SupplierClient
                 default => ['service_id' => $id, 'quantity' => $quantity],
             };
             $headers = [];
-            if (in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::NyStore, SupplierProvider::Canboso, SupplierProvider::MiraiApi], true)) {
-                $headers['Idempotency-Key'] = $reference;
+            if (in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::NyStore, SupplierProvider::Canboso, SupplierProvider::MiraiApi, SupplierProvider::Akunding], true)) {
+                $headers[$provider === SupplierProvider::Akunding ? 'X-Idempotency-Key' : 'Idempotency-Key'] = $reference;
             }
             if ($provider === SupplierProvider::NyStore) {
                 // Documented fastest mode: skip the local checker wait and omit
@@ -144,6 +151,7 @@ final class SupplierClient
                 $body['external_order_id'] = $reference;
             }
             $path = match ($provider) {
+                SupplierProvider::Akunding => '/v1/orders',
                 SupplierProvider::ProdSeller, SupplierProvider::ToolOrax, SupplierProvider::Nastele, SupplierProvider::MiraiApi => '/orders',
                 SupplierProvider::Canboso => '/purchase',
                 default => '/order',
@@ -172,9 +180,12 @@ final class SupplierClient
                 }
             }
 
-            return new SupplierOrderResult($this->noPurchase($provider, $response) ? 'rejected' : 'ambiguous', errorCode: $this->httpCode($response->status()));
+            return new SupplierOrderResult($this->noPurchase($provider, $response, $supplier->api_key) ? 'rejected' : 'ambiguous', errorCode: $this->httpCode($response->status()));
         }
         try {
+            if ($provider === SupplierProvider::Akunding) {
+                return $this->akundingResult($this->payload($response, $supplier->api_key), $quantity, null, $id, true);
+            }
             if ($provider === SupplierProvider::Canboso) {
                 return $this->canbosoResult($supplier, $this->payload($response, $supplier->api_key), $quantity, $id);
             }
@@ -223,6 +234,9 @@ final class SupplierClient
     {
         $provider = $this->ready($supplier, allowInactive: true);
         $orderId = $this->identifier($orderId);
+        if ($provider === SupplierProvider::Akunding) {
+            $orderId = (string) $this->integer(ctype_digit($orderId) && strlen($orderId) <= 10 ? (int) $orderId : null, 1, 2_147_483_647);
+        }
         if ($provider === SupplierProvider::Canboso) {
             $payload = $this->read($supplier, '/orders?orderCode='.rawurlencode($orderId), allowInactive: true);
             $rows = $payload['orders'] ?? null;
@@ -235,6 +249,7 @@ final class SupplierClient
             return new SupplierOrderResult('ambiguous', $orderId, errorCode: 'delivery_unavailable', identityTrusted: true);
         }
         $path = match ($provider) {
+            SupplierProvider::Akunding => '/v1/orders/',
             SupplierProvider::ProdSeller, SupplierProvider::ToolOrax, SupplierProvider::Nastele, SupplierProvider::MiraiApi => '/orders/',
             default => '/order/',
         };
@@ -246,6 +261,9 @@ final class SupplierClient
             return $this->miraiResult($payload, null, $orderId, $productId, $reference);
         }
 
+        if ($provider === SupplierProvider::Akunding) {
+            return $this->akundingResult($payload, null, $orderId, $productId, false);
+        }
         return $this->result($supplier, $payload, null, $orderId, $productId, $reference);
     }
 
@@ -449,7 +467,11 @@ final class SupplierClient
                 $response->status() === 429 ? $this->retryAfterSeconds(SupplierProvider::from($supplier->provider), $response) : 0);
         }
 
-        return $this->payload($response, $supplier->api_key);
+        return $this->payload(
+            $response,
+            $supplier->api_key,
+            $supplier->provider === SupplierProvider::Akunding->value && $path === '/v1/products?include_out_of_stock=true',
+        );
     }
 
     /** Read one bounded group; any failed detail rejects the entire snapshot. */
@@ -528,7 +550,7 @@ final class SupplierClient
     {
         $provider = $this->ready($supplier, $allowInactive);
         // Synchronous bulk purchases need longer than reads, with room for exact-order hydration in the 120s worker.
-        $requestTimeout = $method === 'POST' ? 90 : 12;
+        $requestTimeout = $method === 'POST' && $provider === SupplierProvider::Akunding ? 60 : ($method === 'POST' ? 90 : 12);
         $options = $method === 'POST' ? ['json' => $body] : [];
         if ($provider === SupplierProvider::Canboso && $method === 'GET') {
             parse_str(parse_url($path, PHP_URL_QUERY) ?? '', $query);
@@ -667,6 +689,7 @@ final class SupplierClient
             SupplierProvider::ToolOrax->value => ['X-Shop-API-Key' => $supplier->api_key],
             SupplierProvider::Canboso->value => [],
             SupplierProvider::MiraiApi->value => ['Authorization' => 'Bearer '.$supplier->api_key],
+            SupplierProvider::Akunding->value => ['Authorization' => 'Bearer '.$supplier->api_key],
             default => ['X-API-Key' => $supplier->api_key],
         };
 
@@ -691,8 +714,12 @@ final class SupplierClient
     private function retryAfterSeconds(SupplierProvider $provider, Response $response): int
     {
         $retry = trim((string) $response->header('Retry-After'));
-        $seconds = $provider === SupplierProvider::ProdSeller ? 900 : 60;
-        $maximum = $provider === SupplierProvider::Canboso ? 21_600 : 3600;
+        $maximum = $provider === SupplierProvider::Canboso ? 21_600 : 3_600;
+        $seconds = match ($provider) {
+            SupplierProvider::ProdSeller => 900,
+            SupplierProvider::Akunding => 1,
+            default => 60,
+        };
         if ($retry !== '' && ctype_digit($retry)) {
             $seconds = min($maximum, max(1, (int) $retry));
         } elseif ($retry !== '') {
@@ -726,6 +753,7 @@ final class SupplierClient
     private function budget(Supplier $supplier, SupplierProvider $provider, bool $read): void
     {
         [$maximum, $seconds, $readMaximum] = match ($provider) {
+            SupplierProvider::Akunding => [45, 60, 35],
             SupplierProvider::ProdSeller => [300, 900, 240],
             // NyStore documents 3 requests/second per API key.
             SupplierProvider::Arrs, SupplierProvider::Warzone, SupplierProvider::NyStore => [3, 1, 2],
@@ -767,7 +795,7 @@ final class SupplierClient
         }
     }
 
-    private function payload(Response $response, ?string $key = null): array
+    private function payload(Response $response, ?string $key = null, bool $allowList = false): array
     {
         $body = $response->body();
         if (strlen($body) > self::MAX_BYTES) {
@@ -781,7 +809,7 @@ final class SupplierClient
         } catch (Throwable) {
             throw new SupplierUnavailable('invalid_payload');
         }
-        if (! is_array($payload) || array_is_list($payload)) {
+        if (! is_array($payload) || (! $allowList && array_is_list($payload))) {
             throw new SupplierUnavailable('invalid_payload');
         }
 
@@ -801,6 +829,89 @@ final class SupplierClient
         $inspect($payload);
 
         return $payload;
+    }
+
+    private function akundingSnapshot(Supplier $supplier): SupplierCatalogSnapshot
+    {
+        $deadline = hrtime(true) + 40_000_000_000;
+        $account = $this->read($supplier, '/v1/me', $deadline);
+        $rows = $this->read($supplier, '/v1/products?include_out_of_stock=true', $deadline);
+        $accountId = $this->integer($account['user_id'] ?? null, 1, 2_147_483_647);
+        try {
+            $reportedBalance = $this->money($account['balance'] ?? null, roundUp: false);
+            $referralCredit = $this->money($account['referral_credit'] ?? null, roundUp: false);
+            $paidBalance = $this->money($account['paid_balance'] ?? null, roundUp: false);
+            $balance = SupplierMoney::checkedAdd($referralCredit, $paidBalance);
+        } catch (Throwable) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        if (abs($reportedBalance - $balance) >= 10_000 || ! array_is_list($rows) || count($rows) > self::MAX_PRODUCTS) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+
+        $products = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || array_is_list($row) || ! array_key_exists('available', $row)) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $id = (string) $this->integer($row['id'] ?? null, 1, 2_147_483_647);
+            if (isset($seen[$id])) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $seen[$id] = true;
+            $description = $row['description'] ?? null;
+            if ($description === '') {
+                $description = null;
+            } elseif ($description !== null) {
+                $description = $this->text($description, 16_000);
+            }
+            $stock = $this->integer($row['stock'] ?? null, 0, 1_000_000_000);
+            $available = $this->boolean($row, 'available', false);
+            $products[] = new SupplierProductData(
+                $id,
+                $this->text($row['name'] ?? null, 500),
+                $description,
+                $this->money($row['your_price'] ?? null),
+                $stock,
+                $available && $stock > 0,
+                false,
+                $this->akundingPriceTiers($row['bulk_tiers'] ?? []),
+            );
+        }
+
+        return new SupplierCatalogSnapshot($balance, 'USDT', $products, ['account_id' => (string) $accountId]);
+    }
+
+    private function akundingPriceTiers(mixed $rows): array
+    {
+        if (! is_array($rows) || ! array_is_list($rows) || count($rows) > 100) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $tiers = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || array_is_list($row)) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $minimum = $this->integer($row['min_qty'] ?? null, 1, self::MAX_QUANTITY);
+            if (isset($seen[$minimum])) {
+                throw new SupplierUnavailable('invalid_payload');
+            }
+            $seen[$minimum] = true;
+            $tiers[] = ['min' => $minimum, 'unit_price_micros' => $this->money($row['your_unit_price'] ?? null)];
+        }
+        usort($tiers, static fn (array $left, array $right): int => $left['min'] <=> $right['min']);
+        $normalized = [];
+        foreach ($tiers as $index => $tier) {
+            $normalized[] = [
+                'min' => $tier['min'],
+                'max' => isset($tiers[$index + 1]) ? $tiers[$index + 1]['min'] - 1 : null,
+                'unit_price_micros' => $tier['unit_price_micros'],
+            ];
+        }
+
+        return $normalized;
     }
 
     private function nasteleSnapshot(Supplier $supplier, array $account, array $catalog): SupplierCatalogSnapshot
@@ -1248,6 +1359,96 @@ final class SupplierClient
         return array_values($discounts);
     }
 
+    private function akundingResult(array $payload, ?int $expectedQuantity, ?string $expectedOrderId, ?string $expectedProductId, bool $createResponse): SupplierOrderResult
+    {
+        $row = $payload['order'] ?? $payload;
+        if (! is_array($row) || array_is_list($row) || ! is_array($row['product'] ?? null) || array_is_list($row['product'])) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $id = (string) $this->integer($row['id'] ?? null, 1, 2_147_483_647);
+        $productId = (string) $this->integer($row['product']['id'] ?? null, 1, 2_147_483_647);
+        $quantity = $this->integer($row['quantity'] ?? null, 1, 1000);
+        $status = $this->text($row['status'] ?? null, 40);
+        $items = $row['items'] ?? [];
+        if (! is_array($items) || ! array_is_list($items) || count($items) > $quantity) {
+            throw new SupplierUnavailable('invalid_payload');
+        }
+        $deliveries = [];
+        foreach ($items as $item) {
+            $deliveries[] = $this->text($item, 16_000);
+        }
+        if (($expectedOrderId !== null && $id !== $expectedOrderId)
+            || ($expectedProductId !== null && $productId !== $expectedProductId)
+            || ($expectedQuantity !== null && $quantity !== $expectedQuantity)) {
+            return new SupplierOrderResult('ambiguous', $expectedOrderId, $quantity, errorCode: 'payload_mismatch');
+        }
+
+        if ($status === 'draft') {
+            $charged = null;
+            try {
+                $charged = array_key_exists('charged', $payload) ? $this->money($payload['charged']) : null;
+            } catch (SupplierUnavailable) {
+                return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'invalid_cost', identityTrusted: true);
+            }
+            if ($deliveries !== [] || ($charged !== null && $charged > 0)) {
+                return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'payload_mismatch', identityTrusted: true);
+            }
+
+            return $createResponse
+                ? new SupplierOrderResult('rejected', errorCode: 'unpaid_draft')
+                : new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'unpaid_draft', identityTrusted: true);
+        }
+        if ($status === 'failed') {
+            if ($deliveries !== [] || ($row['payment_method'] ?? null) !== 'wallet') {
+                return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'delivery_unavailable', identityTrusted: true);
+            }
+
+            return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'provider_refunded', identityTrusted: true);
+        }
+        if (! in_array($status, ['paid', 'delivered'], true)) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'invalid_order_status', identityTrusted: true);
+        }
+        if (($row['payment_method'] ?? null) !== 'wallet') {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'delivery_unavailable', identityTrusted: true);
+        }
+
+        try {
+            $rawCost = $createResponse ? ($payload['charged'] ?? null) : ($row['payable'] ?? null);
+            $cost = $rawCost === null ? null : $this->money($rawCost);
+            if ($createResponse && $cost !== null && array_key_exists('payable', $row)
+                && $this->money($row['payable']) !== $cost) {
+                return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'cost_mismatch', identityTrusted: true);
+            }
+        } catch (SupplierUnavailable) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'invalid_cost', identityTrusted: true);
+        }
+        if ($cost === null) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, errorCode: 'cost_unavailable', identityTrusted: true);
+        }
+        if ($status === 'paid') {
+            if ($deliveries !== []) {
+                return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, errorCode: 'delivery_unavailable', identityTrusted: true);
+            }
+
+            return new SupplierOrderResult('pending', $id, $quantity, $cost, identityTrusted: true);
+        }
+        if (count(array_unique($deliveries, SORT_STRING)) !== count($deliveries)) {
+            return new SupplierOrderResult('ambiguous', $id, $quantity, $cost, $deliveries, 'duplicate_delivery', identityTrusted: true);
+        }
+        $complete = count($deliveries) === $quantity;
+
+        return new SupplierOrderResult(
+            $complete ? 'delivered' : 'ambiguous',
+            $id,
+            $quantity,
+            $cost,
+            $deliveries,
+            $complete ? null : 'incomplete_delivery',
+            identityTrusted: true,
+            deliveryTrusted: $complete,
+        );
+    }
+
     private function result(Supplier $supplier, array $payload, ?int $expectedQuantity, ?string $expectedOrderId, ?string $expectedProductId = null, ?string $reference = null): SupplierOrderResult
     {
         $this->currency($supplier, $payload);
@@ -1311,8 +1512,24 @@ final class SupplierClient
         );
     }
 
-    private function noPurchase(SupplierProvider $provider, Response $response): bool
+    private function noPurchase(SupplierProvider $provider, Response $response, ?string $key = null): bool
     {
+        if ($provider === SupplierProvider::Akunding) {
+            if (in_array($response->status(), [400, 401, 402, 403, 404, 422, 429], true)) {
+                return true;
+            }
+            if ($response->status() !== 409) {
+                return false;
+            }
+            try {
+                $payload = $this->payload($response, $key);
+            } catch (SupplierUnavailable) {
+                return false;
+            }
+            $detail = $payload['detail'] ?? null;
+
+            return is_string($detail) && preg_match('/\AOnly [0-9]+ item\(s\) available\z/', $detail) === 1;
+        }
         if ($provider === SupplierProvider::Nastele) {
             if (in_array($response->status(), [401, 402, 403, 404, 422, 429], true)) {
                 return true;

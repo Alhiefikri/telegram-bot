@@ -531,7 +531,7 @@ final class SupplierAdminTest extends TestCase
     {
         $this->owner();
         Http::fake();
-        foreach (['prodseller' => ['ProdSeller', 'USDT'], 'csxstore' => ['CSxStore', 'USD'], 'aivault' => ['AI Vault Hub', 'USD'], 'nystore' => ['NyStore Official', 'USD'], 'toolorax' => ['ToolOraX (ShopBot)', 'USD']] as $provider => [$name, $currency]) {
+        foreach (['prodseller' => ['ProdSeller', 'USDT'], 'akunding' => ['Akunding', 'USDT'], 'csxstore' => ['CSxStore', 'USD'], 'aivault' => ['AI Vault Hub', 'USD'], 'nystore' => ['NyStore Official', 'USD'], 'toolorax' => ['ToolOraX (ShopBot)', 'USD']] as $provider => [$name, $currency]) {
             $input = $this->connectionInput(['provider' => $provider]);
             unset($input['name'], $input['currency'], $input['currency_confirmed']);
             $this->withSession(['auth.password_confirmed_at' => time()])->post(route('admin.suppliers.store'), $input)->assertRedirect();
