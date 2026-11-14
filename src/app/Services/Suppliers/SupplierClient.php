@@ -264,6 +264,7 @@ final class SupplierClient
         if ($provider === SupplierProvider::Akunding) {
             return $this->akundingResult($payload, null, $orderId, $productId, false);
         }
+
         return $this->result($supplier, $payload, null, $orderId, $productId, $reference);
     }
 

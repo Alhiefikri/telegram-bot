@@ -592,7 +592,7 @@ final class AdminDashboardProductsData
     }
 
     /**
-     * @param EloquentCollection<int, Product> $products
+     * @param  EloquentCollection<int, Product>  $products
      * @return array<int, array{previousUrl: ?string, nextUrl: ?string}>
      */
     private function loadOrderedStockItems(EloquentCollection $products): array

@@ -103,7 +103,7 @@ final class AkundingSupplierTest extends TestCase
         $urls = [];
         Http::swap(new Factory);
         Http::preventStrayRequests();
-        Http::fake(function ($request, array $options) use ($base, &$urls) {
+        Http::fake(function ($request, array $options) use (&$urls) {
             $this->assertFalse($options['allow_redirects']);
             $this->assertTrue($request->hasHeader('Authorization', 'Bearer fixture-akunding-key-not-live'));
             $this->assertFalse($request->hasHeader('X-API-Key'));
