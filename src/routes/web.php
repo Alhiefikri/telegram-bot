@@ -88,6 +88,7 @@ use App\Http\Controllers\StorefrontWaitlistController;
 use App\Http\Middleware\EnsureCustomerAuthAvailable;
 use App\Http\Middleware\ValidateCustomerSession;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Routing\RedirectController;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
@@ -193,7 +194,11 @@ Route::prefix('akun')->name('customer.')->middleware([ValidateCustomerSession::c
 });
 
 Route::middleware('admin.no-cache')->group(function (): void {
-    Route::redirect('/telegram-mini-app', '/admin')->name('telegram-mini-app.dashboard');
+    // Preserve the legacy redirect's methods when Laravel adds new HTTP verbs.
+    Route::match(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], '/telegram-mini-app', RedirectController::class)
+        ->defaults('destination', '/admin')
+        ->defaults('status', 302)
+        ->name('telegram-mini-app.dashboard');
     Route::get('/admin/confirm-password', [AdminPasswordConfirmationController::class, 'create'])->name('password.confirm');
     Route::post('/admin/confirm-password', [AdminPasswordConfirmationController::class, 'store'])
         ->middleware('throttle:6,1')
