@@ -249,7 +249,7 @@ Observed focused U8 regression lane passed 98 tests / 569 assertions across sett
 
 Verification: `UsdtTransferRecoveryTest` covers replay, cross-Customer receipt reuse, password rejection, evidence changes, wrong receiver, session binding and receipt reconciliation. Disposable PostgreSQL 16 command smoke exercised the hidden password prompt, exact 2-USDT credit, immutable-ledger rejection and durable notifications. The receiver and RPC facts in that smoke are synthetic, not production funding.
 
-The recovery release pins `symfony/mime` 8.1.10 in `composer.lock`, fixing CVE-2026-45070 (email header injection through MIME parameter names). The production dependency audit remains enforced; no advisory suppression or CI bypass is used.
+The recovery release pins `symfony/mime` 8.1.10 in `composer.lock`, fixing CVE-2026-45070 (email header injection through MIME parameter names). Laravel framework 13.40.0 fixes CVE-2026-128083 (concurrency task output injection). The production dependency audit remains enforced; no advisory suppression or CI bypass is used.
 
 
 ### Telegram balance, USDT top-up and personal history (U9 #554)
