@@ -55,11 +55,13 @@ final readonly class CustomerApiOrderRequest
             throw self::invalid('quantity must be an integer between 1 and 100.');
         }
         $preference = $fields['preference'] ?? null;
-        if ($preference !== null && (! is_string($preference) || BalancePaymentPreference::tryFrom($preference) === null)) {
+        if (array_key_exists('preference', $fields) && (! is_string($preference) || BalancePaymentPreference::tryFrom($preference) === null)) {
             throw self::invalid('preference must be idr_only, usd_only, idr_first or usd_first.');
         }
 
-        [$idrTotal, $usdTotalMicro] = self::expectedTotals($fields['expected_totals'] ?? null);
+        [$idrTotal, $usdTotalMicro] = array_key_exists('expected_totals', $fields)
+            ? self::expectedTotals($fields['expected_totals'])
+            : [null, null];
 
         return new self(
             $key,
@@ -90,25 +92,25 @@ final readonly class CustomerApiOrderRequest
      */
     private static function expectedTotals(mixed $totals): array
     {
-        if ($totals === null) {
-            return [null, null];
-        }
         if (! $totals instanceof stdClass) {
             throw self::invalid('expected_totals must be a JSON object keyed by IDR and USD.');
         }
         $values = get_object_vars($totals);
+        if ($values === []) {
+            throw self::invalid('expected_totals must contain at least one total.');
+        }
         if (array_diff(array_keys($values), ['IDR', 'USD']) !== []) {
             throw self::invalid('expected_totals only accepts IDR and USD.');
         }
 
         $idr = $values['IDR'] ?? null;
         $usd = $values['USD'] ?? null;
-        if ($idr !== null && (! is_string($idr) || self::positiveInteger($idr) === null)) {
+        if (array_key_exists('IDR', $values) && (! is_string($idr) || self::positiveInteger($idr) === null)) {
             throw self::invalid('expected_totals.IDR must be a canonical positive whole-rupiah string.');
         }
         $usdMicro = null;
-        if ($usd !== null) {
-            if (! is_string($usd)) {
+        if (array_key_exists('USD', $values)) {
+            if (! is_string($usd) || preg_match('/\A(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?\z/D', $usd) !== 1) {
                 throw self::invalid('expected_totals.USD must be an exact decimal string with at most six decimals.');
             }
             try {

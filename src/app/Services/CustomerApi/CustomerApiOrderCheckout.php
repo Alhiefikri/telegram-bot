@@ -60,7 +60,7 @@ final class CustomerApiOrderCheckout
                 DB::transaction(fn (): Order => $this->commit($principal, $request, $claim), 3),
             );
         } catch (Throwable $error) {
-            $this->claims->abandon($claim);
+            $this->claims->abandon($principal, $claim);
 
             throw $this->map($error);
         }

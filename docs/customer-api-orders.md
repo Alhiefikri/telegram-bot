@@ -116,17 +116,26 @@ totals). Claims and the accepted Order association are unique at the database le
 | Same key, different payload | 409 `idempotency_conflict`; no effect |
 | Same key, an identical request still running | bounded wait (~2 s), then 409 `in_progress` with `Retry-After` |
 | Same key, abandoned pre-order claim | one atomic takeover of the expired lease; loser gets the replay or `in_progress` |
+| New key when 10,000 non-accepted claims are retained | 503 `temporarily_unavailable`, `Retry-After: 5`; accepted replays remain available |
 
-The pre-order lease is short and bounded; a request that never committed is recoverable,
-never a stuck lock. Every takeover of an expired lease bounds its own row-lock wait, so a
-second request cannot hang behind the first one's transaction and still returns within the
-documented wait. A financially rolled-back attempt releases its own lease and never
-becomes an accepted claim, so the same key can retry the same local DB work after the cause
-is fixed (for example, after funding the wallet). Successful claims never expire, are never
-pruned and can never create a second purchase. API key rotation does not reset claims.
+The pre-order lease is short and bounded; a request that never committed is recoverable.
+Insert and takeover lock waits are bounded by the public deadline. A financially
+rolled-back attempt releases its own lease and the same key can retry the same local DB
+work after the cause is fixed (for example, after funding the wallet). If contention
+prevents admission before an existing claim is visible, the API returns 503
+`temporarily_unavailable` with `Retry-After: 5` rather than asserting that the unseen
+request has the same payload.
 
-To change anything in the body, send a **new** `Idempotency-Key`; a changed payload on an
-existing key is always a conflict.
+Successful claims never expire, are never pruned and can never create a second purchase,
+including after Product deletion or API key rotation. A non-accepted claim becomes eligible
+for bounded opportunistic cleanup at least 24 hours after its original creation, only
+after its lease expires and without racing a financial commit. It may remain longer.
+While retained, a changed payload conflicts; after removal, a never-accepted key can be
+reused for a different payload. New-key admission cleans at most 100 eligible claims per
+attempt. At 10,000 non-accepted claims per Customer, new keys receive the retryable 503
+above until capacity is available; existing accepted replay is not subject to this cap.
+
+To change anything in a retained claim's body, send a **new** `Idempotency-Key`.
 
 ## Errors
 
@@ -153,14 +162,14 @@ reservation, stock allocation or API cart row.
 
 ## Revocation semantics
 
-`CustomerApiPrincipal::revalidateForMutation()` runs inside the API checkout transaction
-after the shared Customer lock and before any write, including the isolated Cart insert.
-Rotate/disable take the Customer row exclusively before the credential row, so:
+Every claim insertion, takeover and lease release, as well as financial checkout,
+revalidates the credential inside a transaction after locking the Customer. Rotation and
+disable take the Customer row exclusively before the credential row, so:
 
 - a mutation that acquired the Customer lock and revalidated before the revocation
   linearization point may finish, and revocation waits for it;
-- a request merely admitted before revocation but not yet revalidated fails with 401 and
-  performs no write;
+- a request merely admitted before revocation but not yet fenced cannot mutate a claim
+  or create an Order;
 - a request after revocation never authenticates.
 
 ## Lock order
@@ -180,11 +189,13 @@ resources. The API never enters checkout holding Order/Payment, supplier,
 policy-exclusive or restore-exclusive locks. It retains the credential shared lock
 through commit and never mutates the Customer's Telegram/Web Cart.
 
-Claim acquisition commits separately before this financial transaction. After the
-credential fence, checkout locks the claim row and verifies its attempt token before
-creating a Cart or touching a wallet. An expired lease cannot be stolen during financial
-commit, and a suspended worker whose token was replaced returns 409 `in_progress`
-without purchasing. Acceptance cannot silently succeed for a stale token.
+Claim acquisition commits separately before this financial transaction. New claim
+admission takes Customer exclusive → credential shared to serialize its quota and
+cleanup; takeover and lease release take Customer shared → credential shared → claim.
+After its credential fence, checkout locks the claim row and verifies its attempt token
+before creating a Cart or touching a wallet. An expired lease cannot be stolen during
+financial commit, and a suspended worker whose claim was deleted or token replaced cannot
+purchase. Acceptance cannot silently succeed for a stale token.
 
 S11 (#628) accounts for the Product FK `KEY SHARE` lock taken by the isolated
 Cart item insert. PostgreSQL checkout/inventory/supplier lifecycle Product
@@ -685,3 +696,25 @@ No CI/CD inspection, production access, activation, deployment, commit or push w
 The disposable HTTP/Redis containers, both smoke/regression databases and temporary
 router/worker/fixture instrumentation were removed. The pre-existing PostgreSQL container
 was left running.
+
+## Local claim and delivery verification (2026-11-16)
+
+Focused SQLite API, delivery, consent and documentation suites passed 59 tests
+and 2,589 assertions. Ten targeted change scenarios also passed on a disposable
+PostgreSQL 16.16 database (95 assertions). A broader PostgreSQL run of the
+SQLite-oriented suites had nine fixture errors because PostgreSQL correctly
+enforced existing Product price and Order Item constraints; it is not a suite pass.
+
+Independent PHP processes against a separate disposable PostgreSQL database
+exercised an uncommitted competing claim insert (bounded at 2.003 seconds),
+revocation before claim mutation (401 and no new claim), and the database guard
+against deleting a claim whose canonical checkout key already belongs to an
+Order. Three concurrent identical balance checkouts returned one Order, one
+Payment, one debit and one allocated unit; the remaining balance was 4 USDT
+after synthetic 6-USDT funding. A checkout holding its financial locks raced a
+separate cleanup-triggering admission; replay retained the same Order and the
+same one-debit economic state.
+
+These local probes are not a full concurrency qualification: Windows PHP lacks
+`pcntl`, so the repository's fork-based PostgreSQL concurrency suite was not run.
+No production provider, live money, deployment or CI run was involved.

@@ -57,6 +57,16 @@ state; they never contain keys or balances.
 - Money, pricing precedence, the four preference modes, expected-price consent, durable
   idempotency across rotation, timeout and partial-delivery recovery, refunds, key
   security, admission budgets, safe error handling, and the honest scope/status limits.
+- Checkout examples require a preauthorized payload saved alongside its stable key; a
+  503 or timeout can have an unknown outcome, so retry that exact intent or inspect
+  order history rather than placing a replacement order. Python examples disable
+  redirects to avoid sending credentials to another origin.
+- Accepted claims remain permanently replayable. Unaccepted claims may be cleaned
+  up after 24 hours once their lease has expired and no financial transaction owns
+  them; protected claims are retained and bounded cleanup may take longer. At 10,000
+  unprotected unaccepted claims per Customer, new keys receive `503 temporarily_unavailable`
+  with `Retry-After: 5`.
+  API order responses do not provide a Recovery Key.
 - Field tables for every published schema with enum values, patterns, bounds and a JSON
   example, all of which appear in the initial HTML.
 
@@ -92,7 +102,10 @@ Purpose notes for the choices that are not self-evident:
 - Lead paragraphs and the section list use `--sf-ink` rather than `--sf-muted`, because the
   muted token measures 4.39:1 on the page paper (it passes at 4.68:1 only on surfaces).
 
-## Verification (2026-10-16)
+## Historical verification (2026-10-16)
+
+The following observations describe the documentation as it existed on that date,
+not verification of later documentation or example changes.
 
 ### Behaviour tests
 
@@ -198,3 +211,24 @@ purchase, real payment, production host or CI run participated.
   `CustomerApiAdmissionPostgresTest` and `CustomerApiCredentialsPostgresTest` carry the
   `postgres-release` group but are absent from `phpunit.postgres.xml` at `4c5efe0a`. It is
   untouched by this ticket and was not fixed here.
+
+## Local contract verification (2026-11-16)
+
+The actual `/api-docs` page was opened against a disposable SQLite application
+at desktop and 390-pixel mobile widths. English selection worked; the mobile
+document width matched the viewport. The published OpenAPI accepted `0.10`,
+rejected zero for an expected USD total and declared `Retry-After` on 409.
+
+The published create-order cURL, Python, JavaScript and PHP examples each made
+two requests to a local HTTP fixture using the same IDR-only payload and
+idempotency key; none requested a new quote. A separate Python balance fixture
+returned a cross-origin redirect, which the example rejected without forwarding
+its synthetic bearer. These are fixture checks, not live network or purchasing
+qualification.
+
+`python scripts/test-customer-api-proxy.py /path/to/nginx` exercised the real
+Nginx routing configuration with local FastCGI handlers replaced by 204
+responses. Canonical API and front-controller routes remained reachable; raw
+and encoded path-info aliases returned no-store 404 and their synthetic query
+values did not enter the fixture access log. This is not a production proxy,
+CDN, or full FastCGI integration check.

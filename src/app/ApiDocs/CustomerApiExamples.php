@@ -24,6 +24,7 @@ final class CustomerApiExamples
         'IDEMPOTENCY_KEY' => 'One stable key per purchase intent.',
         'EXPECTED_IDR_TOTAL' => 'Whole-rupiah `total` copied from the quote.',
         'EXPECTED_USD_TOTAL' => 'USD `total` copied from the quote.',
+        'ORDER_BODY' => 'Exact preauthorized JSON order body, stored with the idempotency key for this intent.',
     ];
 
     /**
@@ -110,6 +111,12 @@ CODE;
         return <<<'CODE'
 import json, os, urllib.error, urllib.request
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+opener = urllib.request.build_opener(NoRedirect)
+
 ORIGIN = os.environ["STORE_ORIGIN"].rstrip("/")
 KEY = os.environ["CUSTOMER_API_KEY"]
 
@@ -126,7 +133,7 @@ def call(method: str, path: str, body: dict | None = None, headers: dict | None 
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             return response.status, json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read() or b"{}")
@@ -236,6 +243,12 @@ CODE;
         return <<<'CODE'
 import json, os, urllib.error, urllib.request
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+opener = urllib.request.build_opener(NoRedirect)
+
 ORIGIN = os.environ["STORE_ORIGIN"].rstrip("/")
 KEY = os.environ["CUSTOMER_API_KEY"]
 
@@ -248,7 +261,7 @@ def call(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
         headers={"Authorization": f"Bearer {KEY}", "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             return response.status, json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read() or b"{}")
@@ -368,6 +381,12 @@ CODE;
         return <<<'CODE'
 import json, os, urllib.error, urllib.request
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+opener = urllib.request.build_opener(NoRedirect)
+
 ORIGIN = os.environ["STORE_ORIGIN"].rstrip("/")
 KEY = os.environ["CUSTOMER_API_KEY"]
 PRODUCT_ID = os.environ["PRODUCT_ID"]
@@ -381,7 +400,7 @@ def call(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
         headers={"Authorization": f"Bearer {KEY}", "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             return response.status, json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read() or b"{}")
@@ -459,15 +478,19 @@ CODE;
     private function orderCurl(): string
     {
         return <<<'CODE'
-# One purchase intent, one stable key. Send EXPECTED_*_TOTAL for every currency you
-# authorize (copy `total` from the quote above). Repeating this exact command after a
-# timeout replays the same order. Never change the body under the same key.
+# Save this key and these exact values for the intent before submitting. Set
+# EXPECTED_USD_TOTAL only if you also authorize USD; omit it for an IDR-only quote.
+# A timeout or 503 has an unknown outcome: retry the same key and body.
 : "${STORE_ORIGIN:?export STORE_ORIGIN first}"
 : "${CUSTOMER_API_KEY:?export CUSTOMER_API_KEY first}"
 : "${PRODUCT_ID:?export PRODUCT_ID first}"
 : "${IDEMPOTENCY_KEY:?export IDEMPOTENCY_KEY first}"
 : "${EXPECTED_IDR_TOTAL:?export EXPECTED_IDR_TOTAL first}"
-: "${EXPECTED_USD_TOTAL:?export EXPECTED_USD_TOTAL first}"
+if [ -n "${EXPECTED_USD_TOTAL:-}" ]; then
+  ORDER_BODY="{\"product_id\":\"${PRODUCT_ID}\",\"quantity\":1,\"expected_totals\":{\"IDR\":\"${EXPECTED_IDR_TOTAL}\",\"USD\":\"${EXPECTED_USD_TOTAL}\"}}"
+else
+  ORDER_BODY="{\"product_id\":\"${PRODUCT_ID}\",\"quantity\":1,\"expected_totals\":{\"IDR\":\"${EXPECTED_IDR_TOTAL}\"}}"
+fi
 
 curl --fail-with-body --silent --show-error --connect-timeout 5 --max-time 15 \
   --request POST \
@@ -475,7 +498,7 @@ curl --fail-with-body --silent --show-error --connect-timeout 5 --max-time 15 \
   --header 'Content-Type: application/json' \
   --header 'Accept: application/json' \
   --header "Idempotency-Key: ${IDEMPOTENCY_KEY}" \
-  --data "{\"product_id\":\"${PRODUCT_ID}\",\"quantity\":1,\"expected_totals\":{\"IDR\":\"${EXPECTED_IDR_TOTAL}\",\"USD\":\"${EXPECTED_USD_TOTAL}\"}}" \
+  --data "$ORDER_BODY" \
   "${STORE_ORIGIN}/api/v1/orders"
 CODE;
     }
@@ -485,44 +508,43 @@ CODE;
         return <<<'CODE'
 import json, os, urllib.error, urllib.request
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+opener = urllib.request.build_opener(NoRedirect)
+
 ORIGIN = os.environ["STORE_ORIGIN"].rstrip("/")
 KEY = os.environ["CUSTOMER_API_KEY"]
-PRODUCT_ID = os.environ["PRODUCT_ID"]
+ORDER_BODY = os.environ["ORDER_BODY"]  # exact preauthorized JSON saved with the key
 IDEMPOTENCY_KEY = os.environ["IDEMPOTENCY_KEY"]
 
 
-def call(method: str, path: str, body: dict | None = None, headers: dict | None = None) -> tuple[int, dict]:
+def call(method: str, path: str, body: str, headers: dict | None = None) -> tuple[int, dict, object]:
     request = urllib.request.Request(
         ORIGIN + path,
         method=method,
-        data=None if body is None else json.dumps(body).encode("utf-8"),
+        data=body.encode("utf-8"),
         headers={
             "Authorization": f"Bearer {KEY}",
             "Accept": "application/json",
+            "Content-Type": "application/json",
             **(headers or {}),
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return response.status, json.loads(response.read() or b"{}")
+        with opener.open(request, timeout=15) as response:
+            return response.status, json.loads(response.read() or b"{}"), response.headers
     except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read() or b"{}")
+        return error.code, json.loads(error.read() or b"{}"), error.headers
 
 
-# 1. Quote the exact quantity and authorize every currency you accept.
-status, product = call("GET", f"/api/v1/products/{PRODUCT_ID}?quantity=1")
-if status != 200:
-    raise SystemExit(f"quote failed: {status} {product}")
-expected = {quote["currency"]: quote["total"] for quote in product["data"]["quotes"] if quote["eligible"]}
-if not expected:
-    raise SystemExit("this Product has no eligible price")
-
-# 2. One purchase intent: the same key and the same body on every retry.
-order_body = {"product_id": PRODUCT_ID, "quantity": 1, "expected_totals": expected}
-status, order = call("POST", "/api/v1/orders", order_body, {"Idempotency-Key": IDEMPOTENCY_KEY})
+# Obtain and authorize a quote separately, then persist its exact JSON body and
+# idempotency key together before sending. Never fetch a fresh quote on retry.
+status, order, response_headers = call("POST", "/api/v1/orders", ORDER_BODY, {"Idempotency-Key": IDEMPOTENCY_KEY})
 
 if status == 409 and order.get("error", {}).get("code") == "in_progress":
-    raise SystemExit(f"identical request still running, retry after {order['error'].get('request_id')}")
+    raise SystemExit(f"identical request still running; retry after {response_headers.get('Retry-After', 'unknown')} seconds")
 if status not in (200, 201):
     raise SystemExit(f"order failed: {status} {order}")
 
@@ -535,8 +557,9 @@ CODE;
         return <<<'CODE'
 const origin = process.env.STORE_ORIGIN.replace(/\/+$/, "");
 const key = process.env.CUSTOMER_API_KEY;
-const productId = process.env.PRODUCT_ID;
+const orderBody = process.env.ORDER_BODY; // exact preauthorized JSON saved with the key
 const idempotencyKey = process.env.IDEMPOTENCY_KEY;
+if (!orderBody || !idempotencyKey) throw new Error("ORDER_BODY and IDEMPOTENCY_KEY are required");
 
 async function call(method, path, body, headers = {}) {
   const response = await fetch(origin + path, {
@@ -548,25 +571,18 @@ async function call(method, path, body, headers = {}) {
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       ...headers,
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body,
   });
   const payload = await response.json().catch(() => ({}));
   return { status: response.status, payload };
 }
 
-// 1. Quote the exact quantity and authorize every currency you accept.
-const quote = await call("GET", `/api/v1/products/${productId}?quantity=1`);
-if (quote.status !== 200) throw new Error(`quote failed: ${quote.status} ${JSON.stringify(quote.payload)}`);
-const expectedTotals = Object.fromEntries(
-  quote.payload.data.quotes.filter((entry) => entry.eligible).map((entry) => [entry.currency, entry.total]),
-);
-if (Object.keys(expectedTotals).length === 0) throw new Error("this Product has no eligible price");
-
-// 2. One purchase intent: the same key and the same body on every retry.
+// Obtain and authorize a quote separately; persist the exact JSON and key together
+// before sending. Never fetch a fresh quote on retry.
 const order = await call(
   "POST",
   "/api/v1/orders",
-  { product_id: productId, quantity: 1, expected_totals: expectedTotals },
+  orderBody,
   { "Idempotency-Key": idempotencyKey },
 );
 
@@ -588,10 +604,13 @@ CODE;
 
 $origin = rtrim((string) getenv('STORE_ORIGIN'), '/');
 $key = (string) getenv('CUSTOMER_API_KEY');
-$productId = (string) getenv('PRODUCT_ID');
+$orderBody = getenv('ORDER_BODY'); // exact preauthorized JSON saved with the key
+if ($orderBody === false || $orderBody === '') {
+    throw new RuntimeException('ORDER_BODY is required');
+}
 $idempotencyKey = (string) getenv('IDEMPOTENCY_KEY');
 
-$call = function (string $method, string $path, ?array $body = null, array $headers = []) use ($origin, $key): array {
+$call = function (string $method, string $path, ?string $body = null, array $headers = []) use ($origin, $key): array {
     $curl = curl_init($origin.$path);
     curl_setopt_array($curl, [
         CURLOPT_RETURNTRANSFER => true,
@@ -602,7 +621,7 @@ $call = function (string $method, string $path, ?array $body = null, array $head
             'Authorization: Bearer '.$key,
             'Accept: application/json',
         ], $body === null ? [] : ['Content-Type: application/json'], $headers),
-        CURLOPT_POSTFIELDS => $body === null ? null : json_encode($body, JSON_THROW_ON_ERROR),
+        CURLOPT_POSTFIELDS => $body,
     ]);
     $raw = curl_exec($curl);
     $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
@@ -615,26 +634,12 @@ $call = function (string $method, string $path, ?array $body = null, array $head
     return [$status, json_decode($raw, true, 32, JSON_THROW_ON_ERROR)];
 };
 
-// 1. Quote the exact quantity and authorize every currency you accept.
-[$status, $product] = $call('GET', '/api/v1/products/'.$productId.'?quantity=1');
-if ($status !== 200) {
-    exit('quote failed: '.$status.' '.json_encode($product));
-}
-$expected = [];
-foreach ($product['data']['quotes'] as $quote) {
-    if ($quote['eligible']) {
-        $expected[$quote['currency']] = $quote['total'];
-    }
-}
-if ($expected === []) {
-    exit('this Product has no eligible price');
-}
-
-// 2. One purchase intent: the same key and the same body on every retry.
+// Obtain and authorize a quote separately; persist the exact JSON and key together
+// before sending. Never fetch a fresh quote on retry.
 [$status, $order] = $call(
     'POST',
     '/api/v1/orders',
-    ['product_id' => $productId, 'quantity' => 1, 'expected_totals' => $expected],
+    $orderBody,
     ['Idempotency-Key: '.$idempotencyKey],
 );
 
@@ -668,6 +673,12 @@ CODE;
         return <<<'CODE'
 import json, os, urllib.error, urllib.request
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+opener = urllib.request.build_opener(NoRedirect)
+
 ORIGIN = os.environ["STORE_ORIGIN"].rstrip("/")
 KEY = os.environ["CUSTOMER_API_KEY"]
 
@@ -678,7 +689,7 @@ def call(path: str) -> tuple[int, dict]:
         headers={"Authorization": f"Bearer {KEY}", "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             return response.status, json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read() or b"{}")
@@ -771,6 +782,12 @@ CODE;
         return <<<'CODE'
 import json, os, urllib.error, urllib.request
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+opener = urllib.request.build_opener(NoRedirect)
+
 ORIGIN = os.environ["STORE_ORIGIN"].rstrip("/")
 KEY = os.environ["CUSTOMER_API_KEY"]
 ORDER_ID = os.environ["ORDER_ID"]
@@ -782,7 +799,7 @@ def call(path: str) -> tuple[int, dict]:
         headers={"Authorization": f"Bearer {KEY}", "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             return response.status, json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read() or b"{}")
@@ -859,8 +876,8 @@ CODE;
     {
         return <<<'CODE'
 # Recovery read. `not_ready` and `partial` are normal 200 answers, not errors.
-# When `pagination.has_more` is true, request the same path with
-# `&cursor=${pagination.next_cursor}` until it is false. Each unit appears once.
+# When `data.pagination.has_more` is true, request the same path with
+# `?cursor=<data.pagination.next_cursor>` until it is false. Each unit appears once.
 : "${STORE_ORIGIN:?export STORE_ORIGIN first}"
 : "${CUSTOMER_API_KEY:?export CUSTOMER_API_KEY first}"
 : "${ORDER_ID:?export ORDER_ID first}"
@@ -877,6 +894,12 @@ CODE;
         return <<<'CODE'
 import json, os, time, urllib.error, urllib.request
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+opener = urllib.request.build_opener(NoRedirect)
+
 ORIGIN = os.environ["STORE_ORIGIN"].rstrip("/")
 KEY = os.environ["CUSTOMER_API_KEY"]
 ORDER_ID = os.environ["ORDER_ID"]
@@ -888,7 +911,7 @@ def call(path: str) -> tuple[int, dict]:
         headers={"Authorization": f"Bearer {KEY}", "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             return response.status, json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read() or b"{}")

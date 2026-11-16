@@ -158,9 +158,9 @@ final class OpenApiDocument
     {
         return [
             'X-Request-ID' => ['description' => 'Request id, also returned in `error.request_id`.', 'schema' => ['type' => 'string', 'format' => 'uuid']],
-            'X-RateLimit-Limit' => ['description' => 'Limit of the budget with the least remaining headroom.', 'schema' => ['type' => 'integer']],
-            'X-RateLimit-Remaining' => ['description' => 'Remaining requests in that budget.', 'schema' => ['type' => 'integer']],
-            'X-RateLimit-Reset' => ['description' => 'Epoch-second conservative ceiling for that budget window.', 'schema' => ['type' => 'integer']],
+            'X-RateLimit-Limit' => ['description' => 'When admission succeeds, limit of the budget with the least remaining headroom.', 'schema' => ['type' => 'integer']],
+            'X-RateLimit-Remaining' => ['description' => 'When admission succeeds, remaining requests in that budget.', 'schema' => ['type' => 'integer']],
+            'X-RateLimit-Reset' => ['description' => 'When admission succeeds, epoch-second conservative ceiling for that budget window.', 'schema' => ['type' => 'integer']],
         ];
     }
 
@@ -173,10 +173,10 @@ final class OpenApiDocument
             'X-Request-ID' => ['description' => 'Request id matching `error.request_id`.', 'schema' => ['type' => 'string', 'format' => 'uuid']],
         ];
         if ($status === 429) {
-            $headers['Retry-After'] = ['description' => 'Seconds to wait before retrying the same request.', 'schema' => ['type' => 'integer']];
+            $headers += array_diff_key($this->successHeaders(), $headers);
         }
-        if ($status === 503) {
-            $headers['Retry-After'] = ['description' => 'Seconds to wait before retrying; nothing was charged.', 'schema' => ['type' => 'integer']];
+        if (in_array($status, [409, 429, 503], true)) {
+            $headers['Retry-After'] = ['description' => 'Seconds to wait before retrying, when supplied (for 409, only in_progress).', 'schema' => ['type' => 'integer']];
         }
 
         return $headers;

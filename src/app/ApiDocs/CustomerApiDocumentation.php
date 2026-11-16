@@ -53,7 +53,7 @@ final class CustomerApiDocumentation
 
     public const POSITIVE_IDR_PATTERN = '^[1-9][0-9]*$';
 
-    public const POSITIVE_USD_PATTERN = '^(?:[1-9][0-9]*(?:\.[0-9]{1,6})?|0\.(?:[0-9]{0,5}[1-9]))$';
+    public const POSITIVE_USD_PATTERN = '^(?:[1-9][0-9]*(?:\.[0-9]{1,6})?|0\.(?=[0-9]{0,5}[1-9])[0-9]{1,6})$';
 
     public const SERVER_TO_SERVER_ONLY = 'Authorization: Bearer <secret>';
 
@@ -151,8 +151,8 @@ final class CustomerApiDocumentation
                 'id' => 'Metode HTTP tidak didukung endpoint tersebut.',
                 'en' => 'The HTTP method is not supported by that endpoint.']],
             'idempotency_conflict' => ['status' => 409, 'meaning' => [
-                'id' => 'Key ini sudah pernah diterima dengan payload berbeda. Kirim payload yang ingin diubah memakai key baru.',
-                'en' => 'The key was already accepted with a different payload. Send the changed payload with a new key.']],
+                'id' => 'Key masih terikat pada payload berbeda. Jangan membuat key baru untuk mengganti pesanan yang hasilnya belum pasti.',
+                'en' => 'The key is still bound to a different payload. Do not create a new key to replace an order whose outcome is unknown.']],
             'price_changed' => ['status' => 409, 'meaning' => [
                 'id' => 'Salah satu total yang diotorisasi tidak lagi cocok. `error.quotes` selalu berisi total IDR terbaru; total USD hanya ada bila snapshot terkunci memiliki total USD lengkap. Tidak ada debit atau alokasi.',
                 'en' => 'An authorized expected total no longer matches. `error.quotes` always includes the fresh IDR total; USD is included only when the locked snapshot has a complete USD total. Nothing was debited or allocated.']],
@@ -181,8 +181,8 @@ final class CustomerApiDocumentation
                 'id' => 'Owner mematikan Customer API. Semua path `/api/v1` dijawab sebelum autentikasi, body, klaim, atau pekerjaan finansial. Tidak ada key, saldo, Order, idempotensi, atau hasil pengiriman yang dihapus; coba lagi setelah `Retry-After`.',
                 'en' => 'The Owner turned the Customer API off. Every `/api/v1` path is answered before authentication, body reads, claims or financial work. No key, balance, Order, idempotency outcome or delivery result is erased; retry after `Retry-After`.']],
             'temporarily_unavailable' => ['status' => 503, 'meaning' => [
-                'id' => 'Admission bersama tidak dapat ditegakkan, maintenance checkout, pause saldo, drift, atau hasil pengiriman melewati batas aman. Tidak ada uang yang dipindahkan.',
-                'en' => 'Shared admission cannot be enforced, checkout maintenance, a balance pause, drift, or a delivery result beyond its safe bound. Nothing was charged.']],
+                'id' => 'Admission bersama, checkout, saldo, atau hasil pengiriman sementara tidak tersedia. Hasil checkout mungkin sudah tercatat; ulangi key dan body yang tersimpan atau periksa riwayat.',
+                'en' => 'Shared admission, checkout, balance or delivery is temporarily unavailable. Checkout may already have been accepted; retry the stored key and body or check order history.']],
         ];
     }
 
@@ -259,8 +259,8 @@ final class CustomerApiDocumentation
                         'Optional Product category filter as a positive id, combined with AND.', ['pattern' => '^[1-9][0-9]*$']),
                     self::query('family_id', 'string', 'Filter opsional Product Family berupa id positif, digabung dengan AND.',
                         'Optional Product Family filter as a positive id, combined with AND.', ['pattern' => '^[1-9][0-9]*$']),
-                    self::query('available', 'string', 'Opsional. `true` membatasi pada Produk yang dapat dibeli, `false` pada Produk yang tidak dapat dibeli, kosong untuk keduanya.',
-                        'Optional. `true` restricts to purchasable Products, `false` to unavailable ones, omitted for both.', ['enum' => ['true', 'false']]),
+                    self::query('available', 'string', 'Opsional. `true` atau `false` memfilter ketersediaan pembelian umum, bukan kecukupan stok untuk `quantity`; hilangkan untuk keduanya.',
+                        'Optional. `true` or `false` filters general purchase availability, not whether stock covers `quantity`; omit for both.', ['enum' => ['true', 'false']]),
                 ],
                 'request' => null,
                 'responses' => [
@@ -340,8 +340,8 @@ final class CustomerApiDocumentation
                 ],
                 'errors' => ['unauthenticated', 'backend_only', 'not_found', 'payload_too_large', 'invalid_input', 'insufficient_funds', 'price_changed', 'idempotency_conflict', 'stock_conflict', 'in_progress', 'rate_limited', 'temporarily_unavailable'],
                 'notes' => [
-                    ['id' => 'Untuk mengubah apa pun di body, kirim key **baru**. Payload berbeda pada key lama selalu 409 `idempotency_conflict`.',
-                        'en' => 'To change anything in the body, send a **new** key. A changed payload on an old key is always 409 `idempotency_conflict`.'],
+                    ['id' => 'Selama klaim tersimpan, payload berbeda pada key yang sama menghasilkan 409 `idempotency_conflict`. Klaim belum diterima dapat dibersihkan setelah 24 jam; klaim diterima permanen.',
+                        'en' => 'While a claim is retained, a changed payload on the same key returns 409 `idempotency_conflict`. Unaccepted claims may be cleaned up after 24 hours; accepted claims are permanent.'],
                     ['id' => 'Klaim yang berhasil tidak pernah kedaluwarsa dan tidak pernah dipangkas, termasuk setelah rotasi atau penonaktifan key.',
                         'en' => 'A successful claim never expires and is never pruned, including after key rotation or disable.'],
                     ['id' => 'Jika respons hilang karena timeout, ulangi permintaan yang sama dengan key yang sama, atau baca `GET /api/v1/orders`.',
@@ -591,7 +591,7 @@ final class CustomerApiDocumentation
                 'type' => 'object',
                 'additionalProperties' => false,
                 'minProperties' => 1,
-                'description' => 'Price-change consent only. The server always recomputes the price and never treats these values as payment authority. Both `2` and `2.000000` are the same USD amount.',
+                'description' => 'Price-change consent only. The server recomputes the price. Both `2` and `2.000000` are the same USD amount.',
                 'properties' => [
                     'IDR' => ['type' => 'string', 'pattern' => self::POSITIVE_IDR_PATTERN, 'description' => 'Expected whole-rupiah total for the authorized quantity.'],
                     'USD' => ['type' => 'string', 'pattern' => self::POSITIVE_USD_PATTERN, 'description' => 'Expected positive USD total with up to six decimals, exactly representable in micro-USDT.'],

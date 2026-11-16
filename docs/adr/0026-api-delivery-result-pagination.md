@@ -33,9 +33,13 @@ Add a bounded unit traversal to the existing owned delivery endpoint.
   read; it is never reported as `partial` supplier fulfillment.
 - **Traversal.** Non-retired allocated rows are ordered by ascending identity. One
   look-ahead row decides whether another page exists but is never decrypted or projected.
-  The page is byte-sized from the exact JSON each unit will emit, including
-  maximum-length fields and escaping, under a 1 MiB bound; the page ends early with a
-  cursor when needed. A genuinely oversized single unit still fails closed with 503.
+  Within the requested count, units are projected sequentially and sized using the exact
+  JSON each will emit, including maximum-length fields and escaping, under a 1 MiB bound.
+  The first unit exceeding the remaining byte budget is projected to determine its size
+  but is not returned; no later unit is decrypted. The cursor identifies the last unit
+  included, so the overflow candidate is retried on the next page. A malformed candidate
+  fails the current request closed, and a genuinely oversized single unit still fails
+  closed with 503.
 - **Stable numbering.** `units[].number` is offset by the count of active units at or
   before the cursor, so it remains the shared presentation's logical account number
   across pages instead of restarting at 1.

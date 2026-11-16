@@ -51,7 +51,7 @@ class StorefrontApiDocsTest extends TestCase
         $this->assertStringContainsString('--connect-timeout 5 --max-time 15', $body);
         $this->assertStringContainsString('AbortSignal.timeout(15_000)', $body);
         $this->assertStringContainsString('CURLOPT_TIMEOUT =&gt; 15', $body);
-        $this->assertStringContainsString('urlopen(request, timeout=15)', $body);
+        $this->assertStringContainsString('opener.open(request, timeout=15)', $body);
         $this->assertStringContainsString('Idempotency-Key', $body);
         $this->assertStringNotContainsString('psk_', $body);
         $this->assertStringNotContainsString('capi_', $body);
@@ -226,6 +226,19 @@ class StorefrontApiDocsTest extends TestCase
         $this->assertSame(['next_cursor', 'has_more'], array_keys($deliverySample['pagination']));
         $this->assertMatchesRegularExpression('/^[A-Za-z0-9_-]{1,512}$/', $deliverySample['pagination']['next_cursor']);
 
+        $pattern = '/'.$schemas['ExpectedTotals']['properties']['USD']['pattern'].'/';
+        foreach (['0.1', '0.10', '0.000010', '2.000000'] as $amount) {
+            $this->assertMatchesRegularExpression($pattern, $amount);
+        }
+        foreach (['0', '0.000000', '0.0000001'] as $amount) {
+            $this->assertDoesNotMatchRegularExpression($pattern, $amount);
+        }
+        $this->assertArrayHasKey('Retry-After', $create['responses']['409']['headers']);
+        $this->assertArrayHasKey('X-RateLimit-Remaining', $create['responses']['429']['headers']);
+        $this->assertSame(1, $schemas['ExpectedTotals']['minProperties']);
+        $this->assertSame('string', $schemas['ExpectedTotals']['properties']['IDR']['type']);
+        $this->assertSame('string', $schemas['ExpectedTotals']['properties']['USD']['type']);
+
         $reference = (string) $this->get(route('storefront.api-docs.reference'))->getContent();
         $this->assertStringContainsString('## Rate limits', $reference);
         foreach ((new CustomerApiDocumentation)->budgets() as $budget) {
@@ -284,6 +297,10 @@ class StorefrontApiDocsTest extends TestCase
         $this->assertStringContainsString('not a fiat-custody claim', $body);
         $this->assertStringContainsString('Never retry a purchase with a new key', $body);
         $this->assertStringContainsString('Authorization: Bearer <secret>', $body);
+        $this->assertStringContainsString('store the key and exact authorized body together', $body);
+        $this->assertStringContainsString('The API does not return a Recovery Key', $body);
+        $this->assertStringContainsString('10,000 unprotected unaccepted claims per Customer', $body);
+        $this->assertStringNotContainsString('nothing was charged', strtolower($body));
         $this->assertStringContainsString(route('storefront.api-docs.openapi'), $body);
     }
 

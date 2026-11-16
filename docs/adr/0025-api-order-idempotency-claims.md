@@ -19,9 +19,9 @@ admitted credential before any money moves.
 Add `customer_api_order_claims`, owned by `App\Services\CustomerApi\CustomerApiOrderClaims`.
 
 - **Durable identity.** The unique index is `(customer_id, operation, idempotency_key)`
-  with `operation = create_order`. A claim is created with `INSERT` and recovered by
-  reading the unique key; there is no check-then-insert. The key is never scoped by
-  key version, so rotation cannot reset or steal a claim.
+  with `operation = create_order`. The key is never scoped by credential version,
+  so rotation cannot reset an accepted claim. Admission serializes new claims per
+  Customer and uses the unique index to arbitrate any external insert race.
 - **Canonical payload fingerprint.** A claim stores the SHA-256 fingerprint of the
   versioned canonical payload: Product id, normalized quantity, the normalized
   supported-input map (empty today), the *requested* preference mode and the
@@ -49,6 +49,24 @@ Add `customer_api_order_claims`, owned by `App\Services\CustomerApi\CustomerApiO
   a stale token. Accepted claims never expire, are never pruned and can never
   create a second purchase. After rollback, `abandon()` releases only its own token
   for recovery.
+- **Bounded non-accepted history.** Accepted claims are permanent. An in-progress
+  claim is eligible for opportunistic deletion only at least 24 hours after its
+  original creation, after its lease expires and while its row is locked against
+  checkout/takeover. Existing Orders using its origin or canonical checkout key
+  protect it from deletion. PostgreSQL excludes these economic recovery claims
+  from the rejected-claim quota using indexed Order lookups. A stale worker cannot
+  commit without re-locking its original claim and verifying its token. Each
+  new-key admission examines at most 100 eligible rows; per Customer at most
+  10,000 non-accepted claims without an Order are admitted. At capacity a new key
+  gets 503 `temporarily_unavailable` with `Retry-After: 5`; cleanup commits even
+  if legacy history still exceeds the cap, so retries make progress as leases
+  expire. Accepted replays bypass the cap. After deletion a never-accepted key can
+  be reused for a different payload; until deletion its fingerprint remains binding.
+  SQLite lacks PostgreSQL's built-in SHA-256 expression: an unmarked legacy Order
+  found only by canonical checkout key is still protected from deletion there,
+  but remains counted and can occupy an early cleanup batch. If such exceptional
+  legacy history exhausts SQLite capacity, reconcile/adopt the affected claims
+  before retrying; never delete their economic evidence.
 - **Namespaced canonical checkout key.** `api-` + `sha256('api-order:<claim id>')[0..60]`,
   exactly 64 characters, derived only from the durable claim row, unique on
   `orders`. A bot key is a 64-character HMAC hex, so the namespaces cannot collide.
@@ -61,12 +79,12 @@ Add `customer_api_order_claims`, owned by `App\Services\CustomerApi\CustomerApiO
   credential allocation, supplier reservations and durable work still commit inside
   the shared `OrderCheckoutService` transaction. The claim layer never writes money
   and never becomes a second checkout.
-- **Revocation fence.** The API transaction locks the Customer row (shared) first,
-  exactly like `CustomerApiCredentials::rotate/disable` lock it exclusively before
-  the credential row, then calls `CustomerApiPrincipal::revalidateForMutation()`
-  before creating the isolated cart. Holding that shared Customer lock through commit
-  means a revocation cannot commit after the fence while a pre-revocation mutation may
-  finish, and revocation waits for it.
+- **Revocation fence.** Each claim insert, takeover, lease release and financial
+  transaction locks the Customer before revalidating the credential. New-claim
+  admission takes Customer exclusive to serialize its quota; takeover, release
+  and financial commit take Customer shared. Rotation/disable take Customer
+  exclusive before the credential row. Revocation committed before the fence
+  prevents claim mutation; an already-fenced mutation may finish first.
 - **Audit identity.** The claim stores the admitted `credential_id` and safe
   request metadata. No credential-bearing HTTP response body is stored; replay
   metadata is reconstructed from the canonical Order/Payment/items.
@@ -87,6 +105,9 @@ Add `customer_api_order_claims`, owned by `App\Services\CustomerApi\CustomerApiO
 - The financial lock graph gains `Customer shared -> credential shared -> claim
   FOR UPDATE -> isolated API Cart -> existing checkout chain`, published in the
   [balance A0 baseline](../balance-a0-baseline.md). Initial claim insertion commits
-  separately and holds no lock when entering that financial transaction.
-- Claim rows are append-only for their identity and acceptance, enforced by model
-  guards and PostgreSQL triggers. Claims are never deleted.
+  separately under Customer exclusive → credential shared → claim/cleanup, with
+  no locks held when entering the financial transaction. Insert and takeover
+  PostgreSQL lock waits are bounded by the remaining public deadline.
+- Claim identity and acceptance are immutable while retained. PostgreSQL guards
+  reject deletion of accepted, recent, live-lease or Order-protected claims;
+  eligible non-accepted rows may be deleted only after the retention period.

@@ -429,6 +429,252 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
         $this->assertSame(3_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($customer)->balanceMicro());
     }
 
+    public function test_revocation_committed_before_claim_insert_or_takeover_prevents_claim_mutation(): void
+    {
+        foreach ([false, true] as $takeover) {
+            $customer = $this->customer(5_000_000);
+            $product = $this->product(1);
+            $principal = $this->principal($customer);
+            $key = $takeover ? 'revoked-takeover' : 'revoked-insert';
+            if ($takeover) {
+                $claim = app(CustomerApiOrderClaims::class)->acquire($principal, $this->request($key, $product))->claim;
+                DB::table('customer_api_order_claims')->where('id', $claim->id)->update(['lease_expires_at' => now()->subMinute()]);
+                $before = (array) DB::table('customer_api_order_claims')->where('id', $claim->id)->first();
+            }
+            $directory = $this->createWorkspace('revocation-before-'.$key);
+            try {
+                $results = $this->runConcurrentWorkers(2, function (int $index) use ($principal, $customer, $product, $key, $directory): string {
+                    if ($index === 0) {
+                        return DB::transaction(function () use ($customer, $directory): string {
+                            app(CustomerApiCredentials::class)->disable($customer);
+                            touch($directory.'/revocation-locked');
+                            $this->waitForMarker($directory.'/request-started');
+                            usleep(100_000);
+
+                            return 'revoked';
+                        });
+                    }
+                    $this->waitForMarker($directory.'/revocation-locked');
+                    touch($directory.'/request-started');
+
+                    return $this->apiPlace($principal, $key, $product);
+                });
+                $this->assertWorkersSucceeded($results);
+                $this->assertSame('revoked', $results[0]['value']);
+                $this->assertSame('err:unauthenticated', $results[1]['value']);
+            } finally {
+                $this->cleanupWorkspace($directory);
+            }
+            if ($takeover) {
+                $this->assertSame($before, (array) DB::table('customer_api_order_claims')->where('id', $claim->id)->first());
+            } else {
+                $this->assertSame(0, CustomerApiOrderClaim::where('customer_id', $customer->id)->count());
+            }
+            $this->assertSame(0, Order::where('customer_id', $customer->id)->count());
+        }
+    }
+
+    public function test_uncommitted_claim_insert_cannot_extend_the_public_wait(): void
+    {
+        $customer = $this->customer(5_000_000);
+        $product = $this->product(1);
+        $principal = $this->principal($customer);
+        $request = $this->request('uncommitted-claim', $product);
+        $directory = $this->createWorkspace('api-order-insert-bound');
+        try {
+            $results = $this->runConcurrentWorkers(2, function (int $index) use ($principal, $customer, $product, $request, $directory): string {
+                if ($index === 0) {
+                    return DB::transaction(function () use ($principal, $customer, $product, $request, $directory): string {
+                        CustomerApiOrderClaim::create([
+                            'customer_id' => $customer->id,
+                            'operation' => CustomerApiOrderClaim::OPERATION_CREATE_ORDER,
+                            'idempotency_key' => 'uncommitted-claim',
+                            'fingerprint' => $request->fingerprint(),
+                            'credential_id' => $principal->credentialId,
+                            'state' => CustomerApiOrderClaim::STATE_IN_PROGRESS,
+                            'attempt_token' => str_repeat('a', 32),
+                            'lease_expires_at' => now()->subMinute(),
+                            'preference' => BalancePaymentPreference::UsdFirst->value,
+                            'preference_source' => 'account',
+                            'product_id' => $product->id,
+                            'quantity' => 1,
+                            'expected_usd_total_micro' => 2_000_000,
+                        ]);
+                        touch($directory.'/inserted');
+                        usleep(5_000_000);
+
+                        return 'inserted';
+                    });
+                }
+                $this->waitForMarker($directory.'/inserted');
+                $started = hrtime(true);
+                $result = $this->apiPlace($principal, 'uncommitted-claim', $product);
+
+                return json_encode(['result' => $result, 'elapsed' => (hrtime(true) - $started) / 1_000_000_000], JSON_THROW_ON_ERROR);
+            });
+            $this->assertWorkersSucceeded($results);
+            $waiter = json_decode($results[1]['value'], true, flags: JSON_THROW_ON_ERROR);
+            $this->assertSame('err:temporarily_unavailable', $waiter['result']);
+            $this->assertLessThan(CustomerApiOrderClaims::WAIT_SECONDS + 0.3, $waiter['elapsed']);
+            $this->assertStringStartsWith('ok:', $this->apiPlace($principal, 'uncommitted-claim', $product));
+            $this->assertSame(1, Order::count());
+        } finally {
+            $this->cleanupWorkspace($directory);
+        }
+    }
+
+    public function test_cleanup_cannot_delete_an_expired_claim_while_its_checkout_commits(): void
+    {
+        $customer = $this->customer(5_000_000);
+        $product = $this->product(2);
+        $principal = $this->principal($customer);
+        $request = $this->request('old-financial-claim', $product);
+        $claim = CustomerApiOrderClaim::forceCreate([
+            'customer_id' => $customer->id,
+            'operation' => CustomerApiOrderClaim::OPERATION_CREATE_ORDER,
+            'idempotency_key' => 'old-financial-claim',
+            'fingerprint' => $request->fingerprint(),
+            'credential_id' => $principal->credentialId,
+            'state' => CustomerApiOrderClaim::STATE_IN_PROGRESS,
+            'attempt_token' => str_repeat('a', 32),
+            'lease_expires_at' => now()->subMinute(),
+            'preference' => BalancePaymentPreference::UsdFirst->value,
+            'preference_source' => 'account',
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'expected_usd_total_micro' => 2_000_000,
+            'created_at' => now()->subHours(25),
+            'updated_at' => now()->subHours(25),
+        ]);
+        $directory = $this->createWorkspace('api-cleanup-financial-race');
+        try {
+            $results = $this->runConcurrentWorkers(2, function (int $index) use ($principal, $product, $claim, $directory): string {
+                if ($index === 0) {
+                    Order::creating(function () use ($claim, $directory): void {
+                        // The lease may expire while checkout still owns the claim.
+                        DB::table('customer_api_order_claims')->where('id', $claim->id)->update(['lease_expires_at' => now()->subMinute()]);
+                        touch($directory.'/financial-locked');
+                        $this->waitForMarker($directory.'/cleanup-started');
+                        usleep(100_000);
+                    });
+
+                    return $this->apiPlace($principal, 'old-financial-claim', $product);
+                }
+                $this->waitForMarker($directory.'/financial-locked');
+                touch($directory.'/cleanup-started');
+
+                return $this->apiPlace($principal, 'cleanup-concurrent', $product);
+            });
+            $this->assertWorkersSucceeded($results);
+            $this->assertStringStartsWith('ok:', $results[0]['value']);
+            $this->assertStringStartsWith('ok:', $results[1]['value']);
+            $this->assertSame('accepted', $claim->fresh()->state);
+            $this->assertSame($results[0]['value'], $this->apiPlace($principal, 'old-financial-claim', $product));
+            $this->assertSame(2, Order::count());
+            $this->assertSame(2, $this->usdtPurchaseDebits([$customer->id]));
+        } finally {
+            $this->cleanupWorkspace($directory);
+        }
+    }
+
+    public function test_worker_suspended_after_takeover_cannot_purchase_after_its_claim_is_reclaimed(): void
+    {
+        $customer = $this->customer(6_000_000);
+        $product = $this->product(2);
+        $principal = $this->principal($customer);
+        $request = $this->request('reclaimed-stale-worker', $product);
+        $claim = CustomerApiOrderClaim::forceCreate([
+            'customer_id' => $customer->id,
+            'operation' => CustomerApiOrderClaim::OPERATION_CREATE_ORDER,
+            'idempotency_key' => 'reclaimed-stale-worker',
+            'fingerprint' => $request->fingerprint(),
+            'credential_id' => $principal->credentialId,
+            'state' => CustomerApiOrderClaim::STATE_IN_PROGRESS,
+            'attempt_token' => str_repeat('a', 32),
+            'lease_expires_at' => now()->subMinute(),
+            'preference' => BalancePaymentPreference::UsdFirst->value,
+            'preference_source' => 'account',
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'expected_usd_total_micro' => 2_000_000,
+            'created_at' => now()->subHours(25),
+            'updated_at' => now()->subHours(25),
+        ]);
+        $directory = $this->createWorkspace('api-cleanup-stale-worker');
+        try {
+            $results = $this->runConcurrentWorkers(2, function (int $index) use ($principal, $product, $claim, $directory): string {
+                if ($index === 0) {
+                    CustomerApiOrderClaim::retrieved(function (CustomerApiOrderClaim $retrieved) use ($claim, $directory): void {
+                        if ($retrieved->id === $claim->id && DB::transactionLevel() > 0) {
+                            DB::afterCommit(function () use ($directory): void {
+                                touch($directory.'/taken-over');
+                                $this->waitForMarker($directory.'/reclaimed');
+                            });
+                        }
+                    });
+
+                    return $this->apiPlace($principal, 'reclaimed-stale-worker', $product);
+                }
+                $this->waitForMarker($directory.'/taken-over');
+                DB::table('customer_api_order_claims')->where('id', $claim->id)->update(['lease_expires_at' => now()->subMinute()]);
+                $result = $this->apiPlace($principal, 'reclaim-trigger', $product);
+                touch($directory.'/reclaimed');
+
+                return $result;
+            });
+            $this->assertWorkersSucceeded($results);
+            $this->assertSame('err:temporarily_unavailable', $results[0]['value']);
+            $this->assertStringStartsWith('ok:', $results[1]['value']);
+            $this->assertNull($claim->fresh());
+            $this->assertStringStartsWith('ok:', $this->apiPlace($principal, 'reclaimed-stale-worker', $product));
+            $this->assertSame(2, Order::count());
+            $this->assertSame(2, $this->usdtPurchaseDebits([$customer->id]));
+        } finally {
+            $this->cleanupWorkspace($directory);
+        }
+    }
+
+    public function test_cleanup_preserves_an_orphaned_checkout_for_later_adoption(): void
+    {
+        $customer = $this->customer(5_000_000);
+        $product = $this->product(2);
+        $principal = $this->principal($customer);
+        $request = $this->request('orphan-recovery', $product);
+        $claim = CustomerApiOrderClaim::forceCreate([
+            'customer_id' => $customer->id,
+            'operation' => CustomerApiOrderClaim::OPERATION_CREATE_ORDER,
+            'idempotency_key' => 'orphan-recovery',
+            'fingerprint' => $request->fingerprint(),
+            'credential_id' => $principal->credentialId,
+            'state' => CustomerApiOrderClaim::STATE_IN_PROGRESS,
+            'attempt_token' => str_repeat('a', 32),
+            'lease_expires_at' => now()->subMinute(),
+            'preference' => BalancePaymentPreference::UsdFirst->value,
+            'preference_source' => 'account',
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'expected_usd_total_micro' => 2_000_000,
+            'created_at' => now()->subHours(25),
+            'updated_at' => now()->subHours(25),
+        ]);
+        $orderToken = $this->botPlace($this->botCart($customer, $product), 'orphan-bot');
+        $order = Order::sole();
+        DB::table('orders')->where('id', $order->id)
+            ->update(['checkout_key' => 'api-'.substr(hash('sha256', 'api-order:'.$claim->id), 0, 60)]);
+
+        $this->assertDatabaseConstraintRejects(
+            fn () => DB::table('customer_api_order_claims')->where('id', $claim->id)->delete(),
+            'Customer API order claim history is immutable',
+        );
+
+        $this->assertStringStartsWith('ok:', $this->apiPlace($principal, 'cleanup-other-key', $product));
+        $this->assertNotNull($claim->fresh());
+        $this->assertSame($orderToken, $this->apiPlace($principal, 'orphan-recovery', $product));
+        $this->assertSame($order->id, $claim->fresh()->order_id);
+        $this->assertSame(2, Order::count());
+        $this->assertSame(2, $this->usdtPurchaseDebits([$customer->id]));
+    }
+
     public function test_abandoned_claim_is_taken_over_exactly_once_after_its_lease_expires(): void
     {
         $customer = $this->customer(6_000_000);

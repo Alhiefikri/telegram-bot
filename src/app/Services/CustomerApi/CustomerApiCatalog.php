@@ -34,10 +34,12 @@ final class CustomerApiCatalog
             }
         }
         if (($filters['available'] ?? null) === 'true') {
-            $query->availableForPurchase();
+            $query->where('products.manual_unlimited', false)->availableForPurchase();
         }
         if (($filters['available'] ?? null) === 'false') {
-            $query->whereNot(fn (Builder $available) => $available->availableForPurchase());
+            $query->whereNot(fn (Builder $available) => $available
+                ->where('products.manual_unlimited', false)
+                ->availableForPurchase());
         }
         $products = $query->orderBy('products.id')->limit($filters['limit'] + 1)->get();
         $hasMore = $products->count() > $filters['limit'];

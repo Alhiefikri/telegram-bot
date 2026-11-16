@@ -29,9 +29,9 @@ Yang tersedia:
 - pesanan berbayar yang tahan pemutaran ulang (`POST /api/v1/orders`);
 - riwayat, status, dan hasil pesanan yang sudah dibeli (`GET /api/v1/orders`, `GET /api/v1/orders/{id}`, `GET /api/v1/orders/{id}/delivery`).
 
-Yang tidak ada di API ini: pengisian atau penyesuaian saldo, refund, transfer, penarikan, pengelolaan key, dan endpoint Admin. Key dikelola dari Store Bot. Bantuan dan refund tetap memakai halaman bantuan akun pada invoice pesanan.
+Yang tidak ada di API ini: pengisian atau penyesuaian saldo, refund, transfer, penarikan, pengelolaan key, dan endpoint Admin. Key dikelola dari Store Bot.
 
-Setiap respons memuat `X-Request-ID`. Catat nilai itu ketika melaporkan masalah: dukungan dapat menelusuri satu permintaan tanpanya.
+Setiap respons memuat `X-Request-ID`. Catat nilai itu ketika melaporkan masalah agar permintaan dapat ditelusuri.
 
 Setiap permintaan dibatasi anggaran admission bersama, jadi integrasi yang rapi tetap harus menangani 429 dan 503.
 
@@ -46,9 +46,9 @@ What is available:
 - replay-safe paid orders (`POST /api/v1/orders`);
 - history, status and results for orders already purchased (`GET /api/v1/orders`, `GET /api/v1/orders/{id}`, `GET /api/v1/orders/{id}/delivery`).
 
-What is not here: funding or adjusting a balance, refunds, transfers, withdrawals, key management and Admin endpoints. Keys are managed from the Store Bot. Support and refunds stay on the existing account-help page of an order invoice.
+What is not here: funding or adjusting a balance, refunds, transfers, withdrawals, key management and Admin endpoints. Keys are managed from the Store Bot.
 
-Every response carries `X-Request-ID`. Record it when reporting a problem: support can trace one request without it.
+Every response carries `X-Request-ID`. Record it when reporting a problem so the request can be traced.
 
 Every request shares admission budgets, so a well-behaved integration still handles 429 and 503.
 
@@ -59,20 +59,20 @@ MD),
 1. Buat Customer API key dari Store Bot, lalu simpan nilainya di secret store backend Anda.
 2. `GET /api/v1/balance` untuk memastikan key bekerja dan melihat saldo yang bisa dipakai.
 3. `GET /api/v1/products/{id}?quantity=1` dan catat nilai `total` dari kutipan mata uang yang Anda otorisasi.
-4. `POST /api/v1/orders` dengan `Idempotency-Key` yang stabil untuk niat pembelian itu dan `expected_totals` berisi nilai yang baru Anda catat.
+4. Simpan key stabil dan body yang telah diotorisasi bersama, lalu `POST /api/v1/orders` dengan keduanya.
 5. Simpan `id` pesanan. Bila respons hilang, ulangi langkah 4 dengan key dan payload yang sama, atau baca `GET /api/v1/orders`.
 6. `GET /api/v1/orders/{id}/delivery` setelah pengiriman siap. Pembacaan berulang mengembalikan unit yang sama; bila `pagination.has_more` true, lanjutkan dengan `pagination.next_cursor`.
 
-Semua contoh kode di halaman ini memakai variabel lingkungan `STORE_ORIGIN`, `CUSTOMER_API_KEY`, `PRODUCT_ID`, dan `IDEMPOTENCY_KEY`, memakai batas waktu yang tegas, memeriksa status HTTP, dan tidak pernah mencoba ulang pembelian dengan key baru.
+Contoh membaca variabel lingkungan yang relevan, memakai batas waktu, dan memeriksa status HTTP. Contoh Python, JavaScript, dan PHP untuk checkout memerlukan `ORDER_BODY` yang disimpan bersama `IDEMPOTENCY_KEY`.
 MD, <<<'MD'
 1. Create a Customer API key from the Store Bot and store the value in your backend secret store.
 2. `GET /api/v1/balance` to confirm the key works and to see spendable balances.
 3. `GET /api/v1/products/{id}?quantity=1` and note the `total` of each currency quote you authorize.
-4. `POST /api/v1/orders` with a stable `Idempotency-Key` for that purchase intent and `expected_totals` holding the values you just noted.
+4. Store a stable key and the authorized body together, then `POST /api/v1/orders` with both.
 5. Keep the order `id`. If the response is lost, repeat step 4 with the same key and payload, or read `GET /api/v1/orders`.
 6. `GET /api/v1/orders/{id}/delivery` once delivery is ready. Repeated reads return the same units; when `pagination.has_more` is true, continue with `pagination.next_cursor`.
 
-Every code example on this page reads `STORE_ORIGIN`, `CUSTOMER_API_KEY`, `PRODUCT_ID` and `IDEMPOTENCY_KEY` from the environment, uses explicit timeouts, checks the HTTP status, and never retries a purchase with a new key.
+Examples read the relevant environment variables, use explicit timeouts and check HTTP status. The Python, JavaScript and PHP checkout examples require `ORDER_BODY` saved together with `IDEMPOTENCY_KEY`.
 MD),
 
             $this->section('authentication', 'Autentikasi dan keamanan key', 'Authentication and key security', <<<'MD'
@@ -142,6 +142,8 @@ Override reseller tidak bertumpuk dengan tier, member, atau promo, dan tidak men
 
 Katalog API memuat Produk lokal dan Produk yang dipasok supplier, termasuk Produk yang sedang tidak tersedia. `stock` bersifat informasional: angkanya gabungan tanpa rincian sumber, dan tidak menahan unit. Checkout selalu memeriksa ulang harga serta ketersediaan di dalam transaksi terkunci, sehingga kutipan yang sudah lama bisa berubah atau gagal.
 
+Filter `available` mencerminkan ketersediaan umum, bukan kecukupan stok untuk `quantity`. Kutipan IDR legacy bernilai `0` dapat ditampilkan sebagai eligible, tetapi total nol bukan persetujuan checkout yang valid; jangan menganggapnya pesanan gratis.
+
 `input_requirements` saat ini selalu kosong: checkout otomatis kanonik belum menerima kolom masukan dari pembeli. Mengirim kolom `inputs` dijawab 422, bukan diabaikan.
 MD, <<<'MD'
 Every quote carries two price layers:
@@ -157,6 +159,8 @@ Effective price precedence:
 A reseller override never stacks with tiers, membership or promotions, and never manufactures currency eligibility. A Product without a base USD price stays ineligible in USD even when the account has an IDR override. Retail prices in the bot and on the website do not change because a reseller price exists.
 
 The API catalog exposes local Products and supplier-backed Products, including Products that are currently unavailable. `stock` is informational: an aggregate without a source breakdown, and it reserves nothing. Checkout always rechecks price and availability inside its locked transaction, so a stale quote can change or fail.
+
+The `available` filter reflects general availability, not whether stock covers `quantity`. A legacy zero IDR quote can appear eligible, but a zero total is not valid checkout consent; do not treat it as a free order.
 
 `input_requirements` is currently always empty: canonical automatic checkout does not accept buyer-supplied fields yet. Sending an `inputs` key is answered with 422 rather than ignored.
 MD),
@@ -200,6 +204,7 @@ Server tidak pernah memakai harga yang dikirim klien. `expected_totals` hanya pe
 - mata uang primer hasil pemilihan preferensi wajib punya total yang diharapkan bila mata uang itu punya kutipan eligible, jika tidak permintaan dijawab 422;
 - bila salah satu total yang diotorisasi tidak lagi cocok, permintaan dijawab 409 `price_changed` dengan `error.quotes` berisi total terbaru, dan tidak ada debit maupun alokasi;
 - pada mode otomatis, mata uang kedua hanya boleh dipakai bila totalnya juga Anda otorisasi, jadi klien tidak pernah ditagih harga yang belum disetujui.
+- Jika `preference` dikirim, nilainya harus salah satu mode yang didukung. Jika `expected_totals` dikirim, nilainya harus objek tidak kosong dengan nilai mata uang berupa string; `null` tidak diterima.
 
 Contoh alur yang benar: baca kutipan, teruskan totalnya ke pengguna atau simpan di sisi server, lalu kirim total itu di `expected_totals`. Bila harga berubah di antara kedua langkah, integrasi menerima 409 dan dapat meminta persetujuan baru.
 
@@ -211,6 +216,7 @@ The server never uses a client-supplied price. `expected_totals` is only price-c
 - the primary currency chosen by preference resolution requires an expected total whenever that currency has an eligible quote, otherwise the request is answered with 422;
 - when any authorized total no longer matches, the request is answered with 409 `price_changed` carrying fresh totals in `error.quotes`, and nothing is debited or allocated;
 - in automatic modes the second currency is charged only when its total was authorized too, so a client is never charged a price it did not acknowledge.
+- If sent, `preference` must be a supported mode. If sent, `expected_totals` must be a nonempty object with string currency values; `null` is not accepted.
 
 A correct flow: read the quote, hand the totals to your user or store them server-side, then send those totals in `expected_totals`. If the price changed between the two steps, your integration receives 409 and can ask for fresh consent.
 
@@ -226,11 +232,17 @@ Klaim mengikat sidik jari payload kanonik: Produk, kuantitas, preferensi yang di
 | --- | --- |
 | Key sama, payload sama, penerimaan pertama | 201 dengan pesanan baru |
 | Key sama, payload sama, setelah respons hilang, restart, atau rotasi key | 200 dengan pesanan yang sama |
-| Key sama, payload berbeda | 409 `idempotency_conflict`, tanpa efek |
-| Key sama, permintaan identik masih berjalan | tunggu terbatas, lalu 409 `in_progress` dengan `Retry-After` |
+| Key sama, payload berbeda, klaim masih tersimpan | 409 `idempotency_conflict` |
+| Klaim identik terlihat dan masih berjalan | tunggu terbatas, lalu 409 `in_progress` dengan `Retry-After` |
 | Klaim pra-pesanan ditinggalkan | satu pengambilalihan lease kedaluwarsa; yang kalah menerima pemutaran atau `in_progress` |
 
+Klaim yang diterima permanen. Klaim tanpa penerimaan dapat dibersihkan secara bertahap paling cepat 24 jam sejak dibuat, hanya setelah lease berakhir dan tidak ada transaksi finansial yang memegangnya; klaim yang dilindungi tidak dibersihkan dan klaim lain dapat bertahan lebih lama. Maksimal 10.000 klaim belum diterima yang tidak dilindungi per Customer; key baru pada batas itu menerima 503 `temporarily_unavailable` dan `Retry-After: 5`. Setelah klaim dihapus, key dapat dipakai ulang dengan payload lain, sehingga jangan gunakan kembali key untuk niat lain. Replay klaim yang diterima tetap tersedia.
+
+Jika admission timeout sebelum klaim terlihat, server mengembalikan 503 `temporarily_unavailable` dengan `Retry-After: 5` karena payload bersamaan belum dapat diidentifikasi.
+
 Pemulihan setelah timeout:
+
+Simpan key dan body yang persis diotorisasi bersama sebelum pengiriman pertama; jangan mengambil kutipan baru saat mengulang. 503 atau timeout dapat terjadi setelah penerimaan, jadi hasilnya belum pasti.
 
 1. ulangi permintaan yang sama persis dengan key yang sama; atau
 2. baca `GET /api/v1/orders` untuk menemukan pesanan yang sudah diterima.
@@ -245,12 +257,17 @@ A claim binds the canonical payload fingerprint: Product, quantity, requested pr
 | --- | --- |
 | Same key, same payload, first acceptance | 201 with the new order |
 | Same key, same payload, after a lost response, restart or key rotation | 200 with the same order |
-| Same key, different payload | 409 `idempotency_conflict`, no effect |
-| Same key, an identical request still running | bounded wait, then 409 `in_progress` with `Retry-After` |
+| Same key, different payload, claim still retained | 409 `idempotency_conflict` |
+| An identical claim is visible and still running | bounded wait, then 409 `in_progress` with `Retry-After` |
 | Abandoned pre-order claim | one takeover of the expired lease; the loser receives the replay or `in_progress` |
-| First acceptance | 201 with the already paid order |
+
+Accepted claims are permanent. Unaccepted claims may be cleaned up opportunistically no earlier than 24 hours after creation, only after their lease expires and no financial transaction holds them; protected claims are not cleaned up and others may remain longer. Once removed, a key can be reused with a different payload, so never reuse keys for another intent. At 10,000 unprotected unaccepted claims per Customer, new keys receive 503 `temporarily_unavailable` with `Retry-After: 5`; accepted claims remain replayable.
+
+If admission times out before an existing claim is visible, the server instead returns 503 `temporarily_unavailable` with `Retry-After: 5`; it cannot yet identify the concurrent payload.
 
 Recovery after a timeout:
+
+Before the first submission, store the key and exact authorized body together; do not fetch a fresh quote when retrying. A 503 or timeout may occur after acceptance, so the outcome is unknown.
 
 1. repeat the identical request with the same key; or
 2. read `GET /api/v1/orders` to find the order that was already accepted.
@@ -310,30 +327,30 @@ Refund dan garansi tetap memakai alur yang sudah ada. API ini tidak menambahkan 
 - Refund selalu memakai mata uang asli pesanan dan dipotong dari entitlement yang masih tersisa.
 - Refund penuh hanya mengkredit sisa entitlement pada mata uang asli dan melaporkan nominal Payment asli sebagai `refund.confirmed_amount`.
 - Unit yang sudah terkirim atau terekspos tidak pernah dikembalikan ke stok, termasuk setelah refund.
-- Refund yang masih berjalan muncul sebagai `refund.state` `pending` atau `partial`, dengan `confirmed_amount` dan `pending_amount` yang terpisah.
+- `refund.state` adalah `refunded` bila Payment direfund penuh; jika tidak, `pending` bila ada nominal tertunda, `partial` bila ada nominal terkonfirmasi, dan `none` bila tidak ada keduanya. `confirmed_amount` dan `pending_amount` dilaporkan terpisah.
 
-Status refund dan status pengiriman adalah dua hal berbeda: pesanan yang kehilangan sebagian unit bisa selesai sebagai `refunded` sementara `delivery.state` tetap `partial`. Untuk mengajukan bantuan, buka halaman bantuan akun pada invoice pesanan memakai invoice dan Recovery Key.
+Status refund dan pengiriman berbeda: pengiriman dapat tetap `partial` setelah refund. API tidak mengembalikan Recovery Key untuk pesanan API; jangan mengasumsikan Recovery Key tersedia untuk membuka invoice.
 MD, <<<'MD'
 Refunds and warranty keep their existing flows. This API adds no refund endpoint, no balance adjustment and no warranty approval.
 
 - A refund always uses the order's original currency and is drawn from the remaining entitlement.
 - A full refund credits only the remaining entitlement in the original currency and reports the original Payment amount as `refund.confirmed_amount`.
 - A unit that was delivered or otherwise exposed is never returned to stock, including after a refund.
-- A refund in progress appears as `refund.state` `pending` or `partial`, with `confirmed_amount` and `pending_amount` reported separately.
+- `refund.state` is `refunded` when the Payment is fully refunded; otherwise it is `pending` if an amount is pending, `partial` if an amount is confirmed, and `none` if neither applies. `confirmed_amount` and `pending_amount` are separate.
 
-Refund state and delivery state are different things: an order that lost some units can settle as `refunded` while `delivery.state` stays `partial`. To request help, open the account-help page of the order invoice with the invoice number and its Recovery Key.
+Refund and delivery state differ: delivery can remain `partial` after a refund. The API does not return a Recovery Key for API orders; do not assume one is available to access the invoice.
 MD),
 
             $this->section('limits', 'Batas laju dan header', 'Rate limits and headers', <<<'MD'
 Semua anggaran berlaku bersamaan. Beberapa key, rotasi, atau berpindah endpoint tidak mereset anggaran per akun. Angka pada tabel di bawah adalah kebijakan admission awal, bukan klaim kapasitas terukur.
 
-Setiap respons terautentikasi membawa `X-RateLimit-Limit`, `X-RateLimit-Remaining`, dan `X-RateLimit-Reset` (detik epoch, batas atas konservatif) untuk anggaran dengan sisa paling sedikit. Penolakan 429 menambahkan `Retry-After` dalam detik.
+Jika admission berhasil, respons dapat membawa `X-RateLimit-Limit`, `X-RateLimit-Remaining`, dan `X-RateLimit-Reset` (detik epoch, batas atas konservatif) untuk anggaran terketat. Penolakan 429 membawa header anggaran dan `Retry-After` dalam detik; respons yang ditolak sebelum admission tidak selalu memiliki header anggaran.
 
 Bila admission bersama tidak dapat ditegakkan, permintaan terautentikasi gagal tertutup dengan 503 tanpa mutasi, bukan melanjutkan ke pekerjaan database atau provider tanpa batas. Kehilangan limiter tidak pernah melewati pengaman finansial di database: constraint PostgreSQL tetap otoritas terakhir.
 MD, <<<'MD'
 All budgets apply at the same time. Multiple keys, rotation or switching endpoints never resets the per-account budgets. The numbers in the table below are initial admission policy, not a measured-capacity claim.
 
-Every authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds, a conservative ceiling) for the budget with the least remaining headroom. A 429 response adds `Retry-After` in seconds.
+After successful admission, responses may carry `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds, a conservative ceiling) for the tightest budget. A 429 carries budget headers and `Retry-After` in seconds; responses rejected before admission do not necessarily carry budget headers.
 
 When shared admission cannot be enforced, authenticated requests fail closed with 503 and no mutation instead of continuing into unbounded database or provider work. Losing the limiter never bypasses the database financial safeguards: PostgreSQL constraints stay the final authority.
 MD),
@@ -346,13 +363,13 @@ Aturan penanganan:
 - periksa status HTTP sebelum membaca body;
 - ulangi hanya kegagalan yang jelas sementara, dengan batas waktu dan jumlah percobaan yang tegas;
 - untuk 429, hormati `Retry-After` dan header anggaran;
-- untuk 409 `in_progress`, ulangi payload yang sama dengan key yang sama;
-- untuk 409 `price_changed`, otorisasi kutipan baru secara sadar sebelum mengulang;
+- untuk 409 `in_progress`, tunggu `Retry-After`, lalu ulangi payload dan key yang sama;
+- untuk 409 `price_changed`, otorisasi kutipan baru; setelah penolakan yang pasti, gunakan key baru untuk niat yang diubah;
 - untuk 503 dan timeout, jangan membuat pesanan pengganti. Ulangi permintaan yang sama, atau baca `GET /api/v1/orders` untuk melihat apakah penerimaan sudah tercatat;
 - perlakukan 404 sebagai "tidak ada untuk akun ini": bentuknya sengaja tidak membedakan resource yang tidak ada dan resource milik Customer lain;
 - jangan pernah mencatat key, header Authorization, atau isi unit hasil pembelian ke log, trace, APM, atau laporan error.
 
-Error tidak pernah memutasi uang. Permintaan yang ditolak tidak meninggalkan pesanan, Payment, debit, reservasi, alokasi stok, atau baris keranjang API.
+Penolakan sebelum transaksi finansial tidak mendebit. Namun 503 atau timeout tidak membuktikan pesanan gagal: penerimaan mungkin sudah tercatat sebelum respons gagal.
 MD, <<<'MD'
 Every error carries `error.code`, `error.message` and `error.request_id` matching the `X-Request-ID` header. Parse `code`; never parse the human message, which can change.
 
@@ -361,13 +378,13 @@ Handling rules:
 - check the HTTP status before reading the body;
 - retry only clearly transient failures, with explicit timeouts and an attempt bound;
 - for 429, honour `Retry-After` and the budget headers;
-- for 409 `in_progress`, repeat the same payload with the same key;
-- for 409 `price_changed`, deliberately authorize fresh quotes before retrying;
+- for 409 `in_progress`, wait for `Retry-After`, then repeat the same payload with the same key;
+- for 409 `price_changed`, authorize fresh quotes; after this definite rejection, use a new key for the changed intent;
 - for 503 and timeouts, never create a replacement order. Repeat the identical request, or read `GET /api/v1/orders` to see whether acceptance was recorded;
 - treat 404 as "not here for this account": the shape deliberately does not distinguish a missing resource from another Customer's resource;
 - never log keys, Authorization headers, or purchased unit contents into logs, traces, APM or error reports.
 
-No error mutates money. A rejected request leaves no Order, Payment, debit, reservation, stock allocation or API cart row.
+Rejection before financial work does not debit. But a 503 or timeout does not prove an order failed: acceptance may have been recorded before the response failed.
 MD),
 
             $this->section('status', 'Cakupan dan status yang jujur', 'Scope and honest status', <<<'MD'

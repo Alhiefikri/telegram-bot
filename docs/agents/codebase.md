@@ -1,10 +1,4 @@
 # Codebase guide untuk agent dan AI
-`Product.manual_unlimited` adalah pilihan Admin, default nonaktif. Katalog bot menampilkan `∞`; tidak ada kredensial atau stok fisik yang perlu diinput sebelum checkout. `availableStock()` memakai batas integer untuk perbandingan kapasitas, bukan jumlah stok fisik; gunakan `finiteAvailableStock()` untuk snapshot inventori. Mode disalin ke `OrderItem.manual_unlimited`: kuantitas manual dicatat sebagai `deferred_local_quantity`, tanpa reservasi stok fisik atau pembelian supplier. Mematikan mode tidak mengubah kewajiban pesanan yang sudah dibuat.
-
-Checkout manual-unlimited memerlukan Customer dengan Telegram terhubung; Customer API dan checkout tanpa Telegram ditolak sebelum pembayaran. Payment sukses membuat review `manual_unlimited` dan Order Processing. Pada monitor `/admin/suppliers/monitor/purchases`, operator mencari invoice, mengisi semua unit yang kurang, lalu memakai receipt Telegram yang ada. Resolusi kredensial terenkripsi dan idempotent; audit tidak boleh menyimpan isi akun. Payment, pemenuhan, dan konfirmasi receipt adalah fakta terpisah: status internal Completed berarti akun siap, sedangkan tampilan bot mempertahankan Processing sampai receipt terkonfirmasi. Kegagalan atau hasil Telegram ambigu ditangani melalui Manual Delivery Review. Late Payment pada Order terminal tetap melalui review/refund yang ada, bukan otomatis dipenuhi.
-
-Mengaktifkan mode saat Product publik berubah dari tidak tersedia menjadi tersedia mencatat sinyal `availability` dan menyerahkannya ke pipeline notifikasi stok/waitlist setelah commit; tidak ada sinyal stok masuk bila Product sudah tersedia. Mutasi mempertahankan lock Product dan snapshot Order; ikuti [Context7 Laravel transactions and pessimistic locking](https://context7.com/laravel/docs/llms.txt?topic=database%20transactions%20pessimistic%20locking%20after%20commit) untuk menjaga transaksi lokal dan pengiriman setelah commit tetap terpisah.
-
 
 Dokumen ini adalah peta implementasi aktual repository. Gunakan bersama [CONTEXT.md](../../CONTEXT.md) dan [ADR](../adr/). `CONTEXT.md` hanya berisi bahasa domain; detail modul, flow, dan invariant berada di sini.
 
@@ -565,7 +559,11 @@ Customer API runtime availability (#647) is owned by `CustomerApiAvailability` a
 Private Store Bot API management (#627) uses `TelegramCustomerApiCallbackHandler` and `TelegramCustomerApiIntents` on the canonical navigation root. The DB-backed `menu.api` icon follows existing Admin/capture/Unicode fallback paths. Generate sends a memory-only secret once outside transactions; reopening shows only the mask, creation time and eventual account admission metadata. Rotation and disable require purpose/key/message-bound opaque confirmations; stale callbacks cannot revoke a newer key. Four payment-preference choices update the S03 Customer enum without altering explicit checkout rails. Documentation links to the existing `/api-docs` route. Tests: `TelegramCustomerApiManagementTest`, `MenuIconCaptureTest`, `CustomerApiCredentialsTest`, and the PostgreSQL credential/admission suites. See the S08 walkthrough in [Customer API key operations](../customer-api-key-operations.md#store-bot-screens-627).
 
 
-Customer API reads (#622) use `CustomerApiReadController` for bounded input and own-wallet mapping, and `CustomerApiCatalog` for ascending-ID keyset Product pages with explicit response allowlists. Visibility/availability use canonical Product scopes, family icons use `CatalogFamilyIconResolver`, and batched quotes use `ProductQuantityPricing::quoteMany()` with the admitted Customer's reseller context. IDR/USDT ledger snapshots remain the money owners; public USD is exact boundary mapping, and frozen/drifted wallets expose null amounts rather than fake zeros. No stock credential model, provider HTTP, supplier economic relation, financial cache or new index is introduced. Schemas, errors, examples and disposable PostgreSQL/Redis HTTP evidence: [Customer API reads](../customer-api-reads.md).
+Customer API reads (#622) use `CustomerApiReadController` for bounded input and own-wallet mapping, and `CustomerApiCatalog` for ascending-ID keyset Product pages with explicit response allowlists. Visibility/availability use canonical Product scopes, family icons use `CatalogFamilyIconResolver`, and each Product quote uses `ProductQuantityPricing::quote()` with the admitted Customer's reseller context and bulk-loaded pricing relations. IDR/USDT ledger snapshots remain the money owners; public USD is exact boundary mapping, and frozen/drifted wallets expose null amounts rather than fake zeros. No stock credential model, provider HTTP, supplier economic relation, financial cache or new index is introduced. Schemas, errors, examples and disposable PostgreSQL/Redis HTTP evidence: [Customer API reads](../customer-api-reads.md).
+
+Customer API availability filtering is channel-specific: `manual_unlimited`
+Products remain visible in the unfiltered catalog but appear under
+`available=false`, because API checkout cannot fulfill them.
 
 Customer API orders (#623) add `POST /api/v1/orders` through `CustomerApiOrderController`,
 `CustomerApiOrderCheckout` and the durable claim owner `CustomerApiOrderClaims`. A claim is
@@ -580,6 +578,13 @@ customer-facing cart read and write; a rolled-back request leaves zero cart rows
 transaction locks the Customer shared and calls `CustomerApiPrincipal::revalidateForMutation()`
 before any write. Contract, error table, lock order and evidence: [Customer API orders](../customer-api-orders.md);
 decision: [ADR-0025](../adr/0025-api-order-idempotency-claims.md).
+
+Claim admission also revalidates the credential before insertion or takeover.
+Accepted claims and Order-protected recovery claims are retained; an unaccepted,
+unprotected claim with no live lease can be reclaimed after 24 hours. Per-Customer
+unaccepted capacity and bounded cleanup fail closed rather than discard a live
+financial attempt. The retention contract and SQLite legacy-orphan caveat are in
+[ADR-0025](../adr/0025-api-order-idempotency-claims.md).
 
 Issue #637 hardens that claim boundary: takeover lock waits use at most 500 ms and
 never more than the monotonic two-second wait's remaining time. Model saves and the
@@ -605,6 +610,10 @@ never purchases, reallocates, debits, refunds or resends. `suppliers:recover` an
 the committed obligation after volatile Redis loss; unknown dispatched purchases retain
 review/holds. Schemas, partial/refund semantics, query plans and disposable worker-loss
 HTTP evidence: [Customer API orders](../customer-api-orders.md#owned-history-status-and-delivery-s07).
+
+Delivery projects credentials incrementally within the response-byte budget.
+The first unit that does not fit is projected for sizing, but later units are not
+decrypted until a continuation request; each request still rechecks entitlement.
 
 Customer API notifications (#625) snapshot `api_order_claim_id` before paid
 lifecycle work. `SalesProofEligibility` preserves other-channel proof timing
@@ -663,6 +672,12 @@ No new financial architecture, queue or production activation gate is introduced
 `Product` adalah katalog yang dapat aktif/nonaktif, dapat berada dalam `Category`, dan punya `stock` serta `reserved_stock` untuk inventori lokal. `localAvailableStock()` membatasi numeric stock dengan credential lokal yang belum dialokasikan; credential hasil pembelian supplier yang sudah order-owned tidak ikut pool lokal. `availableStock()` menambahkan proyeksi `supplier_available_stock` hanya sampai `supplier_available_until`.
 
 Gunakan `Product::publicVisible()`, `availableForPurchase()`, `withAvailability()`, dan `availableStock()` daripada mengulang query visibility/stock di caller. Perubahan stok lokal direkam lewat `InventoryLedger`/`EloquentInventoryLedger` dan menghasilkan `InventoryMovement` bertipe `reservation`, `sale`, `release`, atau `adjustment`. Tipe `availability` adalah sinyal transisi kapasitas eksternal untuk pipeline restock, bukan Stock Intake atau mutasi stok lokal.
+
+`Product.manual_unlimited` adalah pilihan Admin, default nonaktif. Katalog bot menampilkan `∞`; tidak ada kredensial atau stok fisik yang perlu diinput sebelum checkout. `availableStock()` memakai batas integer untuk perbandingan kapasitas, bukan jumlah stok fisik; gunakan `finiteAvailableStock()` untuk snapshot inventori. Mode disalin ke `OrderItem.manual_unlimited`: kuantitas manual dicatat sebagai `deferred_local_quantity`, tanpa reservasi stok fisik atau pembelian supplier. Mematikan mode tidak mengubah kewajiban pesanan yang sudah dibuat.
+
+Checkout manual-unlimited memerlukan Customer dengan Telegram terhubung; Customer API dan checkout tanpa Telegram ditolak sebelum pembayaran. Payment sukses membuat review `manual_unlimited` dan Order Processing. Pada monitor `/admin/suppliers/monitor/purchases`, operator mencari invoice, mengisi semua unit yang kurang, lalu memakai receipt Telegram yang ada. Resolusi kredensial terenkripsi dan idempotent; audit tidak boleh menyimpan isi akun. Payment, pemenuhan, dan konfirmasi receipt adalah fakta terpisah: status internal Completed berarti akun siap, sedangkan tampilan bot mempertahankan Processing sampai receipt terkonfirmasi. Kegagalan atau hasil Telegram ambigu ditangani melalui Manual Delivery Review. Late Payment pada Order terminal tetap melalui review/refund yang ada, bukan otomatis dipenuhi.
+
+Mengaktifkan mode saat Product publik berubah dari tidak tersedia menjadi tersedia mencatat sinyal `availability` dan menyerahkannya ke pipeline notifikasi stok/waitlist setelah commit; tidak ada sinyal stok masuk bila Product sudah tersedia. Mutasi mempertahankan lock Product dan snapshot Order; ikuti [Context7 Laravel transactions and pessimistic locking](https://context7.com/laravel/docs/llms.txt?topic=database%20transactions%20pessimistic%20locking%20after%20commit) untuk menjaga transaksi lokal dan pengiriman setelah commit tetap terpisah.
 
 `Product` juga memiliki override harga reseller opsional per mata uang (`reseller_price_amount` untuk IDR dan `reseller_usdt_price_amount` untuk micro-USDT yang di-backing harga dolar). Override hanya berlaku di channel API/reseller: `ProductQuantityPricing::quote($product, $quantity, ?ResellerPricingContext $context)` menerapkan override sebagai harga final per unit tanpa digabung dengan Quantity Price Tier, per mata uang secara independen, sedangkan `null` memakai quote quantity normal. Context hanya membawa aktor/asal terautentikasi dan tidak pernah mengubah harga retail; bot, Web Storefront, Admin preview, dan paid-invoice presentation selalu mengirim tanpa context. Override USDT tidak berlaku (dan tidak boleh dibuat) tanpa harga USDT dasar, sehingga override tidak pernah memunculkan kelayakan dolar. `ProductQuantityPricing::quoteMany()` adalah seam batch untuk halaman catalog API dan menolak halaman yang belum eager-load `quantityPriceTiers`, sehingga quote 1/20/100 Product tidak menambah query relasi per Product. Detail kontrak dan verifikasi: [reseller price overrides](../reseller-pricing-overrides.md).
 

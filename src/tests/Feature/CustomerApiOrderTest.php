@@ -229,6 +229,61 @@ final class CustomerApiOrderTest extends TestCase
         $this->assertSame(0, Cart::where('origin', CartOrigin::Customer)->count());
     }
 
+    public function test_expired_unaccepted_key_can_be_reused_only_after_safe_cleanup(): void
+    {
+        $first = $this->product();
+        $second = $this->product();
+        $this->assertSame('insufficient_funds', $this->failure($this->body($first), 'retention-seed')->machineCode);
+        $seed = (array) DB::table('customer_api_order_claims')->where('idempotency_key', 'retention-seed')->first();
+        unset($seed['id']);
+        $seed['idempotency_key'] = 'expired-key';
+        $seed['created_at'] = now()->subHours(25);
+        $seed['updated_at'] = now()->subHours(25);
+        $seed['lease_expires_at'] = now()->subMinute();
+        DB::table('customer_api_order_claims')->insert($seed);
+
+        $conflict = $this->failure($this->body($second), 'expired-key');
+        $this->assertSame('idempotency_conflict', $conflict->machineCode);
+        $this->assertSame('insufficient_funds', $this->failure($this->body($second), 'cleanup-trigger')->machineCode);
+        $this->assertSame('insufficient_funds', $this->failure($this->body($second), 'expired-key')->machineCode);
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_claim_capacity_is_retryable_and_expired_nonaccepted_claims_can_be_reclaimed_without_losing_replays(): void
+    {
+        $product = $this->product(2);
+        $this->fundUsd(2_000_000);
+        $accepted = $this->send($this->body($product), 'permanent-acceptance');
+        $this->assertSame(201, $accepted->getStatusCode());
+        $this->assertSame('insufficient_funds', $this->failure($this->body($product), 'pending-seed')->machineCode);
+        $seed = (array) DB::table('customer_api_order_claims')->where('idempotency_key', 'pending-seed')->first();
+        unset($seed['id']);
+        $seed['created_at'] = now()->subHours(25);
+        $seed['updated_at'] = now()->subHours(25);
+        $seed['attempt_token'] = str_repeat('a', 32);
+        $seed['lease_expires_at'] = now()->addHour();
+        for ($offset = 0; $offset < 10000; $offset += 40) {
+            $rows = [];
+            for ($index = $offset; $index < $offset + 40; $index++) {
+                $rows[] = array_merge($seed, ['idempotency_key' => 'capacity-'.$index]);
+            }
+            DB::table('customer_api_order_claims')->insert($rows);
+        }
+
+        $full = $this->failure($this->body($product), 'new-at-capacity');
+        $this->assertSame(503, $full->status);
+        $this->assertSame('temporarily_unavailable', $full->machineCode);
+        $this->assertSame('5', $full->headers['Retry-After']);
+        $this->assertSame($accepted->getData(true)['data']['id'], $this->send($this->body($product), 'permanent-acceptance')->getData(true)['data']['id']);
+
+        DB::table('customer_api_order_claims')->where('idempotency_key', 'like', 'capacity-%')
+            ->update(['lease_expires_at' => now()->subMinute()]);
+        $retry = $this->failure($this->body($product), 'new-at-capacity');
+        $this->assertSame('insufficient_funds', $retry->machineCode);
+        $this->assertSame(1, Order::count());
+        $this->assertSame($accepted->getData(true)['data']['id'], $this->send($this->body($product), 'permanent-acceptance')->getData(true)['data']['id']);
+    }
+
     public function test_a_worker_that_lost_its_claim_lease_cannot_commit_a_purchase(): void
     {
         $product = $this->product();
@@ -418,18 +473,34 @@ final class CustomerApiOrderTest extends TestCase
 
         $notPublic = $this->failure($this->body($hidden), 'hidden-product');
         $this->assertSame(404, $notPublic->status);
-        $this->assertSame(CustomerApiOrderClaim::where('idempotency_key', 'hidden-product')->sole()->state, CustomerApiOrderClaim::STATE_IN_PROGRESS);
+        $this->assertSame('not_found', $notPublic->machineCode);
+        $this->assertSame(0, CustomerApiOrderClaim::query()->count());
+        $hidden->delete();
+        $deleted = $this->failure($this->body($hidden), 'deleted-product');
+        $this->assertSame($missing->status, $deleted->status);
+        $this->assertSame($missing->machineCode, $deleted->machineCode);
+        $this->assertSame(0, CustomerApiOrderClaim::query()->count());
+
+        // An unavailable Product must not reserve the key and reveal its existence.
+        $this->fundUsd(2_000_000);
+        $accepted = $this->send($this->body($product), 'hidden-product');
+        $this->assertSame(201, $accepted->getStatusCode());
+        $product->delete();
+        $replay = $this->send($this->body($product), 'hidden-product');
+        $this->assertSame(200, $replay->getStatusCode());
+        $this->assertSame($accepted->getData(true)['data']['id'], $replay->getData(true)['data']['id']);
+        $product = $this->product();
 
         app(CustomerApiCredentials::class)->disable($this->customer);
         $revoked = $this->failure($this->body($product), 'revoked-key');
         $this->assertSame(401, $revoked->status);
         $this->assertSame('unauthenticated', $revoked->machineCode);
 
-        $this->assertSame(0, Order::count());
-        $this->assertSame(0, Cart::count());
-        $this->assertSame(0, CustomerApiOrderClaim::query()->whereNotNull('order_id')->count());
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, Cart::count());
+        $this->assertSame(1, CustomerApiOrderClaim::query()->whereNotNull('order_id')->count());
         $this->assertSame(5_000_000, app(CustomerUsdtBalanceLedger::class)->snapshot($this->customer)->balanceMicro());
-        $this->assertSame(0, DB::table('customer_usdt_balance_entries')->where('kind', 'purchase_debit')->count());
+        $this->assertSame(1, DB::table('customer_usdt_balance_entries')->where('kind', 'purchase_debit')->count());
     }
 
     public function test_claim_and_order_api_origin_identity_are_immutable(): void

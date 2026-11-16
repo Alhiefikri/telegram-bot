@@ -37,6 +37,23 @@ final class CredentialDeliveryPresentation
         return $this->project($order, $accountOffset);
     }
 
+    /**
+     * Project an eligible Order sequentially until the caller declines an account.
+     * The declined account is the last one decrypted; later accounts are untouched.
+     *
+     * @param  callable(CredentialDeliveryAccount, ProductStockItem, array): bool  $include
+     */
+    public function forOrderUntil(Order $order, callable $include, int $accountOffset = 0): CredentialDelivery
+    {
+        $order->loadMissing(['customer', 'payments', 'orderItems.stockItems.supplierAccountUnit', 'orderItems.product']);
+
+        if ($this->eligibility->rejectionReason($order) !== null) {
+            return CredentialDelivery::empty();
+        }
+
+        return $this->project($order, $accountOffset, $include);
+    }
+
     public function present(Order $order, ?Payment $payment = null): CredentialDelivery
     {
         return $this->forOrder($order, $payment);
@@ -76,20 +93,30 @@ final class CredentialDeliveryPresentation
         }
     }
 
-    private function project(Order $order, int $accountOffset = 0): CredentialDelivery
+    private function project(Order $order, int $accountOffset = 0, ?callable $include = null): CredentialDelivery
     {
         try {
             $groups = [];
+            $usageGuides = $this->usageGuides->forOrder($order);
+            $stopped = false;
             foreach ($order->orderItems->sortBy('id')->values() as $item) {
                 $accounts = [];
                 foreach ($item->stockItems->sortBy('id')->values() as $index => $stockItem) {
                     if ($stockItem->retired_at !== null) {
                         continue;
                     }
-                    $accounts[] = $this->account($stockItem, $stockItem->supplierAccountUnit?->unit_number ?? $accountOffset + $index + 1, $this->defaultTutorial($item));
+                    $account = $this->account($stockItem, $stockItem->supplierAccountUnit?->unit_number ?? $accountOffset + $index + 1, $this->defaultTutorial($item));
+                    if ($include !== null && ! $include($account, $stockItem, $usageGuides)) {
+                        $stopped = true;
+                        break;
+                    }
+                    $accounts[] = $account;
                 }
 
                 if ($accounts === []) {
+                    if ($stopped) {
+                        break;
+                    }
                     continue;
                 }
 
@@ -101,11 +128,14 @@ final class CredentialDeliveryPresentation
                     productIcon: $item->product_icon,
                     productCustomEmojiId: $item->product_custom_emoji_id,
                 );
+                if ($stopped) {
+                    break;
+                }
             }
 
             return new CredentialDelivery(
                 groups: $groups,
-                usageGuides: $this->usageGuides->forOrder($order),
+                usageGuides: $usageGuides,
             );
         } catch (Throwable) {
             // A malformed persisted payload must never produce a partial

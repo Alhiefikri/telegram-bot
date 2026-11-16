@@ -48,13 +48,15 @@ final readonly class BalanceCheckoutRequest
 
         // Validate every authorized candidate before affordability, including a
         // stale secondary when the primary is affordable. Staleness is not fallback.
-        foreach ($currencies as $index => $currency) {
+        foreach ($currencies as $currency) {
             if ($expected[$currency] !== null && $expected[$currency] !== $totals[$currency]) {
                 throw new CheckoutPriceChanged($pricing->idrTotal(), $pricing->usdtTotal());
             }
-            if ($index === 0 && $totals[$currency] !== null && $expected[$currency] === null) {
-                throw new MissingCheckoutPriceConsent('The primary currency requires an expected total.');
-            }
+        }
+
+        $primary = $currencies[0];
+        if ($totals[$primary] !== null && $expected[$primary] === null) {
+            throw new MissingCheckoutPriceConsent('The primary currency requires an expected total.');
         }
 
         foreach ($currencies as $currency) {

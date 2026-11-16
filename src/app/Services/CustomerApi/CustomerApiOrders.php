@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\OrderRefund;
 use App\Models\ProductStockItem;
 use App\Models\SupplierFulfillment;
+use App\Services\Credentials\CredentialDeliveryAccount;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\UsdtBalance\UsdtMicroAmount;
@@ -103,22 +104,15 @@ final class CustomerApiOrders
             $accountOffset = $cursorId === null ? 0 : ProductStockItem::query()
                 ->where('order_item_id', $item->id)->whereNull('retired_at')->where('id', '<=', $cursorId)->count();
             $item->setRelation('stockItems', $pageStocks);
-            $delivery = $this->presentation->forOrder($order, null, $accountOffset);
-            if ($delivery->accountCount() !== $pageStocks->count() || $delivery->isEmpty()) {
-                throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
-            }
-            $accounts = $delivery->groups()[0]->accounts();
-            $result['usage_guides'] = $delivery->usageGuides();
-
-            // Size each unit with the exact JSON the response will carry, including
-            // maximum-length fields and escaping, before adding it to the page.
-            $size = $this->encodedSize($result);
+            $size = null;
             $lastIncluded = null;
-            foreach ($pageStocks as $index => $stock) {
-                if (count($result['units']) >= $limit) {
-                    break;
+            // Project only through the first unit that does not fit. A malformed
+            // later unit must not prevent recovery of an earlier byte-sized page.
+            $delivery = $this->presentation->forOrderUntil($order, function (CredentialDeliveryAccount $account, ProductStockItem $stock, array $usageGuides) use (&$result, &$size, &$lastIncluded, $item): bool {
+                if ($size === null) {
+                    $result['usage_guides'] = $usageGuides;
+                    $size = $this->encodedSize($result);
                 }
-                $account = $accounts[$index];
                 $unit = [
                     'id' => (string) $stock->id, 'product_id' => (string) $item->product_id,
                     'number' => $account->number(), 'format' => $account->isLegacy() ? 'legacy' : 'structured_account',
@@ -128,15 +122,16 @@ final class CustomerApiOrders
                 ];
                 $unitSize = $this->encodedSize($unit) + (count($result['units']) === 0 ? 0 : 1);
                 if ($size + $unitSize > self::DELIVERY_RESPONSE_BUDGET_BYTES) {
-                    if ($result['units'] === []) {
-                        // A single unit cannot be returned within the safe bound.
-                        throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
-                    }
-                    break;
+                    return false;
                 }
                 $result['units'][] = $unit;
                 $size += $unitSize;
                 $lastIncluded = (string) $stock->id;
+
+                return true;
+            }, $accountOffset);
+            if ($delivery->isEmpty() || $delivery->accountCount() !== count($result['units'])) {
+                throw new CustomerApiFailure(503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.');
             }
             // Whole-Order progress/state stay independent of page continuation.
             $result['state'] = $released === $summary['quantity'] ? 'ready' : 'partial';

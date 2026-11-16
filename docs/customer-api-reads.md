@@ -36,8 +36,10 @@ positive and fit a signed 64-bit integer. Treat IDs and cursors as opaque string
   Checkout still owns stricter inventory/provider/business limits and rechecks
   current pricing and availability; a quote is not purchase authorization.
 - `category_id` / `family_id`: exact optional positive IDs, combined with AND.
-- `available`: omit for all visible Products; `true` restricts to canonical
-  available-for-purchase Products; `false` restricts to unavailable Products.
+- `available`: omit for all visible Products; `true` restricts to Products
+  available for API checkout; `false` restricts to unavailable Products.
+  Manual-unlimited Products remain visible but are unavailable for API checkout,
+  so they appear only in unfiltered and `available=false` lists.
 - `currency`: detail only, `IDR` or `USD`. Both quote objects are always returned.
   Explicit `USD` rejects a missing USD price with 422 `currency_unavailable`;
   without that assertion the USD object is returned with `eligible: false`.
@@ -135,11 +137,13 @@ Synthetic quote for quantity 2, base IDR 15000 with an IDR reseller override of
 ```
 
 Visibility and stock reuse `Product::publicVisible`, `availableForPurchase`,
-`withAvailability` and `availableStock`. Active uncategorized, local,
-supplier-backed and zero-stock visible Products remain discoverable. Inactive,
-soft-deleted and private-category Products return the same 404 as missing IDs.
-Expired supplier capacity contributes zero. Stock contains aggregate availability,
-never local/upstream source breakdowns or supplier wallet/status data.
+`withAvailability` and `availableStock`, except that manual-unlimited Products
+report zero API stock and are excluded from API purchase availability. Active
+uncategorized, local, supplier-backed and zero-stock visible Products remain
+discoverable. Inactive, soft-deleted and private-category Products return the
+same 404 as missing IDs. Expired supplier capacity contributes zero. Stock
+contains aggregate availability, never local/upstream source breakdowns or
+supplier wallet/status data.
 
 ## Errors and backend example
 

@@ -102,7 +102,7 @@ final class ReferenceMarkdown
 
         $lines[] = '## Rate limits';
         $lines[] = '';
-        $lines[] = 'All budgets apply at the same time and are initial admission policy, not measured capacity. Authenticated responses report `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; a 429 adds `Retry-After`. When shared admission cannot be enforced, authenticated routes fail closed with 503 and no mutation.';
+        $lines[] = 'All budgets apply at the same time and are initial admission policy, not measured capacity. After admission, responses may report `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; 429 reports those headers and `Retry-After`. Failure to enforce shared admission rejects that request before mutation, but a 503 or timeout can also follow checkout acceptance: retry the stored key and exact body or check order history.';
         $lines[] = '';
         $lines = array_merge($lines, $this->table(
             ['Budget', 'Bound'],

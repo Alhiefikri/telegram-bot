@@ -63,6 +63,33 @@ final class CustomerApiReadTest extends TestCase
         $this->assertSame('0', (string) $this->read('products', ['available' => 'false'])['data'][0]['stock']['available']);
     }
 
+    public function test_manual_unlimited_products_remain_visible_but_are_unavailable_for_api_checkout(): void
+    {
+        $manual = Product::factory()->create(['manual_unlimited' => true, 'stock' => 5, 'reserved_stock' => 0]);
+        $manualEmpty = Product::factory()->create(['manual_unlimited' => true, 'stock' => 0, 'reserved_stock' => 0]);
+        $available = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);
+        $unavailable = Product::factory()->create(['stock' => 0, 'reserved_stock' => 0]);
+
+        $all = $this->read('products', ['quantity' => '2'])['data'];
+        $this->assertSame(
+            array_map(strval(...), [$manual->id, $manualEmpty->id, $available->id, $unavailable->id]),
+            array_column($all, 'id'),
+        );
+        $stock = array_column($all, 'stock', 'id');
+        $emptyStock = ['available' => 0, 'is_available' => false, 'quantity_available' => false];
+        $this->assertSame($emptyStock, $stock[$manual->id]);
+        $this->assertSame($emptyStock, $stock[$manualEmpty->id]);
+        $this->assertSame(['available' => 3, 'is_available' => true, 'quantity_available' => true], $stock[$available->id]);
+        $this->assertSame($emptyStock, $stock[$unavailable->id]);
+
+        $this->assertSame([(string) $available->id], array_column($this->read('products', ['available' => 'true'])['data'], 'id'));
+        $this->assertSame(
+            array_map(strval(...), [$manual->id, $manualEmpty->id, $unavailable->id]),
+            array_column($this->read('products', ['available' => 'false'])['data'], 'id'),
+        );
+        $this->assertSame($emptyStock, $this->read('product', [], (string) $manual->id)['data']['stock']);
+    }
+
     public function test_catalog_distinguishes_legacy_stock_from_exhausted_credential_inventory_without_decryption(): void
     {
         $legacy = Product::factory()->create(['stock' => 3, 'reserved_stock' => 0]);

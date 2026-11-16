@@ -205,6 +205,37 @@ final class CustomerApiOrderReadTest extends TestCase
         $this->assertSame($before, $this->economics());
     }
 
+    public function test_byte_limited_delivery_does_not_decrypt_later_corrupt_units_and_continues_safely(): void
+    {
+        $order = $this->buy(3);
+        $stocks = ProductStockItem::query()->where('order_item_id', $order->orderItems()->sole()->id)->orderBy('id')->get();
+        $stocks[0]->update(['secret' => str_repeat('a', 600_000)]);
+        $stocks[1]->update(['secret' => str_repeat('b', 600_000)]);
+        $originalCiphertext = DB::table('product_stock_items')->where('id', $stocks[2]->id)->value('secret');
+        DB::table('product_stock_items')->where('id', $stocks[2]->id)->update(['secret' => 'invalid ciphertext']);
+        $before = $this->economics();
+
+        $first = $this->read('delivery', $order->id)['data'];
+        $this->assertSame('ready', $first['state']);
+        $this->assertSame([(string) $stocks[0]->id], array_column($first['units'], 'id'));
+        $this->assertSame([1], array_column($first['units'], 'number'));
+        $this->assertSame(str_repeat('a', 600_000), $first['units'][0]['text']);
+        $this->assertTrue($first['pagination']['has_more']);
+        $cursor = $first['pagination']['next_cursor'];
+        $this->assertNotNull($cursor);
+        $this->assertSame($first['units'], $this->read('delivery', $order->id)['data']['units']);
+        $this->assertSame([503, 'temporarily_unavailable', 'Delivery is temporarily unavailable.'],
+            $this->failure('delivery', $order->id, ['cursor' => $cursor]));
+        $this->assertSame($before, $this->economics());
+
+        DB::table('product_stock_items')->where('id', $stocks[2]->id)->update(['secret' => $originalCiphertext]);
+        $tail = $this->read('delivery', $order->id, ['cursor' => $cursor])['data'];
+        $this->assertSame([(string) $stocks[1]->id, (string) $stocks[2]->id], array_column($tail['units'], 'id'));
+        $this->assertSame([2, 3], array_column($tail['units'], 'number'));
+        $this->assertSame(str_repeat('b', 600_000), $tail['units'][0]['text']);
+        $this->assertSame(['next_cursor' => null, 'has_more' => false], $tail['pagination']);
+    }
+
     public function test_delivery_continuation_rejects_foreign_malformed_cursors_and_invalid_limits(): void
     {
         $order = $this->buy(3, structured: true);

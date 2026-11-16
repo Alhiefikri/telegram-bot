@@ -98,6 +98,12 @@ The drain atomically removes each batch from Redis **before** applying per-Custo
 
 The Nginx v1 location routes directly to the front controller, caps the body at 32 KiB, disables access/error request logging there, and returns a safe JSON/no-store 413 with request ID. The application also bounds the input stream without trusting Content-Length. Do not enable body/header tracing at an upstream TLS proxy, CDN, APM, FPM access logger or packet-capture layer; those layers require separate operator verification.
 
+Nginx rejects `/index.php/` path-info aliases with a no-store 404 and disables
+request/error logging in that location. This prevents alternate front-controller
+paths from reaching the API through the general, logged location; clients must use
+the canonical `/api/v1` paths. Upstream proxies and CDN logs still need their own
+independent configuration and verification.
+
 Standard application log channels install `RedactCustomerApiSecrets`: v1 request details/context are suppressed wholesale, while out-of-request token-shaped values and sensitive context fields are redacted. Arbitrary exception/serializer objects do not enter these logs. The Telegram transport redactor also removes Customer API token patterns from provider error text. Do not add custom logging channels or third-party tracing that bypass this boundary. Application exception reporting for v1 is suppressed rather than forwarding secret-bearing exception objects. Safe status/request IDs remain available on HTTP responses; there is no new analytics system.
 
 ## Verification entry points
