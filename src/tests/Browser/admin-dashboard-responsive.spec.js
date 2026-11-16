@@ -3265,6 +3265,32 @@ test("catalog placeholder upload stores a real image and rejects an invalid file
   await expectNoDocumentOverflow(page);
 });
 
+test("workspace returns to the same family and its product options", async ({ page }) => {
+  await login(page);
+
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${baseUrl}/admin?tab=produk`);
+    const group = page
+      .locator('[id^="admin-product-family-group-"]')
+      .filter({ has: page.getByRole("heading", { name: "Browser QA Product Family", exact: true }) });
+    await group.getByRole("button", { name: "Lihat product" }).click();
+    const first = group.locator('article[id^="product-"]').filter({ hasText: "QA option" });
+    const second = group.locator('article[id^="product-"]').filter({ hasText: "QA secondary" });
+    await expect(first).toBeVisible();
+    await expect(second).toBeVisible();
+    await first.getByRole("link", { name: /Kelola produk/ }).click();
+    await expect(page.getByRole("link", { name: "Langsung ke pengaturan produk" })).toBeVisible();
+    await page.getByRole("link", { name: "Kembali ke daftar produk family" }).click();
+    await expect(group.getByRole("button", { name: "Tutup daftar product" })).toBeVisible();
+    await expect(first).toBeVisible();
+    await expect(second).toBeVisible();
+    await second.getByRole("link", { name: /Kelola produk/ }).click();
+    await expect(page.getByRole("heading", { name: "Browser QA Produk Family Secondary", exact: true })).toBeVisible();
+    await expectNoDocumentOverflow(page);
+  }
+});
+
 test("keeps grouped Product Family controls usable at mobile width", async ({
   page,
 }) => {

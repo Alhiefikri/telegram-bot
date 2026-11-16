@@ -15,7 +15,10 @@
          x-on:workspace-stock-dirty="externalDirty = $event.detail.dirty"
          x-on:workspace-stock-busy="stockBusyChanged($event.detail.busy)"
          x-on:workspace-stock-saved="acceptStockSaved($event.detail)">
-        <a class="workspace-skip" href="#workspace-sections" x-on:click="openSection = openSection || 'detail'; $nextTick(() => document.getElementById('workspace-trigger-' + openSection)?.focus())">Langsung ke pengaturan produk</a>
+        <div class="workspace-actions">
+            <a class="workspace-skip" href="#workspace-sections" x-on:click="openSection = openSection || 'detail'; $nextTick(() => document.getElementById('workspace-trigger-' + openSection)?.focus())">Langsung ke pengaturan produk</a>
+            <a class="workspace-button" href="{{ route('admin.dashboard', ['tab' => 'produk']).'#product-'.$workspace['product']['id'] }}">← Kembali ke daftar produk family</a>
+        </div>
         <header class="workspace-heading">
             <div class="workspace-product-identity">
                 <img class="workspace-thumbnail" x-bind:src="workspace.product.image_url" alt="Gambar kartu produk tersimpan" width="72" height="72" decoding="async">
