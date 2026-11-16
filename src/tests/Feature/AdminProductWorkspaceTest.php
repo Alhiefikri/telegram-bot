@@ -12,6 +12,7 @@ use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
 use App\Models\SupplierCatalogItem;
+use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierPricePolicy;
 use App\Models\User;
 use App\Services\Admin\AdminProductWorkspaceData;
@@ -425,7 +426,7 @@ final class AdminProductWorkspaceTest extends TestCase
     {
         $this->manager();
         $product = Product::factory()->create();
-        \App\Models\SupplierCurrencyRate::query()->updateOrCreate(['currency' => 'USD'], ['exchange_rate_idr' => '16000', 'version' => 1]);
+        SupplierCurrencyRate::query()->updateOrCreate(['currency' => 'USD'], ['exchange_rate_idr' => '16000', 'version' => 1]);
         $item = $this->catalogItem(null, ['currency' => 'VND', 'unit_price_micros' => 69_000_000_000]);
         $item->supplier->forceFill(['currency' => 'VND', 'exchange_rate_idr' => '0.692308'])->save();
         $url = route('admin.products.workspace.catalog', ['product' => $product, 'supplier_id' => $item->supplier_id]);
@@ -433,9 +434,9 @@ final class AdminProductWorkspaceTest extends TestCase
             ->assertJsonPath('items.0.cost.unit', '69000')->assertJsonPath('items.0.cost.idr', 47770)
             ->assertJsonPath('items.0.cost.usd', '2.985625')->assertJsonPath('items.0.cost.implausible', false);
 
-        \App\Models\SupplierCurrencyRate::query()->whereKey('USD')->delete();
+        SupplierCurrencyRate::query()->whereKey('USD')->delete();
         $this->getJson($url)->assertOk()->assertJsonPath('items.0.cost.idr', 47770)->assertJsonPath('items.0.cost.usd', null);
-        \App\Models\SupplierCurrencyRate::query()->create(['currency' => 'USD', 'exchange_rate_idr' => '0', 'version' => 1]);
+        SupplierCurrencyRate::query()->create(['currency' => 'USD', 'exchange_rate_idr' => '0', 'version' => 1]);
         $this->getJson($url)->assertOk()->assertJsonPath('items.0.cost.idr', 47770)->assertJsonPath('items.0.cost.usd', null);
         $item->supplier->forceFill(['exchange_rate_idr' => '18000'])->save();
         $this->getJson($url)->assertOk()->assertJsonPath('items.0.cost.idr', null)
