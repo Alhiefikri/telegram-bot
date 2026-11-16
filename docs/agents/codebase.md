@@ -1119,6 +1119,13 @@ Committed Order and OrderItem changes invalidate the cached catalog projection.
 Product Detail, quantity, payment, Cart, Order, and outbound-effect ownership
 remains unchanged.
 
+Sold-out Plan buttons remain red but open Product Detail through the same
+validated family callback as available Plans. The detail shows its localized
+description, policy and sold-out warning without quantity or payment controls;
+it clears the purchase selection and retains back navigation. Checkout still
+revalidates live stock and rejects stale payment callbacks. This warning does
+not subscribe the Customer to a restock alert.
+
 Product Detail copy is locale-aware: `TelegramCatalogIntents::renderProductDetail` and
 `TelegramProductNotificationService` resolve Product Details and Replacement / Refund
 Policy through [`LocalizedProductCopy`](../../src/app/Catalog/LocalizedProductCopy.php) for

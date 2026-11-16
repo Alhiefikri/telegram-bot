@@ -88,14 +88,12 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Terjual: 0', (string) $options['text']);
         $soldOutButton = $options['reply_markup']['inline_keyboard'][0][0];
         $this->assertSame('danger', $soldOutButton['style']);
-        $this->assertSame('{}', json_encode($soldOutButton['disabled'], JSON_THROW_ON_ERROR));
-        $this->assertArrayNotHasKey('callback_data', $soldOutButton);
+        $this->assertArrayNotHasKey('disabled', $soldOutButton);
+        $this->assertStringStartsWith('family:select:v', $soldOutButton['callback_data']);
         $availableButton = $options['reply_markup']['inline_keyboard'][0][1];
         $this->assertSame('primary', $availableButton['style']);
         $this->assertArrayNotHasKey('disabled', $availableButton);
         $this->assertStringStartsWith('family:select:v', $availableButton['callback_data']);
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains($request->body(), '"style":"danger","disabled":{}'));
         $this->assertStringStartsWith('family:list:1:o', $options['reply_markup']['inline_keyboard'][1][0]['callback_data']);
         $selectCallback = $availableButton['callback_data'];
         $this->postTelegramWebhook($this->callbackUpdate(41004, 'family-select-token', $selectCallback, [], 41001))->assertOk();
@@ -493,20 +491,54 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
             'name' => 'Sold Out Option',
             'product_family_id' => $family->id,
             'family_option_label' => 'Unavailable Package',
+            'description' => 'Details customers can read while waiting.',
+            'warranty_policy' => 'Replacement terms for this product.',
             'stock' => 1,
-            'reserved_stock' => 1,
+            'reserved_stock' => 0,
             'is_active' => true,
         ]);
 
+        $this->postTelegramWebhook($this->callbackUpdate(41019, 'open-before-sold-out', 'product:'.$product->id, [], 41003))->assertOk();
+        $oldSelection = app(TelegramIntentSession::class)->get($customer);
+        $this->assertIsArray($oldSelection);
+        $product->forceFill(['reserved_stock' => 1])->save();
+
         $this->openFamilyFromDeepLink($customer, 41018, $family);
-        $this->postTelegramWebhook($this->callbackUpdate(41021, 'select-sold-option', $this->selectCallback($family->id, $product->id), [], 41003))->assertOk();
+        $options = $this->lastMessageContaining('Unavailable Package');
+        $soldOutButton = $options['reply_markup']['inline_keyboard'][0][0];
+        $this->assertSame('danger', $soldOutButton['style']);
+        $this->postTelegramWebhook($this->callbackUpdate(41021, 'select-sold-option', $soldOutButton['callback_data'], [], 41003))->assertOk();
 
         $detail = $this->lastMessageContaining('Sold Out Option');
         $this->assertStringContainsString('Stok kosong', (string) $detail['text']);
-        $this->assertStringNotContainsString('detail:pay:', json_encode($detail, JSON_THROW_ON_ERROR));
-        $this->assertStringContainsString('family:options:v', json_encode($detail, JSON_THROW_ON_ERROR));
+        $this->assertStringContainsString('Details customers can read while waiting.', (string) $detail['text']);
+        $this->assertStringContainsString('Replacement terms for this product.', (string) $detail['text']);
+        $this->assertStringContainsString('⚠️ Stok sedang habis, jadi produk belum bisa dibeli.', (string) $detail['text']);
+        $buttons = collect($detail['reply_markup']['inline_keyboard'])->flatten(1);
+        $this->assertFalse($buttons->contains(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:pay:')
+            || str_starts_with((string) ($button['callback_data'] ?? ''), 'detail:qty:')));
+        $back = $buttons->first(fn (array $button): bool => str_starts_with((string) ($button['callback_data'] ?? ''), 'family:options:'));
+        $this->assertIsArray($back);
+        $this->assertNull(app(TelegramIntentSession::class)->get($customer));
         $this->assertSame(0, Cart::count());
         $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+
+        $this->postTelegramWebhook($this->callbackUpdate(41022, 'sold-option-back', $back['callback_data'], [], 41003))->assertOk();
+        $this->assertStringContainsString('Unavailable Package', (string) $this->lastMessageContaining('Pilih Plan Sold Out Family')['text']);
+
+        foreach (['qris', 'balance', 'binance'] as $index => $rail) {
+            $this->postTelegramWebhook($this->callbackUpdate(
+                41023 + $index,
+                'sold-option-stale-'.$rail,
+                'detail:pay:'.$rail.':'.$product->id.':'.$oldSelection['interactionToken'],
+                [],
+                41003,
+            ))->assertOk();
+        }
+        $this->assertSame(0, Cart::count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
     }
 
     public function test_family_search_collapses_member_matches_and_tampered_selection_has_no_commerce_effect(): void
@@ -1318,12 +1350,12 @@ class ProductFamilyDiscoveryTest extends TelegramBotTestSupport
         $this->assertStringContainsString('❌ Stok: Habis', (string) $soldOutOptions['text']);
         $soldOutButton = $soldOutOptions['reply_markup']['inline_keyboard'][0][0];
         $this->assertSame('danger', $soldOutButton['style']);
-        $this->assertArrayNotHasKey('callback_data', $soldOutButton);
+        $this->assertStringStartsWith('family:select:v', $soldOutButton['callback_data']);
 
         $this->postTelegramWebhook($this->callbackUpdate(
             41144,
             'select-now-sold-out',
-            $this->selectCallback($family->id, $product->id),
+            $soldOutButton['callback_data'],
             [],
             41140,
         ))->assertOk();

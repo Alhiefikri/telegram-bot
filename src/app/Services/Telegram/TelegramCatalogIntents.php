@@ -204,15 +204,9 @@ class TelegramCatalogIntents
                         'number' => (string) ($index + 1),
                     ]).($member->manualUnlimited ? ' · ∞' : ''),
                 ];
-                if (! $member->isAvailable) {
-                    // A disabled button is its own button type, so it carries no
-                    // callback data and Telegram renders it inert.
-                    return [...$label, 'style' => 'danger', 'disabled' => (object) []];
-                }
-
                 return [
                     ...$label,
-                    'style' => 'primary',
+                    'style' => $member->isAvailable ? 'primary' : 'danger',
                     'callback_data' => $this->familySelectCallback($family->id, $member->id, $page, $returnPage),
                 ];
             })

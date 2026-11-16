@@ -357,7 +357,7 @@
   "catalog.product_button.out_of_stock": "🔴 Stok Habis",
   "catalog.payment.binance_total": "Binance: :amount USDT",
   "catalog.payment.price_compact": "Rp:amount",
-  "catalog.sold_out_guidance": "Stok produk ini habis. Lihat produk lain atau tunggu stok baharu.",
+  "catalog.sold_out_guidance": "⚠️ Stok produk ini habis dan belum boleh dibeli. Sila tunggu stok baharu atau lihat produk lain.",
   "catalog.quantity.product": "📦 Produk: ",
   "catalog.quantity.available_stock": "✅ Stok tersedia: ",
   "catalog.detail.base_price": "Harga: Rp:amount/unit",
