@@ -1,12 +1,12 @@
 # Admin Dashboard Sidebar Cutover
-Keuangan kini memiliki satu pintu **Saldo & top-up**. Hub tersebut menghubungkan laporan saldo, penyesuaian IDR/USDT, review deposit USDT, kompensasi top-up IDR, dan kebijakan top-up sesuai hak masing-masing; URL langsung tetap berlaku. Laporan Akun menampilkan satu baris per Customer dengan saldo IDR dan USDT, dan menyembunyikan Customer bila kedua proyeksinya nol. Daftar penyesuaian IDR tetap mempertahankan peringatan drift proyeksi.
-
-Notifikasi Owner untuk penambahan atau reversal saldo memuat nama dan Telegram ID Customer, jumlah dalam mata uang asli, serta alasan yang dikonfirmasi. Pengiriman ulang request yang sudah diterapkan tidak menambah saldo atau membuat notifikasi baru.
-
 
 Status: presentation implemented; release acceptance is blocked. Issues #600–#605 do not authorize deployment. Current candidate-bound checks, missing scenarios, device requirements and rollback identity are recorded in [the #605 release parity audit](admin-dashboard-release-parity.md).
 
 Current scope update: Ringkasan is now sales-only; configuration lives in the separate Pengaturan destination. KlikQRIS history and Withdraw are retired dashboard surfaces, not release-parity targets. The historical #605 inventory and evidence below predate this information-architecture change and do not certify it.
+
+Keuangan kini memiliki satu pintu **Saldo & top-up**. Hub tersebut menghubungkan laporan saldo, penyesuaian IDR/USDT, review deposit USDT, kompensasi top-up IDR, dan kebijakan top-up sesuai hak masing-masing; URL langsung tetap berlaku. Laporan Akun menampilkan satu baris per Customer dengan saldo IDR dan USDT, dan menyembunyikan Customer bila kedua proyeksinya nol. Daftar penyesuaian IDR tetap mempertahankan peringatan drift proyeksi.
+
+Notifikasi Owner untuk penambahan atau reversal saldo memuat nama dan Telegram ID Customer, jumlah dalam mata uang asli, serta alasan yang dikonfirmasi. Pengiriman ulang request yang sudah diterapkan tidak menambah saldo atau membuat notifikasi baru.
 
 ## As-built ownership
 
