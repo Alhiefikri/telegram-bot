@@ -148,6 +148,43 @@ final class AdminProductWorkspaceData
         ];
     }
 
+    /**
+     * Catalog estimates use the already-resolved global USD rate; never query it
+     * while serializing individual items.
+     */
+    public function catalogCost(SupplierCatalogItem $item, int|string|null $usdRate): array
+    {
+        $micros = $this->pricing->costMicros($item, 1);
+        $currency = $item->currency ?? $item->supplier->currency;
+        $rate = $item->supplier->exchange_rate_idr;
+        $implausible = $currency !== $item->supplier->currency || ! SupplierExchangeRate::isStorable($currency, $rate);
+        $idr = null;
+        $usd = $micros !== null && in_array($currency, ['USD', 'USDT'], true) ? SupplierMoney::decimal($micros) : null;
+
+        if ($micros !== null && ! $implausible) {
+            try {
+                $idr = SupplierMoney::costIdr($micros, $rate);
+            } catch (InvalidArgumentException) {
+                // An overflowing estimate is not a usable cost.
+            }
+            if ($idr !== null && $currency !== 'USD' && $currency !== 'USDT'
+                && $usdRate !== null && SupplierExchangeRate::isStorable('USD', $usdRate)) {
+                try {
+                    $usd = SupplierMoney::decimal(SupplierMoney::usdMicrosFromIdr($idr, $usdRate));
+                } catch (InvalidArgumentException) {
+                    // Preserve a valid IDR estimate even if the USD estimate overflows.
+                }
+            }
+        }
+
+        return [
+            'unit' => $micros === null ? null : (rtrim(rtrim(SupplierMoney::decimal($micros), '0'), '.') ?: '0'),
+            'idr' => $idr,
+            'usd' => $usd,
+            'implausible' => $implausible,
+        ];
+    }
+
     private function usdt(?int $micros): ?string
     {
         return $micros === null ? null : (rtrim(rtrim(sprintf('%d.%06d', intdiv($micros, 1000000), $micros % 1000000), '0'), '.') ?: '0');

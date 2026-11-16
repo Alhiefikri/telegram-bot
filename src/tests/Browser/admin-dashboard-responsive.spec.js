@@ -5769,6 +5769,33 @@ test("supplier picker stays centered inside desktop and mobile viewports", async
   }
 });
 
+test("supplier picker filters and searches SKU and shows unit cost estimates", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
+  await page.locator("#workspace-trigger-supplier").click();
+  await page.getByRole("button", { name: "Tambah sumber supplier", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Tambah sumber supplier", exact: true });
+  const supplier = dialog.getByLabel("Supplier", { exact: true });
+  const search = dialog.getByLabel("Cari nama produk, SKU, atau supplier");
+  await expect(supplier.locator("option")).toHaveCount(2);
+  const supplierId = await supplier.locator("option").nth(1).getAttribute("value");
+  await supplier.selectOption(supplierId);
+  await search.fill("BROWSER-PRIVATE-SKU");
+  const item = dialog.locator(".workspace-catalog-option").filter({ hasText: "Browser private catalog option" });
+  await expect(item).toBeVisible();
+  await expect(item).toContainText("Harga supplier: 1 USDT");
+  await expect(item).toContainText("USD 1");
+  await expect(item).toContainText("16.000");
+  await search.fill("no-matching-supplier-item");
+  await expect(dialog.getByText(/Tidak ada item yang cocok/)).toBeVisible();
+  await search.fill("browser-private-sku");
+  await expect(item).toBeVisible();
+  await expectNoDocumentOverflow(page);
+});
+
 test("workspace saves product detail and appearance independently without losing drafts", async ({
   page,
 }) => {

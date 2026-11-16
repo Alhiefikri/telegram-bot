@@ -371,6 +371,89 @@ final class AdminProductWorkspaceTest extends TestCase
             ->assertJsonPath('items.0.supplier.is_fresh', false)->assertDontSee(self::SECRET);
     }
 
+    public function test_catalog_search_is_case_insensitive_literal_and_injection_safe(): void
+    {
+        $this->manager();
+        $product = Product::factory()->create();
+        $item = $this->catalogItem(null, ['name' => 'Alpha 100%_! Plan', 'external_id' => 'SKU-MiXeD']);
+        $item->supplier->forceFill(['name' => 'Provider MiXeD'])->save();
+        $this->catalogItem(null, ['name' => 'Alpha 100XX Plan', 'external_id' => 'unrelated']);
+
+        foreach (['100%_!', 'sku-mixed', 'provider mixed', 'alpha 100%'] as $search) {
+            $this->getJson(route('admin.products.workspace.catalog', ['product' => $product, 'q' => $search]))
+                ->assertOk()->assertJsonCount(1, 'items')->assertJsonPath('items.0.id', $item->id);
+        }
+        foreach (['%', '_', '!'] as $search) {
+            $this->getJson(route('admin.products.workspace.catalog', ['product' => $product, 'q' => $search]))
+                ->assertOk()->assertJsonCount(1, 'items')->assertJsonPath('items.0.id', $item->id);
+        }
+        $this->getJson(route('admin.products.workspace.catalog', ['product' => $product, 'q' => "' OR 1=1 --"]))
+            ->assertOk()->assertJsonCount(0, 'items')->assertDontSee(self::SECRET);
+        $this->getJson(route('admin.products.workspace.catalog', ['product' => $product, 'q' => str_repeat('a', 121)]))
+            ->assertUnprocessable()->assertJsonValidationErrors('q');
+    }
+
+    public function test_catalog_supplier_options_include_inactive_and_empty_connections_even_when_filtered(): void
+    {
+        $this->manager();
+        $product = Product::factory()->create();
+        $item = $this->catalogItem();
+        $empty = Supplier::forceCreate(['name' => 'Empty connection', 'provider' => 'prodseller', 'api_key' => self::SECRET, 'currency' => 'USDT', 'currency_confirmed' => true, 'exchange_rate_idr' => 16000, 'is_active' => true, 'version' => 1, 'reserved_balance_micros' => 0, 'low_balance_threshold_micros' => 0]);
+        $response = $this->getJson(route('admin.products.workspace.catalog', ['product' => $product, 'supplier_id' => $item->supplier_id, 'q' => 'nothing-matches']));
+        $response->assertOk()->assertJsonCount(0, 'items')->assertJsonCount(2, 'suppliers')->assertDontSee(self::SECRET);
+        $this->assertEqualsCanonicalizing([
+            ['id' => $item->supplier_id, 'name' => 'Private supplier', 'is_active' => false],
+            ['id' => $empty->id, 'name' => 'Empty connection', 'is_active' => true],
+        ], $response->json('suppliers'));
+    }
+
+    public function test_catalog_pagination_has_a_stable_id_tiebreaker_for_case_folded_names(): void
+    {
+        $this->manager();
+        $product = Product::factory()->create();
+        $first = $this->catalogItem(null, ['name' => 'Same']);
+        $ids = [$first->id];
+        for ($index = 1; $index < 30; $index++) {
+            $ids[] = $this->catalogItem($first->supplier, ['name' => $index % 2 ? 'same' : 'SAME', 'external_id' => 'tie-'.$index])->id;
+        }
+        $page1 = $this->getJson(route('admin.products.workspace.catalog', ['product' => $product, 'q' => 'same']))->assertOk();
+        $page2 = $this->getJson(route('admin.products.workspace.catalog', ['product' => $product, 'q' => 'same', 'page' => 2]))->assertOk();
+        $this->assertSame($ids, array_merge(array_column($page1->json('items'), 'id'), array_column($page2->json('items'), 'id')));
+    }
+
+    public function test_catalog_costs_use_valid_rates_and_keep_original_currency(): void
+    {
+        $this->manager();
+        $product = Product::factory()->create();
+        \App\Models\SupplierCurrencyRate::query()->updateOrCreate(['currency' => 'USD'], ['exchange_rate_idr' => '16000', 'version' => 1]);
+        $item = $this->catalogItem(null, ['currency' => 'VND', 'unit_price_micros' => 69_000_000_000]);
+        $item->supplier->forceFill(['currency' => 'VND', 'exchange_rate_idr' => '0.692308'])->save();
+        $url = route('admin.products.workspace.catalog', ['product' => $product, 'supplier_id' => $item->supplier_id]);
+        $this->getJson($url)->assertOk()->assertJsonPath('items.0.currency', 'VND')
+            ->assertJsonPath('items.0.cost.unit', '69000')->assertJsonPath('items.0.cost.idr', 47770)
+            ->assertJsonPath('items.0.cost.usd', '2.985625')->assertJsonPath('items.0.cost.implausible', false);
+
+        \App\Models\SupplierCurrencyRate::query()->whereKey('USD')->delete();
+        $this->getJson($url)->assertOk()->assertJsonPath('items.0.cost.idr', 47770)->assertJsonPath('items.0.cost.usd', null);
+        \App\Models\SupplierCurrencyRate::query()->create(['currency' => 'USD', 'exchange_rate_idr' => '0', 'version' => 1]);
+        $this->getJson($url)->assertOk()->assertJsonPath('items.0.cost.idr', 47770)->assertJsonPath('items.0.cost.usd', null);
+        $item->supplier->forceFill(['exchange_rate_idr' => '18000'])->save();
+        $this->getJson($url)->assertOk()->assertJsonPath('items.0.cost.idr', null)
+            ->assertJsonPath('items.0.cost.usd', null)->assertJsonPath('items.0.cost.implausible', true);
+
+        $item->supplier->forceFill(['currency' => 'USDT', 'exchange_rate_idr' => '16000'])->save();
+        $item->forceFill(['currency' => 'USDT', 'unit_price_micros' => 0])->save();
+        $this->getJson($url)->assertOk()->assertJsonPath('items.0.currency', 'USDT')
+            ->assertJsonPath('items.0.cost.unit', '0')->assertJsonPath('items.0.cost.usd', '0.000000');
+        $item->supplier->forceFill(['currency' => 'USD', 'exchange_rate_idr' => '16000'])->save();
+        $item->forceFill(['currency' => 'USD', 'unit_price_micros' => 1_250_000])->save();
+        $this->getJson($url)->assertOk()->assertJsonPath('items.0.cost.unit', '1.25')
+            ->assertJsonPath('items.0.cost.idr', 20000)->assertJsonPath('items.0.cost.usd', '1.250000');
+        $item->forceFill(['unit_price_micros' => null])->save();
+        $this->getJson($url)->assertOk()->assertJsonPath('items.0.cost.unit', null)
+            ->assertJsonPath('items.0.cost.idr', null)->assertJsonPath('items.0.cost.usd', null);
+    }
+
     public function test_workspace_separates_stale_supplier_catalog_stock_from_available_projection(): void
     {
         $this->manager();

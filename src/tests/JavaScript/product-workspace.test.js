@@ -633,6 +633,36 @@ test("catalog searches encode user input and ignore stale results and stale erro
   assert.equal(state.catalogError, "");
   assert.equal(state.catalogLoading, false);
 });
+test("supplier filter keeps latest results and options when an older request finishes late", async () => {
+  const first = deferred();
+  const second = deferred();
+  const urls = [];
+  const state = create((url) => {
+    urls.push(url);
+    return urls.length === 1 ? first.promise : second.promise;
+  });
+  const oldSearch = state.searchCatalog();
+  state.catalogSupplier = "42";
+  state.catalogQuery = "muse";
+  const filteredSearch = state.searchCatalog();
+  second.resolve(response({
+    suppliers: [{ id: 42, name: "Supplier B", is_active: true }],
+    items: [{ id: 8 }],
+    pagination: { current_page: 1, last_page: 1, total: 1 },
+  }));
+  await filteredSearch;
+  first.resolve(response({
+    suppliers: [{ id: 1, name: "Old", is_active: true }],
+    items: [{ id: 1 }],
+    pagination: { current_page: 1, last_page: 3, total: 60 },
+  }));
+  await oldSearch;
+  assert.match(urls[1], /q=muse/);
+  assert.match(urls[1], /supplier_id=42/);
+  assert.deepEqual(state.catalog, [{ id: 8 }]);
+  assert.deepEqual(state.catalogSuppliers, [{ id: 42, name: "Supplier B", is_active: true }]);
+  assert.equal(state.catalogTotal, 1);
+});
 test("catalog network failure exposes retry state without retaining misleading prior results", async () => {
   const state = create(async () => {
     throw new Error("Offline catalog");

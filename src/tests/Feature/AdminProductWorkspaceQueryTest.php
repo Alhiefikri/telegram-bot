@@ -49,6 +49,8 @@ final class AdminProductWorkspaceQueryTest extends TestCase
         $single->assertOk()->assertJsonCount(1, 'items');
         $many->assertOk()->assertJsonCount(25, 'items');
         $this->assertLessThanOrEqual(count($singleQueries), count($manyQueries), 'Catalog supplier lookup must use one eager query for the whole page.');
+        $rateQueries = array_filter($manyQueries, fn (array $query): bool => str_contains(strtolower($query['query']), 'supplier_currency_rates'));
+        $this->assertCount(1, $rateQueries, 'The USD rate must be loaded once for the page, not once per item.');
     }
 
     public function test_json_refresh_omits_unchanged_choice_lists_but_initial_html_retains_every_choice(): void

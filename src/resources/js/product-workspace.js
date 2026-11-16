@@ -118,12 +118,14 @@ export default function productWorkspace(
     refreshPending: false,
     contentLocale: "id",
     catalog: [],
+    catalogSuppliers: [],
     catalogQuery: "",
     catalogSupplier: "",
     catalogResultQuery: "",
     catalogResultSupplier: "",
     catalogPage: 1,
     catalogLastPage: 1,
+    catalogTotal: 0,
     catalogLoading: false,
     catalogError: "",
     catalogSelection: "",
@@ -667,6 +669,8 @@ export default function productWorkspace(
         this.catalog = result.items ?? [];
         this.catalogResultQuery = query;
         this.catalogResultSupplier = supplier;
+        this.catalogSuppliers = result.suppliers ?? this.catalogSuppliers;
+        this.catalogTotal = result.pagination.total ?? 0;
         this.catalogPage = result.pagination.current_page;
         this.catalogLastPage = result.pagination.last_page;
       } catch (error) {

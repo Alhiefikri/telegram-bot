@@ -445,7 +445,7 @@
 .workspace-dialog::backdrop {
   background: rgb(0 0 0 / 0.6);
 }
-.workspace-dialog > label {
+.workspace-catalog-filters {
   margin-block: 1rem;
 }
 .workspace-dialog h3 {
