@@ -13,6 +13,7 @@ use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -1224,6 +1225,57 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $this->assertCount(0, Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument')));
     }
 
+    public function test_existing_receipt_waits_while_manual_review_is_open(): void
+    {
+        Queue::fake();
+        [$order] = $this->paidSingleStructuredReceiptOrder('en', CredentialAccessMethod::None);
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $order->orderItems()->firstOrFail()->update(['manual_unlimited' => true]);
+        $review = ManualFulfillmentReview::query()->create([
+            'order_id' => $order->id,
+            'payment_id' => $order->payments()->firstOrFail()->id,
+            'amount' => $order->total_amount,
+            'currency' => 'IDR',
+            'reason' => ManualFulfillmentReview::REASON_MANUAL_UNLIMITED,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+        ]);
+        $this->fakeTelegramHttp();
+
+        $this->assertNull(app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh()));
+        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+        $this->assertSame(TelegramOutboundEffectState::Pending, $effect->fresh()->state);
+        $this->assertCount(0, Http::recorded());
+
+        $review->update(['state' => ManualFulfillmentReview::STATE_FULFILLED]);
+        app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+    }
+
+    public function test_admin_outcome_does_not_count_allocations_added_after_an_empty_receipt(): void
+    {
+        Queue::fake();
+        [$order] = $this->paidSingleStructuredReceiptOrder('en', CredentialAccessMethod::None);
+        $effect = app(TelegramOutboundEffectService::class)->recordReceipt($order);
+        $group = TelegramOutboundEffect::query()->where('effect_group_key', $effect->effect_group_key)->get();
+        foreach ($group as $row) {
+            $metadata = $row->outcome_metadata;
+            $metadata['account_count'] = 0;
+            $metadata['contains_credentials'] = false;
+            $row->forceFill([
+                'outcome_metadata' => $metadata,
+                'state' => TelegramOutboundEffectState::Sent,
+                'sent_at' => now(),
+                'telegram_message_id' => '820002',
+            ])->save();
+        }
+
+        $order->load(['customer', 'orderItems', 'payments']);
+        $outcome = app(AdminPaidOrderOutcome::class)->read($order);
+        $this->assertFalse($outcome['resolved']);
+        $this->assertStringContainsString('jumlah unit belum terbukti', $outcome['lines'][0]);
+        $this->assertStringNotContainsString('1/1 unit terkirim', $outcome['lines'][0]);
+    }
+
     public function test_admin_outcome_uses_current_allocations_without_changing_the_unresolved_deadline(): void
     {
         Queue::fake();
@@ -1244,7 +1296,7 @@ class TelegramReceiptOutboundEffectTest extends TelegramBotTestSupport
         $outcome = $reader->read($order);
         $this->assertFalse($outcome['resolved']);
         $this->assertFalse($outcome['ready']);
-        $this->assertStringContainsString('1/2 unit terkirim', $outcome['lines'][0]);
+        $this->assertStringContainsString('jumlah unit belum terbukti', $outcome['lines'][0]);
         $this->travel(1)->seconds();
         $outcome = $reader->read($order);
         $this->assertFalse($outcome['resolved']);

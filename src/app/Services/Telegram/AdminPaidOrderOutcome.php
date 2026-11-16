@@ -25,11 +25,18 @@ final class AdminPaidOrderOutcome
         $effects = TelegramOutboundEffect::query()->where('source_type', Order::class)->where('source_id', (string) $order->id)
             ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)->get();
         $complete = false;
+        $completedAccountCounts = [];
         foreach ($effects->groupBy('effect_group_key') as $key => $group) {
             if (app(TelegramOutboundEffectLedgerProtocol::class)->isReceiptGroupComplete($key)
                 && $group->every(fn ($effect) => app(TelegramOutboundEffectPolicy::class)->isReceiptEffectComplete($effect)
                     && ($effect->state->value !== 'sent' || app(TelegramOutboundResponseValidator::class)->isValidMessageId((string) $effect->telegram_message_id)))) {
                 $complete = true;
+                $metadata = $group->first()->outcome_metadata ?? [];
+                if (isset($metadata['account_count'])
+                    && $group->contains(fn ($effect) => $effect->state->value === 'sent'
+                        && ($effect->outcome_metadata['contains_credentials'] ?? null) === true)) {
+                    $completedAccountCounts[] = (int) $metadata['account_count'];
+                }
             }
         }
         $credentialEffects = $effects->filter(fn ($effect) => ($effect->outcome_metadata['contains_credentials'] ?? null) !== false
@@ -49,6 +56,8 @@ final class AdminPaidOrderOutcome
         $intervention = $review || $unknown || $failed;
         $lines = [];
         $order->orderItems->loadCount('stockItems');
+        $allocationCount = $order->orderItems->sum('stock_items_count');
+        $deliveryProven = $complete && $allocationCount > 0 && in_array($allocationCount, $completedAccountCounts, true);
         foreach ($order->orderItems as $item) {
             $f = $fulfillments->get($item->id);
             $supplierResolved = true;
@@ -73,17 +82,18 @@ final class AdminPaidOrderOutcome
             }
             $handoff = (int) ($f?->manualHandoffs->sum('quantity') ?? 0);
             $allocated = (int) $item->stock_items_count;
-            $delivered = $complete ? $allocated : 0;
+            $delivered = $deliveryProven ? $allocated : 0;
             $refunded = (int) ($f?->refunded_quantity ?? 0);
-            $buyerResolved = ($complete && $delivered + $refunded === (int) $item->quantity)
+            $buyerResolved = ($deliveryProven && $delivered + $refunded === (int) $item->quantity)
                 || $handoff + $refunded >= $item->quantity || $failed || ($allRejected && $allocated === 0);
-            $buyer = $complete ? $delivered.'/'.$item->quantity.' unit terkirim'
+            $buyer = $deliveryProven ? $delivered.'/'.$item->quantity.' unit terkirim'
+                : ($complete ? 'receipt terkirim; jumlah unit belum terbukti'
                 : ($handoff > 0 ? $handoff.'/'.$item->quantity.' unit diserahkan di luar bot'
                 : ($unknown ? 'hasil pengiriman Telegram belum dapat dipastikan; jangan kirim ulang'
                 : ($failed ? ($acknowledgedChunks > 0 ? 'pengiriman sebagian; jumlah unit belum pasti' : 'akun belum terkirim')
                     .'; '.$failureReason
                 : ($allRejected && $allocated === 0 ? '0/'.$item->quantity.' unit terkirim; pembelian ditolak'
-                : 'pengiriman belum terkonfirmasi; jangan kirim ulang'))));
+                : 'pengiriman belum terkonfirmasi; jangan kirim ulang')))));
             $resolved = $resolved && $supplierResolved && $buyerResolved && (! $unknown || $complete);
             $lines[] = $item->product_name.' x '.$item->quantity.': '.$buyer.($refunded > 0 ? '; '.$refunded.' unit refund tercatat' : '');
             $lines[] = $purchases === [] ? 'Supplier: tidak digunakan (stok lokal)' : 'Supplier: '.implode('; ', $purchases);

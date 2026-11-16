@@ -42,7 +42,7 @@
                 <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Referensi provider</dt><dd class="break-all font-mono text-xs">{{ $review->provider_reference ?: '-' }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Terkonfirmasi paid</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->payment->paid_at?->format('d M Y H:i') ?? '-' }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Status pemenuhan</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->order->order_status === \App\Enums\OrderStatus::Completed ? 'akun siap' : $review->order->order_status->value }}</dd></div>
-                <div><dt class="text-xs font-medium text-admin-muted">Receipt bot</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->order->telegram_receipt_sent_at ? 'Terkirim pada '.$review->order->telegram_receipt_sent_at->format('d M Y H:i') : ($receiptEffect ? $receiptEffect->state->value.' (belum terkonfirmasi terkirim)' : 'Belum terkonfirmasi terkirim') }}</dd></div>
+                <div><dt class="text-xs font-medium text-admin-muted">Receipt bot</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->order->telegram_receipt_sent_at ? 'Struk diterima Telegram pada '.$review->order->telegram_receipt_sent_at->format('d M Y H:i').' (belum tentu memuat data akun)' : ($receiptEffect ? $receiptEffect->state->value.' (belum terkonfirmasi terkirim)' : 'Belum terkonfirmasi terkirim') }}</dd></div>
                 @if ($receiptEffect && in_array($receiptEffect->state->value, ['unknown', 'manual_review', 'failed'], true))
                     @can('view', $receiptEffect)
                         <div class="sm:col-span-2"><a href="{{ route('admin.telegram-outbound-effects.show', $receiptEffect) }}" class="text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">Buka Manual Delivery Review</a></div>
@@ -51,7 +51,9 @@
                 <div><dt class="text-xs font-medium text-admin-muted">Dibuat</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->created_at?->format('d M Y H:i') ?? '-' }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Aktor resolusi</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->actor?->name ?: '-' }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Waktu resolusi</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->resolved_at?->format('d M Y H:i') ?? '-' }}</dd></div>
-                <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Alasan resolusi</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->resolution_reason ?: '-' }}</dd></div>
+                @if (filled($review->resolution_reason))
+                    <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Alasan resolusi</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->resolution_reason }}</dd></div>
+                @endif
                 @if ($review->refund_provider_reference)
                     <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Refund provider</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->refund_provider_reference }} ({{ $review->refund_provider_result }})</dd></div>
                 @endif
@@ -128,11 +130,6 @@
                                 </fieldset>
                             @endif
                         @endforeach
-                        <x-admin-dashboard.field-label>
-                            Catatan resolusi
-                            <x-admin-dashboard.textarea name="reason" required maxlength="2000" class="mt-1" />
-                            <small class="mt-1 block text-xs text-admin-muted">Tulis catatan pemeriksaan tanpa password atau data akun.</small>
-                        </x-admin-dashboard.field-label>
                         <x-admin-dashboard.button type="submit" variant="primary">Simpan akun dan lanjutkan pengiriman</x-admin-dashboard.button>
                     </form>
                 </x-admin-dashboard.card>

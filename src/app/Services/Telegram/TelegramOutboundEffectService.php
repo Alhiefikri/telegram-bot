@@ -1499,9 +1499,10 @@ class TelegramOutboundEffectService
             self::legacyReceiptEffectGroupKey((string) $source->getKey()),
         ];
         $hasExistingGroup = TelegramOutboundEffect::query()->whereIn('effect_group_key', $groupKeys)->exists();
+        $manualSnapshot = $this->manualReceiptSnapshot($source);
         $prepared = $hasExistingGroup ? null : $this->prepareReceiptGroup($source);
 
-        return DB::transaction(function () use ($source, $customer, $groupKeys, $prepared): ?TelegramOutboundEffect {
+        return DB::transaction(function () use ($source, $customer, $groupKeys, $prepared, $manualSnapshot): ?TelegramOutboundEffect {
             $locked = Order::query()->lockForUpdate()->findOrFail($source->getKey());
             $lockedCustomer = $customer ?? $locked->customer;
 
@@ -1535,6 +1536,11 @@ class TelegramOutboundEffectService
                 // Receipt rows are append-only; a group observed before the
                 // lock cannot disappear and leave an unprepared group behind.
                 throw new RuntimeException('Receipt group preparation was skipped unexpectedly.');
+            }
+
+            if ($manualSnapshot !== $this->manualReceiptSnapshot($locked)
+                || ! $this->manualReceiptPlanMatches($locked, $prepared['plan'])) {
+                return null;
             }
 
             return $this->createReceiptEffectGroup(
@@ -1837,13 +1843,19 @@ class TelegramOutboundEffectService
         if (! $this->receiptEligible($source, $customer)) {
             throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
         }
+        $manualSnapshot = $this->manualReceiptSnapshot($source);
         $prepared = $this->prepareReceiptGroup($source);
 
-        return DB::transaction(function () use ($source, $prepared): TelegramOutboundEffect {
+        return DB::transaction(function () use ($source, $prepared, $manualSnapshot): TelegramOutboundEffect {
             $locked = Order::query()->lockForUpdate()->findOrFail($source->getKey());
             $lockedCustomer = $locked->customer;
             if (! $this->receiptEligible($locked, $lockedCustomer)) {
                 throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
+            }
+
+            if ($manualSnapshot !== $this->manualReceiptSnapshot($locked)
+                || ! $this->manualReceiptPlanMatches($locked, $prepared['plan'])) {
+                throw new InvalidArgumentException('Receipt credentials changed while the receipt was being prepared.');
             }
 
             return $this->createReceiptEffectGroup(
@@ -2407,9 +2419,10 @@ class TelegramOutboundEffectService
         if (! $this->receiptEligible($source, $customer) || $customer === null) {
             throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
         }
+        $manualSnapshot = $this->manualReceiptSnapshot($source);
         $prepared = $this->prepareReceiptGroup($source);
 
-        return DB::transaction(function () use ($initial, $source, $prepared, $actor, $ip): TelegramOutboundEffect {
+        return DB::transaction(function () use ($initial, $source, $prepared, $manualSnapshot, $actor, $ip): TelegramOutboundEffect {
             $locked = TelegramOutboundEffect::query()->lockForUpdate()->findOrFail($initial->getKey());
             if (! $this->isReviewable($locked)) {
                 throw new InvalidArgumentException('Only unknown or manual-review effects can be resent.');
@@ -2419,6 +2432,11 @@ class TelegramOutboundEffectService
             $lockedCustomer = $lockedOrder->customer;
             if (! $this->receiptEligible($lockedOrder, $lockedCustomer) || $lockedCustomer === null) {
                 throw new InvalidArgumentException('Receipt can only be delivered for a paid order with a Telegram customer.');
+            }
+
+            if ($manualSnapshot !== $this->manualReceiptSnapshot($lockedOrder)
+                || ! $this->manualReceiptPlanMatches($lockedOrder, $prepared['plan'])) {
+                throw new InvalidArgumentException('Receipt credentials changed while the receipt was being prepared.');
             }
 
             $resend = $this->createReceiptEffectGroup(
@@ -2842,7 +2860,41 @@ class TelegramOutboundEffectService
             && in_array($order->order_status, [OrderStatus::PendingPayment, OrderStatus::Processing, OrderStatus::Completed], true)
             && $customer?->telegram_id !== null
             && ! app(SupplierFulfillmentService::class)->hasExternalHandoff($order)
-            && ! app(SupplierFulfillmentService::class)->hasPending($order);
+            && ! app(SupplierFulfillmentService::class)->hasPending($order)
+            && $this->manualReceiptReady($order);
+    }
+
+    public function manualReceiptReady(Order $order): bool
+    {
+        if (ManualFulfillmentReview::query()->where('order_id', $order->getKey())
+            ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED])
+            ->open()->exists()) {
+            return false;
+        }
+
+        return ! $order->orderItems()->where('manual_unlimited', true)->withCount('stockItems')->get()
+            ->contains(fn ($item): bool => $item->stock_items_count < $item->quantity);
+    }
+
+    private function manualReceiptSnapshot(Order $order): ?array
+    {
+        if (! $order->orderItems()->where('manual_unlimited', true)->exists()) {
+            return null;
+        }
+
+        return $order->orderItems()->with(['stockItems' => fn ($query) => $query->orderBy('id')])
+            ->orderBy('id')->get()
+            ->map(fn ($item): array => [(string) $item->getKey(), $item->stockItems->modelKeys()])
+            ->all();
+    }
+
+    private function manualReceiptPlanMatches(Order $order, ?TelegramReceiptPlan $plan): bool
+    {
+        if ($plan === null || ! $order->orderItems()->where('manual_unlimited', true)->exists()) {
+            return true;
+        }
+
+        return $plan->accountCount() === $order->orderItems()->withCount('stockItems')->get()->sum('stock_items_count');
     }
 
     private function receiptActionPanelSource(TelegramOutboundEffect $effect): bool

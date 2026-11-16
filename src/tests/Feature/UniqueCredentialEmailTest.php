@@ -22,6 +22,7 @@ use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\Telegram\TelegramPaidOrderTxtExporter;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
@@ -347,6 +348,51 @@ final class UniqueCredentialEmailTest extends NonTransactionalDatabaseTestCase
             ->assertDontSee('changed-password')->assertDontSee('unique_email_unavailable');
     }
 
+    public function test_single_manual_redeem_code_is_delivered_after_recovery_waits_for_input(): void
+    {
+        $customer = $this->customer();
+        $product = Product::factory()->create([
+            'manual_unlimited' => true, 'price_amount' => 5000, 'stock' => 0, 'reserved_stock' => 0,
+        ]);
+        $order = $this->purchase($customer, $product);
+        $item = $order->orderItems()->sole();
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
+
+        $this->artisan('telegram:recover-outbound')->assertSuccessful();
+        $this->assertNull(app(TelegramOutboundEffectService::class)->forOrder(
+            (string) $order->id,
+            TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+        ));
+
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        app(ManualFulfillmentResolutionService::class)->provideLocalCredentials(
+            $review, $owner, [$item->id => ['REDEEM-CODE-123']],
+        );
+        Http::fake(['*' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $this->assertNotNull($receipt);
+        $effects = TelegramOutboundEffect::query()->where('effect_group_key', $receipt->effect_group_key)->orderBy('sequence')->get();
+        foreach ($effects as $effect) {
+            app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+        }
+
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        Http::assertSent(function ($request) use ($customer): bool {
+            if (! str_ends_with($request->url(), '/sendPhoto') && ! str_ends_with($request->url(), '/sendMessage')) {
+                return false;
+            }
+            $data = $request->data();
+            foreach ($data as $part) {
+                if (is_array($part) && isset($part['name'])) {
+                    $data[$part['name']] = $part['contents'] ?? null;
+                }
+            }
+
+            return (string) ($data['chat_id'] ?? '') === (string) $customer->telegram_id
+                && str_contains((string) ($data['caption'] ?? $data['text'] ?? ''), 'REDEEM-CODE-123');
+        });
+    }
+
     public function test_unlimited_manual_order_stays_paid_pending_until_accounts_are_supplied(): void
     {
         $customer = $this->customer();
@@ -366,6 +412,13 @@ final class UniqueCredentialEmailTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(0, $product->fresh()->reserved_stock);
         $this->assertSame(0, $item->stockItems()->count());
         $this->assertTrue($item->manual_unlimited);
+
+        $this->artisan('telegram:recover-outbound')->assertSuccessful();
+        $this->assertNull(app(TelegramOutboundEffectService::class)->forOrder(
+            (string) $order->id,
+            TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS,
+        ));
+        $this->assertNull(app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh()));
 
         $product->forceFill(['manual_unlimited' => false])->save();
         $owner = User::factory()->create(['role' => UserRole::Owner]);
@@ -398,7 +451,19 @@ final class UniqueCredentialEmailTest extends NonTransactionalDatabaseTestCase
         }
         $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
         $this->assertSame((string) $customer->telegram_id, (string) $receipt->telegram_chat_id);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/sendPhoto') || str_contains($request->url(), '/sendMessage'));
+        $document = Http::recorded(fn ($request): bool => str_ends_with($request->url(), '/sendDocument'))->sole()[0];
+        $payload = app(TelegramPaidOrderTxtExporter::class)->export($order->fresh(), $customer->fresh());
+        $this->assertNotNull($payload);
+        $this->assertTrue($document->hasFile('document', $payload->documentContents(), $payload->filename()));
+        $this->assertStringContainsString('account-one', $payload->documentContents());
+        $this->assertStringContainsString('account-two', $payload->documentContents());
+        $data = $document->data();
+        foreach ($data as $part) {
+            if (is_array($part) && ($part['name'] ?? null) === 'chat_id') {
+                $data['chat_id'] = $part['contents'];
+            }
+        }
+        $this->assertSame((string) $customer->telegram_id, (string) ($data['chat_id'] ?? ''));
     }
 
     private function assertProcessingReview(Order $order, int $quantity, int $deferred): void

@@ -89,9 +89,10 @@ class ManualFulfillmentResolutionService
     }
 
     /** @param array<int, list<string|array<string, mixed>>> $credentials */
-    public function provideLocalCredentials(ManualFulfillmentReview $review, User $actor, array $credentials, string $reason, ?string $ip = null): ManualFulfillmentReview
+    public function provideLocalCredentials(ManualFulfillmentReview $review, User $actor, array $credentials, ?string $reason = null, ?string $ip = null): ManualFulfillmentReview
     {
         abort_unless($actor->role?->canManagePaymentSettings(), 403);
+        $reason = $reason !== null && trim($reason) !== '' ? $reason : null;
 
         return DB::transaction(function () use ($review, $actor, $credentials, $reason, $ip): ManualFulfillmentReview {
             $initial = ManualFulfillmentReview::query()->findOrFail($review->id);
@@ -118,8 +119,8 @@ class ManualFulfillmentResolutionService
                 || OrderRefund::query()->where('order_id', $order->id)->exists()) {
                 throw new InvalidOrderTransition('Only an active paid local credential review can accept accounts.');
             }
-            if (trim($reason) === '' || mb_strlen($reason) > 2000) {
-                throw ValidationException::withMessages(['reason' => 'Catatan resolusi wajib diisi, maksimal 2000 karakter.']);
+            if ($reason !== null && mb_strlen($reason) > 2000) {
+                throw ValidationException::withMessages(['reason' => 'Catatan resolusi maksimal 2000 karakter.']);
             }
 
             $items = $order->orderItems()->orderBy('product_id')->orderBy('id')->get();
@@ -538,7 +539,7 @@ class ManualFulfillmentResolutionService
         return $review->fresh();
     }
 
-    private function markResolved(ManualFulfillmentReview $review, string $state, User $actor, string $reason, ?string $refundReference = null, ?string $refundResult = null): ManualFulfillmentReview
+    private function markResolved(ManualFulfillmentReview $review, string $state, User $actor, ?string $reason, ?string $refundReference = null, ?string $refundResult = null): ManualFulfillmentReview
     {
         $review->update(['state' => $state, 'resolution_reason' => $reason, 'refund_provider_reference' => $refundReference, 'refund_provider_result' => $refundResult, 'refund_requested_at' => $refundReference ? now() : null, 'actor_user_id' => $actor->id, 'resolved_at' => now()]);
 

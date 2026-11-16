@@ -325,7 +325,7 @@ final class UniqueCredentialEmailSecurityTest extends NonTransactionalDatabaseTe
 
     public static function missingRequestFields(): array
     {
-        return ['missing all items' => ['items'], 'missing reason' => ['reason'], 'missing credentials' => ['credentials']];
+        return ['missing all items' => ['items'], 'missing format' => ['format'], 'missing credentials' => ['credentials']];
     }
 
     #[DataProvider('missingRequestFields')]
@@ -334,9 +334,9 @@ final class UniqueCredentialEmailSecurityTest extends NonTransactionalDatabaseTe
         $fixture = $this->reviewFixture();
         $before = $this->snapshot($fixture);
         $payload = $this->payload($fixture);
-        if ($missing === 'credentials') {
-            unset($payload['items'][$fixture['item']->id]['credentials']);
-            $error = 'items.'.$fixture['item']->id.'.credentials';
+        if (in_array($missing, ['format', 'credentials'], true)) {
+            unset($payload['items'][$fixture['item']->id][$missing]);
+            $error = 'items.'.$fixture['item']->id.'.'.$missing;
         } else {
             unset($payload[$missing]);
             $error = $missing;
@@ -448,6 +448,51 @@ final class UniqueCredentialEmailSecurityTest extends NonTransactionalDatabaseTe
         $this->assertSame($before, $this->snapshot($fixture));
         $this->assertNoCredentialFlash(['submitted-password']);
         Queue::assertNotPushed(SendTelegramReceipt::class);
+    }
+
+    public function test_manual_unlimited_credentials_can_be_submitted_without_a_resolution_note(): void
+    {
+        $fixture = $this->reviewFixture();
+        $fixture['review']->update(['reason' => ManualFulfillmentReview::REASON_MANUAL_UNLIMITED]);
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $payload = $this->payload($fixture);
+        unset($payload['reason']);
+
+        $this->actingAs($owner)->get(route('admin.manual-fulfillment-reviews.show', $fixture['review']))
+            ->assertOk()->assertDontSee('Catatan resolusi')->assertDontSee('Alasan resolusi');
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.manual-fulfillment-reviews.credentials', $fixture['review']), $payload)
+            ->assertRedirect(route('admin.manual-fulfillment-reviews.show', $fixture['review']))
+            ->assertSessionHasNoErrors();
+
+        $review = $fixture['review']->fresh();
+        $this->assertSame(ManualFulfillmentReview::STATE_FULFILLED, $review->state);
+        $this->assertNull($review->resolution_reason);
+        $this->assertSame($owner->id, $review->actor_user_id);
+        $this->assertNotNull($review->resolved_at);
+        $audit = AuditLog::where('action', 'manual_fulfillment_review.local_credentials_provided')
+            ->where('subject_id', (string) $review->id)->sole();
+        $this->assertSame($owner->id, $audit->user_id);
+        $this->assertNotNull($audit->created_at);
+        $this->get(route('admin.manual-fulfillment-reviews.show', $review))
+            ->assertOk()->assertDontSee('Alasan resolusi')->assertSee($owner->name);
+    }
+
+    public function test_refund_still_requires_a_resolution_reason_and_old_reasons_remain_visible(): void
+    {
+        $fixture = $this->reviewFixture();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+
+        $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.manual-fulfillment-reviews.resolve', $fixture['review']), [
+                'action' => 'refund',
+                'refund_provider_reference' => 'refund-reference',
+                'refund_provider_result' => 'success',
+            ])->assertSessionHasErrors('reason');
+        $this->assertSame(ManualFulfillmentReview::STATE_PENDING, $fixture['review']->fresh()->state);
+        $fixture['review']->update(['resolution_reason' => 'Catatan historis']);
+        $this->get(route('admin.manual-fulfillment-reviews.show', $fixture['review']))
+            ->assertOk()->assertSee('Alasan resolusi')->assertSee('Catatan historis');
     }
 
     public function test_buyer_reads_hide_admin_history_hold_reason_and_foreign_credentials_before_and_after_completion(): void

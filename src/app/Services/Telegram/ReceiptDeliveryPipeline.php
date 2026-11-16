@@ -38,6 +38,11 @@ final class ReceiptDeliveryPipeline
             throw new InvalidArgumentException('Unsupported Telegram receipt effect type.');
         }
 
+        $source = Order::query()->find($effect->source_id);
+        if ($source !== null && ! $this->outboundEffects->manualReceiptReady($source)) {
+            return;
+        }
+
         $claimed = $this->ledger->claim((string) $effect->getKey());
         if ($claimed === null) {
             return;
@@ -55,6 +60,21 @@ final class ReceiptDeliveryPipeline
                     (string) $claimed->claim_token,
                     'receipt_not_eligible',
                     'Telegram receipt was no longer eligible for delivery.',
+                );
+
+                return;
+            }
+
+            $metadata = $claimed->outcome_metadata ?? [];
+            if (! $this->outboundEffects->manualReceiptReady($order)
+                || ($order->orderItems->contains(fn ($item): bool => $item->manual_unlimited)
+                    && (! isset($metadata['account_count'])
+                        || (int) $metadata['account_count'] !== $order->orderItems->sum(fn ($item): int => $item->stockItems->count())))) {
+                $this->ledger->finalizeNotDeliverable(
+                    (string) $claimed->getKey(),
+                    (string) $claimed->claim_token,
+                    'receipt_not_eligible',
+                    'Telegram receipt no longer matches the manual fulfillment.',
                 );
 
                 return;

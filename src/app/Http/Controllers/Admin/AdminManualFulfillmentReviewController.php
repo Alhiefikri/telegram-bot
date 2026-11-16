@@ -131,7 +131,6 @@ class AdminManualFulfillmentReviewController extends Controller
 
         try {
             $data = Validator::make($request->all(), [
-                'reason' => ['required', 'string', 'max:2000'],
                 'items' => ['required', 'array'],
                 'items.*' => ['required', 'array'],
                 'items.*.format' => ['required', 'in:legacy,structured_account'],
@@ -157,7 +156,7 @@ class AdminManualFulfillmentReviewController extends Controller
                 $review,
                 $request->attributes->get('adminUser'),
                 $credentials,
-                $data['reason'],
+                null,
                 $request->ip(),
             );
         } catch (ValidationException $exception) {
