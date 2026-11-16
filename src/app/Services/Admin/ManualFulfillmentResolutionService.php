@@ -104,7 +104,7 @@ class ManualFulfillmentResolutionService
                     ->where('action', 'manual_fulfillment_review.local_credentials_provided')->exists()) {
                 return $locked;
             }
-            if ($locked->reason !== ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE) {
+            if (! in_array($locked->reason, [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)) {
                 throw new InvalidOrderTransition('This review does not accept local credentials.');
             }
             if ($locked->state === ManualFulfillmentReview::STATE_FULFILLED) {
@@ -162,6 +162,7 @@ class ManualFulfillmentResolutionService
                 }
             }
 
+            $originalReason = $locked->reason;
             $resolved = $this->markResolved($locked, ManualFulfillmentReview::STATE_FULFILLED, $actor, $reason);
             if (SupplierFulfillment::query()->where('order_id', $order->id)->where('state', 'review')->exists()) {
                 $resolved->update([
@@ -173,7 +174,7 @@ class ManualFulfillmentResolutionService
                 ]);
                 $this->audit->log('manual_fulfillment_review.supplier_review_resumed', $resolved, [
                     'state' => ManualFulfillmentReview::STATE_FULFILLED,
-                    'reason' => ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE,
+                    'reason' => $originalReason,
                     'resolution_reason' => $reason,
                 ], ['state' => ManualFulfillmentReview::STATE_PENDING, 'reason' => 'supplier_fulfillment'], $actor, $ip);
             }
@@ -363,7 +364,7 @@ class ManualFulfillmentResolutionService
             return $review->fresh();
         }
         $order = Order::query()->lockForUpdate()->findOrFail($review->order_id);
-        if ($review->reason === ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+        if (in_array($review->reason, [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)
             || $order->orderItems()->where('deferred_local_quantity', '>', 0)->exists()) {
             throw new InvalidOrderTransition('Provide all missing local credentials through the account submission form.');
         }

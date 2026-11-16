@@ -206,7 +206,7 @@ class ProductStockItemManager
                 ]);
             }
 
-            $availableBefore = $lockedProduct->availableStock();
+            $availableBefore = $lockedProduct->finiteAvailableStock();
             $old = [
                 'stock' => $lockedProduct->stock,
                 'reserved_stock' => $lockedProduct->reserved_stock,
@@ -223,8 +223,8 @@ class ProductStockItemManager
 
             ProductStockItem::query()->whereIn('id', $ids)->delete();
             $lockedProduct->forceFill(['stock' => $newStock])->save();
-            $availableAfter = $lockedProduct->refresh()->availableStock();
-            $becameUnavailable = $availableBefore > 0 && $availableAfter === 0;
+            $availableAfter = $lockedProduct->refresh()->finiteAvailableStock();
+            $becameUnavailable = ! $lockedProduct->manual_unlimited && $availableBefore > 0 && $availableAfter === 0;
 
             $movement = InventoryMovement::create([
                 'product_id' => $lockedProduct->id,

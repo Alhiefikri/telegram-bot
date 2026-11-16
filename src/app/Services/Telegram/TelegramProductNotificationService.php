@@ -45,7 +45,7 @@ class TelegramProductNotificationService
                 $this->locale->translate($customer, 'notification.product.created.lead'),
                 $this->productNames->renderSelection($product->name, $icon),
                 $this->customerPriceLine($product, $this->locale->code($customer)),
-                $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
+                $this->locale->translate($customer, 'notification.product.stock', ['stock' => $product->manual_unlimited ? '∞' : $availableStock]),
                 ...$this->customerTierLines($customer, $promotedTier),
                 '',
                 $this->locale->translate($customer, 'notification.product.description'),
@@ -87,7 +87,7 @@ class TelegramProductNotificationService
                     $this->locale->translate($customer, 'notification.product.restock.lead'),
                     $this->productNames->renderSelection($product->name, $icon),
                     $this->customerPriceLine($product, $this->locale->code($customer)),
-                    $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
+                    $this->locale->translate($customer, 'notification.product.stock', ['stock' => $product->manual_unlimited ? '∞' : $availableStock]),
                     ...$this->customerTierLines($customer, $promotedTier),
                     '',
                     $this->locale->translate($customer, 'notification.product.description'),
@@ -295,7 +295,7 @@ class TelegramProductNotificationService
                 $lead,
                 $this->productNames->renderSelection($product->name, $icon),
                 $this->customerPriceLine($product, $locale),
-                $this->locale->translateLocale($locale, 'notification.product.stock', ['stock' => $availableStock]),
+                $this->locale->translateLocale($locale, 'notification.product.stock', ['stock' => $product->manual_unlimited ? '∞' : $availableStock]),
                 ...$this->customerTierLines($customer, $promotedTier),
                 '',
                 $this->locale->translateLocale($locale, 'notification.product.description'),
@@ -386,7 +386,7 @@ class TelegramProductNotificationService
         }
 
         try {
-            $quote = $this->pricing->quote($product, $availableAfter);
+            $quote = $this->pricing->quote($product, min($availableAfter, ProductQuantityPricing::MAXIMUM_TIER_QUANTITY));
         } catch (InvalidArgumentException $exception) {
             report($exception);
 
@@ -493,11 +493,11 @@ class TelegramProductNotificationService
                 $product,
                 $icon,
             )]),
-            $this->locale->translateLocale($locale, 'notification.store_channel.restock.added', [
+            ...($product->manual_unlimited ? [] : [$this->locale->translateLocale($locale, 'notification.store_channel.restock.added', [
                 'quantity' => $addedQuantity,
-            ]),
+            ])]),
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.available', [
-                'stock' => $availableStock,
+                'stock' => $product->manual_unlimited ? '∞' : $availableStock,
             ]),
             $unitPrice,
         ];

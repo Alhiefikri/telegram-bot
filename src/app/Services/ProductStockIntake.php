@@ -90,7 +90,7 @@ final class ProductStockIntake
                     ->firstOrFail();
 
                 $itemCount = count($normalized['items']);
-                $availableBefore = $lockedProduct->availableStock();
+                $availableBefore = $lockedProduct->finiteAvailableStock();
                 $stockBefore = (int) $lockedProduct->stock;
                 $stockAfter = $stockBefore + $itemCount;
 
@@ -118,7 +118,7 @@ final class ProductStockIntake
                 }
 
                 $lockedProduct->forceFill(['stock' => $stockAfter])->save();
-                $availableAfter = $lockedProduct->refresh()->availableStock();
+                $availableAfter = $lockedProduct->refresh()->finiteAvailableStock();
 
                 $movement = InventoryMovement::query()->create([
                     'product_id' => $lockedProduct->id,
@@ -156,7 +156,7 @@ final class ProductStockIntake
                     'available_after' => $availableAfter,
                 ])->save();
 
-                if ($itemCount > 0) {
+                if ($itemCount > 0 && ! $lockedProduct->manual_unlimited) {
                     if ($dispatchNotifications) {
                         $this->stockNotifications->register($movement->id);
                     } else {

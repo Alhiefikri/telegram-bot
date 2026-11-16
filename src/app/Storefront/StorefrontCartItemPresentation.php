@@ -18,6 +18,7 @@ final readonly class StorefrontCartItemPresentation
         public ?string $imageUrl = null,
         public ?int $usdtSubtotal = null,
         public ?int $appliedTierMinimum = null,
+        public bool $manualUnlimited = false,
     ) {}
 
     public function hasConflict(): bool

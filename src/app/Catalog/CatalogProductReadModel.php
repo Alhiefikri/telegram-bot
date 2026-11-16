@@ -37,6 +37,7 @@ final readonly class CatalogProductReadModel
         public ?string $customEmojiId = null,
         public ?string $telegramImagePath = null,
         public bool $matchesSearch = false,
+        public bool $manualUnlimited = false,
     ) {}
 
     /** @return array<string, mixed> */
@@ -61,6 +62,7 @@ final readonly class CatalogProductReadModel
             'is_active' => $this->isActive,
             'is_public_visible' => $this->isPublicVisible,
             'is_available' => $this->isAvailable,
+            'manual_unlimited' => $this->manualUnlimited,
             'family_id' => $this->familyId,
             'family_name' => $this->familyName,
             'option_label' => $this->optionLabel,

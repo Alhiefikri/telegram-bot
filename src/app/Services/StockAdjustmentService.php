@@ -71,7 +71,7 @@ class StockAdjustmentService
             if ($locked->isCredentialManaged() && $stockItems === []) {
                 throw new InvalidArgumentException('Credential-managed products must be adjusted through matching stock item rows.');
             }
-            $availableBefore = $locked->availableStock();
+            $availableBefore = $locked->finiteAvailableStock();
             $newStock = $locked->stock + $delta;
 
             if ($newStock < 0 || $newStock < $locked->reserved_stock) {
@@ -92,12 +92,12 @@ class StockAdjustmentService
                 'type' => InventoryMovementType::Adjustment,
                 'quantity' => $delta,
                 'available_before' => $availableBefore,
-                'available_after' => $locked->availableStock(),
+                'available_after' => $locked->finiteAvailableStock(),
                 'notes' => $notes,
                 'created_at' => now(),
             ]);
 
-            if ($delta > 0) {
+            if ($delta > 0 && ! $locked->manual_unlimited) {
                 $this->stockNotifications->materialize($movement->id);
                 $this->waitlistNotifications->scheduleForMovement($movement->id);
             }
@@ -109,7 +109,7 @@ class StockAdjustmentService
             return [
                 'product' => $adjusted,
                 'available_before' => $availableBefore,
-                'available_after' => $adjusted->availableStock(),
+                'available_after' => $adjusted->finiteAvailableStock(),
                 'movement_id' => $movement->id,
             ];
         });

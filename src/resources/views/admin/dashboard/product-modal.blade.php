@@ -163,6 +163,16 @@
                                     @enderror
                                 </div>
                             </div>
+                            <div>
+                                <input type="hidden" name="manual_unlimited" value="0">
+                                <label class="flex min-h-11 items-center gap-3 text-sm font-medium text-admin-ink">
+                                    <input type="checkbox" name="manual_unlimited" value="1" x-model="productManualUnlimited" class="h-5 w-5 shrink-0 rounded border-admin-line accent-admin-accent">
+                                    Stok tak terbatas, pengiriman manual
+                                </label>
+                                <p class="mt-1 text-xs leading-5 text-admin-muted">Pembeli dapat memesan tanpa stok akun. Setelah pembayaran, Admin harus mengisi akun untuk dikirim oleh bot.</p>
+                                @error('manual_unlimited', 'productCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                                @error('manual_unlimited', 'productUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                            </div>
                         
                             <x-admin-dashboard.card as="section" padding="sm" shadow="none" aria-labelledby="product-quantity-price-tiers-title">
                                                         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

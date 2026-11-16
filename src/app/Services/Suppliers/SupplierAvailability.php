@@ -229,7 +229,7 @@ final class SupplierAvailability
                 $product->save();
             }
             $after = $product->localAvailableStock() + $capacity;
-            if (($before === 0 && $after > 0) || ($before > 0 && $after === 0)) {
+            if (! $product->manual_unlimited && (($before === 0 && $after > 0) || ($before > 0 && $after === 0))) {
                 $movement = InventoryMovement::query()->create([
                     'product_id' => $product->id,
                     'type' => InventoryMovementType::Availability,

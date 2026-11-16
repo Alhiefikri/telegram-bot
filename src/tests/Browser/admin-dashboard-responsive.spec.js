@@ -5827,15 +5827,11 @@ test("workspace saves product detail and appearance independently without losing
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await login(page);
-  await page.goto(`${baseUrl}/admin?tab=produk`);
-  const productCard = await getAdminProductCard(
-    page,
-    "Browser QA Produk A",
-    "Browser QA Product Family"
-  );
-  await productCard.getByRole("link", { name: /Kelola produk/ }).click();
+  await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
   await page.locator("#workspace-trigger-detail").click();
   const detail = page.locator('[data-workspace-form="detail"]');
+  await expect(detail.locator('[name="manual_unlimited"]')).not.toBeChecked();
+  await detail.locator('[name="manual_unlimited"]').check();
   await detail.locator('[name="name"]').fill("Browser QA Produk A Edited");
   await page.locator("#workspace-trigger-appearance").click();
   const appearance = page.locator('[data-workspace-form="appearance"]');
@@ -5866,6 +5862,7 @@ test("workspace saves product detail and appearance independently without losing
   ]);
   await page.reload();
   await page.locator("#workspace-trigger-detail").click();
+  await expect(detail.locator('[name="manual_unlimited"]')).toBeChecked();
   await expect(detail.locator('[name="name"]')).toHaveValue(
     "Browser QA Produk A Edited"
   );

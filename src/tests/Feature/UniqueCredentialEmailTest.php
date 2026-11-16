@@ -12,6 +12,7 @@ use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\CartService;
@@ -19,6 +20,8 @@ use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
 use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\Telegram\ReceiptDeliveryPipeline;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
@@ -342,6 +345,60 @@ final class UniqueCredentialEmailTest extends NonTransactionalDatabaseTestCase
         $this->actingAs($customer, 'customer')->get(route('customer.orders.show', $order))
             ->assertOk()->assertSee('manual@example.test')->assertSee('eligible@example.test')
             ->assertDontSee('changed-password')->assertDontSee('unique_email_unavailable');
+    }
+
+    public function test_unlimited_manual_order_stays_paid_pending_until_accounts_are_supplied(): void
+    {
+        $customer = $this->customer();
+        $customer->update(['username' => null]);
+        $product = Product::factory()->create([
+            'manual_unlimited' => true, 'price_amount' => 5000, 'stock' => 0, 'reserved_stock' => 0,
+        ]);
+
+        $order = $this->purchase($customer, $product, 2);
+        $item = $order->orderItems()->sole();
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(ManualFulfillmentReview::REASON_MANUAL_UNLIMITED, $review->reason);
+        $this->assertSame(2, $item->deferred_local_quantity);
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(0, $item->stockItems()->count());
+        $this->assertTrue($item->manual_unlimited);
+
+        $product->forceFill(['manual_unlimited' => false])->save();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $this->actingAs($owner)->get(route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]))
+            ->assertOk()->assertSee($order->invoice_number);
+        Queue::fake();
+        $resolution = app(ManualFulfillmentResolutionService::class);
+        try {
+            $resolution->provideLocalCredentials($review, $owner, [$item->id => ['only-one']], 'Incomplete submission');
+            $this->fail('A partial manual delivery must not be accepted.');
+        } catch (ValidationException) {
+            $this->assertSame(0, $item->stockItems()->count());
+        }
+        $resolution->provideLocalCredentials($review, $owner, [$item->id => ['account-one', 'account-two']], 'Complete order');
+        $resolution->provideLocalCredentials($review->fresh(), $owner, [], 'Retry');
+
+        $this->assertSame(2, $item->stockItems()->count());
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertTrue($item->fresh()->manual_unlimited);
+        Queue::assertPushed(SendTelegramReceipt::class, 1);
+        Http::fake(['*' => Http::response(['ok' => true, 'result' => ['message_id' => 123]])]);
+        $receipt = app(TelegramOutboundEffectService::class)->recordReceipt($order->fresh());
+        $this->assertNotNull($receipt);
+        $this->actingAs($owner)->get(route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]))
+            ->assertOk()->assertSee($order->invoice_number)->assertDontSee('account-one');
+        $effects = TelegramOutboundEffect::query()->where('effect_group_key', $receipt->effect_group_key)->orderBy('sequence')->get();
+        foreach ($effects as $effect) {
+            app(ReceiptDeliveryPipeline::class)->deliver($effect, dispatchNext: false);
+        }
+        $this->assertNotNull($order->fresh()->telegram_receipt_sent_at);
+        $this->assertSame((string) $customer->telegram_id, (string) $receipt->telegram_chat_id);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/sendPhoto') || str_contains($request->url(), '/sendMessage'));
     }
 
     private function assertProcessingReview(Order $order, int $quantity, int $deferred): void

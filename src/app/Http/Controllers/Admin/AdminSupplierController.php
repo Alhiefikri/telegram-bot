@@ -8,6 +8,8 @@ use App\Exceptions\InvalidOrderTransition;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\SupplierAdminRequest;
 use App\Http\Requests\Admin\SupplierCurrencyRateRequest;
+use App\Models\ManualFulfillmentReview;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\ProductSupplierSource;
@@ -16,6 +18,7 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPurchase;
+use App\Models\TelegramOutboundEffect;
 use App\Services\Admin\AdminProductWorkspaceData;
 use App\Services\Admin\AdminSupplierDashboardData;
 use App\Services\Admin\SupplierOperationConfirmation;
@@ -26,6 +29,7 @@ use App\Services\Suppliers\SupplierCurrencyRateManager;
 use App\Services\Suppliers\SupplierExchangeRate;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierManager;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
 use Illuminate\Http\Request;
@@ -278,8 +282,24 @@ final class AdminSupplierController extends Controller
                 - (int) $fulfillment->manualHandoffs->sum('quantity') - (int) ($allocated[$fulfillment->order_item_id] ?? 0));
             $fulfillment->unpaid_reservation = $fulfillment->isUnpaidReservation();
         }
+        $manualReviews = ManualFulfillmentReview::query()
+            ->whereHas('order.orderItems', fn ($items) => $items->where('manual_unlimited', true))
+            ->whereHas('payment', fn ($payment) => $payment->where('status', 'paid'))
+            ->whereHas('order', fn ($order) => $order->where('payment_status', 'paid')
+                ->when($invoice !== '', fn ($query) => $query->where('invoice_number', $invoice)))
+            ->when($invoice === '', fn ($query) => $query->where(fn ($pending) => $pending->open()
+                ->orWhere(fn ($ready) => $ready->where('state', ManualFulfillmentReview::STATE_FULFILLED)
+                    ->whereHas('order', fn ($order) => $order->whereNull('telegram_receipt_sent_at')))))
+            ->with('order:id,invoice_number,order_status,payment_status,telegram_receipt_sent_at')
+            ->latest()->paginate(25, ['*'], 'manual_page')->withQueryString();
+        $manualReceiptEffects = TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->whereIn('source_id', $manualReviews->pluck('order_id'))
+            ->orderByDesc('sequence')->orderByDesc('created_at')->groupLimit(1, 'source_id')->get()->keyBy('source_id');
 
-        return view('admin.suppliers.purchases', compact('purchases', 'fulfillments', 'invoice'));
+
+        return view('admin.suppliers.purchases', compact('purchases', 'fulfillments', 'invoice', 'manualReviews', 'manualReceiptEffects'));
     }
 
     public function operate(SupplierAdminRequest $request, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service, SupplierOrderHistoryReconciliationService $history)

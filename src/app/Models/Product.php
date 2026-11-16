@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use InvalidArgumentException;
 
-#[Fillable(['category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'family_id', 'family_order', 'option_label', 'name', 'icon', 'custom_emoji_id', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'unique_credential_email', 'featured_rank'])]
+#[Fillable(['category_id', 'product_family_id', 'family_sort_order', 'family_option_label', 'family_id', 'family_order', 'option_label', 'name', 'icon', 'custom_emoji_id', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'delivery_note', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'unique_credential_email', 'manual_unlimited', 'featured_rank'])]
 class Product extends Model
 {
     /** @use HasFactory<ProductFactory> */
@@ -22,7 +22,7 @@ class Product extends Model
 
     protected function casts(): array
     {
-        return ['telegram_content' => 'array', 'category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'reseller_price_amount' => 'integer', 'reseller_usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'supplier_available_stock' => 'integer', 'supplier_available_until' => 'datetime', 'is_active' => 'boolean', 'unique_credential_email' => 'boolean', 'featured_rank' => 'integer'];
+        return ['telegram_content' => 'array', 'category_id' => 'integer', 'product_family_id' => 'integer', 'family_sort_order' => 'integer', 'price_amount' => 'integer', 'usdt_price_amount' => 'integer', 'reseller_price_amount' => 'integer', 'reseller_usdt_price_amount' => 'integer', 'stock' => 'integer', 'reserved_stock' => 'integer', 'supplier_available_stock' => 'integer', 'supplier_available_until' => 'datetime', 'is_active' => 'boolean', 'unique_credential_email' => 'boolean', 'manual_unlimited' => 'boolean', 'featured_rank' => 'integer'];
     }
 
     /**
@@ -93,7 +93,7 @@ class Product extends Model
 
         return $query
             ->orderByRaw(
-                "CASE WHEN ({$productsTable}.supplier_available_stock > 0 AND {$productsTable}.supplier_available_until > ?)
+                "CASE WHEN {$productsTable}.manual_unlimited = ? OR ({$productsTable}.supplier_available_stock > 0 AND {$productsTable}.supplier_available_until > ?)
                     OR ({$productsTable}.stock > {$productsTable}.reserved_stock
                     AND (
                         NOT EXISTS (
@@ -112,7 +112,7 @@ class Product extends Model
                         )
                     ))
                 THEN 0 ELSE 1 END",
-                [now()],
+                [true, now()],
             )
             ->orderBy('name')
             ->orderBy('id');
@@ -125,7 +125,7 @@ class Product extends Model
     public function scopeAvailableForPurchase(Builder $query): Builder
     {
         return $query->where(function (Builder $available): void {
-            $available->where(function (Builder $local): void {
+            $available->where('manual_unlimited', true)->orWhere(function (Builder $local): void {
                 $local->whereColumn('stock', '>', 'reserved_stock')
                     ->where(fn (Builder $query) => $query
                         ->whereDoesntHave('stockItems', fn (Builder $items) => $items->whereNull('supplier_purchase_id'))
@@ -145,7 +145,7 @@ class Product extends Model
     public function scopeWithAvailability(Builder $query): Builder
     {
         if ($query->getQuery()->columns !== null) {
-            $query->addSelect($this->qualifyColumn('supplier_available_stock'), $this->qualifyColumn('supplier_available_until'));
+            $query->addSelect($this->qualifyColumn('manual_unlimited'), $this->qualifyColumn('supplier_available_stock'), $this->qualifyColumn('supplier_available_until'));
         }
 
         return $query
@@ -160,6 +160,11 @@ class Product extends Model
     }
 
     public function availableStock(): int
+    {
+        return $this->manual_unlimited ? 2147483647 : $this->localAvailableStock() + $this->supplierAvailableStock();
+    }
+
+    public function finiteAvailableStock(): int
     {
         return $this->localAvailableStock() + $this->supplierAvailableStock();
     }

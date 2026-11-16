@@ -161,6 +161,7 @@ class AdminProductDashboardState
                 'productDeliveryNote' => old('delivery_note', $editingProduct['delivery_note'] ?? ''),
                 'productUsageGuideTitle' => old('usage_guide_title', $editingProduct['usage_guide_title'] ?? ''),
                 'productUniqueCredentialEmail' => $this->booleanInput(old('unique_credential_email', $editingProduct['unique_credential_email'] ?? false)),
+                'productManualUnlimited' => $this->booleanInput(old('manual_unlimited', $editingProduct['manual_unlimited'] ?? false)),
                 'productQuantityPriceTiers' => $productTierRows,
                 'productQuantityPriceTierErrors' => $productFormErrors->toArray(),
                 'productUsageGuideUrl' => old('usage_guide_url', $editingProduct['usage_guide_url'] ?? ''),

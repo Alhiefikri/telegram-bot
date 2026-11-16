@@ -83,7 +83,7 @@ final class CustomerApiCatalog
                 }
                 $quote = null;
             }
-            $stock = $product->availableStock();
+            $stock = $product->manual_unlimited ? 0 : $product->availableStock();
             $metadata = [];
             foreach (['product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items',
                 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en',

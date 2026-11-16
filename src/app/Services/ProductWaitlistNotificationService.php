@@ -245,7 +245,7 @@ final class ProductWaitlistNotificationService
         }
 
         try {
-            $availableStock = $product->availableStock();
+            $availableStock = $product->manual_unlimited ? '∞' : $product->availableStock();
             Mail::to($subscription->email)->send(new ProductWaitlistRestockedMail(
                 productName: $this->safeProductName($product),
                 availableStock: $availableStock,

@@ -16,6 +16,11 @@ class ProductCredentialAllocator
         if ($quantity === 0) {
             return;
         }
+        if ($orderItem->manual_unlimited) {
+            $orderItem->update(['deferred_local_quantity' => $quantity]);
+
+            return;
+        }
         if ($orderItem->unique_credential_email || $product->unique_credential_email) {
             $policy = app(UniqueCredentialEmailPolicy::class);
             // Every allocation path shares the Product lock, including manual delivery.

@@ -19,6 +19,29 @@
 @if(session('supplier_sync_warning'))
     <x-admin-dashboard.notice tone="warning" class="mb-3">{{ session('supplier_sync_warning') }}</x-admin-dashboard.notice>
 @endif
+<section class="mt-3 grid gap-3" aria-labelledby="manual-orders-title">
+    <h2 id="manual-orders-title" class="text-lg font-semibold text-admin-ink">Pesanan manual unlimited</h2>
+    <p class="text-sm text-admin-muted">Pembayaran lunas tidak berarti akun sudah terkirim. Isi akun melalui review; tidak ada pembelian supplier untuk unit manual.</p>
+    @forelse($manualReviews as $manualReview)
+        @php($receiptEffect = $manualReceiptEffects->get((string) $manualReview->order_id))
+        <x-admin-dashboard.card as="article" padding="compact" shadow="sm">
+            <h3 class="break-all text-base font-semibold text-admin-ink">{{ $manualReview->order->invoice_number }}</h3>
+            <p class="mt-1 text-sm text-admin-ink">Pembayaran: paid · Pemenuhan: {{ $manualReview->order->order_status === \App\Enums\OrderStatus::Completed ? 'akun siap' : $manualReview->order->order_status->value }} · Review: {{ $manualReview->state }}</p>
+            <p class="mt-1 text-sm text-admin-ink">Receipt bot: {{ $manualReview->order->telegram_receipt_sent_at ? 'terkirim pada '.$manualReview->order->telegram_receipt_sent_at->format('d M Y H:i') : ($receiptEffect ? $receiptEffect->state->value.' (belum terkonfirmasi terkirim)' : 'belum terkonfirmasi terkirim') }}</p>
+            @if ($receiptEffect && in_array($receiptEffect->state->value, ['unknown', 'manual_review', 'failed'], true))
+                @can('view', $receiptEffect)
+                    <a class="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline" href="{{ route('admin.telegram-outbound-effects.show', $receiptEffect) }}">Buka Manual Delivery Review</a>
+                @endcan
+            @endif
+            @can('view', $manualReview)
+                <a class="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline" href="{{ route('admin.manual-fulfillment-reviews.show', $manualReview) }}">Buka review dan lengkapi akun</a>
+            @endcan
+        </x-admin-dashboard.card>
+    @empty
+        <x-admin-dashboard.notice tone="info">{{ $invoice !== '' ? 'Tidak ada review manual unlimited untuk invoice lunas ini.' : 'Tidak ada pesanan manual unlimited yang menunggu review.' }}</x-admin-dashboard.notice>
+    @endforelse
+    {{ $manualReviews->links() }}
+</section>
 <section class="mt-3 grid gap-3">
     <h2 class="text-lg font-semibold text-admin-ink">{{ $invoice !== '' ? 'Penanganan invoice' : 'Invoice yang perlu ditangani' }}</h2>
     @forelse($fulfillments as $fulfillment)

@@ -76,7 +76,7 @@
                                             @if ($item->conflictMessage)
                                                 <p role="alert" class="mt-3 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-sm font-black leading-6 text-[var(--sf-ink)]">{{ $item->conflictMessage }}</p>
                                             @elseif ($item->availableStock !== null)
-                                                <p class="mt-2 text-xs font-bold text-[var(--sf-muted)]">Stok tersedia saat ini: {{ $item->availableStock }}</p>
+                                                <p class="mt-2 text-xs font-bold text-[var(--sf-muted)]">Stok tersedia saat ini: {{ $item->manualUnlimited ? '∞ · Perlu akun Telegram' : $item->availableStock }}</p>
                                             @endif
 
                                         </div>

@@ -64,6 +64,9 @@
                             <label class="workspace-checkbox"><input type="checkbox" name="unique_credential_email" x-model="draft.detail.unique_credential_email" x-bind:aria-invalid="Boolean(error('detail', 'unique_credential_email'))" aria-describedby="workspace-unique-credential-email-help workspace-error-unique-credential-email"><span>Email akun unik per pembeli untuk produk ini</span></label>
                             <p id="workspace-unique-credential-email-help" class="workspace-muted">Khusus Admin. Pembeli yang sama tidak boleh menerima email akun yang sama pada produk ini, meski kata sandinya berbeda. Pembeli lain boleh menerima email tersebut. Jika stok lokal yang sesuai tidak tersedia, pembayaran tetap berjalan dan pesanan menunggu Admin mengisi akun secara manual.</p>
                             <span id="workspace-error-unique-credential-email" class="workspace-field-error" x-text="error('detail', 'unique_credential_email')"></span>
+                            <label class="workspace-checkbox"><input type="checkbox" name="manual_unlimited" x-model="draft.detail.manual_unlimited" x-bind:aria-invalid="Boolean(error('detail', 'manual_unlimited'))"><span>Stok tak terbatas, pengiriman manual</span></label>
+                            <p class="workspace-muted">Pembeli dapat memesan tanpa stok akun. Setelah pembayaran, Admin harus mengisi akun untuk dikirim oleh bot.</p>
+                            <span class="workspace-field-error" x-text="error('detail', 'manual_unlimited')"></span>
                         </fieldset>
                         @include('admin.products.workspace-feedback', ['formKey' => 'detail', 'saveLabel' => 'Simpan detail'])
                     </form>

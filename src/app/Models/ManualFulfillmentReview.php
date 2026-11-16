@@ -30,6 +30,8 @@ class ManualFulfillmentReview extends Model
 
     public const REASON_UNIQUE_EMAIL_UNAVAILABLE = 'unique_email_unavailable';
 
+    public const REASON_MANUAL_UNLIMITED = 'manual_unlimited';
+
     public const REASON_BSC_MISMATCH = 'bsc_mismatch';
 
     public const REASON_BSC_TRANSACTION_ALREADY_USED = 'bsc_transaction_already_used';
@@ -44,12 +46,18 @@ class ManualFulfillmentReview extends Model
             $eligible->whereHas('order', fn (Builder $order) => $order->whereNotNull('api_order_claim_id'))
                 ->orWhere('reason', self::REASON_LOCAL_CREDENTIALS_MISSING)
                 ->orWhere('reason', self::REASON_UNIQUE_EMAIL_UNAVAILABLE)
+                ->orWhere('reason', self::REASON_MANUAL_UNLIMITED)
                 ->orWhere('reason', self::REASON_PAYMENT_AFTER_MANUAL_ALTERNATIVE)
                 ->orWhere(function (Builder $late): void {
                     $late->where('reason', self::REASON_LATE_PAYMENT)
-                        ->whereHas('order.orderItems', fn (Builder $items) => $items->where('quantity', '>', 0))
-                        ->whereDoesntHave('order.orderItems.stockItems')
-                        ->whereDoesntHave('order.orderItems.supplierFulfillment');
+                        ->where(function (Builder $items): void {
+                            $items->whereHas('order.orderItems', fn (Builder $query) => $query->where('manual_unlimited', true))
+                                ->orWhere(function (Builder $legacy): void {
+                                    $legacy->whereHas('order.orderItems', fn (Builder $query) => $query->where('quantity', '>', 0))
+                                        ->whereDoesntHave('order.orderItems.stockItems')
+                                        ->whereDoesntHave('order.orderItems.supplierFulfillment');
+                                });
+                        });
                 });
         });
     }

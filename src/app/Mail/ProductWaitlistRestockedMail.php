@@ -8,7 +8,7 @@ class ProductWaitlistRestockedMail extends Mailable
 {
     public function __construct(
         private readonly string $productName,
-        private readonly int $availableStock,
+        private readonly int|string $availableStock,
         private readonly string $productUrl,
         private readonly string $unsubscribeUrl,
     ) {}

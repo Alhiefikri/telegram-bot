@@ -86,7 +86,7 @@ class TelegramOrderIntents
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'order.status.states', [
                 'payment_status' => $this->locale->paymentStatus($customer, $paymentStatus),
-                'order_status' => $this->locale->orderStatus($customer, $order->order_status),
+                'order_status' => $this->locale->orderStatus($customer, $this->visibleOrderStatus($order)),
             ]);
             $lines[] = $this->orderInstruction($customer, $order, $payment);
             $deadline = $payment?->expired_at ?? $order->expires_at;
@@ -186,6 +186,7 @@ class TelegramOrderIntents
                 'created_at',
                 'telegram_receipt_sent_at',
             ])
+            ->withExists(['orderItems as has_manual_unlimited' => fn ($query) => $query->where('manual_unlimited', true)])
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
@@ -326,12 +327,34 @@ class TelegramOrderIntents
 
     private function historyButtonStatus(Customer $customer, Order $order): string
     {
+        if ($this->manualDeliveryPending($order)) {
+            return $this->locale->orderStatus($customer, OrderStatus::Processing);
+        }
+
         if ($order->payment_status === PaymentStatus::Paid
             && ($order->order_status === OrderStatus::Completed || $order->telegram_receipt_sent_at !== null)) {
             return $this->locale->translate($customer, 'order.history.delivered');
         }
 
         return $this->locale->orderStatus($customer, $order->order_status);
+    }
+
+    private function manualDeliveryPending(Order $order): bool
+    {
+        if ($order->order_status !== OrderStatus::Completed
+            || $order->payment_status !== PaymentStatus::Paid
+            || $order->telegram_receipt_sent_at !== null) {
+            return false;
+        }
+
+        return $order->relationLoaded('orderItems')
+            ? $order->orderItems->contains(fn ($item) => (bool) $item->manual_unlimited)
+            : (bool) $order->getAttribute('has_manual_unlimited');
+    }
+
+    private function visibleOrderStatus(Order $order): OrderStatus
+    {
+        return $this->manualDeliveryPending($order) ? OrderStatus::Processing : $order->order_status;
     }
 
     public function sendOrderDetail(Customer $customer, string $chatId, string $invoice): void
@@ -369,7 +392,7 @@ class TelegramOrderIntents
                 && $this->isWijayaPayPayable($payment);
         }
         $paymentStatus = $payment?->status ?? $order->payment_status;
-        $orderStatusLabel = $this->locale->orderStatus($customer, $order->order_status);
+        $orderStatusLabel = $this->locale->orderStatus($customer, $this->visibleOrderStatus($order));
         $paymentStatusLabel = $this->locale->paymentStatus($customer, $paymentStatus);
         $lines = [
             $this->locale->translate($customer, 'order.detail.title'),
@@ -478,7 +501,7 @@ class TelegramOrderIntents
 
     public function orderInstruction(Customer $customer, Order $order, ?Payment $payment): string
     {
-        $orderStatus = $order->order_status;
+        $orderStatus = $this->visibleOrderStatus($order);
         $paymentStatus = $payment?->status ?? $order->payment_status;
         if ($order->hasOpenLatePaymentReview()) {
             return $this->locale->translate(

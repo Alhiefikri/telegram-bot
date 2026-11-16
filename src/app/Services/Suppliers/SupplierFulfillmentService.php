@@ -612,7 +612,7 @@ final class SupplierFulfillmentService
         $payment = $order->payments()->whereNull('manual_alternative_at')->where('status', PaymentStatus::Paid)->first();
         if ($payment !== null) {
             $review = ManualFulfillmentReview::query()->firstOrCreate(['payment_id' => $payment->id], ['order_id' => $order->id, 'amount' => $payment->amount, 'currency' => $payment->currency, 'reason' => 'supplier_fulfillment', 'state' => ManualFulfillmentReview::STATE_PENDING]);
-            if ($review->reason === ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+            if (in_array($review->reason, [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)
                 && $review->state === ManualFulfillmentReview::STATE_FULFILLED) {
                 $before = $review->only(['state', 'reason', 'resolution_reason', 'actor_user_id', 'resolved_at']);
                 $review->update([
@@ -703,7 +703,7 @@ final class SupplierFulfillmentService
             return;
         }
         if (ManualFulfillmentReview::query()->where('order_id', $order->id)
-            ->where('reason', ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)
+            ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED])
             ->where('state', ManualFulfillmentReview::STATE_PENDING)->exists()) {
             return;
         }

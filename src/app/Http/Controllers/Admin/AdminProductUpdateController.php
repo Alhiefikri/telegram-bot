@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Exceptions\ProductFamilyCategoryMismatch;
+use App\Enums\InventoryMovementType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Jobs\SendProductPriceChangeNotifications;
+use App\Jobs\SendProductStockNotifications;
 use App\Models\Product;
+use App\Models\InventoryMovement;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\AdminProductQuantityPricing;
 use App\Services\Admin\AdminProductWorkspaceData;
@@ -15,6 +18,8 @@ use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
 use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\Telegram\ProductPriceChangeNotificationService;
+use App\Services\ProductWaitlistNotificationService;
+use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
@@ -50,8 +55,10 @@ class AdminProductUpdateController extends Controller
                 if ($section !== null) {
                     abort_unless(hash_equals($workspace->version($locked, $section), $validated['workspace_version']), 409, 'Bagian ini telah berubah. Muat ulang sebelum menyimpan.');
                 }
-                $auditFields = ['category_id', 'name', 'icon', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'unique_credential_email', 'featured_rank', 'stock', 'reserved_stock'];
+                $auditFields = ['category_id', 'name', 'icon', 'description', 'description_ms', 'description_en', 'product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items', 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en', 'support_policy', 'usage_guide_title', 'usage_guide_url', 'price_amount', 'usdt_price_amount', 'reseller_price_amount', 'reseller_usdt_price_amount', 'currency', 'image_path', 'telegram_image_path', 'telegram_channel_image_path', 'is_active', 'unique_credential_email', 'manual_unlimited', 'featured_rank', 'stock', 'reserved_stock'];
                 $oldValues = $locked->only($auditFields);
+                $wasManualUnlimited = $locked->manual_unlimited;
+                $wasAvailable = $locked->isPublicVisible() && $locked->availableStock() > 0;
                 $tierAudit = [
                     'before' => $tierPricing->snapshot($locked),
                     'after' => [],
@@ -83,6 +90,7 @@ class AdminProductUpdateController extends Controller
                         'currency' => 'IDR',
                         'is_active' => $request->boolean('is_active'),
                         'unique_credential_email' => $request->boolean('unique_credential_email'),
+                        'manual_unlimited' => $request->exists('manual_unlimited') ? $request->boolean('manual_unlimited') : $locked->manual_unlimited,
                     ]);
                 }
 
@@ -115,6 +123,22 @@ class AdminProductUpdateController extends Controller
                     ]);
                 }
                 $locked->save();
+                if (! $wasManualUnlimited && $locked->manual_unlimited && ! $wasAvailable
+                    && Product::query()->publicVisible()->whereKey($locked->id)->exists()) {
+                    $movement = InventoryMovement::query()->create([
+                        'product_id' => $locked->id,
+                        'type' => InventoryMovementType::Availability,
+                        'quantity' => 1,
+                        'stock_before' => $locked->stock,
+                        'available_before' => 0,
+                        'available_after' => 1,
+                        'became_unavailable' => false,
+                        'notes' => 'Manual unlimited availability enabled; no local inventory mutation.',
+                    ]);
+                    app(StockNotificationDeliveryPipeline::class)->register($movement->id);
+                    app(ProductWaitlistNotificationService::class)->scheduleForMovement($movement->id);
+                    DB::afterCommit(fn () => SendProductStockNotifications::dispatch($movement->id)->onQueue(StockNotificationDeliveryPipeline::QUEUE));
+                }
                 if ($request->hasQuantityPriceTiersInput()) {
                     $tierAudit = $tierPricing->replace($locked, $request->quantityPriceTiers());
                 } else {

@@ -38,7 +38,7 @@ class EloquentInventoryLedger implements InventoryLedger
             throw new InvalidCartState('Product is not active.');
         }
 
-        if ($product->availableStock() < $quantity) {
+        if (! $product->manual_unlimited && $product->availableStock() < $quantity) {
             throw new InsufficientStock('Insufficient available stock.');
         }
     }
@@ -64,7 +64,7 @@ class EloquentInventoryLedger implements InventoryLedger
             if (! $product || ! $product->isPublicVisible()) {
                 throw new InvalidCheckout('Cart contains unavailable product.');
             }
-            if ($product->availableStock() < $item->quantity) {
+            if (! $product->manual_unlimited && $product->availableStock() < $item->quantity) {
                 throw new InsufficientStock('Insufficient available stock.');
             }
         }
@@ -153,10 +153,10 @@ class EloquentInventoryLedger implements InventoryLedger
                 'stock' => $product->stock - $localQuantity,
                 'reserved_stock' => $product->reserved_stock - $localQuantity,
             ])->save();
-            $becameUnavailable = $product->stock <= 0
+            $becameUnavailable = ! $product->manual_unlimited && ! $item->manual_unlimited && ($product->stock <= 0
                 || ($product->isCredentialManaged()
                     && $product->reserved_stock <= 0
-                    && $product->availableStockItemCount() <= 0);
+                    && $product->availableStockItemCount() <= 0));
             $sale = InventoryMovement::firstOrCreate(
                 ['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale],
                 [
@@ -198,8 +198,8 @@ class EloquentInventoryLedger implements InventoryLedger
             $stockBefore = $product->stock;
             $product->decrement('stock', $item->localStockQuantity());
             $product->refresh();
-            $becameUnavailable = $product->stock <= 0
-                || ($product->isCredentialManaged() && $product->availableStockItemCount() <= 0);
+            $becameUnavailable = ! $product->manual_unlimited && ! $item->manual_unlimited && ($product->stock <= 0
+                || ($product->isCredentialManaged() && $product->availableStockItemCount() <= 0));
             $sale = InventoryMovement::firstOrCreate(
                 ['order_id' => $order->id, 'product_id' => $product->id, 'type' => InventoryMovementType::Sale],
                 [

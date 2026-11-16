@@ -239,6 +239,7 @@ final class StorefrontCartPageBuilder
             isAvailable: $isPublic && $availableStock >= $quantity,
             conflictMessage: $this->conflictMessage($isPublic, $availableStock, $quantity),
             appliedTierMinimum: $quote->appliedTierMinimum,
+            manualUnlimited: (bool) $product->manual_unlimited,
             imageUrl: StorefrontProductPresentationNormalizer::publicStorageUrl($product->image_path)
                 ?? StorefrontProductPresentationNormalizer::publicStorageUrl($product->family?->image_path),
         );

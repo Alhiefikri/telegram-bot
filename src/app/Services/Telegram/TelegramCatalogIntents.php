@@ -202,7 +202,7 @@ class TelegramCatalogIntents
                     ...$this->catalogIcon($member)->buttonFields(),
                     'text' => $this->locale->translate($customer, 'catalog.family.option_button', [
                         'number' => (string) ($index + 1),
-                    ]),
+                    ]).($member->manualUnlimited ? ' · ∞' : ''),
                 ];
                 if (! $member->isAvailable) {
                     // A disabled button is its own button type, so it carries no
@@ -624,7 +624,7 @@ class TelegramCatalogIntents
             }
         }
         if ($availableStock > 0) {
-            $lines[] = $this->locale->translate($customer, 'catalog.stock').$availableStock;
+            $lines[] = $this->locale->translate($customer, 'catalog.stock').($product->manual_unlimited ? '∞' : $availableStock);
         } else {
             $lines[] = $this->locale->translate($customer, 'catalog.status.sold_out');
         }
@@ -723,7 +723,7 @@ class TelegramCatalogIntents
         $lines[] = '━━━━━━━━━━━━━━';
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.product').$this->captions->icon($this->detailIcon($product)).' '.$product->name;
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.current', ['quantity' => $selection['quantity']]);
-        $lines[] = $this->locale->translate($customer, 'catalog.quantity.available_stock').$availableStock;
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.available_stock').($product->manual_unlimited ? '∞' : $availableStock);
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.custom_instruction', ['example' => 5]);
 
@@ -1235,7 +1235,7 @@ class TelegramCatalogIntents
                         ? $icon->buttonText($product->name.' · '.$this->productAvailabilityLabel(
                             $customer,
                             $product->isAvailable,
-                            $product->availableStock,
+                            $product->manualUnlimited ? '∞' : $product->availableStock,
                         ))
                         : $this->locale->translate($customer, 'catalog.family.number_button', ['number' => $number]),
                     ...($mode === 'catalog' ? $icon->buttonFields() : []),
@@ -1274,7 +1274,7 @@ class TelegramCatalogIntents
         return $number.'. '.$this->captions->icon($icon).' '.$this->escapeText($product->name)."\n"
             .$this->escapeText($this->locale->translate($customer, 'catalog.family.standalone_summary', [
                 'price' => number_format($product->priceAmount, 0, ',', '.'),
-                'stock' => $product->availableStock,
+                'stock' => $product->manualUnlimited ? '∞' : $product->availableStock,
             ]));
     }
 
@@ -1283,7 +1283,7 @@ class TelegramCatalogIntents
         if ($family->optionCount === 1) {
             $member = $family->members[0] ?? null;
             if ($member instanceof CatalogProductReadModel) {
-                return ' · '.$this->productAvailabilityLabel($customer, $member->isAvailable, $member->availableStock);
+                return ' · '.$this->productAvailabilityLabel($customer, $member->isAvailable, $member->manualUnlimited ? '∞' : $member->availableStock);
             }
         }
 
@@ -1296,7 +1296,7 @@ class TelegramCatalogIntents
         return ' · '.$this->locale->translate($customer, 'catalog.family.button_sold_out');
     }
 
-    private function productAvailabilityLabel(Customer $customer, bool $isAvailable, int $availableStock): string
+    private function productAvailabilityLabel(Customer $customer, bool $isAvailable, int|string $availableStock): string
     {
         return $this->locale->translate(
             $customer,
@@ -1321,7 +1321,7 @@ class TelegramCatalogIntents
         $lines[] = $this->locale->translate($customer, $member->isAvailable
             ? 'catalog.family.option_stock'
             : 'catalog.family.option_sold_out', [
-                'stock' => $member->availableStock,
+                'stock' => $member->manualUnlimited ? '∞' : $member->availableStock,
             ]);
         $lines[] = $this->locale->translate($customer, 'catalog.family.option_sold', [
             'sold' => $member->soldQuantity,

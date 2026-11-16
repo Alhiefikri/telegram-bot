@@ -5,10 +5,13 @@ namespace App\Http\Controllers\Admin;
 use App\Exceptions\InvalidOrderTransition;
 use App\Http\Controllers\Controller;
 use App\Models\ManualFulfillmentReview;
+use App\Models\Order;
+use App\Models\TelegramOutboundEffect;
 use App\Models\SupplierFulfillment;
 use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Admin\SupplierOperationConfirmation;
 use App\Services\Credentials\UniqueCredentialEmailPolicy;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -42,7 +45,7 @@ class AdminManualFulfillmentReviewController extends Controller
         $handoffFulfillments = $review->reason === 'supplier_fulfillment'
             ? SupplierFulfillment::query()->where('order_id', $review->order_id)->with('manualHandoffs.actor')->orderBy('id')->get()
             : collect();
-        $localCredentialItems = $review->reason === ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+        $localCredentialItems = in_array($review->reason, [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)
             ? $review->order->orderItems->map(function ($item): array {
                 $allocated = $item->stockItems()->whereNull('supplier_purchase_id')->whereNull('retired_at')->count();
 
@@ -62,6 +65,12 @@ class AdminManualFulfillmentReviewController extends Controller
                 }
             });
 
+        $receiptEffect = TelegramOutboundEffect::query()
+            ->where('source_type', Order::class)
+            ->where('source_id', (string) $review->order_id)
+            ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+            ->orderByDesc('sequence')->first();
+
         return view('admin.manual-fulfillment-reviews.show', [
             'review' => $review,
             'amount' => $this->amount($review->amount, $review->currency),
@@ -69,6 +78,7 @@ class AdminManualFulfillmentReviewController extends Controller
             'handoffKey' => (string) Str::uuid(),
             'localCredentialItems' => $localCredentialItems,
             'credentialEmailHistory' => $credentialEmailHistory,
+            'receiptEffect' => $receiptEffect,
         ]);
     }
 

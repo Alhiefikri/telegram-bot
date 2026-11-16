@@ -105,6 +105,31 @@ final class AdminProductWorkspaceTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'product.updated', 'subject_id' => (string) $product->id]);
     }
 
+    public function test_unlimited_mode_notifies_only_when_an_unavailable_product_becomes_available(): void
+    {
+        $this->manager();
+        $product = Product::factory()->create(['category_id' => null, 'is_active' => true, 'stock' => 0, 'reserved_stock' => 0]);
+        $this->assertFalse($product->fresh()->manual_unlimited);
+
+        $this->saveSection($product, 'detail', ['manual_unlimited' => true])->assertOk()
+            ->assertJsonPath('workspace.product.manual_unlimited', true);
+        $this->assertDatabaseCount('stock_notification_events', 1);
+        $this->assertDatabaseHas('inventory_movements', ['product_id' => $product->id, 'type' => 'availability', 'available_before' => 0, 'available_after' => 1]);
+        $this->assertSame(0, $product->fresh()->stock);
+        $this->saveSection($product, 'detail', ['manual_unlimited' => true])->assertOk();
+        $this->assertDatabaseCount('stock_notification_events', 1);
+        $this->saveSection($product, 'detail', ['manual_unlimited' => false])->assertOk();
+        $this->assertSame(0, $product->fresh()->availableStock());
+        $this->saveSection($product, 'detail', ['manual_unlimited' => true])->assertOk();
+        $this->assertDatabaseCount('stock_notification_events', 2);
+
+        $available = Product::factory()->create(['category_id' => null, 'is_active' => true, 'stock' => 2, 'reserved_stock' => 0]);
+        $this->saveSection($available, 'detail', ['manual_unlimited' => true])->assertOk();
+        $hidden = Product::factory()->create(['category_id' => null, 'is_active' => false, 'stock' => 0, 'reserved_stock' => 0]);
+        $this->saveSection($hidden, 'detail', ['manual_unlimited' => true])->assertOk();
+        $this->assertDatabaseCount('stock_notification_events', 2);
+    }
+
     public function test_appearance_save_preserves_all_detail_and_pricing_fields(): void
     {
         $this->manager();

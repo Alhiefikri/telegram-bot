@@ -217,6 +217,10 @@ class OrderCheckoutService
         }
 
         $products = $this->inventory->lockedCheckoutProducts($items);
+        if (($apiOrderClaimId !== null || $lockedCart->customer?->telegram_id === null)
+            && $products->contains(fn ($product): bool => (bool) $product->manual_unlimited)) {
+            throw new InvalidCheckout('This product requires a linked Telegram account and bot delivery.');
+        }
         $this->supplierFulfillment->lockCheckoutResources($products);
         $this->assertWebReservationBudget($lockedCart, $items, $products);
 
@@ -321,7 +325,7 @@ class OrderCheckoutService
             $usdtUnitPrice = $isUsdtPayment ? $quote->effectiveUsdtUnitAmount : null;
             $usdtSubtotal = $isUsdtPayment ? $quote->usdtSubtotal : null;
             $productIcon = $productIcons[(int) $product->getKey()] ?? $this->familyIcons->forProduct($product);
-            $localQuantity = min($item->quantity, $product->localAvailableStock());
+            $localQuantity = $product->manual_unlimited ? $item->quantity : min($item->quantity, $product->localAvailableStock());
             $supplierQuantity = $item->quantity - $localQuantity;
             $orderItem = OrderItem::create([
                 'order_id' => $order->id,
@@ -340,6 +344,7 @@ class OrderCheckoutService
                 'local_quantity' => $localQuantity,
                 'supplier_quantity' => $supplierQuantity,
                 'unique_credential_email' => (bool) $product->unique_credential_email,
+                'manual_unlimited' => (bool) $product->manual_unlimited,
                 'quantity_price_tier_minimum' => $quote->appliedTierMinimum,
                 'unit_price' => $quote->effectiveIdrUnitAmount,
                 'usdt_unit_price' => $usdtUnitPrice,
@@ -440,7 +445,7 @@ class OrderCheckoutService
 
         foreach ($items as $item) {
             $product = $products[$item->product_id];
-            if ($product->availableStock() - $item->quantity < $floor) {
+            if (! $product->manual_unlimited && $product->availableStock() - $item->quantity < $floor) {
                 throw new InvalidCheckout('Stok terakhir disisakan untuk pembelian lewat Telegram. Pilih jumlah lebih kecil atau coba lagi nanti.');
             }
         }

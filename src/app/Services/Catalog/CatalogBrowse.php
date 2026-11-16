@@ -446,6 +446,7 @@ final class CatalogBrowse
             createdAt: $product->created_at?->toISOString(),
             icon: $icon->icon,
             customEmojiId: $icon->customEmojiId,
+            manualUnlimited: (bool) $product->manual_unlimited,
         );
     }
 
@@ -678,6 +679,7 @@ final class CatalogBrowse
             icon: $product->icon,
             customEmojiId: $product->customEmojiId,
             matchesSearch: $matches,
+            manualUnlimited: $product->manualUnlimited,
         );
     }
 

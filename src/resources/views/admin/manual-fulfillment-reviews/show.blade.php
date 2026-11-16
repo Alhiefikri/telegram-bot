@@ -29,6 +29,8 @@
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">{{ $review->order->invoice_number }}</h1>
             @if ($review->reason === \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)
                 <x-admin-dashboard.notice tone="warning" class="mt-4">Pembayaran sudah diterima. Lengkapi akun lokal dengan email yang belum pernah dialokasikan kepada pelanggan ini untuk Product yang sama. Password berbeda tetap dihitung sebagai email yang sama.</x-admin-dashboard.notice>
+            @elseif ($review->reason === \App\Models\ManualFulfillmentReview::REASON_MANUAL_UNLIMITED)
+                <x-admin-dashboard.notice tone="warning" class="mt-4">Pembayaran dan pengiriman adalah status terpisah. Lengkapi seluruh akun lokal yang kurang; bot mengirim setelah semua unit siap.</x-admin-dashboard.notice>
             @else
                 <x-admin-dashboard.notice tone="warning" class="mt-4">Evidence pembayaran ini membutuhkan keputusan manual. Fulfillment tidak dijalankan otomatis.</x-admin-dashboard.notice>
             @endif
@@ -39,6 +41,13 @@
                 <div><dt class="text-xs font-medium text-admin-muted">Provider</dt><dd class="text-sm font-semibold text-admin-ink">{{ strtoupper($review->payment->provider) }}</dd></div>
                 <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Referensi provider</dt><dd class="break-all font-mono text-xs">{{ $review->provider_reference ?: '-' }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Terkonfirmasi paid</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->payment->paid_at?->format('d M Y H:i') ?? '-' }}</dd></div>
+                <div><dt class="text-xs font-medium text-admin-muted">Status pemenuhan</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->order->order_status === \App\Enums\OrderStatus::Completed ? 'akun siap' : $review->order->order_status->value }}</dd></div>
+                <div><dt class="text-xs font-medium text-admin-muted">Receipt bot</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->order->telegram_receipt_sent_at ? 'Terkirim pada '.$review->order->telegram_receipt_sent_at->format('d M Y H:i') : ($receiptEffect ? $receiptEffect->state->value.' (belum terkonfirmasi terkirim)' : 'Belum terkonfirmasi terkirim') }}</dd></div>
+                @if ($receiptEffect && in_array($receiptEffect->state->value, ['unknown', 'manual_review', 'failed'], true))
+                    @can('view', $receiptEffect)
+                        <div class="sm:col-span-2"><a href="{{ route('admin.telegram-outbound-effects.show', $receiptEffect) }}" class="text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">Buka Manual Delivery Review</a></div>
+                    @endcan
+                @endif
                 <div><dt class="text-xs font-medium text-admin-muted">Dibuat</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->created_at?->format('d M Y H:i') ?? '-' }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Aktor resolusi</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->actor?->name ?: '-' }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Waktu resolusi</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->resolved_at?->format('d M Y H:i') ?? '-' }}</dd></div>
@@ -91,7 +100,7 @@
         @endif
         @can('resolve', $review)
             @if ($review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING
-                && $review->reason === \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+                && in_array($review->reason, [\App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, \App\Models\ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)
                 && $review->order->order_status === \App\Enums\OrderStatus::Processing
                 && $review->order->payment_status === \App\Enums\PaymentStatus::Paid
                 && $localCredentialItems->contains(fn ($row) => $row['missing'] > 0))
@@ -140,7 +149,7 @@
                         <x-admin-dashboard.field-label>
                             Decision
                             <x-admin-dashboard.select name="action" class="mt-1">
-                                @if ($review->reason !== \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)
+                                @if (! in_array($review->reason, [\App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, \App\Models\ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true))
                                     <option value="fulfill">Fulfill</option>
                                 @endif
                                 @if ($review->reason === 'supplier_fulfillment')

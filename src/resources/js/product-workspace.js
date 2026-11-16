@@ -14,6 +14,7 @@ const detailFields = [
   "usage_guide_title",
   "usage_guide_url",
   "unique_credential_email",
+  "manual_unlimited",
 ];
 const appearanceFields = ["icon", "is_active", "featured_rank"];
 const policyFields = [
@@ -62,6 +63,7 @@ function formsFor(workspace) {
   detail.unique_credential_email = Boolean(
     workspace.product?.unique_credential_email
   );
+  detail.manual_unlimited = Boolean(workspace.product?.manual_unlimited);
   return {
     detail,
     price: {

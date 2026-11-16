@@ -50,7 +50,7 @@
                             <div class="mt-4 flex flex-wrap items-center gap-2">
                                 <strong class="font-display text-2xl font-black text-[var(--sf-accent)] sm:text-3xl">{{ $storefront->idr($presentation->priceAmount) }}</strong>
                                 <span class="rounded-full border border-[var(--sf-border)] px-3 py-1.5 text-xs font-black {{ $isAvailable ? 'bg-[var(--sf-yellow)]' : 'bg-[#ffd7d7] text-[#9f1d2d]' }}">
-                                    {{ $isAvailable ? 'Stok: '.$presentation->stockAvailable : 'Stok habis' }}
+                                    {{ $isAvailable ? $presentation->stockLabel : 'Stok habis' }}
                                 </span>
                             </div>
 

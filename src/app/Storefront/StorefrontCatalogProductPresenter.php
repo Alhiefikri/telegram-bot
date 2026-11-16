@@ -33,7 +33,7 @@ final class StorefrontCatalogProductPresenter
             soldQuantity: $product->soldQuantity,
             isAvailable: $isAvailable,
             availabilityLabel: $isAvailable ? 'Tersedia' : 'Habis',
-            stockLabel: $isAvailable ? 'Stok: '.$product->availableStock : 'Stok kosong',
+            stockLabel: $isAvailable ? ($product->manualUnlimited ? 'Stok: ∞ · Perlu akun Telegram' : 'Stok: '.$product->availableStock) : 'Stok kosong',
             soldLabel: 'Terjual: '.$product->soldQuantity,
             cover: new StorefrontProductCoverPresentation(
                 theme: StorefrontProductPresentationNormalizer::defaultCoverTheme(),

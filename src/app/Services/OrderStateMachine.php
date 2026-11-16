@@ -116,7 +116,7 @@ class OrderStateMachine implements OrderLifecycle
                 $lockedOrder->refresh();
                 if ($this->supplierFulfillment()->hasPending($lockedOrder)
                     || ManualFulfillmentReview::query()->where('order_id', $lockedOrder->id)
-                        ->where('reason', ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)->open()->exists()) {
+                        ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED])->open()->exists()) {
                     return $paidOrder;
                 }
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
@@ -376,8 +376,11 @@ class OrderStateMachine implements OrderLifecycle
         $payment->update(['status' => PaymentStatus::Paid, 'paid_at' => now()]);
         $order->update([
             'payment_status' => PaymentStatus::Paid,
-            'order_status' => $this->supplierFulfillment()->hasPending($order) ? OrderStatus::Processing : $this->paidOrderStatus($payment, $order),
+            'order_status' => $this->supplierFulfillment()->hasPending($order)
+                || $order->orderItems()->where('manual_unlimited', true)->where('deferred_local_quantity', '>', 0)->exists()
+                    ? OrderStatus::Processing : $this->paidOrderStatus($payment, $order),
         ]);
+        $manualUnlimitedHold = $order->orderItems()->where('manual_unlimited', true)->where('deferred_local_quantity', '>', 0)->exists();
         $uniqueEmailHold = $order->orderItems()->where('deferred_local_quantity', '>', 0)->exists();
         if ($uniqueEmailHold || $this->needsLocalCredentialReview($order)) {
             $review = ManualFulfillmentReview::query()->firstOrCreate(
@@ -386,9 +389,11 @@ class OrderStateMachine implements OrderLifecycle
                     'order_id' => $order->id,
                     'amount' => $payment->provider_total_payment ?? $payment->amount,
                     'currency' => $payment->currency,
-                    'reason' => $uniqueEmailHold
-                        ? ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
-                        : ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING,
+                    'reason' => $manualUnlimitedHold
+                        ? ManualFulfillmentReview::REASON_MANUAL_UNLIMITED
+                        : ($uniqueEmailHold
+                            ? ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+                            : ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING),
                     'state' => ManualFulfillmentReview::STATE_PENDING,
                     'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
                 ],
@@ -438,7 +443,7 @@ class OrderStateMachine implements OrderLifecycle
     private function uniqueEmailReviewOpen(Order $order): bool
     {
         return ManualFulfillmentReview::query()->where('order_id', $order->id)
-            ->where('reason', ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)->open()->exists();
+            ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED])->open()->exists();
     }
 
     private function needsLocalCredentialReview(Order $order): bool
@@ -512,7 +517,7 @@ class OrderStateMachine implements OrderLifecycle
                 'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
             ],
         );
-        if ($this->needsLocalCredentialReview($order)) {
+        if ($this->needsLocalCredentialReview($order) || $order->orderItems()->where('manual_unlimited', true)->exists()) {
             $this->dispatchManualReviewNotice($review);
         }
 

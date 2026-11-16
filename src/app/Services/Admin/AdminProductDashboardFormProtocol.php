@@ -105,6 +105,7 @@ class AdminProductDashboardFormProtocol
                 'usage_guide_url' => $request->input('usage_guide_url'),
                 'is_active' => $request->input('is_active'),
                 'unique_credential_email' => $request->input('unique_credential_email', 0),
+                'manual_unlimited' => $request->input('manual_unlimited', 0),
                 'product_id' => $product->id,
             ]);
     }
