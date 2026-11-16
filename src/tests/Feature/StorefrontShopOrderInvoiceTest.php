@@ -9,6 +9,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\AuditLog;
 use App\Models\InventoryMovement;
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -726,7 +727,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
 
     public function test_paid_manual_item_uses_snapshot_and_configured_whatsapp_for_follow_up(): void
     {
-        \App\Models\ManualPaymentSetting::create([
+        ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'is_active' => true,
             'whatsapp_support_number' => '0812 9999 0000',
