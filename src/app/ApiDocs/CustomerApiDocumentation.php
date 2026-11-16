@@ -662,7 +662,7 @@ final class CustomerApiDocumentation
                 'required' => ['telegram', 'instructions'],
                 'description' => 'Manual fulfillment contact instructions, not a delivered credential. On order and delivery responses this is present only while a manual-unlimited order is paid and processing.',
                 'properties' => [
-                    'telegram' => ['type' => 'string', 'const' => '@Alhie02'],
+                    'telegram' => ['type' => 'string', 'const' => '@Alhie02', 'description' => 'Telegram username for manual fulfillment support.'],
                     'instructions' => ['type' => 'string', 'description' => 'Contact instructions for obtaining the account or redeem code.'],
                 ],
             ],
