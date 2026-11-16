@@ -348,7 +348,10 @@ test("admin balance adjustment previews the exact Customer and disables duplicat
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
-  await page.getByRole("link", { name: "Kelola saldo" }).click();
+  await page.getByRole("button", { name: "Buka navigasi admin" }).click();
+  await page.getByRole("dialog", { name: "Navigasi admin", exact: true })
+    .getByRole("link", { name: "Saldo & top-up", exact: true }).click();
+  await page.getByRole("link", { name: "Kelola saldo IDR & USDT" }).click();
 
   await expect(page).toHaveURL(/\/admin\/store-balance\/adjustments/);
   await page
@@ -362,7 +365,7 @@ test("admin balance adjustment previews the exact Customer and disables duplicat
     page.locator('[data-customer-telegram-id="9007199254740993"]')
   ).toHaveText("9007199254740993");
 
-  await page.getByLabel("Jumlah tambahan Rupiah").fill("12345");
+  await page.getByLabel("Jumlah tambahan", { exact: true }).fill("12345");
   await page
     .getByLabel("Alasan penambahan")
     .fill("Browser QA Owner-attested adjustment.");
@@ -406,6 +409,48 @@ test("admin balance adjustment previews the exact Customer and disables duplicat
     page.getByRole("status").filter({ hasText: "Penambahan saldo diterapkan" })
   ).toBeVisible();
   await expectNoDocumentOverflow(page);
+});
+
+test("finance hub and combined customer balances stay compact", async ({ page }, testInfo) => {
+  runArtisan(["tinker", "--execute", `
+    $idr = \\App\\Models\\Customer::factory()->create(['first_name' => 'Browser IDR', 'telegram_id' => 880001]);
+    $usdt = \\App\\Models\\Customer::factory()->create(['first_name' => 'Browser USDT', 'telegram_id' => 880002]);
+    $zero = \\App\\Models\\Customer::factory()->create(['first_name' => 'Browser Zero', 'telegram_id' => 880003]);
+    app(\\App\\Services\\StoreBalance\\StoreBalanceLedger::class)->creditTopUp($idr, 70000, 'browser-combined-idr', 'browser-combined-idr');
+    $account = \\Illuminate\\Support\\Facades\\DB::table('customer_usdt_balance_accounts')->insertGetId([
+      'customer_id' => $usdt->id, 'currency' => 'USDT', 'balance_micro' => 2500000, 'version' => 1, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $entry = \\Illuminate\\Support\\Facades\\DB::table('customer_usdt_balance_entries')->insertGetId([
+      'customer_usdt_balance_account_id' => $account, 'account_sequence' => 1, 'kind' => 'funding_credit',
+      'amount_micro' => 2500000, 'balance_after_micro' => 2500000, 'source_type' => 'browser_fixture',
+      'source_id' => 'browser-combined-usdt', 'idempotency_key' => 'browser-combined-usdt',
+      'request_fingerprint' => hash('sha256', 'browser-combined-usdt'), 'created_at' => now(),
+    ]);
+    \\Illuminate\\Support\\Facades\\DB::table('customer_usdt_balance_accounts')->where('id', $account)->update(['last_entry_id' => $entry]);
+    \\Illuminate\\Support\\Facades\\DB::table('customer_balance_accounts')->insert([
+      'customer_id' => $zero->id, 'balance' => 0, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+  `]);
+  await login(page);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${baseUrl}/admin?tab=settings&section=saldo`);
+    await expect(page.getByRole("navigation", { name: "Tindakan saldo" }).getByRole("link", { name: "Laporan saldo" })).toBeVisible();
+    await expectNoDocumentOverflow(page);
+    await page.getByRole("navigation", { name: "Tindakan saldo" }).getByRole("link", { name: "Laporan saldo" }).click();
+    const results = page.getByRole("region", { name: "Hasil laporan saldo" });
+    const idr = results.locator("article").filter({ hasText: "Browser IDR" });
+    const usdt = results.locator("article").filter({ hasText: "Browser USDT" });
+    await expect(idr).toHaveCount(1);
+    await expect(idr).toContainText("Rp 70.000");
+    await expect(idr).toContainText("0 USDT");
+    await expect(usdt).toHaveCount(1);
+    await expect(usdt).toContainText("Rp 0");
+    await expect(usdt).toContainText("2.5 USDT");
+    await expect(results).not.toContainText("Browser Zero");
+    await expectNoDocumentOverflow(page);
+    await results.screenshot({ path: testInfo.outputPath(`balances-${width}.png`) });
+  }
 });
 
 test("asset isolation: Storefront 404 retains its Storefront entry and theme", async ({
@@ -4082,9 +4127,9 @@ test("direct desktop tabs select one sidebar destination and preserve content an
     ["telegram-channel", "Store Channel", "admin-section-store-channel"],
     ["settings", "Pengaturan", "admin-section-settings"],
     ["funnel", "Funnel", "admin-section-funnel"],
-    ["balance-issues", "Kompensasi Top-up", "admin-section-balance-issues"],
+    ["balance-issues", "Kompensasi Top-up", "admin-section-balance-issues", "Saldo & top-up"],
   ];
-  for (const [tab, label, anchor] of tabs) {
+  for (const [tab, label, anchor, navigationLabel = label] of tabs) {
     await page.goto(`${baseUrl}/admin?tab=${tab}`);
     const nav = page.getByRole("navigation", {
       name: "Navigasi admin",
@@ -4092,7 +4137,7 @@ test("direct desktop tabs select one sidebar destination and preserve content an
     });
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
     await expect(
-      nav.getByRole("link", { name: label, exact: true })
+      nav.getByRole("link", { name: navigationLabel, exact: true })
     ).toHaveAttribute("aria-current", "page");
     await expect(page.locator(`#${anchor}`)).toBeVisible();
     await expect(
@@ -4134,16 +4179,16 @@ test("linked operational pages retain the shared shell and active destination", 
       "Monitor pembelian supplier",
       "Supplier",
     ],
-    ["/admin/store-balance/reports", "Laporan saldo Customer", "Laporan saldo"],
+    ["/admin/store-balance/reports", "Laporan saldo Customer", "Saldo & top-up"],
     [
       "/admin/store-balance/adjustments",
       "Kelola saldo Customer",
-      "Kelola saldo",
+      "Saldo & top-up",
     ],
     [
       "/admin/store-balance/usdt-review",
       "Review deposit USDT dan insiden",
-      "Review deposit USDT",
+      "Saldo & top-up",
     ],
   ]) {
     await page.goto(`${baseUrl}${path}`);
@@ -4920,7 +4965,6 @@ test("mobile drawer reaches every tab and preserves filters, hash and product-cr
     ["telegram-channel", "Store Channel"],
     ["settings", "Pengaturan"],
     ["funnel", "Funnel"],
-    ["balance-issues", "Kompensasi Top-up"],
   ]) {
     await page.getByRole("button", { name: "Buka navigasi admin" }).click();
     await page

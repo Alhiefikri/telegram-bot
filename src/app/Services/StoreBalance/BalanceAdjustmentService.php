@@ -285,9 +285,12 @@ final class BalanceAdjustmentService
                     $key = $preview->currency === 'USDT' ? 'balance.adjustment.usdt_credit' : 'balance.adjustment.credit';
                     $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'customer', $this->locale->translate($customer, $key, ['amount' => $displayAmount]), $customer);
                 }
-                $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'owner', $preview->category === 'reversal'
-                    ? 'Reversal IDR '.$preview->id.' diterapkan: '.$displayAmount.' dari adjustment '.$reversalOriginal->id.'.'
-                    : 'Adjustment '.$preview->currency.' '.$preview->id.' diterapkan: '.$displayAmount.'.');
+                $this->outbound->recordBalanceAdjustmentNotice($preview->id, 'owner', implode("\n", [
+                    $preview->category === 'reversal' ? 'Reversal saldo berhasil diterapkan.' : 'Penambahan saldo berhasil diterapkan.',
+                    'Pelanggan: '.(trim((string) $customer->first_name) ?: 'Tanpa nama').' (Telegram ID: '.$preview->telegram_id.')',
+                    'Jumlah: '.$displayAmount,
+                    'Alasan: '.$preview->reason,
+                ]));
 
                 return $mutation;
             }, 5);

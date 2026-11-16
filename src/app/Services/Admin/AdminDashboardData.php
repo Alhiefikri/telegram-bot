@@ -45,7 +45,6 @@ final class AdminDashboardData
         private readonly StorefrontFunnelReport $funnelReport,
         private readonly StoreBalanceOwnerCompensationService $ownerCompensation,
         private readonly AdminSupplierDashboardData $supplierData,
-        private readonly BalanceAdjustmentDashboardReadiness $balanceAdjustmentDashboardReadiness,
     ) {}
 
     /**
@@ -240,7 +239,6 @@ final class AdminDashboardData
      */
     private function navigation(?string $requestedTab, User $user, ?string $activeNavigationId = null): array
     {
-        $canReconcilePayments = (bool) $user->role?->canReconcilePayments();
         $canViewStorefrontAnalytics = (bool) $user->role?->canViewStorefrontAnalytics();
         $canManageStoreOperations = (bool) $user->role?->canManageStoreOperations();
         $canCompensateStoreBalance = (bool) $user->role?->canCompensateStoreBalance();
@@ -327,11 +325,7 @@ final class AdminDashboardData
                 'id' => 'finance',
                 'label' => 'Keuangan',
                 'items' => $this->visibleNavigationItems([
-                    $this->navigationItem('balance-settings', 'Saldo & top-up', 'settings', route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']), visible: $canManagePaymentSettings),
-                    $this->navigationItem('balance-reports', 'Laporan saldo', 'report', route('admin.store-balance.reports.index'), visible: $canReconcilePayments),
-                    $this->navigationItem('balance-adjustments', 'Kelola saldo', 'adjustment', route('admin.store-balance.adjustments.index'), visible: $canCompensateStoreBalance && $this->balanceAdjustmentDashboardReadiness->isReady()),
-                    $this->navigationItem('usdt-review', 'Review deposit USDT', 'shield', route('admin.store-balance.usdt-review.index'), visible: $canCompensateStoreBalance),
-                    $tabItems['balance-issues'],
+                    $this->navigationItem('balance-settings', 'Saldo & top-up', 'wallet', route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']), visible: $canManagePaymentSettings),
                 ]),
             ],
             [
@@ -357,6 +351,12 @@ final class AdminDashboardData
         $tabIds = array_column($tabs, 'id');
         $requestedTab = (string) ($requestedTab ?: 'stats');
         $activeTab = in_array($requestedTab, $tabIds, true) ? $requestedTab : 'stats';
+        $financeActive = in_array($activeNavigationId, ['balance-reports', 'balance-adjustments', 'usdt-review', 'balance-settings'], true)
+            || ($activeNavigationId === null && ($activeTab === StoreBalanceOwnerCompensationService::TAB
+                || ($activeTab === 'settings' && request()->query('section') === 'saldo')));
+        if ($financeActive) {
+            $activeNavigationId = 'balance-settings';
+        }
         $groups = array_map(
             static function (array $group) use ($activeTab, $activeNavigationId): array {
                 $group['items'] = array_map(

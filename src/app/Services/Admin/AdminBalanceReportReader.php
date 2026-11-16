@@ -98,7 +98,9 @@ final class AdminBalanceReportReader
         [$query, $timeColumn, $idColumn] = $this->query($section, $currency);
         $this->applyTelegramFilter($query, $section, $currency, $telegramId);
         $this->applyStateFilter($query, $section, $currency, $state);
-        if ($cursor !== null) {
+        if ($cursor !== null && $section === 'accounts') {
+            $query->where($idColumn, '<', $cursor['id']);
+        } elseif ($cursor !== null) {
             $query->where(function (Builder $after) use ($cursor, $timeColumn, $idColumn): void {
                 $after->where($timeColumn, '<', $cursor['occurred_at'])
                     ->orWhere(function (Builder $sameTime) use ($cursor, $timeColumn, $idColumn): void {
@@ -108,16 +110,16 @@ final class AdminBalanceReportReader
             });
         }
 
-        $records = $query
-            ->orderByDesc($timeColumn)
-            ->orderByDesc($idColumn)
-            ->limit($filters['limit'] + 1)
-            ->get();
+        $query->orderByDesc($timeColumn);
+        if ($idColumn !== $timeColumn) {
+            $query->orderByDesc($idColumn);
+        }
+        $records = $query->limit($filters['limit'] + 1)->get();
         $hasMore = $records->count() > $filters['limit'];
         $visible = $records->take($filters['limit']);
         $last = $visible->last();
         $nextCursor = $hasMore && $last !== null
-            ? $this->cursors->encode($actor, $filters, $this->cursorTimestamp($last->report_time), (string) $last->row_id)
+            ? $this->cursors->encode($actor, $filters, $section === 'accounts' ? '' : $this->cursorTimestamp($last->report_time), (string) $last->row_id)
             : null;
 
         return [
@@ -151,7 +153,7 @@ final class AdminBalanceReportReader
     private function query(string $section, string $currency): array
     {
         return match ($section) {
-            'accounts' => $this->accountsQuery($currency),
+            'accounts' => $this->accountsQuery(),
             'entries' => $this->entriesQuery($currency),
             'topups' => $this->topUpsQuery($currency),
             'reviews' => $this->reviewsQuery($currency),
@@ -161,46 +163,41 @@ final class AdminBalanceReportReader
     }
 
     /** @return array{Builder, string, string} */
-    private function accountsQuery(string $currency): array
+    private function accountsQuery(): array
     {
-        if ($currency === 'IDR') {
-            $query = DB::table('customer_balance_accounts as accounts')
-                ->join('customers', 'customers.id', '=', 'accounts.customer_id')
-                ->select([
-                    'accounts.id as row_id', 'accounts.customer_id', 'accounts.balance as amount',
-                    'accounts.created_at as report_time', 'customers.first_name', 'customers.telegram_id',
-                ])
-                ->selectSub(function ($latest): void {
-                    $latest->from('store_balance_entries')
-                        ->select('balance_after')
-                        ->whereColumn('store_balance_entries.customer_balance_account_id', 'accounts.id')
-                        ->orderByDesc('id')->limit(1);
-                }, 'latest_balance_after');
-
-            return [$query, 'accounts.created_at', 'accounts.id'];
-        }
-
-        $query = DB::table('customer_usdt_balance_accounts as accounts')
-            ->join('customers', 'customers.id', '=', 'accounts.customer_id')
+        $query = DB::table('customers')
+            ->leftJoin('customer_balance_accounts as idr', 'idr.customer_id', '=', 'customers.id')
+            ->leftJoin('customer_usdt_balance_accounts as usdt', 'usdt.customer_id', '=', 'customers.id')
+            ->where(function (Builder $balances): void {
+                $balances->where('idr.balance', '<>', 0)->orWhere('usdt.balance_micro', '<>', 0);
+            })
             ->select([
-                'accounts.id as row_id', 'accounts.customer_id', 'accounts.balance_micro as amount',
-                'accounts.version', 'accounts.frozen_reason', 'accounts.created_at as report_time',
-                'customers.first_name', 'customers.telegram_id',
+                'customers.id as row_id', 'customers.id as customer_id', 'customers.created_at as report_time',
+                'customers.first_name', 'customers.telegram_id', 'idr.balance as idr_amount',
+                'usdt.balance_micro as usdt_amount', 'usdt.version', 'usdt.last_entry_id', 'usdt.frozen_reason',
             ])
             ->selectSub(function ($latest): void {
-                $latest->from('customer_usdt_balance_entries')
-                    ->select('balance_after_micro')
-                    ->whereColumn('customer_usdt_balance_entries.customer_usdt_balance_account_id', 'accounts.id')
+                $latest->from('store_balance_entries')->select('balance_after')
+                    ->whereColumn('store_balance_entries.customer_balance_account_id', 'idr.id')
                     ->orderByDesc('id')->limit(1);
-            }, 'latest_balance_after')
+            }, 'idr_latest_balance')
             ->selectSub(function ($latest): void {
-                $latest->from('customer_usdt_balance_entries')
-                    ->select('account_sequence')
-                    ->whereColumn('customer_usdt_balance_entries.customer_usdt_balance_account_id', 'accounts.id')
+                $latest->from('customer_usdt_balance_entries')->select('balance_after_micro')
+                    ->whereColumn('customer_usdt_balance_entries.customer_usdt_balance_account_id', 'usdt.id')
                     ->orderByDesc('id')->limit(1);
-            }, 'latest_account_sequence');
+            }, 'usdt_latest_balance')
+            ->selectSub(function ($latest): void {
+                $latest->from('customer_usdt_balance_entries')->select('id')
+                    ->whereColumn('customer_usdt_balance_entries.customer_usdt_balance_account_id', 'usdt.id')
+                    ->orderByDesc('id')->limit(1);
+            }, 'usdt_latest_id')
+            ->selectSub(function ($latest): void {
+                $latest->from('customer_usdt_balance_entries')->select('account_sequence')
+                    ->whereColumn('customer_usdt_balance_entries.customer_usdt_balance_account_id', 'usdt.id')
+                    ->orderByDesc('id')->limit(1);
+            }, 'usdt_latest_sequence');
 
-        return [$query, 'accounts.created_at', 'accounts.id'];
+        return [$query, 'customers.id', 'customers.id'];
     }
 
     /** @return array{Builder, string, string} */
@@ -476,24 +473,20 @@ SQL;
         ];
 
         if ($section === 'accounts') {
-            $result['title'] = 'Saldo rekening '.$currency;
-            $result['reference'] = 'Akun '.$this->maskReference((string) $row->row_id);
-            if ($currency === 'IDR') {
-                $valid = $row->latest_balance_after === null
-                    ? (string) $row->amount === '0'
-                    : (string) $row->latest_balance_after === (string) $row->amount;
-                $result['amount'] = $valid ? $this->formatIdr((string) $row->amount) : '—';
-                $result['status'] = $valid ? 'available' : 'unavailable';
-                $result['detail'] = 'Proyeksi Store Balance; saldo ini bukan hasil SUM ledger.';
-            } else {
-                $valid = $row->latest_balance_after === null
-                    ? (int) $row->version === 0 && (string) $row->amount === '0'
-                    : (string) $row->latest_balance_after === (string) $row->amount
-                        && (string) $row->latest_account_sequence === (string) $row->version;
-                $result['amount'] = $valid ? $this->formatUsdt((string) $row->amount).' USDT' : '—';
-                $result['status'] = ! $valid ? 'unavailable' : ($row->frozen_reason !== null ? 'frozen' : 'available');
-                $result['detail'] = 'Proyeksi Customer USDT; versi ledger '.$row->version.'.';
-            }
+            $idr = (string) ($row->idr_amount ?? '0');
+            $usdt = (string) ($row->usdt_amount ?? '0');
+            $idrValid = $row->idr_latest_balance === null
+                ? $idr === '0'
+                : (string) $row->idr_latest_balance === $idr;
+            $usdtValid = $row->usdt_latest_balance === null
+                ? (int) ($row->version ?? 0) === 0 && $usdt === '0' && $row->last_entry_id === null
+                : (string) $row->usdt_latest_balance === $usdt
+                    && (string) $row->usdt_latest_sequence === (string) $row->version
+                    && (string) $row->usdt_latest_id === (string) $row->last_entry_id;
+            $result['idr_amount'] = $idrValid ? $this->formatIdr($idr) : '—';
+            $result['idr_status'] = $idrValid ? 'available' : 'unavailable';
+            $result['usdt_amount'] = $usdtValid ? $this->formatUsdt($usdt).' USDT' : '—';
+            $result['usdt_status'] = ! $usdtValid ? 'unavailable' : ($row->frozen_reason !== null ? 'frozen' : 'available');
 
             return $result;
         }

@@ -15,7 +15,7 @@
             <div>
                 <p class="text-xs font-medium text-admin-muted">Store Balance · read-only</p>
                 <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink sm:text-3xl">Laporan saldo Customer</h1>
-                <p class="mt-2 max-w-3xl text-sm leading-6 text-admin-muted">Saldo IDR dan USDT ditampilkan terpisah. Nilai saldo berasal dari proyeksi akun; rekonsiliasi USDT menampilkan status custody yang tercatat.</p>
+                <p class="mt-2 max-w-3xl text-sm leading-6 text-admin-muted">Setiap Customer dengan saldo ditampilkan sekali dengan IDR dan USDT. Nilai berasal dari proyeksi akun; rekonsiliasi USDT menampilkan status custody yang tercatat.</p>
             </div>
         <nav class="flex flex-wrap gap-x-5" aria-label="Navigasi saldo">
             <a href="{{ route('admin.dashboard', ['tab' => 'stats']) }}" class="inline-flex min-h-11 items-center text-sm font-medium text-admin-accent-strong underline-offset-4 hover:underline">← Kembali ke Dashboard</a>
@@ -83,7 +83,7 @@
             @endforeach
         </nav>
 
-        @if ($report['filters']['section'] !== 'treasury')
+        @if (! in_array($report['filters']['section'], ['accounts', 'treasury'], true))
             <nav class="flex flex-wrap gap-2" aria-label="Mata uang laporan">
                 @foreach (['IDR', 'USDT'] as $currencyTab)
                     <a href="{{ route('admin.store-balance.reports.index', array_filter(['section' => $report['filters']['section'], 'currency' => $currencyTab, 'telegram_id' => $report['filters']['telegram_id'], 'limit' => $report['filters']['limit']])) }}"
@@ -127,6 +127,30 @@
         </form>
 
         <section class="space-y-3" aria-label="Hasil laporan saldo">
+            @if ($report['filters']['section'] === 'accounts')
+                @forelse ($report['rows'] as $row)
+                    <x-admin-dashboard.card as="article" padding="compact" shadow="sm" class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] sm:items-center">
+                        <div class="min-w-0">
+                            <h2 class="break-words text-sm font-semibold text-admin-ink">{{ $row['customer'] }}</h2>
+                            @if ($row['telegram_id'])
+                                <p class="mt-1 text-xs text-admin-muted">Telegram {{ $row['telegram_id'] }}</p>
+                            @endif
+                        </div>
+                        <dl class="grid grid-cols-2 gap-3">
+                            <div class="min-w-0">
+                                <dt class="text-xs text-admin-muted">IDR · {{ match ($row['idr_status']) { 'available' => 'Tersedia', default => 'Perlu rekonsiliasi' } }}</dt>
+                                <dd class="break-words text-sm font-semibold text-admin-ink">{{ $row['idr_amount'] }}</dd>
+                            </div>
+                            <div class="min-w-0">
+                                <dt class="text-xs text-admin-muted">USDT · {{ match ($row['usdt_status']) { 'available' => 'Tersedia', 'frozen' => 'Dibekukan', default => 'Perlu rekonsiliasi' } }}</dt>
+                                <dd class="break-words text-sm font-semibold text-admin-ink">{{ $row['usdt_amount'] }}</dd>
+                            </div>
+                        </dl>
+                    </x-admin-dashboard.card>
+                @empty
+                    <x-admin-dashboard.empty-state title="Tidak ada data untuk filter ini." />
+                @endforelse
+            @else
             @forelse ($report['rows'] as $row)
                 <x-admin-dashboard.card as="article" padding="compact" shadow="sm" class="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] lg:items-start lg:gap-3">
                     <div class="min-w-0">
@@ -151,11 +175,12 @@
             @empty
                 <x-admin-dashboard.empty-state title="Tidak ada data untuk filter ini." />
             @endforelse
+            @endif
         </section>
 
         @if ($report['nextCursor'])
             <div class="flex justify-end">
-                <x-admin-dashboard.button :href="route('admin.store-balance.reports.index', array_filter($report['filters'] + ['cursor' => $report['nextCursor']]))" variant="neutral" size="sm">Laporan lebih lama</x-admin-dashboard.button>
+                <x-admin-dashboard.button :href="route('admin.store-balance.reports.index', array_filter($report['filters'] + ['cursor' => $report['nextCursor']]))" variant="neutral" size="sm">{{ $report['filters']['section'] === 'accounts' ? 'Halaman berikutnya' : 'Laporan lebih lama' }}</x-admin-dashboard.button>
             </div>
         @endif
     </div>

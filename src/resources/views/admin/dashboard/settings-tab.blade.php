@@ -598,20 +598,33 @@
     @endif
     @if ($settingsSection === 'saldo')
                 <x-admin-dashboard.card as="section" padding="compact" shadow="sm" aria-label="Pengelolaan saldo Customer">
-                    <h2 class="text-lg font-semibold text-admin-ink">Pengelolaan saldo Customer</h2>
-                    <p class="mt-2 text-sm leading-6 text-admin-muted">Saldo, riwayat, dan kebijakan IDR dan USDT tetap terpisah; tidak ada konversi antar mata uang.</p>
-                    <nav class="mt-3 flex flex-wrap gap-3" aria-label="Tindakan saldo">
+                    <h2 class="text-lg font-semibold text-admin-ink">Saldo &amp; top-up</h2>
+                    <p class="mt-2 text-sm leading-6 text-admin-muted">Pilih laporan atau tindakan saldo. IDR dan USDT tetap terpisah; tidak ada konversi antar mata uang.</p>
+                    <nav class="mt-3 grid gap-3 sm:grid-cols-2" aria-label="Tindakan saldo">
                         @if (auth()->user()->role->canReconcilePayments())
-                            <x-admin-dashboard.button :href="route('admin.store-balance.reports.index')" variant="neutral">Saldo dan riwayat IDR / USDT</x-admin-dashboard.button>
+                            <div>
+                                <x-admin-dashboard.button :href="route('admin.store-balance.reports.index')" variant="neutral">Laporan saldo</x-admin-dashboard.button>
+                                <p class="mt-1 text-xs text-admin-muted">Saldo pelanggan, ledger, top-up, review, treasury, dan audit.</p>
+                            </div>
                         @endif
                         @if ($canManageBalanceAdjustments)
-                            <x-admin-dashboard.button :href="route('admin.store-balance.adjustments.index')" variant="neutral">Tambah atau reversal IDR</x-admin-dashboard.button>
+                            <div>
+                                <x-admin-dashboard.button :href="route('admin.store-balance.adjustments.index')" variant="neutral">Kelola saldo IDR &amp; USDT</x-admin-dashboard.button>
+                                <p class="mt-1 text-xs text-admin-muted">Tambah saldo IDR atau USDT, atau reversal penyesuaian IDR.</p>
+                            </div>
                         @endif
                         @if ($canManageBalanceIssues)
-                            <x-admin-dashboard.button :href="route('admin.store-balance.usdt-review.index')" variant="neutral">Review top-up USDT</x-admin-dashboard.button>
-                            <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => 'balance-issues'])" variant="neutral">Kompensasi top-up IDR</x-admin-dashboard.button>
+                            <div>
+                                <x-admin-dashboard.button :href="route('admin.store-balance.usdt-review.index')" variant="neutral">Review deposit USDT</x-admin-dashboard.button>
+                                <p class="mt-1 text-xs text-admin-muted">Tinjau deposit USDT dan insiden.</p>
+                            </div>
+                            <div>
+                                <x-admin-dashboard.button :href="route('admin.dashboard', ['tab' => 'balance-issues'])" variant="neutral">Kompensasi top-up IDR</x-admin-dashboard.button>
+                                <p class="mt-1 text-xs text-admin-muted">Tinjau dan selesaikan masalah top-up IDR.</p>
+                            </div>
                         @endif
                     </nav>
+                    <p class="mt-4 text-sm text-admin-muted">Pengaturan top-up IDR dan USDT tersedia di bawah. <a href="{{ route('admin.dashboard', ['tab' => 'settings', 'section' => 'diagnostik']) }}" class="text-admin-accent-strong underline">Diagnostik saldo</a> dan <a href="{{ route('admin.dashboard', ['tab' => 'settings', 'section' => 'pembayaran']) }}" class="text-admin-accent-strong underline">pengaturan pembayaran</a> tersedia terpisah.</p>
                 </x-admin-dashboard.card>
                 <x-admin-dashboard.card
                     id="admin-store-balance-funding-policy"

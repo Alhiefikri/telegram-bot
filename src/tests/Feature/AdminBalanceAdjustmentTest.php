@@ -51,7 +51,7 @@ final class AdminBalanceAdjustmentTest extends NonTransactionalDatabaseTestCase
         $session->start();
         request()->setLaravelSession($session);
         config(['services.telegram.admin_telegram_chat_id' => '998877']);
-        $customer = Customer::factory()->create(['telegram_id' => 901543]);
+        $customer = Customer::factory()->create(['telegram_id' => 901543, 'first_name' => 'Rina <Putri>']);
         $service = app(BalanceAdjustmentService::class);
         $preview = $service->request($owner, '901543', 25000, 'Dana diterima di luar sistem');
         $this->assertSame(0, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
@@ -63,6 +63,8 @@ final class AdminBalanceAdjustmentTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(25000, app(StoreBalanceLedger::class)->snapshot($customer)->balance());
         $this->assertDatabaseCount('balance_adjustment_accounting_events', 1);
         $this->assertDatabaseCount('telegram_outbound_effects', 2);
+        $notice = TelegramOutboundEffect::query()->where('source_id', $preview->id)->where('target_type', 'admin')->sole();
+        $this->assertSame("Penambahan saldo berhasil diterapkan.\nPelanggan: Rina <Putri> (Telegram ID: 901543)\nJumlah: Rp 25.000\nAlasan: Dana diterima di luar sistem", $notice->outcome_metadata['message']);
     }
 
     public function test_owner_usdt_adjustment_posts_exactly_once_to_suspense_without_a_receipt(): void
@@ -96,6 +98,8 @@ final class AdminBalanceAdjustmentTest extends NonTransactionalDatabaseTestCase
         $this->assertDatabaseCount('telegram_outbound_effects', 2);
         $notice = TelegramOutboundEffect::query()->where('source_id', $preview->id)->where('target_type', 'customer')->firstOrFail();
         $this->assertSame('Your USDT balance increased by 12.000001 USDT.', $notice->outcome_metadata['message']);
+        $ownerNotice = TelegramOutboundEffect::query()->where('source_id', $preview->id)->where('target_type', 'admin')->sole();
+        $this->assertSame("Penambahan saldo berhasil diterapkan.\nPelanggan: {$customer->first_name} (Telegram ID: 901543)\nJumlah: 12.000001 USDT\nAlasan: Owner attestation", $ownerNotice->outcome_metadata['message']);
         $this->assertEmpty(app(UsdtBalanceReconciliation::class)->inspect($customer->id, null, 10)->findings);
         $this->assertEmpty(app(UsdtReceiptReconciliation::class)->inspect($customer->id, null, null, 10)->findings);
     }
@@ -411,6 +415,8 @@ final class AdminBalanceAdjustmentTest extends NonTransactionalDatabaseTestCase
         $this->assertSame(4, DB::table('telegram_outbound_effects')->count());
         $notice = TelegramOutboundEffect::query()->where('target_type', 'customer')->where('source_id', $reversal->id)->sole();
         $this->assertSame('Your IDR balance decreased by Rp 5.000.', $notice->outcome_metadata['message']);
+        $ownerNotice = TelegramOutboundEffect::query()->where('target_type', 'admin')->where('source_id', $reversal->id)->sole();
+        $this->assertSame("Reversal saldo berhasil diterapkan.\nPelanggan: {$customer->first_name} (Telegram ID: 901543)\nJumlah: Rp 5.000\nAlasan: Reversal penuh: Dana diterima", $ownerNotice->outcome_metadata['message']);
 
         $this->assertTrue(app(StoreBalanceReconciliation::class)->inspect($customer)->isConsistent());
         $page = app(StoreBalanceActivityService::class)->firstPage($customer);

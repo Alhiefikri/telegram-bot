@@ -19,7 +19,8 @@ final class AdminDashboardNavigationContractTest extends TestCase
         $navigation = app(AdminDashboardData::class)->forActiveTab($admin, 'stats')['navigation'];
         $items = collect($navigation['groups'])->flatMap(fn (array $group): array => $group['items']);
 
-        $this->assertTrue($items->contains('id', 'balance-reports'));
+        $this->assertTrue($items->contains('id', 'balance-settings'));
+        $this->assertFalse($items->contains('id', 'balance-reports'));
         $this->assertTrue($items->contains('id', 'funnel'));
         $this->assertFalse($items->contains('id', 'balance-adjustments'));
         $this->assertFalse($items->contains('id', 'usdt-review'));
@@ -56,9 +57,12 @@ final class AdminDashboardNavigationContractTest extends TestCase
                 foreach ($xpath->query('//nav[@aria-label="Navigasi admin" or @aria-label="Navigasi dashboard"]') as $menu) {
                     $current = $xpath->query('.//a[@aria-current="page"]', $menu);
                     $this->assertSame(1, $current->length);
-                    $this->assertSame(route('admin.dashboard', ['tab' => $tab]), $current->item(0)->getAttribute('href'));
+                    $expected = $tab === 'balance-issues'
+                        ? route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo'])
+                        : route('admin.dashboard', ['tab' => $tab]);
+                    $this->assertSame($expected, $current->item(0)->getAttribute('href'));
                     $ownerLinks = $xpath->query('.//a[contains(@href, "/store-balance/adjustments") or contains(@href, "/store-balance/usdt-review") or contains(@href, "tab=balance-issues")]', $menu);
-                    $this->assertSame($role === UserRole::Owner ? 3 : 0, $ownerLinks->length);
+                    $this->assertSame(0, $ownerLinks->length);
                 }
                 $this->assertSame(1, $xpath->query('//*[@id="admin-dashboard-content"]//*[@id="'.$anchor.'"]')->length);
                 foreach ($anchors as $otherTab => $otherAnchor) {
@@ -92,8 +96,40 @@ final class AdminDashboardNavigationContractTest extends TestCase
             $navigation = $data->navigationFor('stats', $owner, $navigationId);
             $items = collect($navigation['groups'])->flatMap(fn (array $group): array => $group['items']);
 
-            $this->assertSame([$navigationId], $items->where('active', true)->pluck('id')->all());
+            $this->assertSame(['balance-settings'], $items->where('active', true)->pluck('id')->all());
             $this->assertSame('stats', $navigation['activeTab']);
+        }
+    }
+
+    public function test_finance_hub_exposes_reports_and_only_authorized_actions(): void
+    {
+        Http::fake();
+
+        foreach ([UserRole::Owner, UserRole::Admin] as $role) {
+            $user = User::factory()->create(['role' => $role]);
+            $response = $this->actingAs($user)->get(route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']))->assertOk();
+            $response->assertSee(route('admin.store-balance.reports.index'), false);
+            $response->assertSee(route('admin.dashboard', ['tab' => 'settings', 'section' => 'diagnostik']));
+            $document = new \DOMDocument;
+            @$document->loadHTML($response->getContent());
+            $xpath = new \DOMXPath($document);
+            foreach ($xpath->query('//nav[@aria-label="Navigasi admin" or @aria-label="Navigasi dashboard"]') as $menu) {
+                $current = $xpath->query('.//a[@aria-current="page"]', $menu);
+                $this->assertSame(1, $current->length);
+                $this->assertSame(route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']), $current->item(0)->getAttribute('href'));
+            }
+            foreach ([
+                route('admin.store-balance.usdt-review.index'),
+                route('admin.dashboard', ['tab' => 'balance-issues']),
+            ] as $url) {
+                $role === UserRole::Owner ? $response->assertSee($url, false) : $response->assertDontSee($url, false);
+            }
+            $adjustmentUrl = route('admin.store-balance.adjustments.index');
+            if ($role === UserRole::Owner && app(\App\Services\Admin\BalanceAdjustmentDashboardReadiness::class)->isReady()) {
+                $response->assertSee($adjustmentUrl, false);
+            } else {
+                $response->assertDontSee($adjustmentUrl, false);
+            }
         }
     }
 }

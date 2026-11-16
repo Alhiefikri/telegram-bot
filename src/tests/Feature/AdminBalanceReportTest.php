@@ -96,16 +96,68 @@ final class AdminBalanceReportTest extends TestCase
             'currency' => 'IDR',
             'telegram_id' => (string) $idrCustomer->telegram_id,
         ]);
-        $this->assertSame('unavailable', $idr['rows'][0]['status']);
-        $this->assertSame('—', $idr['rows'][0]['amount']);
+        $this->assertSame('unavailable', $idr['rows'][0]['idr_status']);
+        $this->assertSame('—', $idr['rows'][0]['idr_amount']);
+        $this->assertSame('0 USDT', $idr['rows'][0]['usdt_amount']);
 
         $usdt = app(AdminBalanceReportReader::class)->page($finance, [
             'section' => 'accounts',
             'currency' => 'USDT',
             'telegram_id' => (string) $usdtCustomer->telegram_id,
         ]);
-        $this->assertSame('frozen', $usdt['rows'][0]['status']);
-        $this->assertSame('2.5 USDT', $usdt['rows'][0]['amount']);
+        $this->assertSame('frozen', $usdt['rows'][0]['usdt_status']);
+        $this->assertSame('2.5 USDT', $usdt['rows'][0]['usdt_amount']);
+        $this->assertSame('Rp 0', $usdt['rows'][0]['idr_amount']);
+
+        DB::table('customer_usdt_balance_accounts')->where('customer_id', $usdtCustomer->id)->update(['last_entry_id' => null]);
+        $drifted = app(AdminBalanceReportReader::class)->page($finance, [
+            'section' => 'accounts',
+            'telegram_id' => (string) $usdtCustomer->telegram_id,
+        ]);
+        $this->assertSame('unavailable', $drifted['rows'][0]['usdt_status']);
+        $this->assertSame('—', $drifted['rows'][0]['usdt_amount']);
+    }
+
+    public function test_accounts_combine_currencies_exclude_zero_balances_and_paginate_customers(): void
+    {
+        $finance = User::factory()->create(['role' => UserRole::Finance]);
+        $idr = Customer::factory()->create(['first_name' => 'IDR only', 'telegram_id' => 921001]);
+        $usdt = Customer::factory()->create(['first_name' => 'USDT only', 'telegram_id' => 921002]);
+        $both = Customer::factory()->create(['first_name' => 'Both', 'telegram_id' => 921003]);
+        $zero = Customer::factory()->create(['first_name' => 'Zero only', 'telegram_id' => 921004]);
+        app(StoreBalanceLedger::class)->creditTopUp($idr, 1000, 'report-idr-only', 'report-idr-only:credit');
+        app(StoreBalanceLedger::class)->creditTopUp($both, 2500, 'report-both', 'report-both:credit');
+        $this->createUsdtAccount($usdt, 1);
+        $this->createUsdtAccount($both, 2_500_000);
+        DB::table('customer_balance_accounts')->insert([
+            'customer_id' => $zero->getKey(), 'balance' => 0, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('customer_usdt_balance_accounts')->insert([
+            'customer_id' => $zero->getKey(), 'currency' => 'USDT', 'balance_micro' => 0, 'version' => 0,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $reader = app(AdminBalanceReportReader::class);
+        $filters = ['section' => 'accounts', 'currency' => 'IDR', 'limit' => 1];
+        $rows = [];
+        do {
+            $page = $reader->page($finance, $filters + (isset($cursor) ? ['cursor' => $cursor] : []));
+            $this->assertCount(1, $page['rows']);
+            $rows[] = $page['rows'][0];
+            $cursor = $page['nextCursor'];
+        } while ($cursor !== null);
+
+        $this->assertSame(['Both', 'USDT only', 'IDR only'], array_column($rows, 'customer'));
+        $this->assertSame(['Rp 2.500', 'Rp 0', 'Rp 1.000'], array_column($rows, 'idr_amount'));
+        $this->assertSame(['2.5 USDT', '0.000001 USDT', '0 USDT'], array_column($rows, 'usdt_amount'));
+        $this->assertSame([], $reader->page($finance, $filters + ['telegram_id' => '921004'])['rows']);
+        $filtered = $reader->page($finance, ['section' => 'accounts', 'currency' => 'USDT', 'telegram_id' => '921002']);
+        $this->assertSame(['USDT only'], array_column($filtered['rows'], 'customer'));
+        $this->assertSame('0.000001 USDT', $filtered['rows'][0]['usdt_amount']);
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))->get(route('admin.store-balance.reports.index', ['section' => 'accounts']))
+            ->assertOk()->assertSee('IDR only')->assertSee('USDT only')->assertSee('Both')
+            ->assertSee('0.000001 USDT')->assertDontSee('Zero only');
     }
 
     public function test_audit_reports_keep_malformed_historical_subjects_without_matching_a_customer(): void
@@ -243,12 +295,7 @@ final class AdminBalanceReportTest extends TestCase
         $otherAdmin = User::factory()->create(['role' => UserRole::Owner]);
         for ($index = 1; $index <= 2; $index++) {
             $customer = Customer::factory()->create(['telegram_id' => 910000 + $index]);
-            DB::table('customer_balance_accounts')->insert([
-                'customer_id' => $customer->getKey(),
-                'balance' => 0,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            app(StoreBalanceLedger::class)->creditTopUp($customer, 1000, 'cursor-'.$index, 'cursor:'.$index);
         }
 
         $response = $this->actingAs($admin)->get(route('admin.store-balance.reports.index', [
