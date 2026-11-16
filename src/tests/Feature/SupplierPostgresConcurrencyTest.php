@@ -34,6 +34,7 @@ use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierExchangeRate;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Suppliers\SupplierInvoiceRetry;
 use App\Services\Suppliers\SupplierManager;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
@@ -142,6 +143,41 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(9_000_000, $supplier->fresh()->balance_micros);
         $this->assertSame(0, $product->fresh()->stock);
+    }
+
+    #[Group('postgres-release')]
+    public function test_competing_invoice_retry_requests_create_only_one_supplier_purchase(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $sku->update(['orderable' => false]);
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $sku->update(['orderable' => true]);
+        $retry = function () use ($fulfillment): array {
+            Http::swap(new Factory);
+            Http::fake(function ($request) {
+                usleep(100000);
+
+                return Http::response(str_ends_with($request->url(), '/balance')
+                    ? ['balance' => '10', 'currency' => 'USDT']
+                    : ['products' => [['id' => 'fixture-sku', 'name' => 'Private', 'price' => '1', 'stock' => 10]], 'currency' => 'USDT']);
+            });
+
+            return app(SupplierInvoiceRetry::class)->attempt($fulfillment->id);
+        };
+        $results = $this->race([$retry, $retry, $retry]);
+        $this->assertCount(1, array_filter($results, fn ($result) => $result['status'] === 'queued'));
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+
+        Http::swap(new Factory);
+        $this->assertSame(1, $this->process($fulfillment->id)['posts']);
+        $this->assertSame(1, SupplierPurchase::count());
+        $this->assertSame(1, ProductStockItem::whereNotNull('supplier_purchase_id')->count());
     }
 
     #[Group('postgres-release')]

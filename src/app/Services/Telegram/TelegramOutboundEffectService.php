@@ -2284,6 +2284,8 @@ class TelegramOutboundEffectService
                     'supersedes_effect_id' => (string) $locked->getKey(),
                     ...(in_array($locked->effect_type, [TelegramOutboundEffectType::UsdtTopUpReceipt->value, TelegramOutboundEffectType::UsdtRefundReceipt->value], true)
                         ? ['message' => $locked->outcome_metadata['message'] ?? null] : []),
+                    ...($locked->effect_type === TelegramOutboundEffectType::SupplierManualTakeoverNotice->value
+                        ? ['message' => $locked->outcome_metadata['message'] ?? null, 'contact_label' => $locked->outcome_metadata['contact_label'] ?? null] : []),
                 ],
             ]);
 

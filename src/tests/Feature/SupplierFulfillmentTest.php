@@ -297,6 +297,58 @@ class SupplierFulfillmentTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_invoice_recovery_shows_owner_actions_and_rejects_admin_force_sync(): void
+    {
+        [, , $sku, $cart] = $this->fixture(provider: 'warzone');
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $sku->update(['orderable' => false]);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        $invoiceUrl = route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]);
+        $actionUrl = route('admin.suppliers.resolve-invoice', $fulfillment);
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]))
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->get($invoiceUrl)
+            ->assertOk()
+            ->assertSee('Periksa, beli & kirim', false)
+            ->assertSee('Paksa sinkron supplier ini')
+            ->assertSee('Saya tangani sendiri')
+            ->assertSee('Kirim akun lewat bot');
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->post($actionUrl, [
+                'action' => 'force_sync',
+                'purchase_id' => 0,
+                'supplier_version' => $fulfillment->reservedSupplier->version,
+            ])->assertForbidden();
+        Http::assertNothingSent();
+    }
+
+    public function test_owner_takeover_releases_undispatched_hold_even_when_sync_fails(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone');
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $sku->update(['orderable' => false]);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(SupplierFulfillmentService::class)->process($fulfillment->id);
+        Http::fake(fn () => Http::response([], 503));
+
+        $this->actingAs(User::factory()->create(['role' => UserRole::Owner]))
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.resolve-invoice', $fulfillment), [
+                'action' => 'take_over', 'purchase_id' => 0, 'confirmed' => 1,
+            ])->assertSessionHasNoErrors()->assertSessionHas('supplier_sync_warning');
+        $this->assertNotNull($fulfillment->fresh()->manual_takeover_at);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(0, ProductStockItem::count());
+    }
+
     public function test_api_replay_and_lost_queue_recovery_preserve_an_unknown_supplier_purchase(): void
     {
         [$product, $supplier, $sku, $cart] = $this->fixture(provider: 'warzone', local: 1, quantity: 2);
@@ -1641,6 +1693,122 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame('duplicate_account', $second->fresh()->last_error);
         $this->assertNull($second->fresh()->sync_expires_at);
         Http::assertSentCount(4);
+    }
+
+    public function test_owner_takeover_notifies_buyer_once_and_leaves_delivery_pending(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture();
+        $cart->customer->update(['locale' => 'ms']);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $service = app(\App\Services\Suppliers\SupplierManualTakeover::class);
+
+        $service->takeOver($fulfillment->id, $owner);
+        $service->takeOver($fulfillment->id, $owner);
+
+        $this->assertNotNull($fulfillment->fresh()->manual_takeover_at);
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(0, $fulfillment->manualHandoffs()->count());
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $effect = \App\Models\TelegramOutboundEffect::where('effect_type', \App\Enums\TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
+        $this->assertStringContainsString($order->invoice_number, $effect->outcome_metadata['message']);
+        $this->assertStringContainsString('Penghantaran belum selesai', $effect->outcome_metadata['message']);
+        $this->assertStringContainsString('https://t.me/Alhie02', $effect->outcome_metadata['message']);
+
+        config()->set('services.telegram.token', 'test-token');
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 12345]]));
+        $notice = app(\App\Services\Suppliers\SupplierManualTakeoverNotice::class);
+        $notice->deliver($effect);
+        $notice->deliver($effect->fresh());
+        Http::assertSentCount(1);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        try {
+            app(SupplierFulfillmentService::class)->provideManualCredentials($fulfillment->id, ['manual-account@example.test|manual-secret']);
+            $this->fail('Takeover must block a stale credential delivery.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        }
+        $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()])
+            ->post(route('admin.suppliers.resolve-invoice', $fulfillment), [
+                'action' => 'handed_off', 'purchase_id' => 0, 'confirmed' => 1,
+            ])->assertSessionHasNoErrors();
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+    }
+
+    #[DataProvider('takeoverLanguages')]
+    public function test_takeover_notifies_in_buyer_language(string $locale, string $expected): void
+    {
+        [, , , $cart] = $this->fixture();
+        $cart->customer->update(['locale' => $locale]);
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(\App\Services\Suppliers\SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
+        $effect = \App\Models\TelegramOutboundEffect::where('effect_type', \App\Enums\TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
+
+        $this->assertStringContainsString($expected, $effect->outcome_metadata['message']);
+        $this->assertStringContainsString($order->invoice_number, $effect->outcome_metadata['message']);
+        $this->assertStringContainsString('https://t.me/Alhie02', $effect->outcome_metadata['message']);
+    }
+
+    public static function takeoverLanguages(): array
+    {
+        return [
+            'Indonesian' => ['id', 'Pengiriman belum selesai'],
+            'English' => ['en', 'Delivery has not yet been completed'],
+            'Malay' => ['ms', 'Penghantaran belum selesai'],
+        ];
+    }
+
+    public function test_ambiguous_takeover_notice_is_never_blindly_resent(): void
+    {
+        [, , , $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        app(\App\Services\Suppliers\SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
+        $effect = \App\Models\TelegramOutboundEffect::where('effect_type', \App\Enums\TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
+        config()->set('services.telegram.token', 'test-token');
+        Http::fake(fn () => throw new ConnectionException('response lost'));
+        $notice = app(\App\Services\Suppliers\SupplierManualTakeoverNotice::class);
+        $notice->deliver($effect);
+        $notice->deliver($effect->fresh());
+        $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
+        $this->assertSame(1, $effect->fresh()->attempts);
+        $actor = User::factory()->create(['role' => UserRole::Owner]);
+        $resend = app(TelegramOutboundEffectService::class)->resend($effect->fresh(), $actor);
+        Http::swap(new Factory);
+        Http::preventStrayRequests();
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 12346]]));
+        $notice->deliver($resend);
+        $this->assertSame(TelegramOutboundEffectState::Sent, $resend->fresh()->state);
+        Http::assertSent(fn ($request) => str_contains($request->body(), $order->invoice_number)
+            && str_contains($request->body(), 'Alhie02'));
+    }
+
+    public function test_takeover_refuses_a_live_supplier_lease(): void
+    {
+        [, $supplier, $sku, $cart] = $this->fixture();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
+        SupplierPurchase::create([
+            'supplier_fulfillment_id' => $fulfillment->id, 'supplier_id' => $supplier->id,
+            'supplier_catalog_item_id' => $sku->id, 'reference' => (string) Str::uuid(),
+            'quantity' => 1, 'expected_cost_micros' => 1000000, 'exchange_rate_idr' => 1000,
+            'state' => 'sending', 'claim_token' => (string) Str::uuid(), 'lease_expires_at' => now()->addMinute(),
+        ]);
+        try {
+            app(\App\Services\Suppliers\SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
+            $this->fail('A live purchase must block takeover.');
+        } catch (InvalidOrderTransition) {
+            $this->assertNull($fulfillment->fresh()->manual_takeover_at);
+            $this->assertSame(0, \App\Models\TelegramOutboundEffect::where('effect_type', \App\Enums\TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->count());
+        }
     }
 
     protected function fixture(int $local = 0, int $quantity = 1, string $provider = 'prodseller'): array

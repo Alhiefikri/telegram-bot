@@ -11,6 +11,7 @@ use App\Models\Product;
 use App\Models\SupplierFulfillment;
 use App\Services\PaymentReceiptReport;
 use App\Support\DogfoodTiming;
+use Illuminate\Database\Eloquent\Collection;
 
 class TelegramAdminPaidOrderNotifier
 {
@@ -49,16 +50,18 @@ class TelegramAdminPaidOrderNotifier
         }
 
         $claimed = $order->fresh(['customer', 'orderItems', 'payments']) ?? $order;
+        $fulfillments = SupplierFulfillment::query()->with(['currentPurchase', 'purchases.supplier', 'manualHandoffs'])
+            ->where('order_id', $claimed->getKey())->orderBy('id')->get();
 
         return DogfoodTiming::time('dogfood.telegram.checkout_step', [
             'step' => 'admin_paid_order_notification',
             'payment_mode' => $this->paymentMode($claimed),
             'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
             'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed, $reviewNotice, $outcome)), $this->dashboardReplyMarkup($claimed)));
+        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed, $reviewNotice, $outcome, $fulfillments)), $this->dashboardReplyMarkup($claimed, $fulfillments)));
     }
 
-    private function paidMessage(Order $order, bool $reviewNotice, ?array $outcome): string
+    private function paidMessage(Order $order, bool $reviewNotice, ?array $outcome, Collection $fulfillments): string
     {
         $payment = $this->relevantPayment($order);
         if ($outcome === null && $reviewNotice && app(AdminPaidOrderOutcome::class)->applies($order)) {
@@ -74,7 +77,8 @@ class TelegramAdminPaidOrderNotifier
             'Pembeli: '.$this->buyerLabel($order),
             'Sumber: '.$this->sourceLabel($order),
             'Status pembayaran: '.($order->api_order_claim_id !== null ? $order->payment_status->value : 'Paid'),
-            ...($outcome['lines'] ?? $this->fulfillmentStatusLines($order)),
+            ...($outcome['lines'] ?? $this->fulfillmentStatusLines($order, $fulfillments)),
+            ...$this->supplierOrderLines($fulfillments),
             ...($order->api_order_claim_id !== null || $reviewNotice ? [
                 'Status order: '.$order->order_status->value,
                 'Review operator: '.(ManualFulfillmentReview::query()->where('order_id', $order->id)->open()->exists() ? 'diperlukan; buka dashboard' : 'tidak ada review terbuka'),
@@ -97,13 +101,8 @@ class TelegramAdminPaidOrderNotifier
     }
 
     /** @return list<string> */
-    private function fulfillmentStatusLines(Order $order): array
+    private function fulfillmentStatusLines(Order $order, Collection $fulfillments): array
     {
-        $fulfillments = SupplierFulfillment::query()
-            ->with(['currentPurchase', 'purchases.supplier', 'manualHandoffs'])
-            ->where('order_id', $order->getKey())
-            ->orderBy('id')
-            ->get();
         if ($fulfillments->isEmpty()) {
             if ($order->api_order_claim_id !== null) {
                 return ['Pengiriman pelanggan: '.(app(SalesProofEligibility::class)->rejectionReason($order) === null
@@ -145,6 +144,29 @@ class TelegramAdminPaidOrderNotifier
             'Pengiriman pelanggan: '.implode('; ', array_slice($delivery, 0, 3)),
             'Supplier: '.($purchases === [] ? 'belum ada pembelian' : implode('; ', array_slice($purchases, 0, 3))),
         ];
+    }
+
+    /** @return list<string> */
+    private function supplierOrderLines(Collection $fulfillments): array
+    {
+        $lines = [];
+        foreach ($fulfillments as $fulfillment) {
+            foreach ($fulfillment->purchases as $purchase) {
+                if (blank($purchase->supplier_order_id) && $purchase->dispatched_at === null) {
+                    continue;
+                }
+                $details = [];
+                if (filled($purchase->supplier_order_id)) {
+                    $details[] = 'kode order: '.$purchase->supplier_order_id;
+                }
+                if ($purchase->dispatched_at !== null) {
+                    $details[] = 'dikirim ke supplier: '.$this->timeLabel($purchase->dispatched_at);
+                }
+                $lines[] = 'Supplier '.$purchase->supplier->name.': '.implode(' · ', $details);
+            }
+        }
+
+        return $lines;
     }
 
     private function purchaseLabel(string $state): string
@@ -313,13 +335,32 @@ class TelegramAdminPaidOrderNotifier
         return $date->copy()->timezone((string) config('app.timezone'))->format('d M Y, H:i');
     }
 
-    private function dashboardReplyMarkup(Order $order): array
+    private function dashboardReplyMarkup(Order $order, Collection $fulfillments): array
     {
-        return [
-            'inline_keyboard' => [[
-                ['text' => 'Buka Dashboard', 'url' => route('admin.orders.show', $order)],
-            ]],
-        ];
+        $rows = [];
+        if ($order->payment_status === PaymentStatus::Paid) {
+            foreach ($fulfillments->where('state', 'review') as $fulfillment) {
+                if ($fulfillment->manual_takeover_at !== null || $fulfillment->manualHandoffs->isNotEmpty()
+                    || ($fulfillment->purchases->isEmpty() && ($fulfillment->current_purchase_id !== null || $fulfillment->reserved_catalog_item_id === null))
+                    || ! $fulfillment->purchases->every(fn ($purchase) => $purchase->state === 'rejected'
+                        && $purchase->committed_at === null && $purchase->supplier_order_id === null
+                        && $purchase->actual_cost_micros === null && $purchase->claim_token === null
+                        && ! $purchase->lease_expires_at?->isFuture())) {
+                    continue;
+                }
+                $rows[] = [[
+                    'text' => 'Cek, beli & kirim · '.mb_strimwidth((string) ($order->orderItems->firstWhere('id', $fulfillment->order_item_id)?->product_name ?: 'Produk'), 0, 35, '…'),
+                    'callback_data' => 'admin:supplier-retry:'.$fulfillment->getKey(),
+                    'style' => 'primary',
+                ]];
+            }
+        }
+        if ($fulfillments->isNotEmpty()) {
+            $rows[] = [['text' => 'Tangani invoice', 'url' => route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]), 'style' => 'primary']];
+        }
+        $rows[] = [['text' => 'Buka Dashboard', 'url' => route('admin.orders.show', $order)]];
+
+        return ['inline_keyboard' => $rows];
     }
 
     private function truncateMessage(string $message): string

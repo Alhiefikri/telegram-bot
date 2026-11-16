@@ -33,6 +33,7 @@ enum TelegramOutboundEffectType: string
     case ReceiptOrderActions = 'receipt.order_actions';
     case BalanceAdjustmentNotice = 'balance.adjustment_notice';
     case SupplierHealth = 'admin.supplier_health';
+    case SupplierManualTakeoverNotice = 'supplier.manual_takeover_notice';
     case UsdtTopUpReceipt = 'usdt.top_up_receipt';
     case BalanceOperationsAlert = 'admin.balance_operations_alert';
     case UsdtRefundReceipt = 'usdt.refund_receipt';

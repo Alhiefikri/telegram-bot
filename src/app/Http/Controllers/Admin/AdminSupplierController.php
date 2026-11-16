@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\TelegramOutboundEffectType;
 use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
@@ -262,9 +263,9 @@ final class AdminSupplierController extends Controller
         $fulfillments = SupplierFulfillment::query()->with([
             'currentPurchase.supplier', 'currentPurchase.latestHistoryReconciliation',
             'reservedSupplier', 'manualHandoffs:id,supplier_fulfillment_id,quantity',
-            'order:id,customer_id,invoice_number,order_status,payment_status,telegram_receipt_sent_at,expires_at,created_at',
+            'order:id,customer_id,invoice_number,order_status,payment_status,currency,telegram_receipt_sent_at,expires_at,created_at',
             'order.customer:id,telegram_id',
-            'orderItem:id,product_name',
+            'orderItem:id,product_name,unit_price',
         ])
             ->select(['supplier_fulfillments.*'])
             ->when($invoice !== '',
@@ -282,6 +283,12 @@ final class AdminSupplierController extends Controller
                 - (int) $fulfillment->manualHandoffs->sum('quantity') - (int) ($allocated[$fulfillment->order_item_id] ?? 0));
             $fulfillment->unpaid_reservation = $fulfillment->isUnpaidReservation();
         }
+        $takeoverIds = $fulfillments->filter(fn ($fulfillment) => $fulfillment->manual_takeover_at !== null)->pluck('id');
+        $takeoverEffects = $takeoverIds->isEmpty() ? collect() : TelegramOutboundEffect::query()
+            ->where('effect_type', TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)
+            ->where('source_type', SupplierFulfillment::class)
+            ->whereIn('source_id', $takeoverIds->map(fn ($id) => (string) $id))
+            ->orderByDesc('sequence')->get()->unique('source_id')->keyBy('source_id');
         $manualReviews = ManualFulfillmentReview::query()
             ->whereHas('order.orderItems', fn ($items) => $items->where('manual_unlimited', true))
             ->whereHas('payment', fn ($payment) => $payment->where('status', 'paid'))
@@ -299,7 +306,7 @@ final class AdminSupplierController extends Controller
             ->orderByDesc('sequence')->orderByDesc('created_at')->groupLimit(1, 'source_id')->get()->keyBy('source_id');
 
 
-        return view('admin.suppliers.purchases', compact('purchases', 'fulfillments', 'invoice', 'manualReviews', 'manualReceiptEffects'));
+        return view('admin.suppliers.purchases', compact('purchases', 'fulfillments', 'invoice', 'manualReviews', 'manualReceiptEffects', 'takeoverEffects'));
     }
 
     public function operate(SupplierAdminRequest $request, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service, SupplierOrderHistoryReconciliationService $history)

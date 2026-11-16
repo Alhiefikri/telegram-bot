@@ -37,6 +37,11 @@ use App\Services\Suppliers\SupplierClient;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
 use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
+use App\Services\Telegram\Callbacks\TelegramSupplierRetryCallbackHandler;
+use App\Services\Telegram\FakeTelegramBotClient;
+use App\Services\Telegram\TelegramAdminPaidOrderNotifier;
+use App\Services\Telegram\TelegramBotClient;
+use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundEffectService;
@@ -1135,6 +1140,82 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
             $fulfillment->id, $owner, '', 'Minute precision is not exact coverage.',
             evidenceSource: 'provider_history', historyReconciliationId: $inconclusive->id,
         );
+    }
+
+    public function test_paid_admin_notice_allows_retry_before_any_supplier_dispatch(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        $fulfillment->update(['state' => 'review']);
+        config()->set('services.telegram.token', 'test-token');
+        $this->app->instance(TelegramBotClient::class, new FakeTelegramBotClient);
+
+        $message = app(TelegramAdminPaidOrderNotifier::class)->sendEffect($order, '123456')['result'];
+        $this->assertSame('admin:supplier-retry:'.$fulfillment->id, $message['reply_markup']['inline_keyboard'][0][0]['callback_data']);
+    }
+
+    public function test_paid_admin_notice_shows_supplier_order_and_safe_retry_only(): void
+    {
+        [$order, $fulfillment] = $this->paidSupplierOrder();
+        $purchase = SupplierPurchase::create([
+            'supplier_fulfillment_id' => $fulfillment->id, 'supplier_id' => Supplier::sole()->id,
+            'supplier_catalog_item_id' => SupplierCatalogItem::sole()->id, 'reference' => (string) Str::uuid(),
+            'supplier_order_id' => 'supplier-order-42', 'quantity' => 1, 'expected_cost_micros' => 1_000_000,
+            'exchange_rate_idr' => 1000, 'state' => 'rejected', 'dispatched_at' => CarbonImmutable::parse('2026-10-18 10:23:00', config('app.timezone')),
+        ]);
+        $fulfillment->update(['state' => 'review', 'current_purchase_id' => $purchase->id]);
+        config()->set('services.telegram.token', 'test-token');
+        $this->app->instance(TelegramBotClient::class, new FakeTelegramBotClient);
+        $notifier = app(TelegramAdminPaidOrderNotifier::class);
+
+        $message = $notifier->sendEffect($order, '123456')['result'];
+        $this->assertStringContainsString('kode order: supplier-order-42', $message['text']);
+        $this->assertStringContainsString('dikirim ke supplier: 18 Oct 2026, 10:23', $message['text']);
+        $this->assertSame('Tangani invoice', $message['reply_markup']['inline_keyboard'][0][0]['text']);
+        $purchase->update(['supplier_order_id' => null]);
+        $message = $notifier->sendEffect($order, '123456')['result'];
+        $this->assertSame('admin:supplier-retry:'.$fulfillment->id, $message['reply_markup']['inline_keyboard'][0][0]['callback_data']);
+        $this->assertSame('primary', $message['reply_markup']['inline_keyboard'][0][0]['style']);
+
+        $purchase->update(['state' => 'ambiguous']);
+        $message = $notifier->sendEffect($order, '123456')['result'];
+        $this->assertSame('Tangani invoice', $message['reply_markup']['inline_keyboard'][0][0]['text']);
+
+        $purchase->update(['state' => 'rejected']);
+        $fulfillment->forceFill(['manual_takeover_at' => now()])->save();
+        $message = $notifier->sendEffect($order, '123456')['result'];
+        $this->assertSame('Tangani invoice', $message['reply_markup']['inline_keyboard'][0][0]['text']);
+    }
+
+    public function test_supplier_retry_callback_denies_non_owner_and_non_private_chat(): void
+    {
+        [, $fulfillment] = $this->paidSupplierOrder();
+        config()->set('services.telegram.admin_user_id', '123456');
+        $bot = new FakeTelegramBotClient;
+        $this->app->instance(TelegramBotClient::class, $bot);
+        $handler = app(TelegramSupplierRetryCallbackHandler::class);
+        $other = Customer::factory()->create(['telegram_id' => 654321]);
+        $owner = Customer::factory()->create(['telegram_id' => 123456]);
+        $data = 'admin:supplier-retry:'.$fulfillment->id;
+
+        $this->assertTrue($handler->handle(new TelegramCallbackContext($other, '654321', 'other', $data)));
+        $this->assertTrue($handler->handle(new TelegramCallbackContext($owner, '-100', 'group', $data, 'group')));
+        $this->assertSame(['answerCallbackQuery', 'answerCallbackQuery'], array_column($bot->calls, 'method'));
+        $this->assertSame('pending', $fulfillment->fresh()->state);
+        $this->assertSame(0, SupplierPurchase::count());
+    }
+
+    public function test_owner_retry_acknowledges_even_when_fulfillment_no_longer_exists(): void
+    {
+        config()->set('services.telegram.admin_user_id', '123456');
+        $bot = new FakeTelegramBotClient;
+        $this->app->instance(TelegramBotClient::class, $bot);
+        $owner = Customer::factory()->create(['telegram_id' => 123456]);
+        $handler = app(TelegramSupplierRetryCallbackHandler::class);
+        $context = new TelegramCallbackContext($owner, '123456', 'owner', 'admin:supplier-retry:999999999');
+
+        $this->assertTrue($handler->supports($context));
+        $this->assertTrue($handler->handle($context));
+        $this->assertSame(['answerCallbackQuery', 'sendMessage'], array_column($bot->calls, 'method'));
     }
 
     private function paidSupplierOrder(int $quantity = 1, string $provider = 'warzone', bool $includeLocal = false): array

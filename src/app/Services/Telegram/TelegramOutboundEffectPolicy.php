@@ -102,6 +102,7 @@ final class TelegramOutboundEffectPolicy
         TelegramOutboundEffectType::ManualPaymentProof->value => self::MANUAL_PAYMENT_PROOF_MAX_ATTEMPTS,
         TelegramOutboundEffectType::BalanceAdjustmentNotice->value => 3,
         TelegramOutboundEffectType::SupplierHealth->value => 3,
+        TelegramOutboundEffectType::SupplierManualTakeoverNotice->value => 3,
         TelegramOutboundEffectType::UsdtTopUpReceipt->value => 3,
         TelegramOutboundEffectType::UsdtRefundReceipt->value => 3,
         TelegramOutboundEffectType::BalanceOperationsAlert->value => 3,

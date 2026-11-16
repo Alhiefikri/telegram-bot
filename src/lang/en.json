@@ -1213,5 +1213,7 @@
   "balance.usdt.status.hash_howto": "🧾 Then paste the TXID or BscScan link in this chat.\nFind it: BscScan → incoming transfer → copy the TXID.\nIf the input session expires, reopen this top-up and tap Send TXID / BscScan link.",
   "balance.usdt.status.wait_hint": "🌐 After pasting, wait 5–10 seconds. Tap Check status if needed.",
   "balance.usdt.rail_label.binance": "Binance Pay",
-  "balance.usdt.rail_label.bep20": "USDT BEP20"
+  "balance.usdt.rail_label.bep20": "USDT BEP20",
+  "supplier.manual_takeover.notice": "Update on invoice :invoice\n\nYour payment has been received. Your order needs personal assistance, and our team is now handling it manually. Delivery has not yet been completed.\n\nPlease contact us at https://t.me/Alhie02 and provide your invoice number. Thank you for your patience.",
+  "supplier.manual_takeover.contact": "💬 Contact Admin"
 }

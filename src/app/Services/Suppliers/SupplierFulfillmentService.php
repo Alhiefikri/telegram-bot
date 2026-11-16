@@ -193,6 +193,7 @@ final class SupplierFulfillmentService
     {
         $due = SupplierFulfillment::query()
             ->select('supplier_fulfillments.id')
+            ->whereNull('manual_takeover_at')
             ->where(fn ($query) => $query->whereIn('state', ['pending', 'purchasing', 'awaiting_delivery'])
                 ->orWhere(fn ($review) => $review->where('state', 'review')->whereHas('currentPurchase', fn ($purchase) => $purchase
                     ->whereIn('state', ['ambiguous', 'review'])->whereNull('supplier_order_id')->whereNull('committed_at')->whereNotNull('dispatched_at')
@@ -219,8 +220,23 @@ final class SupplierFulfillmentService
     private function startDispatch(SupplierPurchase $purchase, string $token): bool
     {
         return DB::transaction(function () use ($purchase, $token): bool {
+            $initial = SupplierFulfillment::findOrFail($purchase->supplier_fulfillment_id);
+            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            $payments = Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
+            $f = $fulfillments->get($initial->id);
             $locked = SupplierPurchase::query()->lockForUpdate()->findOrFail($purchase->id);
-            if ($locked->claim_token !== $token || ! $locked->lease_expires_at?->isFuture()) {
+            if ($f->manual_takeover_at !== null || $f->current_purchase_id !== $locked->id
+                || $order->payment_status !== PaymentStatus::Paid
+                || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)
+                || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)
+                || $locked->claim_token !== $token || ! $locked->lease_expires_at?->isFuture()) {
+                return false;
+            }
+            if ($locked->dispatched_at === null && ! $this->dispatchQuoteValid($f, $locked, $suppliers, $catalog)) {
+                $locked->update(['state' => 'rejected', 'claim_token' => null, 'lease_expires_at' => null, 'last_error' => 'cost_changed']);
+                $this->review($f, $order, 'cost_changed');
+
                 return false;
             }
             DB::table('supplier_purchase_dispatches')->insert([
@@ -245,7 +261,7 @@ final class SupplierFulfillmentService
         [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
         $f = $fulfillments->get($id);
         if ($order->payment_status !== PaymentStatus::Paid || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)
-            || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true) || $f === null || ! in_array($f->state, ['pending', 'purchasing', 'awaiting_delivery'], true)) {
+            || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true) || $f === null || $f->manual_takeover_at !== null || ! in_array($f->state, ['pending', 'purchasing', 'awaiting_delivery'], true)) {
             return null;
         }
         $purchase = $f->current_purchase_id ? SupplierPurchase::query()->lockForUpdate()->findOrFail($f->current_purchase_id) : null;
@@ -295,12 +311,54 @@ final class SupplierFulfillmentService
         if (! $read && ! in_array($purchase->state, ['reserved'], true)) {
             return null;
         }
+        if (! $read && $purchase->dispatched_at === null && ! $this->dispatchQuoteValid($f, $purchase, $suppliers, $catalog)) {
+            $purchase->update(['state' => 'rejected', 'claim_token' => null, 'lease_expires_at' => null, 'last_error' => 'cost_changed']);
+            $this->review($f, $order, 'cost_changed');
+
+            return null;
+        }
         $token = (string) Str::uuid();
         $lease = now()->addMinutes(2);
         $purchase->update(['state' => $read ? 'awaiting_delivery' : 'sending', 'claim_token' => $token, 'lease_expires_at' => $lease]);
         $f->update(['state' => $read ? 'awaiting_delivery' : 'purchasing', 'next_attempt_at' => $lease]);
 
         return [$purchase, $suppliers->get($purchase->supplier_id), $catalog->get($purchase->supplier_catalog_item_id), $token, $read];
+    }
+
+    /** Validate the exact financial intent again before committing a POST. */
+    private function dispatchQuoteValid(SupplierFulfillment $f, SupplierPurchase $purchase, Collection $suppliers, Collection $catalog): bool
+    {
+        $supplier = $suppliers->get($purchase->supplier_id);
+        $sku = $catalog->get($purchase->supplier_catalog_item_id);
+        $candidate = collect($f->sources_snapshot)->first(fn ($c) => $c['supplier_id'] === $purchase->supplier_id
+            && $c['catalog_item_id'] === $purchase->supplier_catalog_item_id);
+        $source = $candidate ? ProductSupplierSource::query()->whereKey($candidate['source_id'])->lockForUpdate()->first() : null;
+        if ($candidate === null || ! $source?->is_active || $source->supplier_catalog_item_id !== $sku?->id
+            || $source->product_id !== (int) OrderItem::query()->whereKey($f->order_item_id)->value('product_id')
+            || ! $supplier?->is_active || ! $supplier->currency_confirmed || ! $sku?->orderable || $sku->requires_input
+            || $supplier->currency !== $candidate['currency'] || $sku->external_id !== $candidate['external_id']
+            || $f->reserved_supplier_id !== $supplier->id || $f->reserved_catalog_item_id !== $sku->id
+            || $f->reserved_quantity !== $purchase->quantity || $this->outstandingQuantity($f) !== $purchase->quantity) {
+            return false;
+        }
+        $cost = $this->pricing->costMicros($sku, $purchase->quantity);
+        if ($cost === null || $cost > $f->reserved_cost_micros || $cost > $purchase->expected_cost_micros) {
+            return false;
+        }
+        $approval = DB::table('supplier_retry_approvals')->where('approved_purchase_id', $purchase->id)->whereNotNull('used_at')->first();
+        if ($approval === null) {
+            return SupplierMoney::costIdr($cost, $purchase->exchange_rate_idr) <= $this->remainingCostLimit($f);
+        }
+
+        return (int) $approval->supplier_fulfillment_id === $f->id
+            && (int) $approval->source_id === $source->id && (int) $approval->source_version === $source->version
+            && (int) $approval->supplier_id === $supplier->id
+            && (int) $approval->supplier_catalog_item_id === $sku->id && (int) $approval->quantity === $purchase->quantity
+            && $approval->currency === $supplier->currency && (int) $approval->cost_micros === $cost
+            && SupplierMoney::micros((string) $approval->exchange_rate_idr) === SupplierMoney::micros((string) $purchase->exchange_rate_idr)
+            && SupplierMoney::micros((string) $approval->exchange_rate_idr) === SupplierMoney::micros((string) $supplier->exchange_rate_idr)
+            && (int) $approval->cost_idr === SupplierMoney::costIdr($cost, $purchase->exchange_rate_idr)
+            && $supplier->sync_expires_at?->isFuture() && $sku->synced_at?->gte(now()->subMinutes(5));
     }
 
     private function finalize(int $id, int $purchaseId, string $token, SupplierOrderResult $result, bool $read, ?array $debitEvidence = null): void
@@ -429,17 +487,16 @@ final class SupplierFulfillmentService
             $this->commitDebit($f, $purchase, $suppliers, $catalog);
         }
         $hasExternalHandoff = SupplierManualHandoff::query()->where('supplier_fulfillment_id', $f->id)->exists();
-        if (($f->state === 'delivered' || $hasExternalHandoff) && $economicProof && $purchase->committed_at !== null && $purchase->actual_cost_micros !== null) {
-            // Manual replacement already satisfied customer delivery. Recover
-            // only the original acquisition's economics, never reopen delivery
-            // or allocate a second set of credentials.
+        if (($f->state === 'delivered' || $hasExternalHandoff || $f->manual_takeover_at !== null)
+            && $economicProof && $purchase->committed_at !== null && $purchase->actual_cost_micros !== null) {
+            // Reconcile economics without sending a second delivery after takeover.
             $purchase->forceFill([
                 'state' => count($deliveries) === $purchase->quantity ? 'delivered' : 'settled',
                 'next_attempt_at' => null,
                 'last_error' => SupplierMoney::costIdr($purchase->actual_cost_micros, $purchase->exchange_rate_idr) > $f->maximum_cost_idr ? 'cost_mismatch' : null,
             ])->save();
             if ($f->state !== 'delivered') {
-                $this->review($f, $order, 'external_handoff_remaining');
+                $this->review($f, $order, $f->manual_takeover_at !== null ? 'manual_takeover_pending' : 'external_handoff_remaining');
             }
             $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
 
@@ -452,7 +509,7 @@ final class SupplierFulfillmentService
             $purchase->state = 'rejected';
             $purchase->save();
             $this->unhold($f, $suppliers, $catalog);
-            if ($this->fallback($f, $suppliers, $catalog)) {
+            if ($f->manual_takeover_at === null && $this->fallback($f, $suppliers, $catalog)) {
                 $f->update(['state' => 'pending', 'current_purchase_id' => null, 'next_attempt_at' => now()->addSeconds(10)]);
             } else {
                 $this->review($f, $order, $result->errorCode ?? 'purchase_rejected');
@@ -462,7 +519,10 @@ final class SupplierFulfillmentService
             $this->review($f, $order, $result->errorCode);
         } elseif ($result->identityTrusted && $result->deliveryTrusted && ! $conflictingDelivery && $quantityMatches && count($deliveries) === $purchase->quantity && $purchase->committed_at !== null && $order->payment_status === PaymentStatus::Paid && in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
             $cost = $purchase->actual_cost_micros;
-            if ($cost < 0 || SupplierMoney::costIdr($cost, $purchase->exchange_rate_idr) > $f->maximum_cost_idr) {
+            $approval = DB::table('supplier_retry_approvals')->where('approved_purchase_id', $purchase->id)->whereNotNull('used_at')->first();
+            $allowedCost = $approval === null ? $f->maximum_cost_idr : (int) $approval->cost_idr;
+            if ($cost < 0 || ($approval !== null && $cost > (int) $approval->cost_micros)
+                || SupplierMoney::costIdr($cost, $purchase->exchange_rate_idr) > $allowedCost) {
                 $purchase->state = 'review';
                 $purchase->save();
                 $this->review($f, $order, 'cost_mismatch');
@@ -673,6 +733,16 @@ final class SupplierFulfillmentService
         return max(0, $f->quantity - $acquired - (int) $f->refunded_quantity - $handedOff);
     }
 
+    private function rejectedPurchaseIsSafe(SupplierPurchase $purchase): bool
+    {
+        return $purchase->state === 'rejected'
+            && $purchase->committed_at === null
+            && $purchase->supplier_order_id === null
+            && $purchase->actual_cost_micros === null
+            && $purchase->claim_token === null
+            && ! $purchase->lease_expires_at?->isFuture();
+    }
+
     public function completeMissingRefund(SupplierFulfillment $initial, OrderRefund $refund): void
     {
         if (DB::transactionLevel() === 0 || $refund->state !== 'confirmed' || (int) $refund->supplier_fulfillment_id !== (int) $initial->id) {
@@ -748,6 +818,236 @@ final class SupplierFulfillmentService
         });
     }
 
+    /**
+     * An owner retry may reuse a rejected source, but never an uncertain dispatch.
+     * No provider transport is performed while the order resources are locked.
+     */
+    public function retryInvoice(int $id, bool $forceSync = false): array
+    {
+        if (DB::transactionLevel() !== 0) {
+            throw new InvalidOrderTransition('Supplier retry cannot run inside a transaction.');
+        }
+        $prepared = $this->invoiceRetryTransaction($id, 'prepare');
+        if ($prepared['status'] !== 'ready') {
+            return $prepared;
+        }
+        $supplier = Supplier::find($prepared['supplier_id']);
+        if ($supplier === null || ! app(SupplierCatalogSync::class)->sync($supplier, $forceSync, $supplier->version)) {
+            return ['status' => 'sync_failed'];
+        }
+
+        return $this->invoiceRetryTransaction($id, 'attempt');
+    }
+
+    /** Retire only capacity whose purchase is known not to have debited the supplier. */
+    public function releaseProvenRejectedHold(int $id): array
+    {
+        return DB::transaction(function () use ($id): array {
+            $initial = SupplierFulfillment::find($id);
+            if ($initial === null) {
+                return ['status' => 'invalid_order'];
+            }
+            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            $payments = Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
+            $f = $fulfillments->get($id);
+            if ($order->payment_status !== PaymentStatus::Paid
+                || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)) {
+                return ['status' => 'invalid_order'];
+            }
+            if ($f->reserved_quantity === 0) {
+                return ['status' => 'no_hold'];
+            }
+            $purchases = SupplierPurchase::query()->where('supplier_fulfillment_id', $id)->whereNull('warranty_claim_id')->get();
+            $current = $f->current_purchase_id === null ? null : $purchases->firstWhere('id', $f->current_purchase_id);
+            if ($f->current_purchase_id !== null && $current === null) {
+                return ['status' => 'unsafe'];
+            }
+            foreach ($purchases as $purchase) {
+                $unpostedTakeoverIntent = $f->manual_takeover_at !== null && $purchase->id === $f->current_purchase_id
+                    && $purchase->state === 'reserved' && $purchase->dispatched_at === null;
+                if (! $this->rejectedPurchaseIsSafe($purchase)
+                    && (! $unpostedTakeoverIntent || $purchase->committed_at !== null
+                        || $purchase->supplier_order_id !== null || $purchase->actual_cost_micros !== null
+                        || $purchase->claim_token !== null || $purchase->lease_expires_at?->isFuture())) {
+                    return ['status' => 'unsafe'];
+                }
+            }
+            if ($current !== null && $current->state === 'reserved') {
+                $current->update(['state' => 'rejected', 'last_error' => 'manual_takeover_before_dispatch']);
+            }
+            $this->unhold($f, $suppliers, $catalog);
+            $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
+
+            return ['status' => 'released'];
+        }, 5);
+    }
+
+    public function previewInvoiceRetry(int $id, User $owner): array
+    {
+        if (User::query()->whereKey($owner->id)->where('role', UserRole::Owner->value)->doesntExist()) {
+            throw new InvalidOrderTransition('Owner access required.');
+        }
+
+        return $this->invoiceRetryTransaction($id, 'preview', $owner);
+    }
+
+    public function confirmInvoiceRetry(int $id, User $owner, string $token): array
+    {
+        if (User::query()->whereKey($owner->id)->where('role', UserRole::Owner->value)->doesntExist()) {
+            throw new InvalidOrderTransition('Owner access required.');
+        }
+
+        return $this->invoiceRetryTransaction($id, 'confirm', $owner, $token);
+    }
+
+    private function invoiceRetryTransaction(int $id, string $mode, ?User $owner = null, ?string $token = null): array
+    {
+        return DB::transaction(function () use ($id, $mode, $owner, $token): array {
+            $initial = SupplierFulfillment::find($id);
+            if ($initial === null) {
+                return ['status' => 'invalid_order'];
+            }
+            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
+            $payments = Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
+            if ($owner !== null && User::query()->whereKey($owner->id)->where('role', UserRole::Owner->value)->lockForUpdate()->first() === null) {
+                throw new InvalidOrderTransition('Owner access required.');
+            }
+            $f = $fulfillments->get($id);
+            if ($f->manual_takeover_at !== null || SupplierManualHandoff::query()->where('supplier_fulfillment_id', $id)->exists()) {
+                return ['status' => 'manual_takeover'];
+            }
+            if ($order->payment_status !== PaymentStatus::Paid
+                || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)
+                || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
+                return ['status' => 'invalid_order'];
+            }
+            if (in_array($f->state, ['pending', 'purchasing', 'awaiting_delivery'], true)) {
+                return ['status' => 'already_processing'];
+            }
+            if ($f->state !== 'review') {
+                return ['status' => 'unsafe'];
+            }
+            $purchase = $f->current_purchase_id === null ? null : SupplierPurchase::find($f->current_purchase_id);
+            if (($f->current_purchase_id !== null && ($purchase === null || $purchase->supplier_fulfillment_id !== $id))
+                || ($purchase !== null && ! $this->rejectedPurchaseIsSafe($purchase))
+                || SupplierPurchase::query()->where('supplier_fulfillment_id', $id)->whereNull('warranty_claim_id')
+                    ->where(fn ($q) => $q->where('state', '!=', 'rejected')->orWhereNotNull('committed_at')
+                        ->orWhereNotNull('supplier_order_id')->orWhereNotNull('actual_cost_micros')
+                        ->orWhereNotNull('claim_token')->orWhere('lease_expires_at', '>', now()))->exists()) {
+                return ['status' => 'unsafe'];
+            }
+            $candidate = collect($f->sources_snapshot)->first(fn ($c) => $c['catalog_item_id'] === $f->reserved_catalog_item_id);
+            if ($candidate === null) {
+                return ['status' => 'unavailable'];
+            }
+            // With no current purchase the hold was never dispatched; otherwise
+            // only a recorded rejection permits retiring it.
+            if ($f->reserved_quantity > 0) {
+                $this->unhold($f, $suppliers, $catalog);
+                $this->availability->refreshProducts($order->orderItems()->pluck('product_id')->all());
+            }
+            if ($mode === 'prepare') {
+                return ['status' => 'ready', 'supplier_id' => $candidate['supplier_id']];
+            }
+            $sku = $catalog->get($candidate['catalog_item_id']);
+            $supplier = $suppliers->get($candidate['supplier_id']);
+            $source = ProductSupplierSource::query()->whereKey($candidate['source_id'])->lockForUpdate()->first();
+            $quantity = $this->outstandingQuantity($f);
+            $cost = $sku && $quantity > 0 ? $this->pricing->costMicros($sku, $quantity) : null;
+            $provider = $supplier ? SupplierProvider::tryFrom($supplier->provider) : null;
+            if ($provider === null || $quantity < 1 || $quantity > $provider->maxOrderQuantity()
+                || ! $source?->is_active || $source->supplier_catalog_item_id !== $sku?->id
+                || $source->product_id !== (int) OrderItem::query()->whereKey($f->order_item_id)->value('product_id')
+                || ! $supplier?->is_active || ! $supplier->currency_confirmed || ! $supplier->sync_expires_at?->isFuture()
+                || ! $sku?->synced_at || $sku->synced_at->lt(now()->subMinutes(5))
+                || $sku->requires_input || $sku->external_id !== $candidate['external_id']
+                || $supplier->currency !== $candidate['currency'] || $cost === null) {
+                return ['status' => 'unavailable'];
+            }
+            if ($sku->stock === null) {
+                return ['status' => 'stock_unknown'];
+            }
+            if ($sku->stock - $sku->reserved_quantity < $quantity) {
+                return ['status' => 'stock_unavailable'];
+            }
+            if (! $sku->orderable) {
+                return ['status' => 'unavailable'];
+            }
+            if ($supplier->balance_micros === null) {
+                return ['status' => 'balance_unknown'];
+            }
+            if ($supplier->balance_micros - $supplier->reserved_balance_micros < $cost) {
+                return ['status' => 'insufficient_balance'];
+            }
+            $rate = (string) $supplier->exchange_rate_idr;
+            $costIdr = SupplierMoney::costIdr($cost, $rate);
+            $limit = $this->remainingCostLimit($f);
+            $quote = [
+                'cost_idr' => $costIdr, 'maximum_cost_idr' => $limit, 'quantity' => $quantity,
+                'supplier_id' => $supplier->id, 'catalog_item_id' => $sku->id, 'currency' => $supplier->currency,
+                'cost_micros' => $cost, 'exchange_rate_idr' => $rate,
+            ];
+            if ($mode === 'preview') {
+                if ($costIdr <= $limit) {
+                    return ['status' => 'approval_not_required'] + $quote;
+                }
+                $plainToken = Str::random(64);
+                $expiresAt = now()->addMinutes(5);
+                DB::table('supplier_retry_approvals')->insert([
+                    'token_hash' => hash('sha256', $plainToken), 'owner_id' => $owner->id,
+                    'supplier_fulfillment_id' => $id, 'previous_purchase_id' => $purchase?->id,
+                    'source_id' => $source->id, 'source_version' => $source->version,
+                    'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $sku->id,
+                    'supplier_version' => $supplier->version, 'quantity' => $quantity, 'currency' => $supplier->currency,
+                    'exchange_rate_idr' => $rate, 'cost_micros' => $cost, 'cost_idr' => $costIdr,
+                    'expires_at' => $expiresAt, 'created_at' => now(), 'updated_at' => now(),
+                ]);
+
+                return ['status' => 'price_approval_required', 'token' => $plainToken, 'expires_at' => $expiresAt->toISOString()] + $quote;
+            }
+            $approval = null;
+            if ($mode === 'confirm') {
+                $approval = DB::table('supplier_retry_approvals')->where('token_hash', hash('sha256', (string) $token))
+                    ->where('owner_id', $owner->id)->where('supplier_fulfillment_id', $id)->lockForUpdate()->first();
+                if ($approval === null || $approval->used_at !== null || now()->greaterThanOrEqualTo($approval->expires_at)
+                    || (int) $approval->previous_purchase_id !== (int) $purchase?->id
+                    || (int) $approval->source_id !== (int) $source->id || (int) $approval->source_version !== (int) $source->version
+                    || (int) $approval->supplier_id !== (int) $supplier->id
+                    || (int) $approval->supplier_catalog_item_id !== (int) $sku->id || (int) $approval->supplier_version !== (int) $supplier->version
+                    || (int) $approval->quantity !== $quantity || $approval->currency !== $supplier->currency
+                    || SupplierMoney::micros((string) $approval->exchange_rate_idr) !== SupplierMoney::micros($rate)
+                    || (int) $approval->cost_micros !== $cost || (int) $approval->cost_idr !== $costIdr) {
+                    return ['status' => 'quote_changed'] + $quote;
+                }
+            } elseif ($costIdr > $limit) {
+                return ['status' => 'price_approval_required'] + $quote;
+            }
+            $this->hold($f, $supplier, $sku, $cost, $quantity);
+            $next = SupplierPurchase::create([
+                'supplier_fulfillment_id' => $id, 'supplier_id' => $supplier->id, 'supplier_catalog_item_id' => $sku->id,
+                'reference' => (string) Str::uuid(), 'quantity' => $quantity, 'expected_cost_micros' => $cost,
+                'exchange_rate_idr' => $rate, 'state' => 'reserved',
+            ]);
+            if ($approval !== null) {
+                DB::table('supplier_retry_approvals')->where('id', $approval->id)->update([
+                    'approved_purchase_id' => $next->id, 'used_at' => now(), 'updated_at' => now(),
+                ]);
+                $this->audit->log('supplier_fulfillment.retry_cost_approved', $f, null, [
+                    'purchase_id' => $next->id, 'source_id' => $source->id, 'supplier_id' => $supplier->id,
+                    'catalog_item_id' => $sku->id, 'quantity' => $quantity, 'currency' => $supplier->currency,
+                    'cost_micros' => $cost, 'cost_idr' => $costIdr, 'exchange_rate_idr' => $rate,
+                    'original_remaining_cost_idr' => $limit,
+                ], $owner);
+            }
+            $f->update(['state' => 'pending', 'current_purchase_id' => $next->id, 'next_attempt_at' => now(), 'last_error' => null]);
+            DB::afterCommit(fn () => ProcessSupplierFulfillment::dispatch($id));
+
+            return ['status' => 'queued'] + $quote;
+        }, 5);
+    }
+
     public function retryAfterTopup(int $id): void
     {
         DB::transaction(function () use ($id): void {
@@ -757,11 +1057,16 @@ final class SupplierFulfillmentService
             [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
             $f = $fulfillments->get($id);
             $this->assertActive($order);
-            if ($f->state !== 'review') {
+            if ($f->state !== 'review' || $f->manual_takeover_at !== null
+                || SupplierManualHandoff::query()->where('supplier_fulfillment_id', $id)->exists()) {
                 throw new InvalidOrderTransition('This fulfillment is not eligible for a new attempt.');
             }
             $purchase = $f->current_purchase_id ? SupplierPurchase::findOrFail($f->current_purchase_id) : null;
-            if ($purchase && $purchase->state !== 'rejected') {
+            if (($purchase && ($purchase->supplier_fulfillment_id !== $id || ! $this->rejectedPurchaseIsSafe($purchase)))
+                || SupplierPurchase::query()->where('supplier_fulfillment_id', $id)->whereNull('warranty_claim_id')
+                    ->where(fn ($q) => $q->where('state', '!=', 'rejected')->orWhereNotNull('committed_at')
+                        ->orWhereNotNull('supplier_order_id')->orWhereNotNull('actual_cost_micros')
+                        ->orWhereNotNull('claim_token')->orWhere('lease_expires_at', '>', now()))->exists()) {
                 throw new InvalidOrderTransition('An unconfirmed purchase cannot be retried. Recover its matching order first.');
             }
             $this->unhold($f, $suppliers, $catalog);
@@ -1091,6 +1396,9 @@ final class SupplierFulfillmentService
             Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
             [$fulfillments] = $this->lockedOrderResources($order);
             $f = $fulfillments->get($id);
+            if ($f->manual_takeover_at !== null) {
+                throw new InvalidOrderTransition('Manual takeover already owns customer delivery.');
+            }
             $lateManual = $order->payment_status === PaymentStatus::Paid && $f->state === 'cancelled'
                 && ManualFulfillmentReview::query()->where('order_id', $order->id)->where('reason', ManualFulfillmentReview::REASON_LATE_PAYMENT)->where('state', ManualFulfillmentReview::STATE_PENDING)->exists();
             if ($lateManual) {

@@ -15,9 +15,12 @@ use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\AuditLogger;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Suppliers\SupplierInvoiceRetry;
+use App\Services\Suppliers\SupplierManualTakeover;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 final class AdminSupplierInvoiceRecoveryController extends Controller
@@ -33,17 +36,91 @@ final class AdminSupplierInvoiceRecoveryController extends Controller
 
             return redirect()->route('password.confirm');
         }
-        $validator = Validator::make($request->only(['action', 'purchase_id', 'credentials', 'confirmed']), [
-            'action' => ['required', 'in:send_accounts,handed_off,not_debited,sync'],
+        $validator = Validator::make($request->only(['action', 'purchase_id', 'credentials', 'confirmed', 'supplier_version', 'approval_token']), [
+            'action' => ['required', 'in:send_accounts,handed_off,not_debited,sync,force_sync,retry,retry_force,approve_price,take_over'],
             'purchase_id' => ['required', 'integer', 'min:0'],
             'credentials' => ['required_if:action,send_accounts', 'nullable', 'string', 'max:64000'],
-            'confirmed' => ['required_unless:action,sync', 'accepted'],
+            'confirmed' => [Rule::excludeIf(fn (): bool => in_array($request->input('action'), ['sync', 'force_sync', 'retry', 'retry_force'], true)), 'required', 'accepted'],
+            'supplier_version' => ['required_if:action,force_sync', 'nullable', 'integer', 'min:0'],
+            'approval_token' => ['required_if:action,approve_price', 'nullable', 'string', 'max:255'],
         ]);
         if ($validator->fails()) {
             return redirect($url)->withErrors(['recovery' => 'Periksa akun dan centang konfirmasi sebelum melanjutkan. Isian akun tidak disimpan; masukkan kembali bila diperlukan.']);
         }
-        if ($request->input('action') === 'not_debited') {
+        $action = $request->input('action');
+        if (in_array($action, ['not_debited', 'force_sync', 'retry', 'retry_force', 'approve_price', 'take_over'], true)) {
             abort_unless($actor->role === UserRole::Owner, 403);
+        }
+        if (in_array($action, ['retry', 'retry_force', 'approve_price'], true)) {
+            $retry = app(SupplierInvoiceRetry::class);
+            if ($action === 'retry_force') {
+                $supplier = $fulfillment->reservedSupplier ?? $fulfillment->currentPurchase?->supplier;
+                if ($supplier !== null) {
+                    app(AuditLogger::class)->log('supplier.sync_forced', $supplier, null, ['version' => $supplier->version, 'fulfillment_id' => $fulfillment->id], $actor, $request->ip());
+                }
+            }
+            try {
+                $result = $action === 'approve_price'
+                    ? $retry->confirm((int) $fulfillment->id, $actor, $request->string('approval_token')->toString())
+                    : $retry->attempt((int) $fulfillment->id, $action === 'retry_force');
+                if (($result['status'] ?? null) === 'price_approval_required') {
+                    $result = $retry->preview((int) $fulfillment->id, $actor);
+                    if (($result['status'] ?? null) === 'price_approval_required') {
+                        return redirect($url)->with('supplier_retry_preview', $result + ['fulfillment_id' => $fulfillment->id]);
+                    }
+                }
+            } catch (InvalidOrderTransition|InsufficientStock|\DomainException|\InvalidArgumentException|ValidationException) {
+                return redirect($url)->withErrors(['recovery' => 'Status invoice berubah atau tindakan belum aman. Muat ulang dan periksa transaksi supplier.']);
+            }
+            $message = match ($result['status'] ?? '') {
+                'queued' => 'Pembelian dijadwalkan. Jangan menekan ulang; periksa hasil pembelian dan pengiriman.',
+                'already_processing' => 'Pembelian sedang diproses. Tidak ada pembelian baru yang dijadwalkan.',
+                'stock_unavailable' => 'Stok tersedia setelah reservasi tidak cukup. Tidak ada pembelian baru; sinkronkan lagi setelah supplier restock.',
+                'stock_unknown' => 'Stok supplier belum dapat dipastikan. Tidak ada pembelian baru.',
+                'insufficient_balance' => 'Saldo supplier yang tersedia setelah hold tidak cukup. Tidak ada pembelian baru.',
+                'balance_unknown' => 'Saldo supplier belum dapat dipastikan. Tidak ada pembelian baru.',
+                'unavailable' => 'Stok atau saldo belum tersedia dalam batas pembelian. Tidak ada pembelian baru.',
+                'sync_failed' => 'Sinkronisasi belum berhasil. Data supplier belum dapat digunakan untuk membeli.',
+                'manual_takeover' => 'Invoice ditangani manual. Pembelian otomatis tidak dijalankan.',
+                'approval_not_required' => 'Harga tidak lagi memerlukan persetujuan. Periksa ulang invoice sebelum membeli.',
+                'quote_changed' => 'Harga atau kondisi supplier berubah. Penawaran sebelumnya tidak berlaku; periksa ulang invoice.',
+                'unsafe', 'invalid_order' => 'Pembelian ulang belum aman atau invoice tidak lagi memenuhi syarat. Periksa transaksi supplier.',
+                default => 'Status berubah. Muat ulang invoice sebelum melanjutkan.',
+            };
+
+            return redirect($url)->with('status', $message);
+        }
+        if ($action === 'take_over') {
+            $supplierId = $fulfillment->reserved_supplier_id ?? $fulfillment->currentPurchase?->supplier_id;
+            try {
+                app(SupplierManualTakeover::class)->takeOver((int) $fulfillment->id, $actor);
+            } catch (InvalidOrderTransition|InsufficientStock|\DomainException|\InvalidArgumentException|ValidationException) {
+                return redirect($url)->withErrors(['recovery' => 'Invoice tidak dapat diambil alih saat transaksi supplier sedang berjalan atau statusnya berubah.']);
+            }
+
+            $message = 'Invoice ditangani manual. Pemberitahuan pembeli dijadwalkan; penyerahan akun belum dikonfirmasi.';
+            $warning = null;
+            try {
+                $release = app(SupplierInvoiceRetry::class)->releaseProvenRejected((int) $fulfillment->id);
+                $message .= match ($release['status'] ?? '') {
+                    'released' => ' Reservasi lama yang terbukti aman dilepas.',
+                    'no_hold' => ' Tidak ada reservasi lama yang perlu dilepas.',
+                    default => ' Hold supplier tetap ditahan untuk pemeriksaan.',
+                };
+                $supplier = $supplierId === null ? null : Supplier::query()->find($supplierId);
+                if ($supplier === null || ! app(SupplierCatalogSync::class)->sync($supplier)) {
+                    $warning = 'Sinkronisasi supplier belum berhasil; periksa saldo dan katalog sebelum tindakan berikutnya.';
+                } elseif (! $supplier->refresh()->balance_observed_at?->equalTo($supplier->synced_at)) {
+                    $warning = 'Katalog disinkronkan; saldo masih menunggu penyelesaian purchase supplier yang ambigu.';
+                } else {
+                    $message .= ' Saldo dan katalog disinkronkan.';
+                }
+            } catch (\Throwable $exception) {
+                report($exception);
+                $warning = 'Penanganan manual sudah tercatat, tetapi pelepasan hold atau sinkronisasi perlu diperiksa. Jangan mengulangi pengiriman.';
+            }
+
+            return redirect($url)->with('status', $message)->with('supplier_sync_warning', $warning);
         }
         try {
             $supplierId = DB::transaction(function () use ($request, $fulfillment, $service, $actor): ?int {
@@ -90,9 +167,14 @@ final class AdminSupplierInvoiceRecoveryController extends Controller
             default => '',
         };
         $syncWarning = null;
-        if (in_array($action, ['not_debited', 'sync'], true)) {
+        if (in_array($action, ['not_debited', 'sync', 'force_sync'], true)) {
             $supplier = $supplierId === null ? null : Supplier::query()->find($supplierId);
-            $applied = $supplier !== null && app(SupplierCatalogSync::class)->sync($supplier);
+            if ($supplier !== null && $action === 'force_sync') {
+                app(AuditLogger::class)->log('supplier.sync_forced', $supplier, null, ['version' => $request->integer('supplier_version')], $actor, $request->ip());
+            }
+            $applied = $supplier !== null && ($action === 'force_sync'
+                ? app(SupplierCatalogSync::class)->sync($supplier, force: true, expectedVersion: $request->integer('supplier_version'))
+                : app(SupplierCatalogSync::class)->sync($supplier));
             $balanceUpdated = $applied && $supplier->refresh()->balance_observed_at?->equalTo($supplier->synced_at);
             if (! $applied) {
                 $syncWarning = 'Sinkronisasi belum berhasil; saldo terbaru belum terverifikasi. Coba sinkronkan lagi.';

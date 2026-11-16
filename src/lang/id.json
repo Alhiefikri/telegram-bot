@@ -1213,5 +1213,7 @@
   "balance.usdt.status.hash_howto": "🧾 Tempel TXID atau link BscScan di chat ini setelah transfer.\nCari di: BscScan → transaksi masuk → salin TXID.\nJika sesi input berakhir, buka kembali top-up ini dan tekan Kirim TXID / link BscScan.",
   "balance.usdt.status.wait_hint": "🌐 Tunggu 5–10 detik. Tekan Cek status bila perlu.",
   "balance.usdt.rail_label.binance": "Binance Pay",
-  "balance.usdt.rail_label.bep20": "USDT BEP20"
+  "balance.usdt.rail_label.bep20": "USDT BEP20",
+  "supplier.manual_takeover.notice": "Informasi invoice :invoice\n\nPembayaran Anda telah diterima. Pesanan Anda memerlukan bantuan khusus dan kini sedang ditangani secara manual oleh tim kami. Pengiriman belum selesai.\n\nSilakan hubungi https://t.me/Alhie02 dan sampaikan nomor invoice Anda. Terima kasih atas kesabaran Anda.",
+  "supplier.manual_takeover.contact": "💬 Hubungi Admin"
 }

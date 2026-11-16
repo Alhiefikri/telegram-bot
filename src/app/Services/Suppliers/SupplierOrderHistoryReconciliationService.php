@@ -74,7 +74,7 @@ final class SupplierOrderHistoryReconciliationService
                 throw new InvalidOrderTransition('An order-history scan already owns this purchase.');
             }
             if ($actor === null) {
-                if ($fulfillment->state !== 'review' || $fulfillment->next_attempt_at?->isFuture()
+                if ($fulfillment->manual_takeover_at !== null || $fulfillment->state !== 'review' || $fulfillment->next_attempt_at?->isFuture()
                     || $purchase->historyReconciliations()->whereNull('actor_user_id')->count() >= 3) {
                     throw new InvalidOrderTransition('Automatic order-history budget is not due.');
                 }
@@ -178,7 +178,7 @@ final class SupplierOrderHistoryReconciliationService
             }
             $locked->forceFill($attributes)->save();
             $fulfillment = SupplierFulfillment::query()->findOrFail($fulfillmentId);
-            if ($actor === null && $fulfillment->current_purchase_id === $purchaseId && $fulfillment->state === 'review') {
+            if ($actor === null && $fulfillment->manual_takeover_at === null && $fulfillment->current_purchase_id === $purchaseId && $fulfillment->state === 'review') {
                 $finished = $purchase->historyReconciliations()->whereNull('actor_user_id')->count() >= 3;
                 $fulfillment->update(['next_attempt_at' => $finished ? null : now()->addMinutes(5)]);
             }

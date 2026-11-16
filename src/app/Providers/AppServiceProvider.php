@@ -57,6 +57,7 @@ use App\Services\StoreBalance\TopUp\StoreBalanceTopUpLifecycleResolver;
 use App\Services\StoreBalance\TopUp\WijayaPayStoreBalanceTopUpLifecycle;
 use App\Services\Telegram\Callbacks\TelegramAdminPaymentCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramAdminStatsCallbackHandler;
+use App\Services\Telegram\Callbacks\TelegramSupplierRetryCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBalanceActivityCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBalanceFundingCallbackHandler;
 use App\Services\Telegram\Callbacks\TelegramBinanceVerifyCallbackHandler;
@@ -200,6 +201,7 @@ class AppServiceProvider extends ServiceProvider
             $app->make(TelegramCustomerApiCallbackHandler::class),
             $app->make(TelegramHomeCallbackHandler::class),
             $app->make(TelegramAdminPaymentCallbackHandler::class),
+            $app->make(TelegramSupplierRetryCallbackHandler::class),
             $app->make(TelegramBroadcastCallbackHandler::class),
             $app->make(TelegramAdminStatsCallbackHandler::class),
             $app->make(TelegramIconCallbackHandler::class),

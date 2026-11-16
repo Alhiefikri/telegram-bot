@@ -108,6 +108,7 @@ class RecoverTelegramOutboundEffects extends Command
             $operations['dispatch_ready_effects'] = function () use ($ledger, $pages, $pageLimit, $dispatcher, &$dispatched): void {
                 $dispatchTypes = [
                     TelegramOutboundEffectType::BalanceAdjustmentNotice->value,
+                    TelegramOutboundEffectType::SupplierManualTakeoverNotice->value,
                     TelegramOutboundEffectType::BalanceOperationsAlert->value,
                     TelegramOutboundEffectType::OwnerCompensationNotification->value,
                     TelegramOutboundEffectType::UsdtRefundReceipt->value,
