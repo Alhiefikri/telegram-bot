@@ -184,6 +184,21 @@
                             <p class="mt-2 text-xs font-bold leading-5 text-[var(--sf-muted)]">Review saja; nominal final QRIS atau USDT tampil di invoice provider.</p>
                         </section>
 
+                        @if ($cartItems->contains(fn ($item) => $item->manualUnlimited))
+                            @php
+                                $manualSupport = $storefront->support()->whatsappOption('Halo Admin Lhie Store, saya ingin menanyakan akun atau kode redeem untuk produk yang diproses manual.');
+                            @endphp
+                            <section class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] p-4 text-sm font-bold leading-6 text-[var(--sf-ink)]">
+                                <h2 class="font-display text-lg font-black">Produk diproses manual</h2>
+                                <p class="mt-1">Setelah pembayaran terverifikasi, hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.</p>
+                                @if ($manualSupport['available'])
+                                    <a href="{{ $manualSupport['href'] }}" class="mt-2 inline-flex min-h-11 items-center underline underline-offset-2">Hubungi WhatsApp Support</a>
+                                @else
+                                    <p class="mt-1">Nomor WhatsApp Support belum dikonfigurasi.</p>
+                                @endif
+                            </section>
+                        @endif
+
                         @if ($cartHasConflicts)
                             <section class="rounded-lg border-[3px] border-[#9f1d2d] bg-[#ffd9df] p-4 text-sm font-bold leading-6 text-[var(--sf-ink)]" role="alert" aria-labelledby="checkout-unavailable-title">
                                 <h2 id="checkout-unavailable-title" class="font-display text-lg font-black">Checkout belum siap</h2>

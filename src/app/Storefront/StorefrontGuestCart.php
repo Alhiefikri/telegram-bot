@@ -125,6 +125,7 @@ final class StorefrontGuestCart
                     'category_id' => $product?->category_id,
                     'category_active' => $product?->category?->is_active,
                     'is_active' => $product?->is_active,
+                    'manual_unlimited' => $product?->manual_unlimited,
                     'stock' => $product?->stock,
                     'reserved_stock' => $product?->reserved_stock,
                     'price_amount' => $product?->price_amount,

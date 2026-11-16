@@ -724,6 +724,32 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertDontSee('mail.pending.example.test', false);
     }
 
+    public function test_paid_manual_item_uses_snapshot_and_configured_whatsapp_for_follow_up(): void
+    {
+        \App\Models\ManualPaymentSetting::create([
+            'payment_mode' => 'manual',
+            'is_active' => true,
+            'whatsapp_support_number' => '0812 9999 0000',
+        ]);
+        $product = Product::factory()->create(['manual_unlimited' => false]);
+        $order = Order::factory()->create([
+            'order_status' => OrderStatus::Processing,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        Payment::factory()->create(['order_id' => $order->id, 'status' => PaymentStatus::Paid, 'paid_at' => now()]);
+        OrderItem::factory()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'manual_unlimited' => true,
+        ]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee('Produk diproses manual')
+            ->assertSee('Hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.')
+            ->assertSee('https://wa.me/6281299990000?text=', false);
+    }
+
     public function test_paid_invoice_without_allocated_stock_items_renders_admin_follow_up_copy(): void
     {
         $this->pakasirConfigIsReady();

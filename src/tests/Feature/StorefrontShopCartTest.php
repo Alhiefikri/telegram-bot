@@ -118,6 +118,63 @@ class StorefrontShopCartTest extends TestCase
         $this->assertSame(1, CartItem::query()->where('cart_id', $cart->id)->value('quantity'));
     }
 
+    public function test_mixed_cart_discloses_manual_fulfillment_and_checks_out_without_telegram(): void
+    {
+        Queue::fake();
+        $this->manualPaymentModeIsActive();
+        ManualPaymentSetting::current()->update(['whatsapp_support_number' => '0812 9999 0000']);
+        $manual = $this->availableProduct(['manual_unlimited' => true, 'stock' => 0]);
+        $normal = $this->availableProduct(['manual_unlimited' => false, 'stock' => 3]);
+        $sessionKey = 'mixed-manual-checkout';
+        $this->addToCart($manual, sessionKey: $sessionKey);
+        $this->addToCart($normal, sessionKey: $sessionKey);
+
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->get(route('storefront.shop.cart'))
+            ->assertOk()->assertSee('Diproses manual')->assertDontSee('Perlu akun Telegram');
+        $review = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->get(route('storefront.shop.checkout.start'))
+            ->assertOk()
+            ->assertSee('Setelah pembayaran terverifikasi, hubungi WhatsApp Support')
+            ->assertSee('https://wa.me/6281299990000?text=', false);
+        preg_match('/name="cart_snapshot" value="([a-f0-9]+)"/', $review->getContent(), $matches);
+        $this->assertNotEmpty($matches[1] ?? null);
+
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->post(route('storefront.shop.checkout'), [
+                'buyer_name' => 'Mixed Buyer',
+                'cart_snapshot' => $matches[1],
+                'payment_method' => 'qris',
+                'checkout_attempt' => '73000000-0000-4000-8000-000000000003',
+                'terms_accepted' => '1',
+            ])->assertRedirect();
+        $order = Order::query()->with('customer', 'orderItems')->sole();
+        $this->assertNull($order->customer->telegram_id);
+        $this->assertCount(2, $order->orderItems);
+        $this->assertTrue($order->orderItems->firstWhere('product_id', $manual->id)->manual_unlimited);
+        $this->assertFalse($order->orderItems->firstWhere('product_id', $normal->id)->manual_unlimited);
+    }
+
+    public function test_cart_snapshot_rejects_changed_manual_fulfillment_mode(): void
+    {
+        $this->manualPaymentModeIsActive();
+        $product = $this->availableProduct(['manual_unlimited' => false, 'stock' => 3]);
+        $sessionKey = 'manual-mode-change';
+        $this->addToCart($product, sessionKey: $sessionKey);
+        $snapshot = $this->checkoutSnapshot($sessionKey);
+        Product::withoutTimestamps(fn () => $product->forceFill(['manual_unlimited' => true])->saveQuietly());
+
+        $this->withSession(['storefront.checkout_client_key' => $sessionKey])
+            ->post(route('storefront.shop.checkout'), [
+                'buyer_name' => 'Buyer',
+                'cart_snapshot' => $snapshot,
+                'payment_method' => 'qris',
+                'checkout_attempt' => '73000000-0000-4000-8000-000000000004',
+                'terms_accepted' => '1',
+            ])->assertRedirect(route('storefront.shop.checkout.start'));
+        $this->assertSame(0, Order::query()->count());
+    }
+
     public function test_multi_item_checkout_creates_one_order_payment_and_reservation_per_item(): void
     {
         Queue::fake();

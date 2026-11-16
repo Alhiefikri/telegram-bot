@@ -19,6 +19,7 @@ use App\Models\ProductStockItem;
 use App\Services\CartService;
 use App\Services\CustomerApi\CustomerApiCredentials;
 use App\Services\CustomerApi\CustomerApiFailure;
+use App\Services\CustomerApi\CustomerApiOrders;
 use App\Services\CustomerApi\CustomerApiPrincipal;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
@@ -57,6 +58,39 @@ final class CustomerApiOrderTest extends TestCase
         $this->customer->forceFill(['balance_payment_preference' => BalancePaymentPreference::UsdFirst])->save();
         $credentials = app(CustomerApiCredentials::class);
         $this->principal = $credentials->authenticate('Bearer '.$credentials->generate($this->customer)->takeSecret());
+    }
+
+    public function test_manual_unlimited_checkout_and_recovery_offer_support_without_credentials(): void
+    {
+        $product = $this->product(0);
+        $product->update(['manual_unlimited' => true]);
+        $this->fundUsd(5_000_000);
+        $created = $this->send($this->body($product), 'manual-claim');
+        $this->assertSame(201, $created->getStatusCode());
+        $data = $created->getData(true)['data'];
+        $this->assertSame('paid', $data['payment_status']);
+        $this->assertSame('processing', $data['status']);
+        $support = $data['manual_support'];
+        $this->assertSame('@Alhie02', $support['telegram']);
+        $this->assertStringContainsString('account or redeem code', $support['instructions']);
+        $product->update(['manual_unlimited' => false]);
+        $this->assertSame($support, $this->send($this->body($product), 'manual-claim')->getData(true)['data']['manual_support']);
+
+        $orders = app(CustomerApiOrders::class);
+        $summary = $orders->detail($this->principal, $data['id'])['data'];
+        $this->assertSame($support, $summary['manual_support']);
+        $this->assertSame('review', $summary['fulfillment']['state']);
+        $this->assertSame(0, $summary['fulfillment']['released_units']);
+        $this->assertSame($support, $orders->page($this->principal, 20, null, null)['data'][0]['manual_support']);
+        $delivery = $orders->delivery($this->principal, $data['id'])['data'];
+        $this->assertSame($support, $delivery['manual_support']);
+        $this->assertSame('not_ready', $delivery['state']);
+        $this->assertSame([], $delivery['units']);
+        $this->assertSame(0, ProductStockItem::whereNotNull('order_item_id')->count());
+        $order = Order::findOrFail($data['id']);
+        $order->update(['payment_status' => PaymentStatus::Refunded]);
+        $this->assertArrayNotHasKey('manual_support', $orders->detail($this->principal, $data['id'])['data']);
+        $this->assertArrayNotHasKey('manual_support', $orders->delivery($this->principal, $data['id'])['data']);
     }
 
     public function test_one_paid_balance_order_is_created_and_the_same_claim_replays_it_unchanged(): void

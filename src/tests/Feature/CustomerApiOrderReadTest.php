@@ -57,6 +57,7 @@ final class CustomerApiOrderReadTest extends TestCase
         $this->principal = $keys->authenticate('Bearer '.$keys->rotate($this->customer, 10, $nonce)->takeSecret());
         $before = $this->economics();
         $first = $this->read('delivery', $order->id)['data'];
+        $this->assertArrayNotHasKey('manual_support', $first);
         $this->assertSame('ready', $first['state']);
         $this->assertSame(ProductStockItem::whereNotNull('order_item_id')->orderBy('id')->pluck('id')->map(strval(...))->all(), array_column($first['units'], 'id'));
         $this->assertSame('test0@example.com', $first['units'][0]['email']);
@@ -67,6 +68,7 @@ final class CustomerApiOrderReadTest extends TestCase
         $this->assertSame([['title' => 'Usage', 'url' => 'https://example.com/guide']], $first['usage_guides']);
         $this->assertSame($first, $this->read('delivery', $order->id)['data']);
         $summary = $this->read('show', $order->id)['data'];
+        $this->assertArrayNotHasKey('manual_support', $summary);
         $this->assertSame('USD', $summary['currency']);
         $this->assertSame('4', $summary['amount']);
         $this->assertSame(2, $summary['fulfillment']['released_units']);

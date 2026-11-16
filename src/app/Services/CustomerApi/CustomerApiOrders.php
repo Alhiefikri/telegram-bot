@@ -65,6 +65,7 @@ final class CustomerApiOrders
             $result = ['id' => (string) $order->id, 'state' => 'not_ready',
                 'progress' => $summary['fulfillment'], 'units' => [], 'usage_guides' => [],
                 'pagination' => ['next_cursor' => null, 'has_more' => false]];
+            $result += CustomerApiOrderResult::manualSupport($order);
             $item = $order->orderItems->count() === 1 ? $order->orderItems->first() : null;
             // Continuation input is validated before availability so a foreign or
             // forged cursor never receives a success-shaped response.
@@ -206,7 +207,7 @@ final class CustomerApiOrders
             return [];
         }
         $orders->loadMissing(['payments:id,order_id,status,currency,amount,paid_at,created_at',
-            'orderItems:id,order_id,product_id,product_name,quantity,delivery_note,delivery_note_snapshotted,usage_guide_title,usage_guide_url,usage_guide_snapshotted']);
+            'orderItems:id,order_id,product_id,product_name,quantity,manual_unlimited,delivery_note,delivery_note_snapshotted,usage_guide_title,usage_guide_url,usage_guide_snapshotted']);
         $ids = $orders->modelKeys();
         $reasons = $this->eligibility->rejectionReasons($orders);
         $units = DB::table('product_stock_items')->join('order_items', 'order_items.id', '=', 'product_stock_items.order_item_id')
@@ -251,6 +252,7 @@ final class CustomerApiOrders
                 'delivery' => ['available' => $released > 0, 'state' => $released === 0 ? 'not_ready' : ($released === $quantity ? 'ready' : 'partial')],
                 'refund' => ['state' => $refundState, 'currency' => $currency === 'USDT' ? 'USD' : $currency,
                     'confirmed_amount' => $this->money($confirmed, $currency), 'pending_amount' => $this->money($pending, $currency)],
+                ...CustomerApiOrderResult::manualSupport($order),
                 'created_at' => $order->created_at?->toIso8601String(),
             ];
         })->values()->all();

@@ -63,7 +63,7 @@ final class CustomerApiReadTest extends TestCase
         $this->assertSame('0', (string) $this->read('products', ['available' => 'false'])['data'][0]['stock']['available']);
     }
 
-    public function test_manual_unlimited_products_remain_visible_but_are_unavailable_for_api_checkout(): void
+    public function test_manual_unlimited_products_are_available_without_a_finite_stock_count(): void
     {
         $manual = Product::factory()->create(['manual_unlimited' => true, 'stock' => 5, 'reserved_stock' => 0]);
         $manualEmpty = Product::factory()->create(['manual_unlimited' => true, 'stock' => 0, 'reserved_stock' => 0]);
@@ -75,19 +75,29 @@ final class CustomerApiReadTest extends TestCase
             array_map(strval(...), [$manual->id, $manualEmpty->id, $available->id, $unavailable->id]),
             array_column($all, 'id'),
         );
+        $rows = array_column($all, null, 'id');
+        $support = $rows[$manual->id]['manual_support'];
+        $this->assertSame('@Alhie02', $support['telegram']);
+        $this->assertStringContainsString('After payment', $support['instructions']);
+        $this->assertStringContainsString('account or redeem code', $support['instructions']);
+        $this->assertSame($support, $rows[$manualEmpty->id]['manual_support']);
+        $this->assertArrayNotHasKey('manual_support', $rows[$available->id]);
+        $this->assertArrayNotHasKey('manual_support', $rows[$unavailable->id]);
         $stock = array_column($all, 'stock', 'id');
         $emptyStock = ['available' => 0, 'is_available' => false, 'quantity_available' => false];
-        $this->assertSame($emptyStock, $stock[$manual->id]);
-        $this->assertSame($emptyStock, $stock[$manualEmpty->id]);
+        $manualStock = ['available' => null, 'is_available' => true, 'quantity_available' => true];
+        $this->assertSame($manualStock, $stock[$manual->id]);
+        $this->assertSame($manualStock, $stock[$manualEmpty->id]);
         $this->assertSame(['available' => 3, 'is_available' => true, 'quantity_available' => true], $stock[$available->id]);
         $this->assertSame($emptyStock, $stock[$unavailable->id]);
 
-        $this->assertSame([(string) $available->id], array_column($this->read('products', ['available' => 'true'])['data'], 'id'));
+        $this->assertSame(array_map(strval(...), [$manual->id, $manualEmpty->id, $available->id]), array_column($this->read('products', ['available' => 'true'])['data'], 'id'));
         $this->assertSame(
-            array_map(strval(...), [$manual->id, $manualEmpty->id, $unavailable->id]),
+            [(string) $unavailable->id],
             array_column($this->read('products', ['available' => 'false'])['data'], 'id'),
         );
-        $this->assertSame($emptyStock, $this->read('product', [], (string) $manual->id)['data']['stock']);
+        $this->assertSame($manualStock, $this->read('product', [], (string) $manual->id)['data']['stock']);
+        $this->assertSame($support, $this->read('product', [], (string) $manual->id)['data']['manual_support']);
     }
 
     public function test_catalog_distinguishes_legacy_stock_from_exhausted_credential_inventory_without_decryption(): void

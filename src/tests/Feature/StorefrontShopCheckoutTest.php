@@ -9,6 +9,7 @@ use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\CheckoutMaintenanceSetting;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
@@ -43,6 +44,51 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
 
         config()->set('services.storefront.telegram_reservation_floor', 0);
+    }
+
+    public function test_guest_and_unlinked_customer_can_checkout_manual_unlimited_products(): void
+    {
+        Queue::fake();
+        $this->manualPaymentModeIsActive();
+        $product = $this->availableProduct(['manual_unlimited' => true, 'stock' => 0]);
+
+        $this->postStorefrontShopCheckout($product, 1, 'Guest Buyer')->assertRedirect();
+        $guestOrder = Order::query()->with('customer', 'orderItems')->sole();
+        $this->assertNull($guestOrder->customer->telegram_id);
+        $this->assertTrue($guestOrder->orderItems->sole()->manual_unlimited);
+
+        $customer = Customer::factory()->create(['telegram_id' => null]);
+        $this->actingAs($customer, 'customer');
+        $this->withSession(['storefront.checkout_client_key' => 'unlinked-manual-customer'])
+            ->post(route('storefront.shop.checkout'), [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'buyer_name' => 'Unlinked Buyer',
+                'payment_method' => 'qris',
+                'checkout_attempt' => '73000000-0000-4000-8000-000000000002',
+                'terms_accepted' => '1',
+            ])->assertRedirect();
+        $this->assertSame(2, Order::query()->count());
+        $this->assertSame(2, Order::query()->whereHas('customer', fn ($query) => $query->whereNull('telegram_id'))->count());
+    }
+
+    public function test_guest_manual_unlimited_qris_payment_remains_in_review_with_whatsapp_guidance(): void
+    {
+        Queue::fake();
+        $product = $this->availableProduct(['manual_unlimited' => true, 'stock' => 0]);
+        [$response, $order, $payment] = $this->successfulNativeQrisCheckout($product, 1, 'Guest Buyer');
+        $this->assertRedirectsToSignedOrderShow($response->headers->get('Location'), $order);
+        $this->assertNull($order->customer->telegram_id);
+
+        app(OrderStateMachine::class)->markPaymentPaid($payment);
+
+        $this->assertSame(PaymentStatus::Paid, $order->fresh()->payment_status);
+        $this->assertSame(OrderStatus::Processing, $order->fresh()->order_status);
+        $this->assertSame(ManualFulfillmentReview::REASON_MANUAL_UNLIMITED, ManualFulfillmentReview::where('order_id', $order->id)->sole()->reason);
+        $this->assertSame(0, $order->orderItems()->sole()->stockItems()->count());
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee('Hubungi WhatsApp Support dengan nomor invoice');
     }
 
     public function test_shop_named_route_contracts_are_registered(): void

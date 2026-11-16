@@ -217,10 +217,6 @@ class OrderCheckoutService
         }
 
         $products = $this->inventory->lockedCheckoutProducts($items);
-        if (($apiOrderClaimId !== null || $lockedCart->customer?->telegram_id === null)
-            && $products->contains(fn ($product): bool => (bool) $product->manual_unlimited)) {
-            throw new InvalidCheckout('This product requires a linked Telegram account and bot delivery.');
-        }
         $this->supplierFulfillment->lockCheckoutResources($products);
         $this->assertWebReservationBudget($lockedCart, $items, $products);
 

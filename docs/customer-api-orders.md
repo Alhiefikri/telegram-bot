@@ -102,6 +102,13 @@ Order/Payment values. No credential, ledger entry, cost, supplier, acquisition o
 internal crosses this allowlist, and no credential-bearing response body is stored for
 replay: every field is reconstructed from the durable Order, its items and its Payment.
 
+For a paid, processing manual-unlimited Order, checkout and replay, order history,
+order detail and delivery include `manual_support`, with `telegram: "@Alhie02"`
+and instructions to contact that account with the invoice number for the account
+or redeem code. This is not a delivered credential: delivery units remain empty
+until authorized by the normal lifecycle. The field is absent for other products
+and when the Order is no longer paid and processing.
+
 ## Idempotency
 
 Scope is Customer + `create_order` + `Idempotency-Key`, never the key version, so rotation

@@ -2,6 +2,7 @@
 
 namespace App\Services\CustomerApi;
 
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Services\UsdtBalance\UsdtMicroAmount;
@@ -54,8 +55,22 @@ final readonly class CustomerApiOrderResult
             'quantity' => (int) $order->orderItems->sum('quantity'),
             'product' => $item === null ? null : ['id' => (string) $item->product_id, 'name' => $item->product_name],
             'created_at' => $order->created_at?->toIso8601String(),
+            ...self::manualSupport($order),
             'request_id' => $requestId,
         ];
+    }
+
+    public static function manualSupport(Order $order): array
+    {
+        if ($order->payment_status !== PaymentStatus::Paid || $order->order_status !== OrderStatus::Processing
+            || ! $order->orderItems->contains(fn ($item) => $item->manual_unlimited)) {
+            return [];
+        }
+
+        return ['manual_support' => [
+            'telegram' => '@Alhie02',
+            'instructions' => 'Contact @Alhie02 on Telegram with your invoice number to obtain your account or redeem code.',
+        ]];
     }
 
     /**

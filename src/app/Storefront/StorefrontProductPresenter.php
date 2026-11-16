@@ -109,7 +109,7 @@ class StorefrontProductPresenter
             isAvailable: $isAvailable,
             isBuyable: $isBuyable,
             availabilityLabel: $isAvailable ? 'Tersedia' : 'Habis',
-            stockLabel: $isAvailable ? ($product->manual_unlimited ? 'Stok: ∞ · Perlu akun Telegram' : 'Stok: '.$stockAvailable) : 'Stok kosong',
+            stockLabel: $isAvailable ? ($product->manual_unlimited ? 'Stok: ∞ · Diproses manual' : 'Stok: '.$stockAvailable) : 'Stok kosong',
             soldLabel: 'Terjual: '.$soldQuantity,
             statusLabel: $statusLabel,
             cardActionLabel: $cardActionLabel,

@@ -22,6 +22,10 @@
                         $orderBackUrl = route('customer.orders.index');
                         $orderBackLabel = 'Kembali ke pesanan saya';
                     }
+                    $hasManualUnlimited = $order->orderItems->contains(fn ($item) => $item->manual_unlimited);
+                    $manualSupport = $hasManualUnlimited
+                        ? $storefront->support()->whatsappOption('Halo Admin Lhie Store, saya ingin mendapatkan akun atau kode redeem untuk invoice '.$order->invoice_number.'.')
+                        : null;
                 @endphp
                 <a href="{{ $orderBackUrl }}" data-order-back-link class="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[var(--sf-ink)] hover:text-[var(--sf-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]">
                     <span aria-hidden="true">&larr;</span> {{ $orderBackLabel }}
@@ -85,8 +89,13 @@
                         </summary>
                         <div class="grid gap-4 border-t-[3px] border-[var(--sf-border)] p-3 sm:p-4">
                             <div class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">
-                                <p class="font-black text-[var(--sf-ink)]">Data akun aman sampai pembayaran masuk</p>
-                                <p>Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.</p>
+                                @if ($hasManualUnlimited)
+                                    <p class="font-black text-[var(--sf-ink)]">Produk manual diproses setelah pembayaran</p>
+                                    <p>Setelah pembayaran terverifikasi, hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.</p>
+                                @else
+                                    <p class="font-black text-[var(--sf-ink)]">Data akun aman sampai pembayaran masuk</p>
+                                    <p>Setelah pembayaran terverifikasi, data akun muncul di halaman ini. Simpan link invoice ini sampai akun diterima.</p>
+                                @endif
                             </div>
                             @if ($canCancel && $isPendingPayment)
                                 <form method="POST" action="{{ $cancelUrl }}" class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3" onsubmit="return confirm(@js(__('storefront.invoice.qris.cancel.confirm', [], $storefrontLocale)));">
@@ -108,6 +117,17 @@
                 @elseif ($isPaid)
                     <div class="invoice-paid-workspace">
                         <div class="invoice-paid-primary">
+                            @if ($hasManualUnlimited)
+                                <section class="invoice-delivery-panel mt-5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface)] p-4 text-sm leading-6 text-[var(--sf-ink)]">
+                                    <h2 class="font-display text-xl font-bold">Produk diproses manual</h2>
+                                    <p class="mt-2">Hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.</p>
+                                    @if ($manualSupport['available'])
+                                        <a href="{{ $manualSupport['href'] }}" class="credential-action mt-3">Hubungi WhatsApp Support</a>
+                                    @else
+                                        <p class="mt-2">Nomor WhatsApp Support belum dikonfigurasi.</p>
+                                    @endif
+                                </section>
+                            @endif
                             @include('storefront.partials.shop.account-delivery')
                             @include('storefront.partials.support-chooser', [
                                 'supportContext' => $supportContext,

@@ -34,12 +34,10 @@ final class CustomerApiCatalog
             }
         }
         if (($filters['available'] ?? null) === 'true') {
-            $query->where('products.manual_unlimited', false)->availableForPurchase();
+            $query->availableForPurchase();
         }
         if (($filters['available'] ?? null) === 'false') {
-            $query->whereNot(fn (Builder $available) => $available
-                ->where('products.manual_unlimited', false)
-                ->availableForPurchase());
+            $query->whereNot(fn (Builder $available) => $available->availableForPurchase());
         }
         $products = $query->orderBy('products.id')->limit($filters['limit'] + 1)->get();
         $hasMore = $products->count() > $filters['limit'];
@@ -85,7 +83,7 @@ final class CustomerApiCatalog
                 }
                 $quote = null;
             }
-            $stock = $product->manual_unlimited ? 0 : $product->availableStock();
+            $stock = $product->manual_unlimited ? null : $product->availableStock();
             $metadata = [];
             foreach (['product_type', 'access_duration', 'region', 'account_type', 'device_limit', 'included_items',
                 'limitations', 'fulfillment_expectation', 'warranty_policy', 'warranty_policy_ms', 'warranty_policy_en',
@@ -102,7 +100,11 @@ final class CustomerApiCatalog
                 'family' => $product->family === null ? null : ['id' => (string) $product->family->id,
                     'name' => $product->family->name, 'slug' => $product->family->slug, 'description' => $product->family->description,
                     'icon' => $product->family->icon, 'custom_emoji_id' => $product->family->custom_emoji_id],
-                'stock' => ['available' => $stock, 'is_available' => $stock > 0, 'quantity_available' => $stock >= $quantity],
+                'stock' => ['available' => $stock, 'is_available' => $stock === null || $stock > 0, 'quantity_available' => $stock === null || $stock >= $quantity],
+                ...($product->manual_unlimited ? ['manual_support' => [
+                    'telegram' => '@Alhie02',
+                    'instructions' => 'After payment, contact @Alhie02 on Telegram with your invoice number to obtain your account or redeem code. Fulfillment is manual.',
+                ]] : []),
                 'quantity' => $quantity, 'quotes' => [$this->money($quote, false), $this->money($quote, true)],
                 'input_requirements' => [], 'metadata' => $metadata, 'informational' => true,
             ];
