@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\StoreBalanceEntryKind;
 use App\Enums\TelegramOutboundEffectState;
+use App\Enums\TelegramOutboundEffectType;
 use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\ProcessSupplierFulfillment;
@@ -27,6 +28,7 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierFulfillment;
 use App\Models\SupplierPricePolicy;
 use App\Models\SupplierPurchase;
+use App\Models\TelegramOutboundEffect;
 use App\Models\User;
 use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Checkout\CheckoutPaymentIntents;
@@ -41,6 +43,8 @@ use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierAvailability;
 use App\Services\Suppliers\SupplierCatalogSync;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Suppliers\SupplierManualTakeover;
+use App\Services\Suppliers\SupplierManualTakeoverNotice;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierPricing;
 use App\Services\Telegram\ReceiptDeliveryPipeline;
@@ -1703,7 +1707,7 @@ class SupplierFulfillmentTest extends TestCase
         app(OrderLifecycle::class)->applyManualCompletion($order);
         $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
         $owner = User::factory()->create(['role' => UserRole::Owner]);
-        $service = app(\App\Services\Suppliers\SupplierManualTakeover::class);
+        $service = app(SupplierManualTakeover::class);
 
         $service->takeOver($fulfillment->id, $owner);
         $service->takeOver($fulfillment->id, $owner);
@@ -1714,14 +1718,14 @@ class SupplierFulfillmentTest extends TestCase
         $this->assertSame(0, $fulfillment->manualHandoffs()->count());
         $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
         $this->assertSame(1, $sku->fresh()->reserved_quantity);
-        $effect = \App\Models\TelegramOutboundEffect::where('effect_type', \App\Enums\TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
+        $effect = TelegramOutboundEffect::where('effect_type', TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
         $this->assertStringContainsString($order->invoice_number, $effect->outcome_metadata['message']);
         $this->assertStringContainsString('Penghantaran belum selesai', $effect->outcome_metadata['message']);
         $this->assertStringContainsString('https://t.me/Alhie02', $effect->outcome_metadata['message']);
 
         config()->set('services.telegram.token', 'test-token');
         Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 12345]]));
-        $notice = app(\App\Services\Suppliers\SupplierManualTakeoverNotice::class);
+        $notice = app(SupplierManualTakeoverNotice::class);
         $notice->deliver($effect);
         $notice->deliver($effect->fresh());
         Http::assertSentCount(1);
@@ -1747,8 +1751,8 @@ class SupplierFulfillmentTest extends TestCase
         $order = $this->checkout($cart);
         app(OrderLifecycle::class)->applyManualCompletion($order);
         $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
-        app(\App\Services\Suppliers\SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
-        $effect = \App\Models\TelegramOutboundEffect::where('effect_type', \App\Enums\TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
+        app(SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
+        $effect = TelegramOutboundEffect::where('effect_type', TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
 
         $this->assertStringContainsString($expected, $effect->outcome_metadata['message']);
         $this->assertStringContainsString($order->invoice_number, $effect->outcome_metadata['message']);
@@ -1770,11 +1774,11 @@ class SupplierFulfillmentTest extends TestCase
         $order = $this->checkout($cart);
         app(OrderLifecycle::class)->applyManualCompletion($order);
         $fulfillment = SupplierFulfillment::where('order_id', $order->id)->sole();
-        app(\App\Services\Suppliers\SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
-        $effect = \App\Models\TelegramOutboundEffect::where('effect_type', \App\Enums\TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
+        app(SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
+        $effect = TelegramOutboundEffect::where('effect_type', TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->sole();
         config()->set('services.telegram.token', 'test-token');
         Http::fake(fn () => throw new ConnectionException('response lost'));
-        $notice = app(\App\Services\Suppliers\SupplierManualTakeoverNotice::class);
+        $notice = app(SupplierManualTakeoverNotice::class);
         $notice->deliver($effect);
         $notice->deliver($effect->fresh());
         $this->assertSame(TelegramOutboundEffectState::Unknown, $effect->fresh()->state);
@@ -1803,11 +1807,11 @@ class SupplierFulfillmentTest extends TestCase
             'state' => 'sending', 'claim_token' => (string) Str::uuid(), 'lease_expires_at' => now()->addMinute(),
         ]);
         try {
-            app(\App\Services\Suppliers\SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
+            app(SupplierManualTakeover::class)->takeOver($fulfillment->id, User::factory()->create(['role' => UserRole::Owner]));
             $this->fail('A live purchase must block takeover.');
         } catch (InvalidOrderTransition) {
             $this->assertNull($fulfillment->fresh()->manual_takeover_at);
-            $this->assertSame(0, \App\Models\TelegramOutboundEffect::where('effect_type', \App\Enums\TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->count());
+            $this->assertSame(0, TelegramOutboundEffect::where('effect_type', TelegramOutboundEffectType::SupplierManualTakeoverNotice->value)->count());
         }
     }
 

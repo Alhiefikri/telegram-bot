@@ -52,14 +52,19 @@ final class StoreBalanceOwnerCompensationTest extends TestCase
             ])
             ->assertForbidden();
 
+        $this->actingAs($admin)
+            ->get(route('admin.dashboard', ['tab' => StoreBalanceOwnerCompensationService::TAB]))
+            ->assertForbidden();
+
         $this->actingAs($owner)
             ->get(route('admin.dashboard', ['tab' => StoreBalanceOwnerCompensationService::TAB]))
             ->assertOk()
-            ->assertSee('Kompensasi Top-up')
+            ->assertSee('id="admin-section-balance-issues"', false)
             ->assertSee((string) $topUp->customer->telegram_id)
             ->assertSee('Hasil provider invalid')
             ->assertDontSee('owner-compensation-secret')
-            ->assertDontSee($topUp->provider_qris_url);
+            ->assertDontSee($topUp->provider_qris_url)
+            ->assertDontSee('provider-signature-secret');
     }
 
     public function test_owner_release_uses_original_amount_records_balance_transition_and_materializes_one_notification(): void

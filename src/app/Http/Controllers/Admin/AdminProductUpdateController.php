@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Exceptions\ProductFamilyCategoryMismatch;
 use App\Enums\InventoryMovementType;
+use App\Exceptions\ProductFamilyCategoryMismatch;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Jobs\SendProductPriceChangeNotifications;
 use App\Jobs\SendProductStockNotifications;
-use App\Models\Product;
 use App\Models\InventoryMovement;
+use App\Models\Product;
 use App\Services\Admin\AdminProductDashboardFormProtocol;
 use App\Services\Admin\AdminProductQuantityPricing;
 use App\Services\Admin\AdminProductWorkspaceData;
@@ -17,8 +17,8 @@ use App\Services\Admin\ProductFamilyCategoryCoherence;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\AuditLogger;
 use App\Services\Pricing\ProductQuantityPricing;
-use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\ProductWaitlistNotificationService;
+use App\Services\Telegram\ProductPriceChangeNotificationService;
 use App\Services\Telegram\StockNotificationDeliveryPipeline;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;

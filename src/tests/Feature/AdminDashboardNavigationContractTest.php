@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Models\User;
 use App\Services\Admin\AdminDashboardData;
+use App\Services\Admin\BalanceAdjustmentDashboardReadiness;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -125,7 +126,7 @@ final class AdminDashboardNavigationContractTest extends TestCase
                 $role === UserRole::Owner ? $response->assertSee($url, false) : $response->assertDontSee($url, false);
             }
             $adjustmentUrl = route('admin.store-balance.adjustments.index');
-            if ($role === UserRole::Owner && app(\App\Services\Admin\BalanceAdjustmentDashboardReadiness::class)->isReady()) {
+            if ($role === UserRole::Owner && app(BalanceAdjustmentDashboardReadiness::class)->isReady()) {
                 $response->assertSee($adjustmentUrl, false);
             } else {
                 $response->assertDontSee($adjustmentUrl, false);

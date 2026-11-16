@@ -204,6 +204,7 @@ class TelegramCatalogIntents
                         'number' => (string) ($index + 1),
                     ]).($member->manualUnlimited ? ' · ∞' : ''),
                 ];
+
                 return [
                     ...$label,
                     'style' => $member->isAvailable ? 'primary' : 'danger',

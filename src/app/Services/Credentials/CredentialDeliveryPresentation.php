@@ -117,6 +117,7 @@ final class CredentialDeliveryPresentation
                     if ($stopped) {
                         break;
                     }
+
                     continue;
                 }
 

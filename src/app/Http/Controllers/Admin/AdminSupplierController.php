@@ -30,9 +30,9 @@ use App\Services\Suppliers\SupplierCurrencyRateManager;
 use App\Services\Suppliers\SupplierExchangeRate;
 use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Suppliers\SupplierManager;
-use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Suppliers\SupplierMoney;
 use App\Services\Suppliers\SupplierOrderHistoryReconciliationService;
+use App\Services\Telegram\TelegramOutboundEffectService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
@@ -304,7 +304,6 @@ final class AdminSupplierController extends Controller
             ->where('effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
             ->whereIn('source_id', $manualReviews->pluck('order_id'))
             ->orderByDesc('sequence')->orderByDesc('created_at')->groupLimit(1, 'source_id')->get()->keyBy('source_id');
-
 
         return view('admin.suppliers.purchases', compact('purchases', 'fulfillments', 'invoice', 'manualReviews', 'manualReceiptEffects', 'takeoverEffects'));
     }

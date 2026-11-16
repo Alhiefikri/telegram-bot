@@ -62,6 +62,7 @@ final class SupplierManualTakeoverNotice
             $message = $claimed->outcome_metadata['message'] ?? null;
             if (! is_string($message) || $message === '') {
                 $this->ledger->finalizeNotDeliverable((string) $claimed->id, $claimed->claim_token, 'supplier_takeover_notice_missing');
+
                 return;
             }
             $label = $claimed->outcome_metadata['contact_label'] ?? '💬 Contact Admin';

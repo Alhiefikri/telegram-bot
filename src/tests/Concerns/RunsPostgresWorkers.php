@@ -18,7 +18,7 @@ trait RunsPostgresWorkers
 {
     /**
      * @param  callable(int): string  $work
-     * @return list<array{ok: bool, value?: string, class?: string, exit_code: int, signal?: int|null}>
+     * @return list<array{ok: bool, value?: string, class?: string, message?: string, exit_code: int, signal?: int|null}>
      */
     protected function runConcurrentWorkers(int $count, callable $work, string $workspacePrefix = 'usdt-race'): array
     {
@@ -86,14 +86,18 @@ trait RunsPostgresWorkers
             file_put_contents($resultFile, json_encode(['ok' => true, 'value' => $value], JSON_THROW_ON_ERROR), LOCK_EX);
             exit(0);
         } catch (Throwable $exception) {
-            file_put_contents($resultFile, json_encode(['ok' => false, 'class' => $exception::class], JSON_THROW_ON_ERROR), LOCK_EX);
+            $result = ['ok' => false, 'class' => $exception::class];
+            if ($exception instanceof RuntimeException && str_starts_with($exception->getMessage(), 'Timed out waiting for worker marker [')) {
+                $result['message'] = $exception->getMessage();
+            }
+            file_put_contents($resultFile, json_encode($result, JSON_THROW_ON_ERROR), LOCK_EX);
             exit(1);
         }
     }
 
     /**
      * @param  array<int, int>  $children
-     * @return list<array{ok: bool, value?: string, class?: string, exit_code: int, signal?: int|null}>
+     * @return list<array{ok: bool, value?: string, class?: string, message?: string, exit_code: int, signal?: int|null}>
      */
     protected function collectResults(array $children, string $directory): array
     {
@@ -118,7 +122,7 @@ trait RunsPostgresWorkers
         $deadline = microtime(true) + 15;
         while (! is_file($path)) {
             if (microtime(true) > $deadline) {
-                throw new RuntimeException('Timed out waiting for a balance concurrency worker.');
+                throw new RuntimeException('Timed out waiting for worker marker ['.basename($path).'].');
             }
             usleep(10_000);
         }
@@ -135,13 +139,13 @@ trait RunsPostgresWorkers
     }
 
     /**
-     * @param  list<array{ok: bool, value?: string, class?: string, exit_code: int, signal?: int|null}>  $results
+     * @param  list<array{ok: bool, value?: string, class?: string, message?: string, exit_code: int, signal?: int|null}>  $results
      */
     protected function assertWorkersSucceeded(array $results): void
     {
         foreach ($results as $result) {
-            $this->assertTrue($result['ok'], json_encode($result, JSON_THROW_ON_ERROR));
-            $this->assertSame(0, $result['exit_code'], json_encode($result, JSON_THROW_ON_ERROR));
+            $this->assertTrue($result['ok'], json_encode($results, JSON_THROW_ON_ERROR));
+            $this->assertSame(0, $result['exit_code'], json_encode($results, JSON_THROW_ON_ERROR));
         }
     }
 

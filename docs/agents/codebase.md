@@ -585,6 +585,8 @@ unprotected claim with no live lease can be reclaimed after 24 hours. Per-Custom
 unaccepted capacity and bounded cleanup fail closed rather than discard a live
 financial attempt. The retention contract and SQLite legacy-orphan caveat are in
 [ADR-0025](../adr/0025-api-order-idempotency-claims.md).
+The PostgreSQL deletion guard compares these timestamp-without-time-zone values
+against the application’s Asia/Jakarta wall clock, matching claim and lease writes.
 
 Issue #637 hardens that claim boundary: takeover lock waits use at most 500 ms and
 never more than the monotonic two-second wait's remaining time. Model saves and the

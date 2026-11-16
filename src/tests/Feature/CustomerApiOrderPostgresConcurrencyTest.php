@@ -577,6 +577,64 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
         }
     }
 
+    public function test_retention_guard_uses_application_time_independent_of_database_session_timezone(): void
+    {
+        $customer = $this->customer(6_000_000);
+        $product = $this->product(2);
+        $principal = $this->principal($customer);
+        $request = $this->request('retention-timezone', $product);
+        $claim = CustomerApiOrderClaim::forceCreate([
+            'customer_id' => $customer->id,
+            'operation' => CustomerApiOrderClaim::OPERATION_CREATE_ORDER,
+            'idempotency_key' => 'retention-timezone',
+            'fingerprint' => $request->fingerprint(),
+            'credential_id' => $principal->credentialId,
+            'state' => CustomerApiOrderClaim::STATE_IN_PROGRESS,
+            'attempt_token' => str_repeat('a', 32),
+            'lease_expires_at' => now()->addMinute(),
+            'preference' => BalancePaymentPreference::UsdFirst->value,
+            'preference_source' => 'account',
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'expected_usd_total_micro' => 2_000_000,
+            'created_at' => now()->subHours(25),
+            'updated_at' => now()->subHours(25),
+        ]);
+        $recent = CustomerApiOrderClaim::forceCreate([
+            'customer_id' => $customer->id,
+            'operation' => CustomerApiOrderClaim::OPERATION_CREATE_ORDER,
+            'idempotency_key' => 'retention-recent',
+            'fingerprint' => $this->request('retention-recent', $product)->fingerprint(),
+            'credential_id' => $principal->credentialId,
+            'state' => CustomerApiOrderClaim::STATE_IN_PROGRESS,
+            'attempt_token' => str_repeat('b', 32),
+            'lease_expires_at' => now()->subMinute(),
+            'preference' => BalancePaymentPreference::UsdFirst->value,
+            'preference_source' => 'account',
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'expected_usd_total_micro' => 2_000_000,
+            'created_at' => now()->subHours(20),
+            'updated_at' => now()->subHours(20),
+        ]);
+
+        DB::statement("SET TIME ZONE 'Pacific/Kiritimati'");
+        try {
+            $this->assertDatabaseConstraintRejects(
+                fn () => DB::table('customer_api_order_claims')->where('id', $claim->id)->delete(),
+                'Customer API order claim history is immutable',
+            );
+            $this->assertDatabaseConstraintRejects(
+                fn () => DB::table('customer_api_order_claims')->where('id', $recent->id)->delete(),
+                'Customer API order claim history is immutable',
+            );
+            DB::table('customer_api_order_claims')->where('id', $claim->id)->update(['lease_expires_at' => now()->subMinute()]);
+            $this->assertSame(1, DB::table('customer_api_order_claims')->where('id', $claim->id)->delete());
+        } finally {
+            DB::disconnect();
+        }
+    }
+
     public function test_worker_suspended_after_takeover_cannot_purchase_after_its_claim_is_reclaimed(): void
     {
         $customer = $this->customer(6_000_000);
@@ -616,6 +674,7 @@ final class CustomerApiOrderPostgresConcurrencyTest extends TestCase
                     return $this->apiPlace($principal, 'reclaimed-stale-worker', $product);
                 }
                 $this->waitForMarker($directory.'/taken-over');
+                DB::statement("SET TIME ZONE 'UTC'");
                 DB::table('customer_api_order_claims')->where('id', $claim->id)->update(['lease_expires_at' => now()->subMinute()]);
                 $result = $this->apiPlace($principal, 'reclaim-trigger', $product);
                 touch($directory.'/reclaimed');

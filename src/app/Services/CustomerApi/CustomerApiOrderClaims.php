@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\CustomerApiOrderClaim;
 use App\Models\Order;
 use App\Models\Product;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -275,6 +276,7 @@ final class CustomerApiOrderClaims
             if (! in_array((string) $error->getCode(), ['55P03', '40P01'], true)) {
                 throw $error;
             }
+
             // The row lock outlived the bound (or a deadlock aborted us): the
             // attempt never won, so the caller keeps polling until its deadline.
             return false;
@@ -291,7 +293,7 @@ final class CustomerApiOrderClaims
      * rejected-claim quota. PostgreSQL has built-in SHA-256 and indexed order
      * origin/checkout keys; SQLite still checks the hash before deletion.
      */
-    private function withoutProtectedOrders(\Illuminate\Database\Eloquent\Builder $claims): \Illuminate\Database\Eloquent\Builder
+    private function withoutProtectedOrders(Builder $claims): Builder
     {
         $claims->whereNotExists(fn ($orders) => $orders->selectRaw('1')->from('orders')
             ->whereColumn('orders.api_order_claim_id', 'customer_api_order_claims.id'));
