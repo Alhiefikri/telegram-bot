@@ -88,6 +88,13 @@ evidence are in [the outbound architecture contract](../telegram-outbound-effect
 Regression entry point: `NotificationRetentionDryRunTest`; existing ledger,
 broadcast, price notification, receipt and owned Order readers remain authoritative.
 
+For database-growth fixes, operational cleaner holds/budgets and the proposed
+payload-normalization/replay-safe retention protocol, read
+[database growth and retention safety](../database-growth-retention-safety.md).
+Stock materialization cursors are Customer IDs; price effect cursors are recipient
+IDs. `DataRetentionTest` covers the bounded cleaner and payment/audit evidence
+holds. No destructive notification retention is enabled.
+
 ## Proposed IDR/USDT balance extension (A0 #537)
 
 The [source audit and lock graph](../balance-a0-baseline.md) maps actual money writers, nested checkout/lifecycle/supplier/warranty/refund/compensation callers and I1–I12 gaps. Its [lock-site appendix](../balance-a0-lock-sites.md) names each explicit acquisition by file/symbol. [ADR-0019](../adr/0019-idr-usdt-economic-sources-and-receipt-claims.md) is **Proposed**, not accepted: it defines typed economic sources, additive USDT ledger, global receipt aliases/parent transaction claims, counterpart accounting and durable work. R1 (#541) implements the additive receipt registry and claim seam; R2 (#542) routes external payment writers through it and backfills legacy identities; I1 (#543) adds the IDR adjustment request boundary; I3 (#545) adds the linked IDR reversal; U1 (#546) adds the separate Customer USDT account/entry/accounting schema, typed economic sources and exact micro-USDT contract; U2 (#547) adds bounded USDT reconciliation, scoped drift freeze, receipt/settlement comparison, custody/treasury coverage and idempotent accounting aggregates. USDT funding stays gated. Runtime ownership below remains current for every other writer.

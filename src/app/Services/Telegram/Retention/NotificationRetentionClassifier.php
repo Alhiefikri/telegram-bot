@@ -18,7 +18,7 @@ final class NotificationRetentionClassifier
     public const SPECS = [
         'supplier-health' => ['supplier_health_events', 'SupplierHealthEvent', ['id', 'created_at'], null, null],
         'stock-events' => ['stock_notification_events', 'StockNotificationEvent', ['id', 'inventory_movement_id', 'recipients_snapshotted_at', 'materialization_cursor', 'created_at', 'updated_at'], 'stock-recipients', 'recipients_snapshotted_at'],
-        'stock-recipients' => ['stock_notification_recipients', 'StockNotificationRecipient', ['id', 'stock_notification_event_id', 'sent_at', 'failed_at', 'terminal_failed_at', 'created_at', 'updated_at'], 'stock-events', 'stock_notification_event_id'],
+        'stock-recipients' => ['stock_notification_recipients', 'StockNotificationRecipient', ['id', 'stock_notification_event_id', 'customer_id', 'sent_at', 'failed_at', 'terminal_failed_at', 'created_at', 'updated_at'], 'stock-events', 'stock_notification_event_id'],
         'price-events' => ['product_price_change_events', 'ProductPriceChangeEvent', ['id', 'recipients_materialized_at', 'recipient_effect_cursor', 'store_channel_sent_at', 'store_channel_failed_at', 'created_at', 'updated_at'], 'price-recipients', 'recipients_materialized_at'],
         'price-recipients' => ['product_price_change_notification_recipients', 'ProductPriceChangeNotificationRecipient', ['id', 'event_id', 'sent_at', 'failed_at', 'created_at', 'updated_at'], 'price-events', 'event_id'],
         'broadcasts' => ['telegram_broadcasts', 'TelegramBroadcast', ['id', 'status', 'recipient_count', 'pending_count', 'recipients_materialized_at', 'completed_at', 'created_at', 'updated_at'], 'broadcast-recipients', 'recipients_materialized_at'],
@@ -214,7 +214,10 @@ final class NotificationRetentionClassifier
                     }
                     if ($children !== [] && in_array($kind, ['stock-events', 'price-events'], true)) {
                         $cursor = $kind === 'stock-events' ? $row->materialization_cursor : $row->recipient_effect_cursor;
-                        if ($cursor === null || (int) $cursor < max(array_column($children, 'id'))) {
+                        // Stock snapshots advance through Customers; price effects advance through recipient rows.
+                        $cursorKey = $kind === 'stock-events' ? 'customer_id' : 'id';
+                        $lastMaterializedId = max(array_column($children, $cursorKey));
+                        if ($lastMaterializedId !== null && ($cursor === null || (int) $cursor < (int) $lastMaterializedId)) {
                             $reasons[] = 'active_obligation';
                             $terminal = false;
                         }
