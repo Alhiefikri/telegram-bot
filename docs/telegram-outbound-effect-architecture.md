@@ -724,6 +724,13 @@ qualification tool. `state_only_terminal` is intermediate ledger/source
 classification, never full archive eligibility. `archive_review_candidates`
 and `delete_candidates` are zero. Existing sources remain replayable.
 
+The 12 November local safety patch corrects the stock cursor namespace
+(Customer ID, not recipient ID) without changing these deletion gates.
+See [database growth and retention safety](database-growth-retention-safety.md)
+for the bounded operational cleaner, lifecycle evidence holds, verified
+independent-deletion resurrection hazard, proposed payload normalization and
+replay-safe retention, local PostgreSQL evidence, and rollout/rollback gates.
+
 `age_bucket` compares the latest bounded observed source/child/delivery/review
 activity against the scenario cutoff, inclusive at exactly the cutoff.
 Missing/inconsistent/future timestamps make this bucket unproven. Even a valid

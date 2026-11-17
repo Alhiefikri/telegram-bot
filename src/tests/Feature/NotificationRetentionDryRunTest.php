@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 final class NotificationRetentionDryRunTest extends TestCase
@@ -244,6 +245,81 @@ final class NotificationRetentionDryRunTest extends TestCase
         [$report, $exit] = $this->runScan(['--family' => 'broadcast-recipients']);
         $this->assertSame(0, $exit);
         $this->assertArrayHasKey('missing_effect', $report['reason_counts']);
+    }
+
+    public static function stockMaterializationCases(): array
+    {
+        return [
+            'complete customer cursor below recipient id' => [7, 700, 7, true, true, false, false],
+            'complete customer cursor above recipient id' => [700, 7, 700, true, true, false, false],
+            'complete marker with cursor behind customer' => [700, 7, 7, true, true, true, false],
+            'incomplete snapshot with covered customers' => [700, 7, 700, false, true, true, true],
+            'complete Store Channel with zero customer cursor' => [null, 700, 0, true, true, false, false],
+            'incomplete Store Channel snapshot' => [null, 700, 0, false, true, true, true],
+            'complete snapshot without recipient effect' => [7, 700, 7, true, false, true, false],
+            'complete snapshot without customer cursor' => [7, 700, null, true, true, true, false],
+        ];
+    }
+
+    #[DataProvider('stockMaterializationCases')]
+    public function test_stock_materialization_classification_uses_customer_cursor_not_recipient_id(
+        ?int $customerId,
+        int $recipientId,
+        ?int $cursor,
+        bool $snapshotComplete,
+        bool $effectMaterialized,
+        bool $activeObligation,
+        bool $partialAudience,
+    ): void {
+        $stamp = '2026-01-01 12:00:00';
+        $product = Product::factory()->create();
+        if ($customerId !== null) {
+            Customer::factory()->create(['id' => $customerId]);
+        }
+        $movement = InventoryMovement::factory()->create([
+            'product_id' => $product->id, 'created_at' => $stamp, 'stock_notification_sent_at' => $stamp,
+        ]);
+        $eventId = DB::table('stock_notification_events')->insertGetId([
+            'inventory_movement_id' => $movement->id, 'kind' => 'restocked',
+            'recipients_snapshotted_at' => $snapshotComplete ? $stamp : null,
+            'materialization_cursor' => $cursor, 'created_at' => $stamp, 'updated_at' => $stamp,
+        ]);
+        DB::table('stock_notification_recipients')->insert([
+            'id' => $recipientId, 'stock_notification_event_id' => $eventId, 'customer_id' => $customerId,
+            'recipient_type' => $customerId === null ? 'store_channel' : 'customer',
+            'telegram_id' => 'SECRET-CHAT', 'text' => 'SECRET-MESSAGE',
+            'sent_at' => $stamp, 'created_at' => $stamp, 'updated_at' => $stamp,
+        ]);
+        if ($effectMaterialized) {
+            $this->effect('sent', [
+                'effect_type' => 'stock.notification_recipient', 'source_type' => 'App\\Models\\StockNotificationRecipient',
+                'source_id' => (string) $recipientId,
+            ]);
+        }
+        $before = hash_file('sha256', $this->database);
+        $families = $effectMaterialized ? ['stock-events', 'stock-recipients', 'effects'] : ['stock-events', 'stock-recipients'];
+        foreach ($families as $family) {
+            [$report, $exit] = $this->runScan(['--family' => $family]);
+            $this->assertSame(0, $exit, $family);
+            $this->assertFalse($report['partial'], $family);
+            $this->assertSame(1, $report['roots_evaluated'], $family);
+            $this->assertSame(1, $report['protected'], $family);
+            $this->assertSame(0, $report['archive_review_candidates'], $family);
+            $this->assertSame(0, $report['delete_candidates'], $family);
+            $this->assertSame((int) ! $activeObligation, $report['state_only_terminal'], $family);
+            $detail = $report['details'][0];
+            $this->assertSame('protected', $detail['classification'], $family);
+            $this->assertSame(! $activeObligation, $detail['state_only_terminal'], $family);
+            $this->assertSame($activeObligation, in_array('active_obligation', $detail['reasons'], true), $family);
+            $this->assertSame($partialAudience, in_array('partial_audience', $detail['reasons'], true), $family);
+            $this->assertSame(! $effectMaterialized, in_array('missing_effect', $detail['reasons'], true), $family);
+            foreach (['reference_unproven', 'hold_unproven', 'archive_unverified', 'age_unproven'] as $reason) {
+                $this->assertContains($reason, $detail['reasons'], $family);
+            }
+        }
+        $this->assertSame($before, hash_file('sha256', $this->database));
+        Queue::assertNothingPushed();
+        Http::assertNothingSent();
     }
 
     public function test_dry_run_preserves_dedupe_manual_review_and_strict_receipt_ordering(): void
