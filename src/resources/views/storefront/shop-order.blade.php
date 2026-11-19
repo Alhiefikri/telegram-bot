@@ -32,10 +32,10 @@
                 </a>
 
                 @php
-                    $headline = $isPaid ? 'Pembayaran terverifikasi' : ($isBscPayment ? 'Order USDT BEP20 dibuat' : ($isBinancePay ? 'Order Binance Pay dibuat' : (($isManualQris || $isQrisPayable) ? 'Order QRIS dibuat' : $qrisReadinessTitle)));
+                    $headline = $isPaid ? 'Pembayaran terverifikasi' : ($isBscPayment ? 'Order USDT BEP20 dibuat' : ($isBinancePay ? 'Order Binance Pay dibuat' : ($qrisExpired ? 'Batas pembayaran terlewati' : (($isManualQris || $isQrisPayable || $isHostedQris) ? 'Invoice QRIS' : $qrisReadinessTitle))));
                     $summary = $isPaid
                         ? 'sudah lunas. Detail pesanan dan pengiriman tersedia di bawah.'
-                        : ($isBscPayment ? 'sudah mencadangkan stok. Bayar tepat USDT melalui BNB Smart Chain (BEP20) sebelum masa order berakhir.' : ($isBinancePay ? 'sudah mencadangkan stok. Bayar USDT sesuai instruksi sebelum masa order berakhir.' : (($isManualQris || $isQrisPayable) ? 'sudah mencadangkan stok. Bayar sesuai total QRIS sebelum masa order berakhir.' : 'sudah mencadangkan stok, tetapi QRIS belum siap dibayar. Gunakan tombol retry di bawah atau hubungi bantuan jika tetap gagal.')));
+                        : ($isBscPayment ? 'sudah mencadangkan stok. Bayar tepat USDT melalui BNB Smart Chain (BEP20) sebelum masa order berakhir.' : ($isBinancePay ? 'sudah mencadangkan stok. Bayar USDT sesuai instruksi sebelum masa order berakhir.' : ($qrisExpired ? 'sudah melewati batas pembayaran. Jangan bayar QR lama. Jika sudah membayar, hubungi bantuan dengan bukti pembayaran.' : (($isManualQris || $isQrisPayable || $isHostedQris) ? 'menunggu pembayaran.' : 'QRIS belum siap dibayar. Cek status di bawah atau hubungi bantuan.'))));
 
                     if ($isTerminal && ! $isPaid) {
                         $headline = match ($order->order_status?->value) {
@@ -62,7 +62,7 @@
                         </p>
                     </div>
                     <span class="invoice-status inline-flex w-fit shrink-0 items-center rounded-lg px-3 py-2 text-sm font-bold">
-                        {{ $isPaid ? 'Terverifikasi' : ($isPendingPayment ? 'Menunggu bayar' : 'Status akhir') }}
+                        {{ $isPaid ? 'Terverifikasi' : ($isPendingPayment ? (($qrisExpired && ! $isBscPayment && ! $isBinancePay) ? 'Batas bayar terlewati' : 'Menunggu bayar') : 'Status akhir') }}
                     </span>
                 </div>
 
@@ -84,7 +84,7 @@
 
                     <details id="invoice-support" class="invoice-followup-details mt-4 overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[5px_5px_0_var(--sf-shadow)]" data-invoice-followup-details>
                         <summary class="flex min-h-12 cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-black text-[var(--sf-ink)] focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)] focus:ring-inset">
-                            <span>Info invoice, Recovery Key, dan bantuan</span>
+                            <span class="inline-flex items-center gap-2"><svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M9.5 9a2.5 2.5 0 1 1 4.2 1.84c-.95.74-1.7 1.3-1.7 2.66M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>Info invoice, Recovery Key, dan bantuan</span>
                             <span aria-hidden="true" class="text-lg">+</span>
                         </summary>
                         <div class="grid gap-4 border-t-[3px] border-[var(--sf-border)] p-3 sm:p-4">

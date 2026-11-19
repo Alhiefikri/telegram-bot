@@ -44,6 +44,25 @@ class StorefrontShopOrderPresenter
             'USDT_BEP20' => 'bsc',
             default => 'qris',
         };
+        $isManualQris = $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL';
+        $isHostedQris = filled($invoice->hostedPaymentUrl)
+            && ($isSakurupiah || ($invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted'));
+        $qrisDeadline = $paymentKind === 'qris'
+            ? collect([
+                $paymentDeadline,
+                $invoice->payment?->expired_at,
+                $invoice->payment?->provider_expires_at,
+                $invoice->order->expires_at,
+            ])->filter()->min()
+            : $paymentDeadline;
+        $qrisExpired = $invoice->qrisReadinessState === 'expired' || $qrisDeadline?->isPast() === true;
+        $qrisTotal = match (true) {
+            ! $invoice->isPendingPayment(), $qrisExpired => null,
+            $isManualQris => $this->storefront->idr($invoice->order->total_amount),
+            $invoice->isQrisPayable && $invoice->payableAmount !== null => $invoice->payableAmountDisplay
+                ?? $this->storefront->idr($invoice->payableAmount),
+            default => null,
+        };
         $pollIntervalMs = max(
             20_000,
             (int) config('services.storefront.payment_status_poll_interval_seconds', 20) * 1_000,
@@ -110,11 +129,12 @@ class StorefrontShopOrderPresenter
             'paymentDeadlineTimestamp' => $paymentDeadline?->toIso8601String(),
             'isBinancePay' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'BINANCE_PAY_ID',
             'isBscPayment' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'USDT_BEP20',
-            'isManualQris' => $invoice->payment?->provider === 'manual' && $invoice->payment?->method === 'QR_MANUAL',
-            'isSakurupiah' => $isSakurupiah,
-            'isWijayaPay' => $isWijayaPay,
-            'isHostedSakurupiah' => $isSakurupiah && $invoice->isPendingPayment() && filled($invoice->hostedPaymentUrl) && ! filled($invoice->qrisImageSource),
-            'isHostedPakasir' => $invoice->payment?->provider === 'pakasir' && $invoice->payment?->method === 'hosted',
+            'isManualQris' => $isManualQris,
+            'isHostedQris' => $isHostedQris && ! $qrisExpired,
+            'qrisAutoReadinessPoll' => ($isSakurupiah || $isWijayaPay) && ! $invoice->isQrisPayable,
+            'qrisExpired' => $qrisExpired,
+            'qrisTotal' => $qrisTotal,
+            'qrisDeadline' => $qrisDeadline,
             'qrisFeePayer' => $invoice->qrisFeePayer,
             'binanceVerificationMode' => $invoice->binanceVerificationStatus?->mode ?? 'amount_unique',
             'binanceVerificationStatus' => $this->binanceStatus($invoice->binanceVerificationStatus),

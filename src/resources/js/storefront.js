@@ -487,6 +487,14 @@ function initPaymentCountdowns() {
       if (remainingSeconds <= 0) {
         value.textContent = "00:00:00";
         countdown.setAttribute("data-countdown-expired", "true");
+        const panel = countdown.closest(".invoice-qris-panel");
+        panel?.querySelector("[data-invoice-qris]")?.setAttribute("hidden", "");
+        panel
+          ?.querySelector("[data-invoice-qris-instruction]")
+          ?.setAttribute("hidden", "");
+        panel
+          ?.querySelector("[data-invoice-qris-expired]")
+          ?.removeAttribute("hidden");
         if (state) {
           state.textContent =
             countdown.getAttribute("data-countdown-expired-title") || "";
@@ -959,6 +967,15 @@ function initShopPaymentStatus() {
         ) {
           setStatus(copy.terminal_title, data.message || copy.terminal_message);
           markTerminal();
+          if (paymentKind === "qris") {
+            const panel = container.closest(".invoice-qris-panel");
+            panel
+              ?.querySelector("[data-invoice-qris]")
+              ?.setAttribute("hidden", "");
+            panel
+              ?.querySelector("[data-invoice-qris-instruction]")
+              ?.setAttribute("hidden", "");
+          }
           button.hidden = true;
           followup?.classList.remove("hidden");
           if (isBinance && data.is_terminal === true) {

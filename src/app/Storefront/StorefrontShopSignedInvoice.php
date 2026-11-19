@@ -69,6 +69,7 @@ class StorefrontShopSignedInvoice
         $sakurupiahPayable = $projection->isPendingPayment ? $sakurupiahResult?->payable() : null;
         $wijayapayPayable = $projection->isPendingPayment ? $wijayapayResult?->payable() : null;
         $payable = $klikPayable ?? $sakurupiahPayable ?? $wijayapayPayable;
+        $qrisImageDataUri = $this->qrisImageDataUri($projection, $payment);
 
         return new StorefrontShopSignedInvoiceReadResult(
             order: $order,
@@ -87,8 +88,8 @@ class StorefrontShopSignedInvoice
             qrisReadinessTitle: $qrisReadiness['title'],
             qrisReadinessMessage: $qrisReadiness['message'],
             qrisRetryLabel: $qrisReadiness['retry_label'],
-            qrisImageDataUri: $this->qrisImageDataUri($projection, $payment),
-            qrisImageSource: $this->qrisImageSource($order, $projection, $payment, $klikPayable, $sakurupiahPayable, $wijayapayPayable),
+            qrisImageDataUri: $qrisImageDataUri,
+            qrisImageSource: $this->qrisImageSource($order, $projection, $klikPayable, $sakurupiahPayable, $wijayapayPayable) ?? $qrisImageDataUri,
             payableAmountDisplay: $payable?->totalAmountDisplay(),
             qrisEffectiveExpiresAt: $payable?->effectiveExpiresAt(),
             hostedPaymentUrl: $this->hostedPaymentUrl($projection, $payment, $sakurupiahPayable),
@@ -222,7 +223,6 @@ class StorefrontShopSignedInvoice
     private function qrisImageSource(
         Order $order,
         OrderLifecycleProjection $projection,
-        ?Payment $payment,
         ?KlikQrisPayableNativeQris $klikPayable,
         ?SakurupiahPayableInvoice $sakurupiahPayable,
         ?WijayaPayPayableInvoice $wijayapayPayable = null,
@@ -243,11 +243,7 @@ class StorefrontShopSignedInvoice
             return $this->invoiceUrls->qrisImage($order);
         }
 
-        if (! $this->hasPayableNativePakasirQris($payment)) {
-            return null;
-        }
-
-        return $this->qrisImageDataUri($projection, $payment);
+        return null;
     }
 
     private function hostedPaymentUrl(
