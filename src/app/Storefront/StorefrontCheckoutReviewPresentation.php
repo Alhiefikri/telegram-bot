@@ -61,6 +61,15 @@ final readonly class StorefrontCheckoutReviewPresentation
      */
     public function viewData(): array
     {
+        $paymentOptions = array_map(static fn (array $option): array => [
+            ...$option,
+            'label' => match ($option['value']) {
+                'qris' => 'QRIS',
+                'binance_pay_id' => 'Binance Pay',
+                'usdt_bep20' => 'USDT BSC (BEP20)',
+            },
+        ], $this->paymentOptions);
+
         $directSource = $this->source instanceof StorefrontDirectCheckoutReviewSource
             ? $this->source
             : null;
@@ -84,7 +93,7 @@ final readonly class StorefrontCheckoutReviewPresentation
             'cartCurrency' => $this->currency,
             'cartHasConflicts' => $this->hasConflicts,
             'checkoutSnapshot' => $this->snapshot,
-            'checkoutPaymentOptions' => $this->paymentOptions,
+            'checkoutPaymentOptions' => $paymentOptions,
             'checkoutDefaultPaymentMethod' => $this->defaultPaymentMethod,
             'checkoutMaintenance' => $this->maintenance,
             'checkoutMaintenanceNotice' => $this->maintenanceNotice,

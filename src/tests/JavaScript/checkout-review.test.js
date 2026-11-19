@@ -11,58 +11,6 @@ function reviewConfig(overrides = {}) {
     baseIdrPrice: 10_000,
     baseUsdtPrice: 1_000_000,
     tiers: [],
-    items: [
-      {
-        productId: "17",
-        quantity: 1,
-        idrUnitPrice: 10_000,
-        usdtUnitPrice: 1_000_000,
-        idrSubtotal: 10_000,
-        tierMinimum: null,
-      },
-    ],
-    initialIdrSubtotal: 10_000,
-    initialUsdtSubtotal: 1_000_000,
-    initialItemCount: 1,
-    canSubmit: true,
-    selectedPaymentMethod: "qris",
-    paymentOptions: [
-      {
-        value: "qris",
-        label: "QRIS",
-        description: "Bayar melalui invoice QRIS.",
-        provider: "klikqris",
-        amountKind: "idr",
-        amountLabel: "Subtotal review (IDR)",
-        amountHelp: "Total final pada invoice.",
-        submitLabel: "Buat invoice QRIS",
-      },
-      {
-        value: "binance_pay_id",
-        label: "Binance Pay ID",
-        description: "Bayar melalui Binance Pay.",
-        provider: "binance",
-        amountKind: "usdt",
-        amountLabel: "Total dasar USDT / estimasi",
-        amountHelp: "Nominal final pada invoice.",
-        submitLabel: "Buat invoice Binance Pay",
-      },
-      {
-        value: "sakurupiah",
-        label: "QRIS Sakurupiah",
-        description: "Bayar melalui Sakurupiah.",
-        provider: "sakurupiah",
-        amountKind: "idr",
-        amountLabel: "Subtotal review (IDR)",
-        amountHelp: "Total final pada invoice.",
-        submitLabel: "Buat invoice Sakurupiah",
-      },
-    ],
-    stickyPaymentLabel: "Metode pembayaran belum tersedia",
-    stickyAmountLabel: "Total review (IDR)",
-    stickySubmitLabel: "Lanjut bayar",
-    contactDefaultHelp: "Kontak bantuan bersifat opsional.",
-    contactDisclosureOpen: false,
     ...overrides,
   };
 }
@@ -87,16 +35,13 @@ test("quantity review switches prices at each reached tier and restores them bel
 
   assert.equal(review.quote.idrUnitPrice, 10_000);
   assert.equal(review.quote.idrSubtotal, 10_000);
-  assert.equal(review.itemTierNote("17"), "");
+  assert.equal(review.tierNote, "");
 
   review.quantity = 2;
   assert.equal(review.quote.idrUnitPrice, 9_000);
   assert.equal(review.quote.idrSubtotal, 18_000);
   assert.equal(review.quote.usdtSubtotal, 1_800_000);
-  assert.equal(
-    review.itemTierNote("17"),
-    "Harga grosir diterapkan mulai 2 unit."
-  );
+  assert.equal(review.tierNote, "Harga grosir diterapkan mulai 2 unit.");
 
   review.quantity = 3;
   assert.equal(review.quote.appliedTierMinimum, 2);
@@ -140,10 +85,9 @@ test("base prices remain the quote when no tier applies or USDT is unavailable",
     usdtSubtotal: null,
     appliedTierMinimum: null,
   });
-  assert.equal(review.itemIdrUnitPrice("17"), "Rp\u00a07.500");
-  assert.equal(review.itemUsdtUnitPrice("17"), "—");
-  assert.equal(review.itemHasUsdtPrice("17"), false);
-  assert.equal(review.itemTierNote("17"), "");
+  assert.equal(review.subtotalIdr, "Rp\u00a022.500");
+  assert.equal(review.subtotalUsdt, "Belum tersedia");
+  assert.equal(review.tierNote, "");
 });
 
 test("invalid tier schedules reject the whole preview instead of accepting a partial quote", () => {
@@ -219,7 +163,7 @@ test("invalid tier schedules reject the whole preview instead of accepting a par
       reviewConfig({ tiers: invalidSchedule.tiers })
     );
     assert.equal(review.quote, null, invalidSchedule.name);
-    assert.equal(review.currentSubtotalIdr, null, invalidSchedule.name);
+    assert.equal(review.subtotalIdr, "Belum tersedia", invalidSchedule.name);
   }
 });
 
@@ -228,7 +172,7 @@ test("quantity bounds, step controls, and unsafe arithmetic reject false quotes"
     reviewConfig({ quantity: 11, maximumQuantity: 10 })
   );
   assert.equal(outsideMaximum.quote, null);
-  assert.equal(outsideMaximum.summaryItemCount, "—");
+  assert.equal(outsideMaximum.subtotalIdr, "Belum tersedia");
 
   const steps = checkoutReview(
     reviewConfig({ quantity: 1, maximumQuantity: 3 })
@@ -249,7 +193,7 @@ test("quantity bounds, step controls, and unsafe arithmetic reject false quotes"
     })
   );
   assert.equal(idrOverflow.quote, null);
-  assert.equal(idrOverflow.orderSubtotalIdrText, "—");
+  assert.equal(idrOverflow.subtotalIdr, "Belum tersedia");
 
   const usdtOverflow = checkoutReview(
     reviewConfig({
@@ -259,228 +203,8 @@ test("quantity bounds, step controls, and unsafe arithmetic reject false quotes"
     })
   );
   assert.equal(usdtOverflow.quote, null);
-  assert.equal(usdtOverflow.orderSubtotalUsdtText, "—");
+  assert.equal(usdtOverflow.subtotalUsdt, "Belum tersedia");
 
   const invalidUsdtBase = checkoutReview(reviewConfig({ baseUsdtPrice: 0 }));
   assert.equal(invalidUsdtBase.quote, null);
-});
-test("payment changes project copy, required contact, and native form validity", () => {
-  let otherFieldsValid = false;
-  let contactComplete = false;
-  let review;
-  review = checkoutReview(reviewConfig());
-  review.$refs = {
-    checkoutForm: {
-      matches(selector) {
-        assert.equal(selector, ":valid");
-        return otherFieldsValid && (!review.contactRequired || contactComplete);
-      },
-    },
-  };
-
-  assert.equal(review.contactRequired, false);
-  assert.equal(review.stickySubmitDisabled, true);
-
-  review.selectedPaymentMethod = "binance_pay_id";
-  assert.equal(review.stickyPaymentLabel, "Binance Pay ID");
-  assert.equal(review.stickyAmountLabel, "Total dasar USDT / estimasi");
-  assert.equal(review.stickyAmountValue, "1 USDT");
-  assert.equal(review.stickySubmitLabel, "Buat invoice Binance Pay");
-  assert.equal(review.stickySubmitDisabled, true);
-
-  otherFieldsValid = true;
-  review.refreshFormValidity();
-  assert.equal(review.stickySubmitDisabled, false);
-
-  review.selectedPaymentMethod = "sakurupiah";
-  review.refreshFormValidity();
-  assert.equal(review.contactRequired, true);
-  assert.equal(
-    review.contactRequirementText,
-    "WhatsApp wajib untuk metode pembayaran ini"
-  );
-  assert.match(review.contactHelpText, /Nomor WhatsApp diperlukan/);
-  assert.equal(review.stickySubmitDisabled, true);
-
-  contactComplete = true;
-  review.refreshFormValidity();
-  assert.equal(review.stickySubmitDisabled, false);
-});
-
-test("Sakurupiah keeps checkout disabled until a WhatsApp number is valid", () => {
-  const review = checkoutReview(reviewConfig());
-  const channel = {
-    value: "telegram",
-    error: "",
-    setCustomValidity(message) {
-      this.error = message;
-    },
-  };
-  const contact = { value: "@username", pattern: "", title: "" };
-  review.$refs = {
-    checkoutForm: {
-      elements: {
-        namedItem(name) {
-          return name === "support_contact_channel" ? channel : contact;
-        },
-      },
-      matches(selector) {
-        assert.equal(selector, ":valid");
-        return (
-          channel.error === "" &&
-          (!contact.pattern ||
-            new RegExp(`^(?:${contact.pattern})$`, "v").test(contact.value))
-        );
-      },
-    },
-  };
-
-  review.selectedPaymentMethod = "sakurupiah";
-  review.refreshFormValidity();
-  assert.equal(review.stickySubmitDisabled, true);
-  assert.match(channel.error, /WhatsApp/);
-
-  channel.value = "whatsapp";
-  review.refreshFormValidity();
-  assert.equal(review.stickySubmitDisabled, true);
-  contact.value = "+628123456789";
-  review.refreshFormValidity();
-  assert.equal(review.stickySubmitDisabled, false);
-
-  review.selectedPaymentMethod = "qris";
-  channel.value = "telegram";
-  contact.value = "@username";
-  review.refreshFormValidity();
-  assert.equal(review.stickySubmitDisabled, false);
-  assert.equal(contact.pattern, "");
-});
-
-test("payment metadata hydrates from server-rendered option attributes", () => {
-  const review = checkoutReview(
-    reviewConfig({ paymentOptions: [], selectedPaymentMethod: "" })
-  );
-  const option = {
-    dataset: {
-      paymentValue: "sakurupiah",
-      paymentLabel: "QRIS Sakurupiah",
-      paymentDescription: "Bayar melalui Sakurupiah.",
-      paymentProvider: "sakurupiah",
-      paymentAmountKind: "idr",
-      paymentAmountLabel: "Subtotal review (IDR)",
-      paymentAmountHelp: "Total final pada invoice.",
-      paymentSubmitLabel: "Buat invoice Sakurupiah",
-    },
-  };
-  const root = {
-    querySelectorAll: () => [option],
-    querySelector(selector) {
-      if (selector === 'input[name="payment_method"]:checked') {
-        return { value: "sakurupiah" };
-      }
-      if (selector === "[data-checkout-sticky-payment]") {
-        return { textContent: "QRIS Sakurupiah" };
-      }
-      if (selector === "[data-checkout-sticky-amount-label]") {
-        return { textContent: "Subtotal review (IDR)" };
-      }
-      if (selector === "[data-checkout-sticky-submit]") {
-        return { textContent: "Buat invoice Sakurupiah" };
-      }
-      if (selector === "[data-checkout-contact-help]") {
-        return { dataset: { defaultContactHelp: "Kontak opsional." } };
-      }
-      if (selector === "[data-checkout-contact-details]") {
-        return { open: true };
-      }
-      return null;
-    },
-  };
-  review.$root = root;
-  review.$refs = {};
-  review.$nextTick = (callback) => callback();
-
-  review.init();
-
-  assert.equal(review.selectedPaymentMethod, "sakurupiah");
-  assert.equal(review.selectedPaymentLabel, "QRIS Sakurupiah");
-  assert.equal(review.contactRequired, true);
-  assert.equal(review.contactDefaultHelp, "Kontak opsional.");
-  assert.equal(review.contactDisclosureOpen, true);
-});
-
-test("sticky measurement listeners and observer are released on destroy", () => {
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  const originalResizeObserver = Object.getOwnPropertyDescriptor(
-    globalThis,
-    "ResizeObserver"
-  );
-  let addedListener;
-  let removedListener;
-  let observedElement;
-  let disconnected = false;
-
-  class TestResizeObserver {
-    constructor(callback) {
-      this.callback = callback;
-    }
-
-    observe(element) {
-      observedElement = element;
-    }
-
-    disconnect() {
-      disconnected = true;
-    }
-  }
-
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
-      matchMedia: () => ({ matches: true }),
-      addEventListener: (name, listener) => {
-        assert.equal(name, "resize");
-        addedListener = listener;
-      },
-      removeEventListener: (name, listener) => {
-        assert.equal(name, "resize");
-        removedListener = listener;
-      },
-    },
-  });
-  Object.defineProperty(globalThis, "ResizeObserver", {
-    configurable: true,
-    value: TestResizeObserver,
-  });
-
-  try {
-    const review = checkoutReview(reviewConfig());
-    const stickyAction = { getBoundingClientRect: () => ({ height: 72 }) };
-    review.$root = { querySelectorAll: () => [], querySelector: () => null };
-    review.$refs = { stickyAction };
-    review.$nextTick = (callback) => callback();
-
-    review.init();
-    assert.equal(observedElement, stickyAction);
-    assert.equal(review.stickyBottomPadding, "72px");
-    assert.equal(typeof addedListener, "function");
-
-    review.destroy();
-    assert.equal(disconnected, true);
-    assert.equal(removedListener, addedListener);
-  } finally {
-    if (originalWindow) {
-      Object.defineProperty(globalThis, "window", originalWindow);
-    } else {
-      delete globalThis.window;
-    }
-    if (originalResizeObserver) {
-      Object.defineProperty(
-        globalThis,
-        "ResizeObserver",
-        originalResizeObserver
-      );
-    } else {
-      delete globalThis.ResizeObserver;
-    }
-  }
 });

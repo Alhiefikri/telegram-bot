@@ -1494,33 +1494,6 @@
       display: none !important;
     }
   }
-  .storefront-checkout-page .storefront-sticky-action {
-    display: none;
-  }
-
-  .js-enabled .storefront-checkout-page .storefront-sticky-action {
-    display: flex;
-  }
-
-  .js-enabled
-    .storefront-checkout-page
-    [data-checkout-selected-option]
-    [data-checkout-submit] {
-    display: none;
-  }
-
-  @media (min-width: 768px) {
-    .storefront-checkout-page .storefront-sticky-action {
-      display: none !important;
-    }
-
-    .js-enabled
-      .storefront-checkout-page
-      [data-checkout-selected-option]
-      [data-checkout-submit] {
-      display: inline-flex;
-    }
-  }
   /*
    * Compact family chooser: image, family copy, variants, and the active
    * option share one product panel instead of stacking separate sections.
@@ -1664,36 +1637,160 @@
     box-shadow: 0 18px 32px -18px rgb(18 35 63 / 0.42);
   }
 
-  .storefront-checkout-page #checkout-form {
-    box-shadow: 0 16px 32px -24px rgb(18 35 63 / 0.35);
+  .storefront-checkout-page {
+    --checkout-action: #1d4ed8;
+    --checkout-action-ink: #fff;
+    --checkout-focus: #1d4ed8;
+    --checkout-error: #9f1d2d;
+    --checkout-error-surface: #fff1f2;
+
+    overflow-wrap: anywhere;
+    accent-color: var(--checkout-focus);
   }
 
-  .storefront-checkout-page [data-checkout-item] {
-    border-color: var(--sf-border);
-    box-shadow: none;
+  [data-theme="dark"] .storefront-checkout-page {
+    --checkout-action: #93c5fd;
+    --checkout-action-ink: #0b1220;
+    --checkout-focus: #93c5fd;
+    --checkout-error: #fecdd3;
+    --checkout-error-surface: #431923;
   }
 
-  .storefront-checkout-page [data-checkout-payment-option] {
-    box-shadow: none;
-  }
-  .storefront-checkout-page .checkout-payment-column {
-    min-width: 0;
+  .storefront-checkout-page :focus-visible {
+    outline: 3px solid var(--checkout-focus);
+    outline-offset: 2px;
   }
 
-  .storefront-checkout-page .checkout-payment-panel,
-  .storefront-checkout-page .checkout-support-panel {
-    box-shadow: 0 16px 32px -24px rgb(18 35 63 / 0.35);
+  .storefront-checkout-page [id] {
+    scroll-margin-top: 0.75rem;
   }
 
-  .storefront-checkout-page .checkout-item-media {
-    border-color: var(--sf-border);
+  .checkout-frame {
+    padding-inline: clamp(12px, 4vw, 24px);
   }
 
-  .storefront-checkout-page .checkout-item-media img {
+  .checkout-review {
+    padding-inline: clamp(12px, 3vw, 16px);
+  }
+
+  .checkout-step {
+    inline-size: 44px;
+  }
+
+  .js-enabled #checkout-quantity {
+    appearance: textfield;
+  }
+
+  .js-enabled #checkout-quantity::-webkit-inner-spin-button {
+    appearance: none;
+  }
+
+  body:not(.js-enabled) .checkout-theme {
+    display: none;
+  }
+
+  .checkout-control {
+    border-color: var(--sf-muted);
+    background: var(--sf-surface);
+  }
+
+  .checkout-control[aria-invalid="true"] {
+    border-color: var(--checkout-error);
+  }
+
+  .checkout-error,
+  .checkout-alert {
+    color: var(--checkout-error);
+  }
+
+  .checkout-alert {
+    border-color: var(--checkout-error);
+    background: var(--checkout-error-surface);
+  }
+
+  .checkout-submit {
+    background: var(--checkout-action);
+    color: var(--checkout-action-ink);
+  }
+
+  .checkout-submit:enabled:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+
+  .checkout-submit:disabled {
+    background: var(--sf-surface-warm);
+    color: var(--sf-muted);
+  }
+
+  .checkout-step,
+  .checkout-rail-copy,
+  .checkout-usdt,
+  .checkout-whatsapp {
+    display: none;
+  }
+
+  .js-enabled .checkout-step,
+  .checkout-review:has(
+      [name="payment_method"][data-payment-provider="sakurupiah"]:is(
+          :checked,
+          [type="hidden"]
+        )
+    )
+    summary
+    .checkout-whatsapp {
     display: block;
-    height: 100%;
-    width: 100%;
-    object-fit: cover;
+  }
+
+  /* Mirror the native checked rail even when Alpine is unavailable. */
+  .checkout-review:has(
+      [name="payment_method"][value="qris"]:is(:checked, [type="hidden"])
+    )
+    [data-rail="qris"],
+  .checkout-review:has(
+      [name="payment_method"][value="binance_pay_id"]:is(
+          :checked,
+          [type="hidden"]
+        )
+    )
+    [data-rail="binance_pay_id"],
+  .checkout-review:has(
+      [name="payment_method"][value="usdt_bep20"]:is(:checked, [type="hidden"])
+    )
+    [data-rail="usdt_bep20"],
+  .checkout-review:has(
+      [name="payment_method"][data-payment-provider="sakurupiah"]:is(
+          :checked,
+          [type="hidden"]
+        )
+    )
+    p
+    .checkout-whatsapp {
+    display: inline;
+  }
+
+  .checkout-review:has(
+      [name="payment_method"]:not([value="qris"]):is(:checked, [type="hidden"])
+    )
+    .checkout-idr,
+  .checkout-review:has(
+      [name="payment_method"][data-payment-provider="sakurupiah"]:is(
+          :checked,
+          [type="hidden"]
+        )
+    )
+    .checkout-optional-contact,
+  .checkout-review[data-submitting="true"]
+    .checkout-submit
+    .checkout-rail-copy {
+    display: none;
+  }
+
+  .checkout-review:has(
+      [name="payment_method"]:not([value="qris"]):is(:checked, [type="hidden"])
+    )
+    .checkout-usdt {
+    display: inline;
   }
 
   .storefront-invoice-page {
