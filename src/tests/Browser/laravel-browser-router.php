@@ -29,6 +29,12 @@ $app->booted(function () use ($app): void {
     config([
         'services.turnstile.site_key' => 'browser-only-turnstile-site-key',
         'services.turnstile.secret_key' => 'browser-only-turnstile-secret-key',
+        'services.sakurupiah.sandbox_api_id' => 'browser-only-sakurupiah-id',
+        'services.sakurupiah.sandbox_api_key' => 'browser-only-sakurupiah-key',
+        'services.sakurupiah.sandbox_callback_url' => 'https://store.example.test/api/webhook/sakurupiah',
+        'services.sakurupiah.sandbox_return_url' => 'https://store.example.test/shop/orders',
+        'services.sakurupiah.sandbox_callback_allowed_hosts' => ['store.example.test'],
+        'services.sakurupiah.sandbox_return_allowed_hosts' => ['store.example.test'],
     ]);
 
     // Keep the real verifier; only its external provider is a browser fixture.

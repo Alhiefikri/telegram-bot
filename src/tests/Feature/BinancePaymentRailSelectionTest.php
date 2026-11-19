@@ -369,8 +369,9 @@ class BinancePaymentRailSelectionTest extends TestCase
 
         $this->get(route('storefront.shop.checkout.product', $product))
             ->assertOk()
-            ->assertSee('Bayar dengan Binance Pay')
-            ->assertSee('Bayar dengan USDT BSC BEP20')
+            ->assertSee('Buat invoice Binance Pay')
+            ->assertSee('Buat invoice USDT BSC (BEP20)')
+            ->assertSee('value="usdt_bep20"', false)
             ->assertSee('name="product_id" value="'.$product->id.'"', false);
     }
 

@@ -462,42 +462,6 @@ class StorefrontShopCheckoutTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_checkout_mobile_sticky_action_reuses_the_canonical_checkout_form(): void
-    {
-        $this->manualPaymentModeIsActive();
-        $product = $this->availableProduct(['name' => 'Sticky checkout product', 'price_amount' => 45000, 'stock' => 2]);
-
-        $html = $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
-            ->assertOk()
-            ->getContent();
-
-        $this->assertSame(1, substr_count($html, 'data-checkout-sticky-action'));
-        $this->assertStringContainsString('id="checkout-form"', $html);
-        $this->assertStringContainsString('form="checkout-form"', $html);
-        $this->assertStringContainsString('data-checkout-sticky-submit', $html);
-        $this->assertStringContainsString('data-checkout-sticky-total', $html);
-        $this->assertMatchesRegularExpression('/data-checkout-sticky-submit[^>]*disabled/', $html);
-        $this->assertStringContainsString('storefront-checkout-page', $html);
-        $this->assertStringContainsString('aria-controls="checkout-form"', $html);
-        $this->assertMatchesRegularExpression('/data-checkout-sticky-payment[^>]*>[^<]*QRIS[^<]*<\/strong>/', $html);
-        $this->assertMatchesRegularExpression('/data-checkout-sticky-amount-label[^>]*>Subtotal review \(IDR\)<\/span>/', $html);
-        $this->assertMatchesRegularExpression('/data-checkout-sticky-total[^>]*>Rp45\.000<\/strong>/', $html);
-        $this->assertSame(1, substr_count($html, 'data-checkout-submit'));
-        $this->assertSame(3, substr_count($html, 'form="checkout-form"'));
-        foreach ([
-            'product_id',
-            'quantity',
-            'buyer_name',
-            'email',
-            'payment_method',
-            'support_contact_channel',
-            'support_contact_value',
-            'terms_accepted',
-        ] as $field) {
-            $this->assertSame(1, substr_count($html, 'name="'.$field.'"'), $field.' must remain canonical.');
-        }
-    }
-
     public function test_landing_catalog_renders_page_checkout_and_empty_stock_state(): void
     {
         $this->manualPaymentModeIsActive();
@@ -560,13 +524,13 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
-            ->assertSee('Review produk sebelum bayar.')
+            ->assertSee('Ringkasan pesanan')
             ->assertDontSee('checkoutManual()', false)
             ->assertDontSee('Beli lewat Telegram')
             ->assertSee('action="'.route('storefront.shop.checkout').'?from=', false)
             ->assertSee('method="POST"', false)
             ->assertSee('name="payment_method" value="qris"', false)
-            ->assertSee('Buat invoice QRIS &amp; lanjut bayar', false);
+            ->assertSee('Buat invoice QRIS');
     }
 
     public function test_page_checkout_renders_accessible_native_payment_controls(): void
@@ -587,11 +551,10 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
-            ->assertSee('Review produk sebelum bayar.')
+            ->assertSee('Ringkasan pesanan')
             ->assertSee('type="radio"', false)
             ->assertSee('name="payment_method"', false)
-            ->assertSee('Bayar dengan Binance Pay')
-            ->assertSee('Buat invoice Binance Pay &amp; lanjut bayar', false)
+            ->assertSee('Buat invoice Binance Pay')
             ->assertDontSee('data-storefront-checkout-scroll', false)
             ->assertDontSee('data-product=', false);
     }
@@ -619,8 +582,9 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $html = $this->get($response->headers->get('Location'))
             ->assertOk()
-            ->assertSee('Review produk sebelum bayar.')
+            ->assertSee('Ringkasan pesanan')
             ->assertSee('Retry Checkout Product')
+            ->assertSee('Rp20.000')
             ->assertSee('name="product_id"', false)
             ->assertSee('name="quantity"', false)
             ->assertSee('id="checkout-buyer-name"', false)
@@ -768,7 +732,7 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
-            ->assertSee('Bayar dengan Binance Pay');
+            ->assertSee('Buat invoice Binance Pay');
         $settings->update(['binance_pay_enabled' => false]);
 
         $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,

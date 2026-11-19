@@ -47,18 +47,24 @@ class StorefrontShopCheckoutReviewController extends Controller
             'source' => $this->urls->checkoutPageSource($returnUrl),
         ]);
 
+        $oldProductId = $request->old('product_id');
+        $restoredQuantity = in_array($oldProductId, [$product->getKey(), (string) $product->getKey()], true)
+            ? $request->old('quantity')
+            : null;
+
         return $this->render($pages->directCheckoutReview(
             $product,
-            $request->query('quantity'),
+            $restoredQuantity ?? $request->query('quantity'),
             $returnUrl,
-        ));
+        ), $restoredQuantity);
     }
 
-    private function render(StorefrontCheckoutReviewPresentation $review): Response
+    private function render(StorefrontCheckoutReviewPresentation $review, mixed $restoredQuantity = null): Response
     {
         return response()
             ->view('storefront.shop-checkout', $review->viewData() + [
                 'checkoutChallengeSiteKey' => $this->challenge->siteKey(),
+                'restoredCheckoutQuantity' => is_scalar($restoredQuantity) ? $restoredQuantity : null,
             ])
             ->header('Cache-Control', 'no-store, private')
             ->header('Referrer-Policy', 'no-referrer');

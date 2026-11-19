@@ -33,12 +33,14 @@ function optionalSafeInteger(value) {
 }
 
 function formatIdr(amount) {
-  return Number.isSafeInteger(amount) ? idrFormatter.format(amount) : "—";
+  return Number.isSafeInteger(amount)
+    ? idrFormatter.format(amount)
+    : "Belum tersedia";
 }
 
 function formatUsdt(microAmount) {
   if (!Number.isSafeInteger(microAmount)) {
-    return "—";
+    return "Belum tersedia";
   }
 
   return `${(microAmount / 1_000_000).toFixed(6).replace(/\.?0+$/, "")} USDT`;
@@ -113,79 +115,6 @@ function normalizeTiers(
   }
 
   return tiers;
-}
-
-function normalizePaymentOptions(rawOptions) {
-  if (!Array.isArray(rawOptions)) {
-    return [];
-  }
-
-  return rawOptions
-    .filter(
-      (option) =>
-        option &&
-        typeof option === "object" &&
-        typeof option.value === "string" &&
-        typeof option.label === "string"
-    )
-    .map((option) => ({
-      value: option.value,
-      label: option.label,
-      description:
-        typeof option.description === "string" ? option.description : "",
-      provider: typeof option.provider === "string" ? option.provider : "",
-      amountKind: option.amountKind === "usdt" ? "usdt" : "idr",
-      amountLabel:
-        typeof option.amountLabel === "string" ? option.amountLabel : "",
-      amountHelp:
-        typeof option.amountHelp === "string" ? option.amountHelp : "",
-      submitLabel:
-        typeof option.submitLabel === "string" ? option.submitLabel : "",
-    }));
-}
-
-function paymentOptionsFrom(root) {
-  const options = Array.from(
-    root?.querySelectorAll?.("[data-checkout-payment-option]") ?? []
-  ).map(({ dataset }) => ({
-    value: dataset.paymentValue,
-    label: dataset.paymentLabel,
-    description: dataset.paymentDescription,
-    provider: dataset.paymentProvider,
-    amountKind: dataset.paymentAmountKind,
-    amountLabel: dataset.paymentAmountLabel,
-    amountHelp: dataset.paymentAmountHelp,
-    submitLabel: dataset.paymentSubmitLabel,
-  }));
-
-  return normalizePaymentOptions(options);
-}
-
-function readText(root, selector) {
-  return root?.querySelector?.(selector)?.textContent?.trim() ?? "";
-}
-
-function readContactDefaultHelp(root) {
-  const value = root?.querySelector?.("[data-checkout-contact-help]")?.dataset
-    ?.defaultContactHelp;
-  return typeof value === "string" ? value : "";
-}
-
-function normalizeItems(rawItems) {
-  if (!Array.isArray(rawItems)) {
-    return [];
-  }
-
-  return rawItems
-    .filter((item) => item && typeof item === "object")
-    .map((item) => ({
-      productId: String(item.productId ?? ""),
-      quantity: safeInteger(item.quantity),
-      idrUnitPrice: optionalSafeInteger(item.idrUnitPrice).value,
-      usdtUnitPrice: optionalSafeInteger(item.usdtUnitPrice).value,
-      idrSubtotal: optionalSafeInteger(item.idrSubtotal).value,
-      tierMinimum: safeInteger(item.tierMinimum),
-    }));
 }
 
 function quoteForQuantity(config, value) {
@@ -264,54 +193,12 @@ export default function checkoutReview(initialConfig = {}) {
         : null,
     baseUsdtPrice: validBaseUsdtPrice ? baseUsdtPrice.value : null,
     tiers,
-    items: normalizeItems(initialConfig.items),
-    initialIdrSubtotal: optionalSafeInteger(initialConfig.initialIdrSubtotal)
-      .value,
-    initialUsdtSubtotal: optionalSafeInteger(initialConfig.initialUsdtSubtotal)
-      .value,
-    initialItemCount: safeInteger(initialConfig.initialItemCount) ?? 0,
-    canSubmit: initialConfig.canSubmit === true,
-    paymentOptions: normalizePaymentOptions(initialConfig.paymentOptions),
-    defaultPaymentMethod:
-      typeof initialConfig.selectedPaymentMethod === "string"
-        ? initialConfig.selectedPaymentMethod
-        : "",
-    stickyDefaults: {
-      paymentLabel:
-        typeof initialConfig.stickyPaymentLabel === "string"
-          ? initialConfig.stickyPaymentLabel
-          : "Metode pembayaran belum tersedia",
-      amountLabel:
-        typeof initialConfig.stickyAmountLabel === "string"
-          ? initialConfig.stickyAmountLabel
-          : "Total review (IDR)",
-      submitLabel:
-        typeof initialConfig.stickySubmitLabel === "string"
-          ? initialConfig.stickySubmitLabel
-          : "Lanjut bayar",
-    },
-    contactDefaultHelp:
-      typeof initialConfig.contactDefaultHelp === "string"
-        ? initialConfig.contactDefaultHelp
-        : "",
-    contactDisclosureOpen: initialConfig.contactDisclosureOpen === true,
   };
 
   return {
     quantity: initialConfig.quantity ?? null,
-    selectedPaymentMethod: config.defaultPaymentMethod,
-    paymentOptionsState: config.paymentOptions,
-    stickyDefaults: { ...config.stickyDefaults },
-    contactDefaultHelp: config.contactDefaultHelp,
-    canSubmit: config.canSubmit,
-    formIsValid: false,
+    submitting: false,
     quantityAnnouncement: "",
-    contactDisclosureOpen: config.contactDisclosureOpen,
-    stickyActionHeight: 0,
-    mobileViewport: false,
-    resizeObserver: null,
-    resizeListener: null,
-    focusFrame: null,
 
     get currentQuantity() {
       const quantity = safeInteger(this.quantity);
@@ -326,197 +213,68 @@ export default function checkoutReview(initialConfig = {}) {
       return quoteForQuantity(config, this.quantity);
     },
 
-    get paymentOptions() {
-      return this.paymentOptionsState;
+    get subtotalIdr() {
+      return formatIdr(this.quote?.idrSubtotal);
     },
 
-    get selectedPaymentOption() {
-      return (
-        this.paymentOptions.find(
-          (option) => option.value === this.selectedPaymentMethod
-        ) ?? null
+    get subtotalUsdt() {
+      return formatUsdt(this.quote?.usdtSubtotal);
+    },
+
+    get tierNote() {
+      const minimum = this.quote?.appliedTierMinimum;
+      return minimum ? `Harga grosir diterapkan mulai ${minimum} unit.` : "";
+    },
+
+    syncContact() {
+      const form = this.$refs.checkoutForm;
+      if (!form) {
+        return;
+      }
+      const method = form.querySelector(
+        'input[name="payment_method"]:is(:checked, [type="hidden"])'
       );
-    },
-
-    get contactRequired() {
-      return this.selectedPaymentOption?.provider === "sakurupiah";
-    },
-
-    get contactRequirementText() {
-      return this.contactRequired
-        ? "WhatsApp wajib untuk metode pembayaran ini"
-        : "Opsional";
-    },
-
-    get contactHelpText() {
-      return this.contactRequired
-        ? "Nomor WhatsApp diperlukan untuk metode pembayaran ini. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan."
-        : this.contactDefaultHelp;
-    },
-
-    get selectedPaymentLabel() {
-      return (
-        this.selectedPaymentOption?.label ?? this.stickyDefaults.paymentLabel
-      );
-    },
-    get selectedPaymentDescription() {
-      return this.selectedPaymentOption?.description ?? "";
-    },
-
-    get selectedAmountLabel() {
-      return (
-        this.selectedPaymentOption?.amountLabel ??
-        this.stickyDefaults.amountLabel
-      );
-    },
-
-    get selectedAmountHelp() {
-      return this.selectedPaymentOption?.amountHelp ?? "";
-    },
-
-    get selectedAmountValue() {
-      return this.amountForKind(
-        this.selectedPaymentOption?.amountKind ?? "idr"
-      );
-    },
-
-    get stickyPaymentLabel() {
-      return this.selectedPaymentLabel;
-    },
-
-    get stickyAmountLabel() {
-      return this.selectedAmountLabel;
-    },
-
-    get stickyAmountValue() {
-      return this.selectedAmountValue;
-    },
-
-    get stickySubmitLabel() {
-      return (
-        this.selectedPaymentOption?.submitLabel ??
-        this.stickyDefaults.submitLabel
-      );
-    },
-
-    get stickySubmitDisabled() {
-      return (
-        !this.canSubmit ||
-        this.selectedPaymentOption === null ||
-        !this.formIsValid
-      );
-    },
-
-    get stickySubmitDescription() {
-      return this.canSubmit ? null : "checkout-submit-disabled-help";
-    },
-
-    get currentSubtotalIdr() {
-      return quantityEditable
-        ? (this.quote?.idrSubtotal ?? null)
-        : config.initialIdrSubtotal;
-    },
-
-    get currentSubtotalUsdt() {
-      return quantityEditable
-        ? (this.quote?.usdtSubtotal ?? null)
-        : config.initialUsdtSubtotal;
-    },
-
-    get summaryItemCount() {
-      return quantityEditable
-        ? (this.currentQuantity ?? "—")
-        : config.initialItemCount;
-    },
-
-    get stickyBottomPadding() {
-      return this.mobileViewport && this.stickyActionHeight > 0
-        ? `${this.stickyActionHeight}px`
-        : null;
-    },
-
-    formatIdr,
-    formatUsdt,
-
-    amountForKind(kind) {
-      return kind === "usdt"
-        ? formatUsdt(this.currentSubtotalUsdt)
-        : formatIdr(this.currentSubtotalIdr);
-    },
-
-    itemQuantityText(productId) {
-      if (quantityEditable) {
-        return this.currentQuantity === null
-          ? "Jumlah —"
-          : `Jumlah ${this.currentQuantity}`;
+      const required = method?.dataset.paymentProvider === "sakurupiah";
+      const channel = form.elements.namedItem("support_contact_channel");
+      const contact = form.elements.namedItem("support_contact_value");
+      if (!channel || !contact) {
+        return;
       }
 
-      const item = config.items.find(
-        (candidate) => candidate.productId === String(productId)
-      );
-      return item?.quantity === null
-        ? "Jumlah —"
-        : `Jumlah ${item?.quantity ?? "—"}`;
-    },
-
-    itemIdrUnitPrice(productId) {
-      if (quantityEditable) {
-        return formatIdr(this.quote?.idrUnitPrice ?? null);
+      if (required) {
+        this.$refs.contactDetails.open = true;
       }
-
-      const item = config.items.find(
-        (candidate) => candidate.productId === String(productId)
+      channel.required = contact.required = required;
+      channel.setCustomValidity(
+        required && channel.value !== "whatsapp"
+          ? "Pilih WhatsApp untuk metode pembayaran ini."
+          : ""
       );
-      return formatIdr(item?.idrUnitPrice ?? null);
-    },
-
-    itemUsdtUnitPrice(productId) {
-      if (quantityEditable) {
-        return formatUsdt(this.quote?.usdtUnitPrice ?? null);
+      if (required) {
+        contact.pattern = "\\+?[0-9][0-9 .\\-]{7,19}";
+        contact.title = "Masukkan nomor WhatsApp yang valid.";
+      } else {
+        contact.removeAttribute("pattern");
+        contact.removeAttribute("title");
       }
-
-      const item = config.items.find(
-        (candidate) => candidate.productId === String(productId)
-      );
-      return formatUsdt(item?.usdtUnitPrice ?? null);
     },
 
-    itemHasUsdtPrice(productId) {
-      return this.itemUsdtUnitPrice(productId) !== "—";
-    },
-
-    itemTierNote(productId) {
-      const minimum = quantityEditable
-        ? (this.quote?.appliedTierMinimum ?? null)
-        : (config.items.find(
-            (candidate) => candidate.productId === String(productId)
-          )?.tierMinimum ?? null);
-      return minimum === null
-        ? ""
-        : `Harga grosir diterapkan mulai ${minimum} unit.`;
-    },
-
-    itemHasTier(productId) {
-      return this.itemTierNote(productId) !== "";
-    },
-
-    itemIdrSubtotal(productId) {
-      if (quantityEditable) {
-        return formatIdr(this.quote?.idrSubtotal ?? null);
+    openInvalidDetails(event) {
+      const details = event.target.closest("details");
+      if (details) {
+        details.open = true;
       }
-
-      const item = config.items.find(
-        (candidate) => candidate.productId === String(productId)
-      );
-      return formatIdr(item?.idrSubtotal ?? null);
     },
 
-    get orderSubtotalIdrText() {
-      return formatIdr(this.currentSubtotalIdr);
-    },
-
-    get orderSubtotalUsdtText() {
-      return formatUsdt(this.currentSubtotalUsdt);
+    submit(event) {
+      if (
+        this.submitting ||
+        !event.currentTarget.querySelector("[data-checkout-submit]:enabled")
+      ) {
+        event.preventDefault();
+        return;
+      }
+      this.submitting = true;
     },
 
     stepQuantity(step) {
@@ -543,7 +301,6 @@ export default function checkoutReview(initialConfig = {}) {
         Math.max(config.minimumQuantity, current + increment)
       );
       this.announceQuantity();
-      this.refreshFormValidity();
     },
 
     announceQuantity() {
@@ -551,162 +308,24 @@ export default function checkoutReview(initialConfig = {}) {
       const quote = this.quote;
       if (quantity === null || quote === null) {
         this.quantityAnnouncement =
-          quantity === null
-            ? "Jumlah tidak valid; subtotal review belum tersedia."
-            : `Jumlah ${quantity} unit; subtotal review belum tersedia.`;
+          "Subtotal produk belum tersedia. Periksa jumlah.";
         return;
       }
 
-      this.quantityAnnouncement = `Jumlah ${quantity} unit; subtotal review ${formatIdr(quote.idrSubtotal)}.`;
-    },
-
-    refreshFormValidity() {
-      const channel = this.$refs?.checkoutForm?.elements?.namedItem?.(
-        "support_contact_channel"
+      const isUsdt = this.$refs?.checkoutForm?.querySelector(
+        'input[name="payment_method"]:is(:checked, [type="hidden"]):not([value="qris"])'
       );
-      const contact = this.$refs?.checkoutForm?.elements?.namedItem?.(
-        "support_contact_value"
-      );
-      if (channel && contact) {
-        channel.setCustomValidity(
-          this.contactRequired && channel.value !== "whatsapp"
-            ? "Pilih WhatsApp untuk metode pembayaran ini."
-            : ""
-        );
-        contact.pattern = this.contactRequired
-          ? "\\+?[0-9][0-9 .\\-]{7,19}"
-          : "";
-        contact.title = this.contactRequired
-          ? "Masukkan nomor WhatsApp yang valid."
-          : "";
-      }
-      const refresh = () => {
-        this.formIsValid = Boolean(
-          this.$refs?.checkoutForm?.matches?.(":valid")
-        );
-      };
-
-      if (typeof this.$nextTick === "function") {
-        this.$nextTick(refresh);
-      } else {
-        refresh();
-      }
+      const subtotal = isUsdt
+        ? formatUsdt(quote.usdtSubtotal)
+        : formatIdr(quote.idrSubtotal);
+      this.quantityAnnouncement = `Jumlah ${quantity} unit. Subtotal produk ${subtotal}.`;
     },
 
     init() {
-      const root = this.$root;
-      const options = paymentOptionsFrom(root);
-      if (options.length > 0) {
-        this.paymentOptionsState = options;
-      }
-
-      const checkedPayment = root?.querySelector?.(
-        'input[name="payment_method"]:checked'
-      );
-      const selectedOption = root
-        ?.querySelector?.("[data-checkout-selected-option]")
-        ?.getAttribute?.("data-payment-value");
-      const selectedMethod = checkedPayment?.value ?? selectedOption;
-      if (typeof selectedMethod === "string" && selectedMethod !== "") {
-        this.selectedPaymentMethod = selectedMethod;
-      }
-
-      const stickyPaymentLabel = readText(
-        root,
-        "[data-checkout-sticky-payment]"
-      );
-      const stickyAmountLabel = readText(
-        root,
-        "[data-checkout-sticky-amount-label]"
-      );
-      const stickySubmitLabel = readText(root, "[data-checkout-sticky-submit]");
-      this.stickyDefaults = {
-        paymentLabel: stickyPaymentLabel || this.stickyDefaults.paymentLabel,
-        amountLabel: stickyAmountLabel || this.stickyDefaults.amountLabel,
-        submitLabel: stickySubmitLabel || this.stickyDefaults.submitLabel,
-      };
-      this.contactDefaultHelp =
-        readContactDefaultHelp(root) || this.contactDefaultHelp;
-      const contactDetails = root?.querySelector?.(
-        "[data-checkout-contact-details]"
-      );
-      if (contactDetails) {
-        this.contactDisclosureOpen = contactDetails.open;
-      }
-
-      const errorSummary = root?.querySelector?.(
-        "[data-checkout-error-summary]"
-      );
-      if (
-        errorSummary &&
-        typeof window !== "undefined" &&
-        typeof window.requestAnimationFrame === "function"
-      ) {
-        this.focusFrame = window.requestAnimationFrame(() =>
-          errorSummary.focus?.({ preventScroll: true })
-        );
-      }
-
-      this.$nextTick?.(() => this.observeStickyAction());
-      this.refreshFormValidity();
-    },
-
-    updateViewport() {
-      this.mobileViewport =
-        typeof window !== "undefined" &&
-        typeof window.matchMedia === "function" &&
-        window.matchMedia("(max-width: 767px)").matches;
-    },
-
-    measureStickyAction() {
-      const height =
-        this.$refs?.stickyAction?.getBoundingClientRect?.().height ?? 0;
-      this.stickyActionHeight =
-        Number.isFinite(height) && height > 0 ? height : 0;
-    },
-
-    observeStickyAction() {
-      const stickyAction = this.$refs?.stickyAction;
-      if (!stickyAction) {
-        return;
-      }
-
-      this.updateViewport();
-      this.measureStickyAction();
-      if (
-        typeof window !== "undefined" &&
-        typeof window.addEventListener === "function"
-      ) {
-        this.resizeListener = () => {
-          this.updateViewport();
-          this.measureStickyAction();
-        };
-        window.addEventListener("resize", this.resizeListener, {
-          passive: true,
-        });
-      }
-
-      if (typeof ResizeObserver !== "undefined") {
-        this.resizeObserver = new ResizeObserver(() =>
-          this.measureStickyAction()
-        );
-        this.resizeObserver.observe(stickyAction);
-      }
-    },
-
-    destroy() {
-      this.resizeObserver?.disconnect();
-      this.resizeObserver = null;
-
-      if (this.resizeListener && typeof window !== "undefined") {
-        window.removeEventListener?.("resize", this.resizeListener);
-        this.resizeListener = null;
-      }
-
-      if (this.focusFrame !== null && typeof window !== "undefined") {
-        window.cancelAnimationFrame?.(this.focusFrame);
-        this.focusFrame = null;
-      }
+      this.$nextTick(() => {
+        this.syncContact();
+        this.$root.querySelector("[data-checkout-error-summary]")?.focus();
+      });
     },
   };
 }

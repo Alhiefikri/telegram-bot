@@ -164,14 +164,9 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertStringContainsString('Harga satuan', $html);
-        $this->assertStringContainsString('Rp24.000', $html);
+        $this->assertStringContainsString('Subtotal produk', $html);
+        $this->assertStringContainsString('Rp48.000', $html);
         $this->assertStringContainsString('Harga grosir diterapkan mulai 2 unit.', $html);
-        $this->assertStringContainsString('data-base-price="25000"', $html);
-        $this->assertStringContainsString('data-base-usdt-price="500000"', $html);
-        $this->assertStringContainsString('data-quantity-price-tiers=', $html);
-        $this->assertStringContainsString('"minimum_quantity":2', $html);
-        $this->assertStringContainsString('"minimum_quantity":4', $html);
     }
 
     public function test_retired_product_modal_route_returns_not_found(): void
@@ -528,10 +523,10 @@ class StorefrontProductCheckoutTest extends TestCase
         $mainHtml = substr($html, strpos($html, '<main'));
         $this->assertStringNotContainsString('role="dialog"', $mainHtml);
         $this->assertStringNotContainsString('data-storefront-checkout-scroll', $html);
-        $this->assertStringContainsString('Tambahkan email atau kontak bantuan', $html);
-        $this->assertStringContainsString('checkout-item-media', $html);
-        $this->assertStringContainsString('checkout-payment-column', $html);
-        $this->assertStringContainsString('Buat invoice QRIS &amp; lanjut bayar', $html);
+        $this->assertStringContainsString('Email atau kontak bantuan', $html);
+        $this->assertStringContainsString('Buat invoice QRIS', $html);
+        $this->assertSame(1, substr_count($html, 'Subtotal produk'));
+        $this->assertStringNotContainsString('Harga USDT satuan', $html);
         $this->assertStringNotContainsString('QR Manual', $html);
         $this->assertStringNotContainsString('KlikQRIS', $html);
         $this->assertStringContainsString('data-checkout-quantity-announcement', $html);
@@ -543,12 +538,6 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringContainsString('type="hidden" name="payment_method" value="qris"', $html);
         $this->assertStringNotContainsString('type="radio" name="payment_method"', $html);
         $this->assertStringNotContainsString('LONG MERCHANDISING DESCRIPTION SHOULD STAY OUT OF REVIEW', $html);
-
-        $this->assertTrue(
-            strpos($html, 'Produk yang dipilih') < strpos($html, 'Nama pembeli')
-                && strpos($html, 'Nama pembeli') < strpos($html, 'Tambahkan email atau kontak bantuan')
-                && strpos($html, 'Tambahkan email atau kontak bantuan') < strpos($html, 'Metode pembayaran dipilih'),
-        );
     }
 
     public function test_multiple_payment_choices_are_explicit_inside_a_closed_disclosure(): void
@@ -569,37 +558,10 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertStringContainsString('Ubah metode pembayaran', $html);
         $this->assertStringContainsString('type="radio" name="payment_method"', $html);
-        $this->assertStringContainsString('Bayar dengan Binance Pay', $html);
-        $this->assertStringContainsString('Total dasar USDT / estimasi', $html);
+        $this->assertStringContainsString('value="binance_pay_id"', $html);
+        $this->assertStringContainsString('Buat invoice Binance Pay', $html);
         $this->assertSame(0, preg_match('/<details id="checkout-payment-disclosure"[^>]*\\bopen\\b/', $html));
-    }
-
-    public function test_multiple_payment_choices_render_method_specific_copy_for_no_javascript(): void
-    {
-        config()->set('services.binance.pay_id', '987654321');
-        ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
-        $product = Product::factory()->create([
-            'name' => 'No JavaScript Payment Choices',
-            'price_amount' => 60000,
-            'usdt_price_amount' => 3_500_000,
-            'stock' => 4,
-            'reserved_stock' => 0,
-        ]);
-
-        $html = $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
-            ->assertOk()
-            ->getContent();
-
-        $this->assertSame(2, substr_count($html, 'data-checkout-payment-copy'));
-        $this->assertStringContainsString('data-payment-value="qris"', $html);
-        $this->assertStringContainsString('Subtotal review (IDR)', $html);
-        $this->assertStringContainsString('Buat invoice QRIS &amp; lanjut bayar', $html);
-        $this->assertStringContainsString('data-payment-value="binance_pay_id"', $html);
-        $this->assertStringContainsString('Total dasar USDT / estimasi', $html);
-        $this->assertStringContainsString('Buat invoice Binance Pay &amp; lanjut bayar', $html);
-        $this->assertSame(2, substr_count($html, 'data-checkout-submit'));
     }
 
     public function test_sakurupiah_review_marks_required_contact_controls_without_javascript(): void
@@ -644,10 +606,9 @@ class StorefrontProductCheckoutTest extends TestCase
             ->getContent();
 
         $this->assertSame(1, preg_match('/<details id="checkout-contact-details"[^>]*\bopen\b/', $html));
-        $this->assertSame(1, preg_match('/<select[^>]+name="support_contact_channel"[^>]+\brequired\b[^>]+aria-required="true"/', $html));
-        $this->assertSame(1, preg_match('/<input[^>]+name="support_contact_value"[^>]+type="text"[^>]+required\b[^>]+aria-required="true"/', $html));
-        $this->assertStringContainsString('value=""', $html);
-        $this->assertStringContainsString('Nomor WhatsApp diperlukan untuk metode pembayaran ini.', $html);
+        $this->assertMatchesRegularExpression('/<select[^>]+name="support_contact_channel"[^>]+\brequired\b/', $html);
+        $this->assertMatchesRegularExpression('/<input[^>]+name="support_contact_value"[^>]+\brequired\b/', $html);
+        $this->assertStringContainsString('WhatsApp wajib untuk QRIS', $html);
         Http::assertNothingSent();
     }
 
@@ -703,8 +664,7 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringContainsString('id="checkout-error-summary"', $html);
         $this->assertStringContainsString('autofocus', $html);
         $this->assertStringContainsString('data-focus-target="checkout-email"', $html);
-        $this->assertStringContainsString('<details id="checkout-contact-details"', $html);
-        $this->assertStringContainsString('id="checkout-contact-details" data-checkout-contact-details', $html);
+        $this->assertMatchesRegularExpression('/<details id="checkout-contact-details"[^>]*\bopen\b/', $html);
         $this->assertStringContainsString('value="invalid-email"', $html);
     }
 

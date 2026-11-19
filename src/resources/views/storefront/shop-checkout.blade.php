@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
+<html lang="{{ $metadata->htmlLocale() }}" class="bg-[var(--sf-paper)]">
 <head>
     @include('storefront.partials.head', ['metadata' => $metadata])
-    @if ($checkoutChallengeSiteKey !== null)
+    @if ($checkoutCanSubmit && $checkoutChallengeSiteKey !== null)
         <script>
             function checkoutChallengeStatus(message) {
                 const status = document.getElementById('checkout-challenge-status');
                 if (status) status.textContent = message;
             }
             function checkoutChallengeReady() {
-                checkoutChallengeStatus('Verifikasi selesai. Anda dapat melanjutkan checkout.');
+                checkoutChallengeStatus('Verifikasi selesai. Anda dapat membuat invoice.');
             }
             function checkoutChallengeExpired() {
                 checkoutChallengeStatus('Verifikasi kedaluwarsa. Tunggu verifikasi baru sebelum checkout.');
@@ -21,35 +21,34 @@
         <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer onerror="checkoutChallengeError()"></script>
     @endif
 </head>
-<body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white motion-reduce:animate-none">
-    <div class="storefront-shell storefront-checkout-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-clip">
-        @include('storefront.partials.header')
-
+<body class="text-[var(--sf-ink)] antialiased">
+    <div class="storefront-shell storefront-checkout-page flex min-h-screen flex-col">
+        <header class="checkout-frame mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-3 py-2">
+            <a href="{{ $homeUrl }}" class="inline-flex min-h-11 min-w-0 items-center" aria-label="Beranda {{ $brand }}">
+                @include('storefront.components.brand-mark', ['brand' => $brand])
+            </a>
+            <x-theme-toggle class="checkout-theme h-11 w-11 shrink-0 rounded-lg" />
+        </header>
         @php
+            $oldReviewField = static function (string $field): mixed {
+                $value = old($field);
+
+                return is_scalar($value) ? $value : null;
+            };
+            $checkoutQuantityInput = $restoredCheckoutQuantity ?? $checkoutQuantity;
+            $checkoutQuantityQuoted = filter_var($checkoutQuantityInput, FILTER_VALIDATE_INT) === $checkoutQuantity;
             $checkoutReviewConfig = [
                 'quantityEditable' => $checkoutSource === 'direct' && $checkoutProduct !== null,
-                'quantity' => old('quantity', $checkoutQuantity),
+                'quantity' => $checkoutQuantityInput,
                 'minimumQuantity' => 1,
                 'maximumQuantity' => $checkoutQuantityMax,
-                'baseIdrPrice' => $checkoutProductPresentation?->priceAmount ?? $cartItems->first()?->unitPrice,
-                'baseUsdtPrice' => $checkoutProductPresentation?->usdtPriceAmount ?? $cartItems->first()?->usdtUnitPrice,
+                'baseIdrPrice' => $checkoutProductPresentation?->priceAmount,
+                'baseUsdtPrice' => $checkoutProductPresentation?->usdtPriceAmount,
                 'tiers' => $checkoutProductPresentation?->reachableQuantityPriceTierData() ?? [],
-                'items' => $cartItems->map(static fn ($item): array => [
-                    'productId' => (string) $item->productId,
-                    'quantity' => $item->quantity,
-                    'idrUnitPrice' => $item->unitPrice,
-                    'usdtUnitPrice' => $item->usdtUnitPrice,
-                    'idrSubtotal' => $item->subtotal,
-                    'tierMinimum' => $item->hasAppliedQuantityPriceTier() ? $item->appliedTierMinimum : null,
-                ])->values()->all(),
-                'initialIdrSubtotal' => $cartSubtotal,
-                'initialUsdtSubtotal' => $cartUsdtSubtotal,
-                'initialItemCount' => $cartItemCount,
-                'canSubmit' => $checkoutCanSubmit,
             ];
         @endphp
-        <main class="flex-grow pb-[calc(7rem+env(safe-area-inset-bottom,0px))] pt-4 sm:pt-12 md:pb-16" x-data="checkoutReview(@js($checkoutReviewConfig))" x-ref="checkoutMain" x-bind:style="stickyBottomPadding ? { paddingBottom: stickyBottomPadding } : {}" @input="refreshFormValidity()" @change="refreshFormValidity()">
-            <section class="mx-auto max-w-5xl px-4 sm:px-6">
+        <main class="checkout-frame mx-auto w-full max-w-2xl flex-1 pb-8" x-data="checkoutReview(@js($checkoutReviewConfig))" @pageshow.window="submitting = false">
+            <section aria-labelledby="checkout-title" class="grid gap-2">
                 @php
                     $checkoutValidationMessages = $errors->getMessages();
                     $checkoutSessionError = session('storefront_checkout_error');
@@ -68,24 +67,20 @@
                         'support_contact_channel' => 'checkout-support-contact-channel',
                         'support_contact_value' => 'checkout-support-contact-value',
                         'terms_accepted' => 'checkout-terms-accepted',
+                        'cf-turnstile-response' => 'checkout-challenge',
                     ];
                     $checkoutFirstErrorField = array_key_first($checkoutValidationMessages);
                     $checkoutErrorTarget = $checkoutErrorTargets[$checkoutFirstErrorField] ?? 'checkout-recovery-action';
                 @endphp
 
-                <a id="checkout-recovery-action" href="{{ $checkoutReturnUrl }}" class="inline-flex min-h-11 items-center gap-2 text-sm font-black text-[var(--sf-ink)] underline-offset-4 hover:text-[var(--sf-accent)] hover:underline focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-blue)] focus-visible:outline-offset-2">
+                <a id="checkout-recovery-action" href="{{ $checkoutReturnUrl }}" class="inline-flex min-h-11 w-fit items-center gap-2 text-sm font-bold underline underline-offset-4">
                     <span aria-hidden="true">&larr;</span> {{ $checkoutReturnLabel }}
                 </a>
-
-                <div class="mt-4 max-w-3xl">
-                    <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Checkout web</p>
-                    <h1 class="mt-2 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-4xl">{{ $checkoutSource === 'direct' ? 'Review produk sebelum bayar.' : 'Review pesanan sebelum bayar.' }}</h1>
-                    <p class="mt-2 max-w-2xl text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $checkoutSource === 'direct' ? 'Pastikan produk, jumlah, dan metode pembayaran sudah benar. Stok baru dicadangkan setelah checkout berhasil.' : 'Pastikan item, jumlah, dan metode pembayaran sudah benar. Stok baru dicadangkan setelah checkout berhasil.' }}</p>
-                </div>
+                <h1 id="checkout-title" class="font-display text-2xl font-black tracking-tight sm:text-3xl">Ringkasan pesanan</h1>
 
                 @if ($checkoutErrorMessages->isNotEmpty())
-                    <section id="checkout-error-summary" tabindex="-1" autofocus data-checkout-error-summary data-focus-target="{{ $checkoutErrorTarget }}" role="alert" aria-labelledby="checkout-error-summary-title" class="mt-5 rounded-lg border-[3px] border-[#9f1d2d] bg-[#ffd9df] p-4 text-sm font-bold leading-6 text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-blue)] focus-visible:outline-offset-2">
-                        <h2 id="checkout-error-summary-title" class="font-display text-lg font-black">Perlu diperbaiki sebelum checkout</h2>
+                    <section id="checkout-error-summary" tabindex="-1" autofocus data-checkout-error-summary data-focus-target="{{ $checkoutErrorTarget }}" role="alert" aria-labelledby="checkout-error-summary-title" class="checkout-alert rounded-lg border p-3 text-sm leading-relaxed">
+                        <h2 id="checkout-error-summary-title" class="font-bold">{{ $checkoutValidationMessages === [] ? 'Checkout belum berhasil' : 'Periksa kembali isian checkout' }}</h2>
                         <ul class="mt-2 grid list-disc gap-1.5 pl-5">
                             @foreach ($checkoutValidationMessages as $field => $messages)
                                 @foreach ($messages as $message)
@@ -111,427 +106,218 @@
                     </section>
                 @endif
 
-                <div class="checkout-shell mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] lg:items-start">
-                    <div class="grid min-w-0 grid-cols-1 gap-4">
-                        <section class="checkout-summary-panel neo-panel bg-[var(--sf-surface)] p-4 sm:p-5" aria-labelledby="checkout-summary-title">
-                            <div class="flex flex-wrap items-start justify-between gap-3 border-b-[3px] border-dashed border-[var(--sf-border)] pb-4">
-                                <div>
-                                    <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-accent)]">Ringkasan</p>
-                                    <h2 id="checkout-summary-title" class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">{{ $checkoutSource === 'direct' ? 'Produk yang dipilih' : 'Item keranjang' }}</h2>
-                                </div>
-                                <span class="rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-xs font-black text-[var(--sf-ink)]" x-text="summaryItemCount + ' unit'">{{ $cartItemCount }} unit</span>
-                            </div>
+                @php
+                    $selectedPaymentMethod = old('payment_method', $checkoutDefaultPaymentMethod);
+                    if (! in_array($selectedPaymentMethod, array_column($checkoutPaymentOptions, 'value'), true)) {
+                        $selectedPaymentMethod = $checkoutPaymentOptions[0]['value'] ?? null;
+                    }
+                    $paymentOptionCount = count($checkoutPaymentOptions);
+                    $paymentHasSakurupiah = in_array('sakurupiah', array_column($checkoutPaymentOptions, 'provider'), true);
+                    $contactDisclosureOpen = $paymentHasSakurupiah || filled(old('email'))
+                        || filled(old('support_contact_channel')) || filled(old('support_contact_value'))
+                        || $errors->hasAny(['email', 'support_contact_channel', 'support_contact_value']);
+                    $termsAccepted = in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true);
+                    $checkoutHasRecoveryInput = $checkoutErrorMessages->isNotEmpty()
+                        || collect(['buyer_name', 'email', 'support_contact_channel', 'support_contact_value', 'payment_method', 'terms_accepted'])
+                            ->contains(static fn (string $field): bool => old($field) !== null);
+                    $showFields = $checkoutCanSubmit || $checkoutHasRecoveryInput;
+                    $reviewElement = $showFields ? 'form' : 'div';
+                @endphp
+                @if (! $checkoutCanSubmit)
+                    <section id="checkout-submit-disabled-help" class="checkout-alert rounded-lg border p-3 text-sm leading-relaxed" role="{{ $checkoutMaintenance->active ? 'status' : 'alert' }}">
+                        <h2 class="font-bold">{{ $checkoutMaintenance->active ? 'Checkout sedang maintenance' : ($cartHasConflicts ? 'Checkout belum siap' : 'Checkout belum tersedia') }}</h2>
+                        <p>{{ $checkoutMaintenance->active ? $checkoutMaintenanceNotice : ($checkoutUnavailableNotice ?? ($cartHasConflicts ? 'Item keranjang berubah atau tidak lagi tersedia. Sesuaikan keranjang terlebih dahulu; tidak ada order yang dibuat dari snapshot ini.' : 'Metode pembayaran belum tersedia. Coba lagi nanti atau hubungi bantuan.')) }}</p>
+                        <a href="{{ $checkoutReturnUrl }}" class="inline-flex min-h-11 items-center font-bold underline underline-offset-4">{{ $checkoutReturnLabel }}</a>
+                    </section>
+                @endif
 
-                            <div class="mt-4 grid gap-3">
-                                @foreach ($cartItems as $item)
-                                    @php
-                                        $checkoutItemImageUrl = $item->imageUrl;
-                                        if ($checkoutItemImageUrl === null && $checkoutSource === 'direct') {
-                                            $checkoutItemImageUrl = $checkoutProductPresentation?->cover?->imageUrl;
-                                        }
-                                    @endphp
-                                    <article class="min-w-0 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 sm:p-4" data-checkout-item="{{ $item->productId }}" data-checkout-unit-price="{{ $item->unitPrice ?? '' }}" data-checkout-unit-usdt-price="{{ $item->usdtUnitPrice ?? '' }}">
-                                        <div class="flex min-w-0 items-start gap-3 sm:gap-4">
-                                            <div class="checkout-item-media grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-lg border border-[var(--sf-border)] bg-[var(--sf-yellow)] text-2xl font-black text-[var(--sf-accent)] sm:h-20 sm:w-20" aria-hidden="true">
-                                                @if ($checkoutItemImageUrl)
-                                                    <img src="{{ $checkoutItemImageUrl }}" alt="" loading="eager" decoding="async" class="h-full w-full object-cover">
-                                                @else
-                                                    {{ mb_substr($item->name, 0, 1) }}
-                                                @endif
-                                            </div>
-                                            <div class="min-w-0 flex-1">
-                                                <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                                    <div class="min-w-0">
-                                                        <h3 class="break-words font-display text-lg font-black leading-6 text-[var(--sf-ink)]">{{ $item->name }}</h3>
-                                                        <p class="mt-1 break-words text-sm font-bold leading-6 text-[var(--sf-muted)]">
-                                                            <span data-checkout-item-quantity x-text="itemQuantityText($el.closest('[data-checkout-item]').dataset.checkoutItem)">Jumlah {{ $item->quantity }}</span>
-                                                            <span aria-hidden="true"> · </span>
-                                                            Harga satuan <span data-checkout-item-unit-price x-text="itemIdrUnitPrice($el.closest('[data-checkout-item]').dataset.checkoutItem)">{{ $item->unitPrice === null ? '—' : $storefront->idr($item->unitPrice) }}</span>
-                                                        </p>
-                                                        <p data-checkout-item-unit-usdt-price class="mt-1 text-xs font-bold leading-5 text-[var(--sf-muted)] @if ($item->usdtUnitPrice === null) hidden @endif" x-bind:class="{ hidden: !itemHasUsdtPrice($el.closest('[data-checkout-item]').dataset.checkoutItem) }">Harga USDT satuan <span x-text="itemUsdtUnitPrice($el.closest('[data-checkout-item]').dataset.checkoutItem)">{{ $item->usdtUnitPrice === null ? '—' : $storefront->usdt($item->usdtUnitPrice) }}</span></p>
-                                                        <p data-checkout-item-tier-note class="mt-1 text-xs font-bold leading-5 text-[var(--sf-muted)] @if (! $item->hasAppliedQuantityPriceTier()) hidden @endif" x-bind:class="{ hidden: !itemHasTier($el.closest('[data-checkout-item]').dataset.checkoutItem) }" x-text="itemTierNote($el.closest('[data-checkout-item]').dataset.checkoutItem)">@if ($item->hasAppliedQuantityPriceTier()) Harga grosir diterapkan mulai {{ $item->appliedTierMinimum }} unit. @endif</p>
-                                                        @if ($item->conflictMessage)
-                                                            <p role="alert" class="mt-2 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-sm font-black leading-6 text-[var(--sf-ink)]">{{ $item->conflictMessage }}</p>
-                                                        @endif
-                                                    </div>
-                                                    <p class="min-w-0 w-full shrink-0 text-left text-sm font-black leading-6 text-[var(--sf-ink)] sm:w-auto sm:text-right">
-                                                        <span class="block text-xs uppercase tracking-wide text-[var(--sf-muted)]">Subtotal review</span>
-                                                        <span data-checkout-item-subtotal class="inline-block max-w-full break-words" x-text="itemIdrSubtotal($el.closest('[data-checkout-item]').dataset.checkoutItem)">{{ $item->subtotal === null ? '—' : $storefront->idr($item->subtotal) }}</span>
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </article>
-                                @endforeach
-                            </div>
-
-                            @if ($checkoutSource === 'cart')
-                                <a href="{{ $cartUrl }}" class="mt-4 inline-flex min-h-11 items-center text-sm font-black text-[var(--sf-accent)] underline underline-offset-4 focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-blue)] focus-visible:outline-offset-2">Ubah jumlah di keranjang</a>
-                            @endif
-
-                            <dl class="mt-4 grid gap-2 border-t-[3px] border-[var(--sf-border)] pt-3 text-sm">
-                                <div class="flex min-w-0 flex-wrap items-center justify-between gap-3 text-base font-black text-[var(--sf-ink)]">
-                                    <dt>Subtotal review (IDR)</dt>
-                                    <dd data-checkout-order-subtotal x-text="orderSubtotalIdrText">{{ $storefront->idr($cartSubtotal) }}</dd>
-                                </div>
-                                @if ($cartUsdtSubtotal !== null)
-                                    <div class="flex min-w-0 flex-wrap items-center justify-between gap-3 font-bold text-[var(--sf-muted)]">
-                                        <dt>Total dasar USDT / estimasi</dt>
-                                        <dd class="font-black text-[var(--sf-ink)]" data-checkout-order-usdt-subtotal x-text="orderSubtotalUsdtText">{{ $storefront->usdt($cartUsdtSubtotal) }}</dd>
-                                    </div>
-                                @endif
-                            </dl>
-                            <p class="mt-2 text-xs font-bold leading-5 text-[var(--sf-muted)]">Review saja; nominal final QRIS atau USDT tampil di invoice provider.</p>
-                        </section>
-
-                        @if ($cartItems->contains(fn ($item) => $item->manualUnlimited))
-                            @php
-                                $manualSupport = $storefront->support()->whatsappOption('Halo Admin Lhie Store, saya ingin menanyakan akun atau kode redeem untuk produk yang diproses manual.');
-                            @endphp
-                            <section class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] p-4 text-sm font-bold leading-6 text-[var(--sf-ink)]">
-                                <h2 class="font-display text-lg font-black">Produk diproses manual</h2>
-                                <p class="mt-1">Setelah pembayaran terverifikasi, hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.</p>
-                                @if ($manualSupport['available'])
-                                    <a href="{{ $manualSupport['href'] }}" class="mt-2 inline-flex min-h-11 items-center underline underline-offset-2">Hubungi WhatsApp Support</a>
-                                @else
-                                    <p class="mt-1">Nomor WhatsApp Support belum dikonfigurasi.</p>
-                                @endif
-                            </section>
+                @if ($cartItems->contains(fn ($item) => $item->manualUnlimited))
+                    @php
+                        $manualSupport = $storefront->support()->whatsappOption('Halo Admin Lhie Store, saya ingin menanyakan akun atau kode redeem untuk produk yang diproses manual.');
+                    @endphp
+                    <section class="rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] p-3 text-sm leading-relaxed">
+                        <h2 class="font-bold">Produk diproses manual</h2>
+                        <p>Setelah pembayaran terverifikasi, hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.</p>
+                        @if ($manualSupport['available'])
+                            <a href="{{ $manualSupport['href'] }}" class="inline-flex min-h-11 items-center underline underline-offset-2">Hubungi WhatsApp Support</a>
+                        @else
+                            <p>Nomor WhatsApp Support belum dikonfigurasi.</p>
                         @endif
+                    </section>
+                @endif
 
-                        @if ($cartHasConflicts)
-                            <section class="rounded-lg border-[3px] border-[#9f1d2d] bg-[#ffd9df] p-4 text-sm font-bold leading-6 text-[var(--sf-ink)]" role="alert" aria-labelledby="checkout-unavailable-title">
-                                <h2 id="checkout-unavailable-title" class="font-display text-lg font-black">Checkout belum siap</h2>
-                                <p class="mt-1">{{ $checkoutSource === 'direct' ? ($checkoutUnavailableNotice ?? 'Produk ini berubah atau tidak lagi tersedia. Periksa kembali sebelum checkout.') : 'Item keranjang berubah atau tidak lagi tersedia. Sesuaikan keranjang terlebih dahulu; tidak ada order yang dibuat dari snapshot ini.' }}</p>
-                                <a href="{{ $checkoutReturnUrl }}" class="neo-button neo-button-stable mt-4 inline-flex min-h-11 items-center justify-center bg-white px-4 text-sm font-black text-[var(--sf-ink)]">{{ $checkoutReturnLabel }}</a>
-                            </section>
-                        @elseif ($checkoutMaintenance->active)
-                            <section class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-4 text-sm font-bold leading-6 text-[var(--sf-ink)]" role="status" aria-labelledby="checkout-maintenance-title">
-                                <h2 id="checkout-maintenance-title" class="font-display text-lg font-black">Checkout sedang maintenance</h2>
-                                <p class="mt-1 whitespace-pre-line">{{ $checkoutMaintenanceNotice }}</p>
-                                <a href="{{ $checkoutReturnUrl }}" class="neo-button neo-button-stable mt-4 inline-flex min-h-11 items-center justify-center bg-white px-4 text-sm font-black text-[var(--sf-ink)]">{{ $checkoutReturnLabel }}</a>
-                            </section>
-                        @elseif ($checkoutPaymentOptions === [] || ! $checkoutCanSubmit)
-                            <section class="rounded-lg border-[3px] border-[#9f1d2d] bg-[#ffd9df] p-4 text-sm font-bold leading-6 text-[var(--sf-ink)]" role="alert" aria-labelledby="checkout-unavailable-title">
-                                <h2 id="checkout-unavailable-title" class="font-display text-lg font-black">Checkout belum tersedia</h2>
-                                <p class="mt-1">{{ $checkoutUnavailableNotice ?? 'Metode pembayaran belum tersedia untuk seluruh item di keranjang. Kembali ke katalog atau hubungi support.' }}</p>
-                                <a href="{{ $checkoutReturnUrl }}" class="neo-button neo-button-stable mt-4 inline-flex min-h-11 items-center justify-center bg-white px-4 text-sm font-black text-[var(--sf-ink)]">{{ $checkoutReturnLabel }}</a>
-                            </section>
+                <{{ $reviewElement }} class="checkout-review grid min-w-0 gap-2.5 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface)] py-3 sm:py-4"
+                    @if ($showFields) id="checkout-form" method="POST" action="{{ $checkoutSubmitUrl }}" x-ref="checkoutForm" @submit="submit($event)" @change="syncContact()" @invalid.capture="openInvalidDetails($event)" :data-submitting="submitting" @endif>
+                    @if ($showFields)
+                        @csrf
+                        <input type="hidden" name="checkout_attempt" value="{{ old('checkout_attempt', (string) \Illuminate\Support\Str::uuid()) }}">
+                        @if ($checkoutSource === 'direct' && $checkoutProduct)
+                            <input type="hidden" name="product_id" value="{{ $checkoutProduct->id }}">
+                        @elseif ($checkoutSnapshot)
+                            <input type="hidden" name="cart_snapshot" value="{{ $checkoutSnapshot }}">
                         @endif
+                    @endif
 
-                        @php
-                            $checkoutHasRecoveryInput = $checkoutErrorMessages->isNotEmpty()
-                                || collect([
-                                    'buyer_name',
-                                    'email',
-                                    'support_contact_channel',
-                                    'support_contact_value',
-                                    'payment_method',
-                                    'terms_accepted',
-                                ])->contains(static fn (string $field): bool => old($field) !== null);
-                        @endphp
-
-                        @if ($checkoutCanSubmit || $checkoutHasRecoveryInput)
-                            @php
-                                $selectedPaymentMethod = old('payment_method', $checkoutDefaultPaymentMethod ?? '');
-                                $selectedPaymentOption = collect($checkoutPaymentOptions)->first(
-                                    static fn (array $option): bool => $option['value'] === $selectedPaymentMethod,
-                                ) ?? ($checkoutPaymentOptions[0] ?? null);
-                                $selectedPaymentProvider = $selectedPaymentOption['provider'] ?? null;
-                                $paymentOptionCount = count($checkoutPaymentOptions);
-                                $paymentDisclosureOpen = old('payment_method') !== null || $errors->has('payment_method');
-                                $paymentHasSakurupiah = collect($checkoutPaymentOptions)->contains(
-                                    static fn (array $option): bool => ($option['provider'] ?? null) === 'sakurupiah',
-                                );
-                                $contactDisclosureOpen = filled(old('email'))
-                                    || filled(old('support_contact_channel'))
-                                    || filled(old('support_contact_value'))
-                                    || $errors->has('email')
-                                    || $errors->has('support_contact_channel')
-                                    || $errors->has('support_contact_value')
-                                    || $paymentHasSakurupiah;
-                                $termsAccepted = in_array(old('terms_accepted'), [true, 1, '1', 'on', 'yes', 'true'], true);
-                                $paymentLabel = static fn (array $option): string => $option['value'] === 'qris' ? 'QRIS' : $option['label'];
-                                $paymentDescription = static fn (array $option): string => $option['value'] === 'qris'
-                                    ? 'Bayar dengan QRIS pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.'
-                                    : $option['description'];
-                                $paymentCopy = static function (array $option): array {
-                                    if ($option['value'] === 'qris') {
-                                        return [
-                                            'amount_kind' => 'idr',
-                                            'amount_label' => 'Subtotal review (IDR)',
-                                            'amount_help' => 'Total QRIS final ditentukan pada invoice. Bayar nominal invoice.',
-                                            'submit_label' => 'Buat invoice QRIS & lanjut bayar',
-                                        ];
-                                    }
-
-                                    return [
-                                        'amount_kind' => 'usdt',
-                                        'amount_label' => 'Total dasar USDT / estimasi',
-                                        'amount_help' => 'Nominal USDT final ditetapkan pada invoice; ikuti nominal invoice.',
-                                        'submit_label' => $option['value'] === 'binance_pay_id'
-                                            ? 'Buat invoice Binance Pay & lanjut bayar'
-                                            : 'Buat invoice USDT BSC & lanjut bayar',
-                                    ];
-                                };
-                                $selectedOptionCopy = $selectedPaymentOption === null
-                                    ? null
-                                    : $paymentCopy($selectedPaymentOption);
-                                $checkoutStickyPaymentLabel = $selectedPaymentOption === null
-                                    ? 'Metode pembayaran belum tersedia'
-                                    : $paymentLabel($selectedPaymentOption);
-                                $checkoutStickyAmountLabel = $selectedOptionCopy['amount_label'] ?? 'Total review (IDR)';
-                                $checkoutStickyAmountValue = ($selectedOptionCopy['amount_kind'] ?? 'idr') === 'usdt'
-                                    ? ($cartUsdtSubtotal === null ? '—' : $storefront->usdt($cartUsdtSubtotal))
-                                    : $storefront->idr($cartSubtotal);
-                                $checkoutStickySubmitLabel = $selectedOptionCopy['submit_label']
-                                    ?? ($checkoutPaymentOptions === [] ? 'Checkout belum tersedia' : 'Lanjut bayar');
-                                $checkoutBlockedReason = match (true) {
-                                    $checkoutUnavailableNotice !== null => $checkoutUnavailableNotice,
-                                    $cartHasConflicts => $checkoutSource === 'direct'
-                                        ? 'Produk ini berubah atau tidak lagi tersedia. Periksa kembali sebelum checkout.'
-                                        : 'Item keranjang berubah atau tidak lagi tersedia. Sesuaikan keranjang terlebih dahulu.',
-                                    $checkoutMaintenance->active => $checkoutMaintenanceNotice,
-                                    default => 'Metode pembayaran belum tersedia untuk checkout ini. Coba lagi nanti atau hubungi support.',
-                                };
-                            @endphp
-                            <form id="checkout-form" method="POST" action="{{ $checkoutSubmitUrl }}" class="neo-panel grid grid-cols-1 min-w-0 gap-4 bg-[var(--sf-surface)] p-4 sm:p-5" x-ref="checkoutForm">
-                                @csrf
-                                <input type="hidden" name="checkout_attempt" value="{{ old('checkout_attempt', (string) \Illuminate\Support\Str::uuid()) }}">
-                                @if ($checkoutSource === 'direct' && $checkoutProduct)
-                                    <input type="hidden" name="product_id" value="{{ old('product_id', $checkoutProduct->id) }}">
-                                @elseif ($checkoutSnapshot)
-                                    <input type="hidden" name="cart_snapshot" value="{{ $checkoutSnapshot }}">
-                                @endif
-
-                                @if ($checkoutSource === 'direct' && $checkoutProduct)
-                                    <div class="grid gap-2">
-                                        <label for="checkout-quantity" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">Jumlah</label>
-                                        <div class="flex max-w-[13rem] items-center rounded-lg border border-[var(--sf-border)] bg-white">
-                                            <button type="button" data-checkout-quantity-step="-1" class="grid h-12 w-11 shrink-0 place-items-center text-xl font-black text-[var(--sf-muted)]" aria-label="Kurangi jumlah" @click="stepQuantity(-1)">−</button>
-                                            <input id="checkout-quantity" name="quantity" type="number" min="1" max="{{ $checkoutQuantityMax }}" required value="{{ old('quantity', $checkoutQuantity) }}" data-checkout-quantity data-unit-price="{{ $cartItems->first()?->unitPrice ?? 0 }}" data-unit-usdt-price="{{ $cartItems->first()?->usdtUnitPrice ?? '' }}" data-base-price="{{ $checkoutProductPresentation?->priceAmount ?? '' }}" data-base-usdt-price="{{ $checkoutProductPresentation?->usdtPriceAmount ?? '' }}" data-quantity-price-tiers='@json($checkoutProductPresentation?->reachableQuantityPriceTierData() ?? [])' x-model.number="quantity" @change="announceQuantity()" @if($errors->has('quantity')) aria-invalid="true" aria-describedby="checkout-quantity-help checkout-quantity-error checkout-quantity-announcement" @else aria-describedby="checkout-quantity-help checkout-quantity-announcement" @endif class="h-12 min-w-11 w-full flex-1 border-x border-[var(--sf-border)] bg-transparent px-3 text-center text-base font-black text-[var(--sf-ink)] focus:outline-none @error('quantity') border-[#9f1d2d] @enderror">
-                                            <button type="button" data-checkout-quantity-step="1" class="grid h-12 w-11 shrink-0 place-items-center text-xl font-black text-[var(--sf-muted)]" aria-label="Tambah jumlah" @click="stepQuantity(1)">+</button>
+                    <ul class="grid divide-y divide-[var(--sf-border)]" aria-label="Produk">
+                        @foreach ($cartItems as $item)
+                            <li class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0" data-checkout-item="{{ $item->productId }}">
+                                <div class="min-w-0 flex-[1_1_10rem]">
+                                    <p class="font-display text-lg font-bold leading-tight" data-checkout-item-name>{{ $item->name }}</p>
+                                    @if ($checkoutSource === 'direct' && $showFields)
+                                        <p class="text-sm text-[var(--sf-muted)]" data-checkout-item-tier-note x-show="tierNote !== ''" x-text="tierNote" @if (! $item->hasAppliedQuantityPriceTier()) style="display: none" @endif>@if ($item->hasAppliedQuantityPriceTier()) Harga grosir diterapkan mulai {{ $item->appliedTierMinimum }} unit. @endif</p>
+                                    @else
+                                        <p class="text-sm text-[var(--sf-muted)]" data-checkout-item-quantity>Jumlah {{ $item->quantity }}</p>
+                                        @if ($item->hasAppliedQuantityPriceTier())
+                                            <p class="text-sm text-[var(--sf-muted)]">Harga grosir diterapkan mulai {{ $item->appliedTierMinimum }} unit.</p>
+                                        @endif
+                                    @endif
+                                    @if ($item->conflictMessage)
+                                        <p class="checkout-error text-sm">{{ $item->conflictMessage }}</p>
+                                    @endif
+                                </div>
+                                @if ($checkoutSource === 'direct' && $checkoutProduct && $showFields)
+                                    <div class="grid w-[min(100%,9rem)] gap-1">
+                                        <label for="checkout-quantity" class="text-sm font-bold">Jumlah</label>
+                                        <div class="checkout-control flex items-center rounded-lg border">
+                                            <button type="button" data-checkout-quantity-step="-1" class="checkout-step min-h-11 shrink-0 font-bold" aria-label="Kurangi jumlah" @click="stepQuantity(-1)">−</button>
+                                            <input id="checkout-quantity" name="quantity" type="number" inputmode="numeric" min="1" max="{{ $checkoutQuantityMax }}" required value="{{ $checkoutQuantityInput }}" data-checkout-quantity x-model.number="quantity" @change="announceQuantity()" class="min-h-11 w-full min-w-[max(44px,3ch)] bg-transparent px-1 text-center font-semibold" @error('quantity') aria-invalid="true" aria-describedby="checkout-quantity-error" @enderror>
+                                            <button type="button" data-checkout-quantity-step="1" class="checkout-step min-h-11 shrink-0 font-bold" aria-label="Tambah jumlah" @click="stepQuantity(1)">+</button>
                                         </div>
-                                        <p id="checkout-quantity-help" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Maksimal {{ $checkoutQuantityMax }} unit. Total akan diperbarui otomatis.</p>
-                                        <p id="checkout-quantity-announcement" data-checkout-quantity-announcement class="sr-only" aria-live="polite" aria-atomic="true" x-text="quantityAnnouncement"></p>
                                         @error('quantity')
-                                            <p id="checkout-quantity-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
+                                            <p id="checkout-quantity-error" class="checkout-error text-sm">{{ $message }}</p>
                                         @enderror
                                     </div>
+                                    <p data-checkout-quantity-announcement class="sr-only" aria-live="polite" x-text="quantityAnnouncement"></p>
                                 @endif
+                            </li>
+                        @endforeach
+                    </ul>
 
-                                <div class="grid gap-2">
-                                    <label for="checkout-buyer-name" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['buyer_name_label'] }}</label>
-                                    <input id="checkout-buyer-name" name="buyer_name" type="text" required value="{{ old('buyer_name') }}" autocomplete="name" placeholder="Nama pembeli" @if($errors->has('buyer_name')) aria-invalid="true" aria-describedby="checkout-buyer-name-help checkout-buyer-name-error" @else aria-describedby="checkout-buyer-name-help" @endif class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)] @error('buyer_name') border-[#9f1d2d] @enderror">
-                                    <p id="checkout-buyer-name-help" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $copy['shop']['buyer_name_help'] }}</p>
-                                    @error('buyer_name')
-                                        <p id="checkout-buyer-name-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
-                                    @enderror
-                                </div>
-
-
-                                <details id="checkout-contact-details" data-checkout-contact-details class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-2.5" x-bind:open="contactRequired || contactDisclosureOpen" @toggle="contactDisclosureOpen = $el.open" @if ($contactDisclosureOpen) open @endif>
-                                    <summary class="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-sm font-black text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-blue)] focus-visible:outline-offset-2">
-                                        <span>Tambahkan email atau kontak bantuan</span>
-                                        <span class="text-xs font-bold text-[var(--sf-muted)]" data-checkout-contact-requirement x-text="contactRequirementText">{{ $paymentHasSakurupiah ? 'WhatsApp wajib untuk metode pembayaran ini' : 'Opsional' }}</span>
+                    @if ($selectedPaymentMethod !== null)
+                        <div id="checkout-payment-method" @error('payment_method') aria-describedby="checkout-payment-error" @enderror>
+                            @if ($paymentOptionCount === 1)
+                                <input type="hidden" name="payment_method" value="{{ $selectedPaymentMethod }}" data-payment-provider="{{ $checkoutPaymentOptions[0]['provider'] ?? '' }}">
+                                <p class="flex flex-wrap justify-between gap-x-3 text-sm">Metode pembayaran <strong>{{ $checkoutPaymentOptions[0]['label'] }}</strong></p>
+                            @else
+                                <details id="checkout-payment-disclosure" class="checkout-control rounded-lg border px-3" @if (old('payment_method') !== null || $errors->has('payment_method')) open @endif>
+                                    <summary class="min-h-11 cursor-pointer py-3 text-sm font-bold">
+                                        Metode pembayaran:
+                                        @foreach ($checkoutPaymentOptions as $option)
+                                            <span class="checkout-rail-copy" data-rail="{{ $option['value'] }}">{{ $option['label'] }}</span>
+                                        @endforeach
                                     </summary>
-                                    <div class="mt-2 grid gap-3">
-                                        <div class="grid gap-2">
-                                            <label for="checkout-email" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['email_label'] }}</label>
-                                            <input id="checkout-email" name="email" type="email" value="{{ old('email') }}" autocomplete="email" placeholder="nama@contoh.com" @if($errors->has('email')) aria-invalid="true" aria-describedby="checkout-email-help checkout-email-error" @else aria-describedby="checkout-email-help" @endif class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)] @error('email') border-[#9f1d2d] @enderror">
-                                            <p id="checkout-email-help" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $copy['shop']['email_help'] }}</p>
-                                            @error('email')
-                                                <p id="checkout-email-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
-                                            @enderror
-                                        </div>
-
-                                        <div class="grid gap-2">
-                                            <label for="checkout-support-contact-channel" class="text-sm font-black uppercase tracking-wider text-[var(--sf-ink)]">{{ $copy['shop']['support_contact_label'] }}</label>
-                                            <div class="grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)]">
-                                                <select id="checkout-support-contact-channel" name="support_contact_channel" @if($paymentHasSakurupiah) required aria-required="true" @endif x-bind:required="contactRequired" x-bind:aria-required="contactRequired ? 'true' : null" @if($errors->has('support_contact_channel')) aria-invalid="true" aria-describedby="checkout-support-contact-help checkout-support-contact-channel-error" @else aria-describedby="checkout-support-contact-help" @endif class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)]">
-                                                    <option value="">Tidak perlu</option>
-                                                    <option value="telegram" @selected(old('support_contact_channel') === 'telegram')>Telegram</option>
-                                                    <option value="whatsapp" @selected(old('support_contact_channel') === 'whatsapp')>WhatsApp</option>
-                                                </select>
-                                                <input id="checkout-support-contact-value" name="support_contact_value" type="text" value="{{ old('support_contact_value') }}" placeholder="@username atau nomor WhatsApp" @if($paymentHasSakurupiah) required aria-required="true" @endif x-bind:required="contactRequired" x-bind:aria-required="contactRequired ? 'true' : null" @if($errors->has('support_contact_value')) aria-invalid="true" aria-describedby="checkout-support-contact-help checkout-support-contact-value-error" @else aria-describedby="checkout-support-contact-help" @endif class="neo-input h-12 w-full bg-white px-3 text-base font-bold text-[var(--sf-ink)] @error('support_contact_value') border-[#9f1d2d] @enderror">
-                                            </div>
-                                            <p id="checkout-support-contact-help" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]" data-checkout-contact-help data-default-contact-help="{{ $copy['shop']['support_contact_help'] }}" x-text="contactHelpText">{{ $selectedPaymentProvider === 'sakurupiah' ? 'Nomor WhatsApp diperlukan untuk metode pembayaran ini. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan.' : ($paymentHasSakurupiah ? 'Nomor WhatsApp wajib untuk metode pembayaran ini. Email dan kontak bantuan tetap bukan bukti kepemilikan pesanan.' : $copy['shop']['support_contact_help']) }}</p>
-                                            @error('support_contact_channel')
-                                                <p id="checkout-support-contact-channel-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
-                                            @enderror
-                                            @error('support_contact_value')
-                                                <p id="checkout-support-contact-value-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
-                                            @enderror
-                                        </div>
-                                    </div>
-                                </details>
-
-                                <div class="grid gap-2">
-                                    <label for="checkout-terms-accepted" class="flex min-h-12 items-start gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]">
-                                        <input id="checkout-terms-accepted" name="terms_accepted" type="checkbox" value="1" required @checked($termsAccepted) @if($errors->has('terms_accepted')) aria-invalid="true" aria-describedby="checkout-terms-accepted-help checkout-terms-accepted-error" @else aria-describedby="checkout-terms-accepted-help" @endif class="mt-1 h-5 w-5 shrink-0 accent-[var(--sf-accent)]">
-                                        <span>Saya menyetujui <a href="{{ route('storefront.policies.terms') }}" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">{{ $copy['policies']['terms']['title'] }}</a> dan <a href="{{ route('storefront.policies.refund') }}" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">{{ $copy['policies']['refund']['title'] }}</a>.</span>
-                                    </label>
-                                    <p id="checkout-terms-accepted-help" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Persetujuan dicatat bersama order.</p>
-                                    @error('terms_accepted')
-                                        <p id="checkout-terms-accepted-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
-                                    @enderror
-                                </div>
-
-                                <section id="checkout-challenge" aria-labelledby="checkout-challenge-title" class="grid min-w-0 gap-2">
-                                    <h2 id="checkout-challenge-title" class="text-sm font-black text-[var(--sf-ink)]">Verifikasi sebelum membuat pesanan</h2>
-                                    @if ($checkoutChallengeSiteKey !== null)
-                                        <p class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Selesaikan verifikasi Cloudflare untuk membantu mencegah pesanan otomatis. Verifikasi berlaku lima menit dan hanya untuk satu checkout.</p>
-                                        <div class="cf-turnstile" data-sitekey="{{ $checkoutChallengeSiteKey }}" data-action="checkout" data-size="compact" data-callback="checkoutChallengeReady" data-error-callback="checkoutChallengeError" data-expired-callback="checkoutChallengeExpired" data-timeout-callback="checkoutChallengeExpired" data-refresh-expired="auto" data-refresh-timeout="auto" aria-describedby="checkout-challenge-status"></div>
-                                        <p id="checkout-challenge-status" role="status" aria-live="polite" aria-atomic="true" class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Menunggu verifikasi keamanan. Jika tidak muncul, periksa koneksi dan izinkan challenges.cloudflare.com.</p>
-                                        <noscript><p class="text-sm font-bold leading-6 text-[var(--sf-ink)]">Aktifkan JavaScript, lalu muat ulang halaman untuk menyelesaikan verifikasi checkout.</p></noscript>
-                                    @else
-                                        <p role="status" class="text-sm font-bold leading-6 text-[var(--sf-ink)]">{{ \App\Storefront\StorefrontCheckoutChallenge::UNAVAILABLE_MESSAGE }}</p>
-                                    @endif
-                                </section>
-
-                                @if (! $checkoutCanSubmit)
-                                    <p id="checkout-submit-disabled-help" role="status" class="rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 text-sm font-bold leading-6 text-[var(--sf-ink)]">{{ $checkoutBlockedReason }}</p>
-                                @endif
-
-                                @if ($checkoutPaymentOptions === [])
-                                    <button type="submit" data-checkout-submit disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" class="neo-button neo-button-stable inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">Checkout belum tersedia</button>
-                                @endif
-                            </form>
-                            <div class="storefront-sticky-action fixed inset-x-0 bottom-0 z-40 items-center justify-between gap-3 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-checkout-sticky-action x-ref="stickyAction" role="region" aria-labelledby="checkout-sticky-title">
-                                <div class="min-w-0 flex-1">
-                                    <span id="checkout-sticky-title" class="block text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">Ringkasan pembayaran</span>
-                                    <strong class="block break-words text-xs font-black leading-5 text-[var(--sf-ink)]" data-checkout-sticky-payment x-text="stickyPaymentLabel">{{ $checkoutStickyPaymentLabel }}</strong>
-                                    <span class="block break-words text-[11px] font-bold leading-4 text-[var(--sf-muted)]" data-checkout-sticky-amount-label x-text="stickyAmountLabel">{{ $checkoutStickyAmountLabel }}</span>
-                                    <strong class="block break-words text-sm font-black leading-5 text-[var(--sf-ink)]" data-checkout-sticky-total x-text="stickyAmountValue">{{ $checkoutStickyAmountValue }}</strong>
-                                </div>
-                                <button type="submit" form="checkout-form" aria-controls="checkout-form" data-checkout-sticky-submit class="neo-button neo-button-stable inline-flex min-h-12 max-w-[60%] shrink-0 items-center justify-center break-words bg-[var(--sf-accent)] px-3 text-center text-xs leading-4 text-white sm:max-w-[68%] sm:px-5 sm:text-sm" x-text="stickySubmitLabel" x-bind:disabled="stickySubmitDisabled" x-bind:aria-disabled="stickySubmitDisabled ? 'true' : 'false'" x-bind:aria-describedby="stickySubmitDescription">
-                                    {{ $checkoutStickySubmitLabel }}
-                                </button>
-                            </div>
-                        @endif
-                    </div>
-
-                    <aside class="checkout-payment-column grid gap-4 lg:self-start" aria-label="Pembayaran dan bantuan checkout">
-                        @if ($checkoutCanSubmit || $checkoutHasRecoveryInput)
-                            <section id="checkout-payment-method" data-checkout-payment class="checkout-payment-panel neo-panel grid min-w-0 gap-2 bg-[var(--sf-surface)] p-4 sm:p-5" aria-labelledby="checkout-payment-title" @if ($errors->has('payment_method')) aria-describedby="checkout-payment-error" @endif>
-                                    <div class="min-w-0">
-                                        <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-accent)]">Pembayaran</p>
-                                        <h2 id="checkout-payment-title" class="mt-1 font-display text-xl font-black text-[var(--sf-ink)]">Metode pembayaran dipilih</h2>
-                                    </div>
-
-                                    @if ($checkoutPaymentOptions === [])
-                                        <p class="rounded-lg border-2 border-[var(--sf-border)] bg-white p-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">Metode pembayaran belum tersedia untuk checkout ini. Pilihan dan instruksi akan muncul setelah provider siap.</p>
-                                    @elseif ($paymentOptionCount === 1)
-                                        @php
-                                            $option = $checkoutPaymentOptions[0];
-                                            $optionCopy = $paymentCopy($option);
-                                        @endphp
-                                        <input type="hidden" name="payment_method" value="{{ $option['value'] }}" form="checkout-form">
-                                        <div data-checkout-payment-option data-checkout-selected-option data-payment-value="{{ $option['value'] }}" data-payment-label="{{ $paymentLabel($option) }}" data-payment-description="{{ $paymentDescription($option) }}" data-payment-provider="{{ $option['provider'] ?? '' }}" data-payment-amount-kind="{{ $optionCopy['amount_kind'] }}" data-payment-amount-label="{{ $optionCopy['amount_label'] }}" data-payment-amount-help="{{ $optionCopy['amount_help'] }}" data-payment-submit-label="{{ $optionCopy['submit_label'] }}" class="grid min-w-0 gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3 shadow-[3px_3px_0_var(--sf-shadow)]">
-                                            <div class="min-w-0">
-                                                <p class="text-xs font-black uppercase tracking-wide text-slate-800">Dipilih untuk review</p>
-                                                <p class="mt-1 break-words text-base font-black text-[#0b1220]" data-checkout-selected-payment-label x-text="selectedPaymentLabel">{{ $paymentLabel($option) }}</p>
-                                                <p class="mt-1 break-words text-sm font-semibold leading-6 text-slate-800" data-checkout-selected-payment-description x-text="selectedPaymentDescription">{{ $paymentDescription($option) }}</p>
-                                            </div>
-                                            <div data-checkout-payment-copy class="min-w-0 rounded-lg border-2 border-dashed border-[var(--sf-border)] bg-white p-2.5 text-sm font-bold leading-6 text-[var(--sf-muted)]">
-                                                <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                                                    <span class="min-w-0 break-words" data-checkout-payment-amount-label x-text="selectedAmountLabel">{{ $optionCopy['amount_label'] }}</span>
-                                                    <strong class="shrink-0 text-[var(--sf-ink)]" data-checkout-payment-amount-value x-text="selectedAmountValue">{{ $optionCopy['amount_kind'] === 'usdt' ? ($cartUsdtSubtotal === null ? '—' : $storefront->usdt($cartUsdtSubtotal)) : $storefront->idr($cartSubtotal) }}</strong>
-                                                </div>
-                                                <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help x-text="selectedAmountHelp">{{ $optionCopy['amount_help'] }}</p>
-                                            </div>
-                                            @if (($option['provider'] ?? null) === 'sakurupiah')
-                                                <p class="text-sm font-bold leading-6 text-slate-800" x-show="contactRequired">Nomor WhatsApp wajib untuk metode pembayaran ini.</p>
-                                            @endif
-                                            <button type="submit" form="checkout-form" data-checkout-submit class="neo-button neo-button-stable inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white" x-bind:disabled="!canSubmit" x-bind:aria-disabled="canSubmit ? 'false' : 'true'" x-bind:aria-describedby="canSubmit ? null : 'checkout-submit-disabled-help'" x-text="stickySubmitLabel" @if (! $checkoutCanSubmit) disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" @endif>{{ $optionCopy['submit_label'] }}</button>
-                                        </div>
-                                    @else
-                                        @php
-                                            $selectedOptionId = 'checkout-payment-option-'.$selectedPaymentOption['value'];
-                                        @endphp
-                                        <div data-checkout-payment-option data-checkout-selected-option data-payment-value="{{ $selectedPaymentOption['value'] }}" data-payment-label="{{ $paymentLabel($selectedPaymentOption) }}" data-payment-description="{{ $paymentDescription($selectedPaymentOption) }}" data-payment-provider="{{ $selectedPaymentOption['provider'] ?? '' }}" data-payment-amount-kind="{{ $selectedOptionCopy['amount_kind'] }}" data-payment-amount-label="{{ $selectedOptionCopy['amount_label'] }}" data-payment-amount-help="{{ $selectedOptionCopy['amount_help'] }}" data-payment-submit-label="{{ $selectedOptionCopy['submit_label'] }}" class="grid min-w-0 gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[3px_3px_0_var(--sf-shadow)]">
-                                            <input id="{{ $selectedOptionId }}" type="radio" name="payment_method" value="{{ $selectedPaymentOption['value'] }}" checked required form="checkout-form" class="peer sr-only" x-model="selectedPaymentMethod">
-                                            <label for="{{ $selectedOptionId }}" class="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-sm font-black text-[var(--sf-ink)] peer-checked:bg-[var(--sf-yellow)] peer-checked:text-[#0b1220]">
-                                                <span class="mt-1 h-5 w-5 shrink-0 rounded-full border-2 border-[var(--sf-border)] bg-white p-1 peer-checked:bg-[var(--sf-accent)]" aria-hidden="true"></span>
-                                                <span class="min-w-0">
-                                                    <span class="block break-words" data-checkout-selected-payment-label x-text="selectedPaymentLabel">{{ $paymentLabel($selectedPaymentOption) }}</span>
-                                                    <span class="mt-1 block break-words text-sm font-semibold leading-6 text-[var(--sf-muted)] peer-checked:text-slate-800" data-checkout-selected-payment-description x-text="selectedPaymentDescription">{{ $paymentDescription($selectedPaymentOption) }}</span>
-                                                </span>
+                                    <fieldset class="grid min-w-0 gap-1 pb-2">
+                                        <legend class="sr-only">Pilih metode pembayaran</legend>
+                                        @foreach ($checkoutPaymentOptions as $option)
+                                            <label class="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold">
+                                                <input id="checkout-payment-option-{{ $option['value'] }}" type="radio" name="payment_method" value="{{ $option['value'] }}" data-payment-provider="{{ $option['provider'] ?? '' }}" required @checked($option['value'] === $selectedPaymentMethod)>
+                                                {{ $option['label'] }}
                                             </label>
-                                            <div class="hidden peer-checked:grid min-w-0 gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-yellow)] p-3">
-                                                <div data-checkout-payment-copy class="min-w-0 rounded-lg border-2 border-dashed border-[var(--sf-border)] bg-white p-2.5 text-sm font-bold leading-6 text-[var(--sf-muted)]">
-                                                    <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                                                        <span class="min-w-0 break-words" data-checkout-payment-amount-label x-text="selectedAmountLabel">{{ $selectedOptionCopy['amount_label'] }}</span>
-                                                        <strong class="shrink-0 text-[var(--sf-ink)]" data-checkout-payment-amount-value x-text="selectedAmountValue">{{ $selectedOptionCopy['amount_kind'] === 'usdt' ? ($cartUsdtSubtotal === null ? '—' : $storefront->usdt($cartUsdtSubtotal)) : $storefront->idr($cartSubtotal) }}</strong>
-                                                    </div>
-                                                    <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help x-text="selectedAmountHelp">{{ $selectedOptionCopy['amount_help'] }}</p>
-                                                </div>
-                                                @if (($selectedPaymentOption['provider'] ?? null) === 'sakurupiah')
-                                                    <p class="text-sm font-bold leading-6 text-slate-800" x-show="contactRequired">Nomor WhatsApp wajib untuk metode pembayaran ini.</p>
-                                                @endif
-                                                <button type="submit" form="checkout-form" data-checkout-submit class="neo-button neo-button-stable inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white" x-bind:disabled="!canSubmit" x-bind:aria-disabled="canSubmit ? 'false' : 'true'" x-bind:aria-describedby="canSubmit ? null : 'checkout-submit-disabled-help'" x-bind:formnovalidate="null" x-text="stickySubmitLabel" @if (! $checkoutCanSubmit) disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" @endif @if ($paymentHasSakurupiah && ($selectedPaymentOption['provider'] ?? null) !== 'sakurupiah') formnovalidate @endif>{{ $selectedOptionCopy['submit_label'] }}</button>
-                                            </div>
-                                        </div>
+                                        @endforeach
+                                    </fieldset>
+                                </details>
+                            @endif
+                        </div>
+                    @endif
+                    @error('payment_method')
+                        <p id="checkout-payment-error" class="checkout-error text-sm">{{ $message }}</p>
+                    @enderror
 
-                                        <details id="checkout-payment-disclosure" data-checkout-payment-disclosure class="rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-2.5" @if ($paymentDisclosureOpen) open @endif>
-                                            <summary class="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-sm font-black text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-[var(--sf-blue)] focus-visible:outline-offset-2">
-                                                <span>Ubah metode pembayaran</span>
-                                                <span class="text-xs font-bold text-[var(--sf-muted)]">{{ $paymentOptionCount }} pilihan</span>
-                                            </summary>
-                                            <fieldset class="mt-3 grid gap-3" aria-label="Alternatif metode pembayaran">
-                                                @foreach ($checkoutPaymentOptions as $option)
-                                                    @if ($option['value'] !== $selectedPaymentOption['value'])
-                                                        @php
-                                                            $optionCopy = $paymentCopy($option);
-                                                            $optionId = 'checkout-payment-option-'.$option['value'];
-                                                        @endphp
-                                                        <div data-checkout-payment-option data-payment-value="{{ $option['value'] }}" data-payment-label="{{ $paymentLabel($option) }}" data-payment-description="{{ $paymentDescription($option) }}" data-payment-provider="{{ $option['provider'] ?? '' }}" data-payment-amount-kind="{{ $optionCopy['amount_kind'] }}" data-payment-amount-label="{{ $optionCopy['amount_label'] }}" data-payment-amount-help="{{ $optionCopy['amount_help'] }}" data-payment-submit-label="{{ $optionCopy['submit_label'] }}" class="grid min-w-0 gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[3px_3px_0_var(--sf-shadow)]">
-                                                            <input id="{{ $optionId }}" type="radio" name="payment_method" value="{{ $option['value'] }}" required form="checkout-form" class="peer sr-only" x-model="selectedPaymentMethod">
-                                                            <label for="{{ $optionId }}" class="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 text-sm font-black text-[var(--sf-ink)] peer-checked:bg-[var(--sf-yellow)] peer-checked:text-[#0b1220]">
-                                                                <span class="mt-1 h-5 w-5 shrink-0 rounded-full border-2 border-[var(--sf-border)] bg-white p-1 peer-checked:bg-[var(--sf-accent)]" aria-hidden="true"></span>
-                                                                <span class="min-w-0">
-                                                                    <span class="block break-words">{{ $paymentLabel($option) }}</span>
-                                                                    <span class="mt-1 block break-words text-sm font-semibold leading-6 text-[var(--sf-muted)] peer-checked:text-slate-800">{{ $paymentDescription($option) }}</span>
-                                                                </span>
-                                                            </label>
-                                                            <div data-checkout-payment-copy class="hidden min-w-0 rounded-lg border-2 border-dashed border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-2.5 text-sm font-bold leading-6 text-[var(--sf-muted)] peer-checked:block">
-                                                                <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                                                                    <span class="min-w-0 break-words" data-checkout-payment-amount-label>{{ $optionCopy['amount_label'] }}</span>
-                                                                    <strong class="shrink-0 text-[var(--sf-ink)]" data-checkout-payment-amount-value x-text="amountForKind($el.closest('[data-checkout-payment-option]').dataset.paymentAmountKind)">{{ $optionCopy['amount_kind'] === 'usdt' ? ($cartUsdtSubtotal === null ? '—' : $storefront->usdt($cartUsdtSubtotal)) : $storefront->idr($cartSubtotal) }}</strong>
-                                                                </div>
-                                                                <p class="mt-1 text-sm font-semibold leading-5" data-checkout-payment-amount-help>{{ $optionCopy['amount_help'] }}</p>
-                                                            </div>
-                                                            @if (($option['provider'] ?? null) === 'sakurupiah')
-                                                                <p class="text-sm font-bold leading-6 text-slate-800">Nomor WhatsApp wajib untuk metode pembayaran ini.</p>
-                                                            @endif
-                                                            <button type="submit" form="checkout-form" data-checkout-submit class="neo-button neo-button-stable hidden min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white peer-checked:inline-flex" x-bind:disabled="!canSubmit" x-bind:aria-disabled="canSubmit ? 'false' : 'true'" x-bind:aria-describedby="canSubmit ? null : 'checkout-submit-disabled-help'" x-bind:formnovalidate="null" @if (! $checkoutCanSubmit) disabled aria-disabled="true" aria-describedby="checkout-submit-disabled-help" @endif @if ($paymentHasSakurupiah && ($option['provider'] ?? null) !== 'sakurupiah') formnovalidate @endif>{{ $optionCopy['submit_label'] }}</button>
-                                                        </div>
-                                                    @endif
-                                                @endforeach
-                                            </fieldset>
-                                        </details>
+                    <dl class="border-y border-[var(--sf-border)] py-2">
+                        <div class="flex flex-wrap items-baseline justify-between gap-x-3 font-bold">
+                            <dt>Subtotal produk</dt>
+                            <dd data-checkout-order-subtotal>
+                                <span class="checkout-idr" @if ($checkoutSource === 'direct' && $checkoutCanSubmit) x-text="subtotalIdr" @endif>{{ $checkoutQuantityQuoted ? $storefront->idr($cartSubtotal) : 'Belum tersedia' }}</span>
+                                @if ($cartUsdtSubtotal !== null && collect($checkoutPaymentOptions)->contains(fn (array $option): bool => $option['value'] !== 'qris'))
+                                    <span class="checkout-usdt" @if ($checkoutSource === 'direct' && $checkoutCanSubmit) x-text="subtotalUsdt" @endif>{{ $checkoutQuantityQuoted ? $storefront->usdt($cartUsdtSubtotal) : 'Belum tersedia' }}</span>
+                                @endif
+                            </dd>
+                        </div>
+                    </dl>
+                    <p class="-mt-1 text-sm text-[var(--sf-muted)]">Total bayar tercantum di invoice.</p>
+
+                    @if ($showFields)
+                        <div class="grid gap-1">
+                            <label for="checkout-buyer-name" class="text-sm font-bold">{{ $copy['shop']['buyer_name_label'] }}</label>
+                            <input id="checkout-buyer-name" name="buyer_name" type="text" required value="{{ $oldReviewField('buyer_name') }}" autocomplete="name" class="checkout-control min-h-11 w-full rounded-lg border px-3 text-base" @error('buyer_name') aria-invalid="true" aria-describedby="checkout-buyer-name-error" @enderror>
+                            @error('buyer_name')
+                                <p id="checkout-buyer-name-error" class="checkout-error text-sm">{{ $message }}</p>
+                            @enderror
+                        </div>
+
+                        <details id="checkout-contact-details" class="checkout-control rounded-lg border px-3" x-ref="contactDetails" @if ($contactDisclosureOpen) open @endif>
+                            <summary class="min-h-11 cursor-pointer py-3 text-sm font-bold">
+                                Email atau kontak bantuan
+                                @if ($paymentHasSakurupiah)
+                                    <span data-checkout-contact-requirement class="checkout-whatsapp block text-[var(--sf-muted)]">WhatsApp wajib untuk QRIS</span>
+                                @endif
+                            </summary>
+                            <div class="grid gap-2 pb-3">
+                                <label for="checkout-support-contact-channel" class="text-sm font-bold">Kanal kontak</label>
+                                <select id="checkout-support-contact-channel" name="support_contact_channel" @if ($paymentHasSakurupiah) required @endif class="checkout-control min-h-11 w-full rounded-lg border px-2 text-base" aria-describedby="checkout-support-contact-help @error('support_contact_channel') checkout-support-contact-channel-error @enderror" @error('support_contact_channel') aria-invalid="true" @enderror>
+                                    <option value="">Tidak perlu</option>
+                                    <option value="telegram" @selected(old('support_contact_channel') === 'telegram')>Telegram</option>
+                                    <option value="whatsapp" @selected(old('support_contact_channel') === 'whatsapp')>WhatsApp</option>
+                                </select>
+                                @error('support_contact_channel')
+                                    <p id="checkout-support-contact-channel-error" class="checkout-error text-sm">{{ $message }}</p>
+                                @enderror
+                                <label for="checkout-support-contact-value" class="text-sm font-bold">Username Telegram atau nomor WhatsApp</label>
+                                <input id="checkout-support-contact-value" name="support_contact_value" type="text" value="{{ $oldReviewField('support_contact_value') }}" @if ($paymentHasSakurupiah) required @endif class="checkout-control min-h-11 w-full rounded-lg border px-3 text-base" aria-describedby="checkout-support-contact-help @error('support_contact_value') checkout-support-contact-value-error @enderror" @error('support_contact_value') aria-invalid="true" @enderror>
+                                <p id="checkout-support-contact-help" class="text-sm text-[var(--sf-muted)]">
+                                    @if ($paymentHasSakurupiah)
+                                        <span class="checkout-whatsapp">Pilih WhatsApp dan masukkan nomor untuk membuat invoice QRIS.</span>
                                     @endif
+                                    <span class="checkout-optional-contact">{{ $copy['shop']['support_contact_help'] }}</span>
+                                </p>
+                                @error('support_contact_value')
+                                    <p id="checkout-support-contact-value-error" class="checkout-error text-sm">{{ $message }}</p>
+                                @enderror
+                                <label for="checkout-email" class="text-sm font-bold">{{ $copy['shop']['email_label'] }}</label>
+                                <input id="checkout-email" name="email" type="email" value="{{ $oldReviewField('email') }}" autocomplete="email" class="checkout-control min-h-11 w-full rounded-lg border px-3 text-base" aria-describedby="checkout-email-help @error('email') checkout-email-error @enderror" @error('email') aria-invalid="true" @enderror>
+                                <p id="checkout-email-help" class="text-sm text-[var(--sf-muted)]">{{ $copy['shop']['email_help'] }}</p>
+                                @error('email')
+                                    <p id="checkout-email-error" class="checkout-error text-sm">{{ $message }}</p>
+                                @enderror
+                            </div>
+                        </details>
 
-                                    @error('payment_method')
-                                        <p id="checkout-payment-error" role="alert" class="text-sm font-black leading-6 text-[#9f1d2d]">{{ $message }}</p>
-                                    @enderror
+                        <label for="checkout-terms-accepted" class="flex min-h-11 items-start gap-2 py-1 text-sm font-semibold">
+                            <input id="checkout-terms-accepted" name="terms_accepted" type="checkbox" value="1" required @checked($termsAccepted) class="mt-0.5 h-5 w-5 shrink-0" @error('terms_accepted') aria-invalid="true" aria-describedby="checkout-terms-accepted-error" @enderror>
+                            <span>Saya menyetujui <a href="{{ route('storefront.policies.terms') }}" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">{{ $copy['policies']['terms']['title'] }}</a> dan <a href="{{ route('storefront.policies.refund') }}" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">{{ $copy['policies']['refund']['title'] }}</a>.</span>
+                        </label>
+                        @error('terms_accepted')
+                            <p id="checkout-terms-accepted-error" class="checkout-error text-sm">{{ $message }}</p>
+                        @enderror
+
+                        @if ($checkoutCanSubmit)
+                            <section id="checkout-challenge" aria-label="Verifikasi keamanan" class="flex min-w-0 flex-wrap items-center gap-2 text-sm text-[var(--sf-muted)]">
+                                @if ($checkoutChallengeSiteKey !== null)
+                                    <div class="cf-turnstile max-w-full" data-sitekey="{{ $checkoutChallengeSiteKey }}" data-action="checkout" data-size="compact" data-callback="checkoutChallengeReady" data-error-callback="checkoutChallengeError" data-expired-callback="checkoutChallengeExpired" data-timeout-callback="checkoutChallengeExpired" data-refresh-expired="auto" data-refresh-timeout="auto" aria-describedby="checkout-challenge-status"></div>
+                                    <p id="checkout-challenge-status" class="min-w-0 flex-[1_1_9rem]" role="status">Selesaikan verifikasi sebelum membuat pesanan.</p>
+                                    <noscript><p>Aktifkan JavaScript, lalu muat ulang halaman untuk menyelesaikan verifikasi checkout.</p></noscript>
+                                @else
+                                    <p role="status">{{ \App\Storefront\StorefrontCheckoutChallenge::UNAVAILABLE_MESSAGE }}</p>
+                                @endif
                             </section>
                         @endif
-                        <section class="checkout-support-panel neo-panel bg-[var(--sf-surface)] p-4 sm:p-5" aria-labelledby="checkout-support-title">
-                        <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Bantuan</p>
-                        <h2 id="checkout-support-title" class="mt-1 font-display text-xl font-black text-[var(--sf-ink)]">Butuh bantuan?</h2>
-                        <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $supportContext['body'] ?? 'Hubungi support bila ada pertanyaan tentang produk atau order.' }}</p>
-                        @if ($supportHref)
-                            <a href="{{ $supportHref }}" target="_blank" rel="noopener noreferrer" class="neo-button neo-button-stable mt-4 inline-flex min-h-11 w-full items-center justify-center bg-[var(--sf-yellow)] px-4 text-center text-sm font-black text-[var(--sf-ink)]">Hubungi support</a>
-                        @endif
-                        <p class="mt-4 text-xs font-bold leading-5 text-[var(--sf-muted)]">Simpan invoice dan Recovery Key setelah order dibuat. Harga browser tidak pernah dipakai sebagai sumber kebenaran order.</p>
-                        </section>
-                    </aside>
-                </div>
+
+                        <button type="submit" data-checkout-submit class="checkout-submit min-h-12 w-full rounded-lg px-3 py-2 text-base font-bold" x-bind:disabled="submitting || @js(! $checkoutCanSubmit)" @if (! $checkoutCanSubmit) disabled aria-describedby="checkout-submit-disabled-help" @endif @if ($paymentHasSakurupiah && $paymentOptionCount > 1) formnovalidate x-bind:formnovalidate="false" @endif>
+                            @forelse ($checkoutPaymentOptions as $option)
+                                <span class="checkout-rail-copy" data-rail="{{ $option['value'] }}">Buat invoice {{ $option['label'] }}</span>
+                            @empty
+                                Checkout belum tersedia
+                            @endforelse
+                            <span x-cloak x-show="submitting">Sedang membuat invoice…</span>
+                        </button>
+                    @endif
+                </{{ $reviewElement }}>
+
+                @if ($supportHref)
+                    <a href="{{ $supportHref }}" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 w-fit items-center text-sm font-bold underline underline-offset-4">Hubungi bantuan</a>
+                @endif
             </section>
         </main>
-
-        @include('storefront.partials.footer')
     </div>
 </body>
 </html>

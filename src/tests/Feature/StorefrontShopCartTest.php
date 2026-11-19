@@ -194,7 +194,7 @@ class StorefrontShopCartTest extends TestCase
             ->assertSee('Rp25.000')
             ->assertSee('name="cart_snapshot"', false)
             ->assertSee('name="payment_method"', false)
-            ->assertSee('Kontak bantuan', false);
+            ->assertSee('Email atau kontak bantuan');
 
         $response = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->post(route('storefront.shop.checkout'), ['buyer_name' => 'Multi Buyer',
@@ -241,7 +241,8 @@ class StorefrontShopCartTest extends TestCase
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->get(route('storefront.shop.checkout.start'))
             ->assertOk()
-            ->assertSee('Bayar dengan Binance Pay');
+            ->assertSee('Buat invoice Binance Pay')
+            ->assertSee('3.5 USDT');
         $snapshot = $this->checkoutSnapshot($sessionKey);
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
@@ -527,7 +528,8 @@ class StorefrontShopCartTest extends TestCase
 
         $this->assertStringContainsString('Read Only Cart Review', $html);
         $this->assertStringContainsString('Jumlah 2', $html);
-        $this->assertStringContainsString('Ubah jumlah di keranjang', $html);
+        $this->assertStringContainsString('Rp50.000', $html);
+        $this->assertSame(1, substr_count($html, 'Subtotal produk'));
         $this->assertStringContainsString('Kembali ke keranjang', $html);
         $this->assertStringContainsString('href="'.route('storefront.shop.cart').'"', $html);
         $this->assertStringContainsString('name="cart_snapshot"', $html);
@@ -535,8 +537,6 @@ class StorefrontShopCartTest extends TestCase
         $this->assertStringNotContainsString('name="quantity"', $html);
         $checkoutMainHtml = substr($html, strpos($html, '<main'));
         $this->assertStringNotContainsString('role="dialog"', $checkoutMainHtml);
-        $this->assertSame(1, substr_count($html, 'data-checkout-sticky-action'));
-        $this->assertSame(3, substr_count($html, 'form="checkout-form"'));
         $this->assertSame(1, substr_count($html, 'name="cart_snapshot"'));
         $this->assertSame(1, substr_count($html, 'data-checkout-submit'));
     }

@@ -546,7 +546,7 @@ test("customer checkout: opens canonical page checkout from the landing catalog"
     page.locator('script[type="module"][src*="/assets/app-"]')
   ).toHaveCount(0);
   await expect(
-    page.getByRole("heading", { name: "Review produk sebelum bayar." })
+    page.getByRole("heading", { name: "Ringkasan pesanan" })
   ).toBeVisible();
   await expect(page.locator("#checkout-form")).toBeVisible();
   await expect(page.locator('input[name="product_id"]')).toBeAttached();
@@ -599,6 +599,45 @@ test("customer checkout: opens the authenticated balance overview across mobile 
   await expectNoDocumentOverflow(page);
 });
 
+test("customer checkout: shows issue 732 review and invoice action above the fold", async ({
+  page,
+}, testInfo) => {
+  for (const viewport of [
+    { width: 1366, height: 768 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${baseUrl}${invoiceFixtures.tierProductCheckoutPath}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expectStorefrontPageCheckout(page);
+    await page.evaluate(() => document.fonts.ready.then(() => null));
+    const subtotal = page.locator("[data-checkout-order-subtotal]");
+    const submit = page.getByRole("button", { name: "Buat invoice QRIS" });
+    await expect(subtotal).toHaveText(/Rp\s*75\.000/);
+    for (const theme of ["light", "dark"]) {
+      const root = page.locator("html");
+      if ((await root.getAttribute("data-theme")) !== theme) {
+        await page.locator("[data-theme-toggle]").click();
+      }
+      await expect(root).toHaveAttribute("data-theme", theme);
+      const geometry = await submit.evaluate((element) => ({
+        top: element.getBoundingClientRect().top,
+        bottom: element.getBoundingClientRect().bottom,
+        scrollY: window.scrollY,
+      }));
+      expect(geometry.scrollY).toBe(0);
+      expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
+      await expect(subtotal).toBeInViewport({ ratio: 1 });
+      await expectNoDocumentOverflow(page);
+      console.log(viewport, theme, geometry);
+      await page.screenshot({
+        path: testInfo.outputPath(`after-${viewport.width}-${theme}.png`),
+      });
+    }
+  }
+});
+
 test("customer checkout: keeps no-JavaScript review usable and requires verification to purchase", async ({
   browser,
 }) => {
@@ -621,10 +660,9 @@ test("customer checkout: keeps no-JavaScript review usable and requires verifica
     });
 
     await expect(
-      page.getByRole("heading", { name: "Review produk sebelum bayar." })
+      page.getByRole("heading", { name: "Ringkasan pesanan" })
     ).toBeVisible();
     await expect(page.locator("#checkout-form")).toBeVisible();
-    await expect(page.locator("[data-checkout-sticky-action]")).toBeHidden();
     await expect(
       page.locator('#checkout-form input[name="product_id"]')
     ).toHaveValue(/^\d+$/);
@@ -640,9 +678,7 @@ test("customer checkout: keeps no-JavaScript review usable and requires verifica
     await terms.focus();
     await page.keyboard.press("Space");
     await expect(terms).toBeChecked();
-    const submit = page
-      .getByRole("region", { name: "Metode pembayaran dipilih" })
-      .getByRole("button", { name: /Buat invoice/ });
+    const submit = page.getByRole("button", { name: "Buat invoice QRIS" });
     await submit.focus();
     await expect(submit).toBeFocused();
     await expect(
@@ -674,156 +710,143 @@ test("customer checkout: updates direct tier estimates from bounded safe data", 
   });
 
   const quantity = page.locator("[data-checkout-quantity]");
-  const unitPrice = page.locator("[data-checkout-item-unit-price]");
-  const itemSubtotal = page.locator("[data-checkout-item-subtotal]");
   const orderSubtotal = page.locator("[data-checkout-order-subtotal]");
   const tierNote = page.locator("[data-checkout-item-tier-note]");
 
   await expect(quantity).toHaveValue("1");
-  await expect(unitPrice).toHaveText(/Rp\s+75\.000/);
+  await expect(orderSubtotal).toHaveText(/Rp\s*75\.000/);
   await quantity.fill("2");
-  await expect(unitPrice).toHaveText(/Rp\s+70\.000/);
-  await expect(itemSubtotal).toHaveText(/Rp\s+140\.000/);
   await expect(orderSubtotal).toHaveText(/Rp\s+140\.000/);
   await expect(tierNote).toHaveText("Harga grosir diterapkan mulai 2 unit.");
   await expect(tierNote).toBeVisible();
 });
 
-test("customer checkout: keeps the mobile sticky action aligned with the canonical checkout", async ({
+test("customer checkout: blocks a second activation while the invoice request is pending", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await runArtisan([
+  await page.goto(`${baseUrl}${invoiceFixtures.tierProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expectStorefrontPageCheckout(page);
+  await page
+    .getByRole("textbox", { name: "Nama pembeli" })
+    .fill("Repeat Buyer");
+  await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
+  const accepted = await page.locator("#checkout-form").evaluate((form) => {
+    const submissions = [];
+    form.addEventListener("submit", (event) => {
+      submissions.push(!event.defaultPrevented);
+    });
+    form.requestSubmit();
+    form.requestSubmit();
+    return submissions;
+  });
+  expect(accepted).toEqual([true, false]);
+  await expect(page).toHaveURL(customerInvoiceUrlPattern);
+});
+
+test("customer checkout: shows required WhatsApp at 320px and 200% text", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  runArtisan([
     "tinker",
     "--execute",
-    `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => true]);`,
+    `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['payment_mode' => 'sakurupiah', 'binance_pay_enabled' => true]);`,
   ]);
+  await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expectStorefrontPageCheckout(page);
+  await page.addStyleTag({ content: "html { font-size: 200%; }" });
+  const contact = page.locator("#checkout-contact-details");
+  const channel = page.getByLabel("Kanal kontak");
+  const number = page.getByLabel("Username Telegram atau nomor WhatsApp");
+  await expect(contact).toHaveJSProperty("open", true);
+  await expect(contact.getByText("WhatsApp wajib untuk QRIS")).toBeVisible();
+  await expect(number).toHaveJSProperty("required", true);
+  await channel.selectOption("telegram");
+  await expect(channel).toHaveJSProperty(
+    "validationMessage",
+    "Pilih WhatsApp untuk metode pembayaran ini."
+  );
+  await channel.selectOption("whatsapp");
+  await number.fill("+628123456789");
+  await expect(number).toHaveJSProperty("validationMessage", "");
+  await expectNoDocumentOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath("required-whatsapp-320-text200.png"),
+    fullPage: true,
+  });
 
-  try {
-    await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+  const methods = page.locator("#checkout-payment-disclosure summary");
+  await methods.press("Enter");
+  await page.getByRole("radio", { name: "Binance Pay" }).check();
+  await expect(number).toHaveJSProperty("required", false);
+  await expect(contact.getByText("WhatsApp wajib untuk QRIS")).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Buat invoice Binance Pay" })
+  ).toBeVisible();
+  await methods.press("Enter");
+  await expectNoDocumentOverflow(page);
+
+  runArtisan([
+    "tinker",
+    "--execute",
+    `App\\Models\\CheckoutMaintenanceSetting::updateOrCreate(
+      ['singleton_key' => App\\Models\\CheckoutMaintenanceSetting::SINGLETON_KEY],
+      ['is_active' => true, 'version' => 1]
+    );`,
+  ]);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByText("Checkout sedang maintenance")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Buat invoice/ })).toHaveCount(
+    0
+  );
+  await expect(
+    page.getByRole("link", { name: "Kembali ke produk" }).first()
+  ).toBeVisible();
+});
+
+test("customer checkout: reflows a long Cart at 320px and 200% text", async ({
+  page,
+}, testInfo) => {
+  const names = Array.from(
+    { length: 8 },
+    (_, index) => `Paket ${"NamaPanjang".repeat(6)} ${index + 1}`
+  );
+  runArtisan([
+    "tinker",
+    "--execute",
+    `foreach (json_decode('${JSON.stringify(names)}') as $name) {
+      App\\Models\\Product::factory()->create(['name' => $name, 'stock' => 10, 'price_amount' => 10000]);
+    }`,
+  ]);
+  const viewport = { width: 320, height: 568 };
+  await page.setViewportSize(viewport);
+  for (const name of names) {
+    await page.goto(`${baseUrl}/shop?q=${encodeURIComponent(name)}`, {
       waitUntil: "domcontentloaded",
     });
-    await expectStorefrontPageCheckout(page);
-
-    const sticky = page.locator("[data-checkout-sticky-action]");
-    const stickySubmit = sticky.locator("[data-checkout-sticky-submit]");
-    const inFlowSubmit = page.locator(
-      "[data-checkout-selected-option] [data-checkout-submit]"
-    );
-
-    await expect(sticky).toBeVisible();
-    await expect(sticky).toHaveCSS("position", "fixed");
-    await expect(sticky).toHaveAttribute(
-      "aria-labelledby",
-      "checkout-sticky-title"
-    );
-    await expect(stickySubmit).toHaveAttribute("form", "checkout-form");
-    await expect(stickySubmit).toHaveAttribute(
-      "aria-controls",
-      "checkout-form"
-    );
-    await expect(sticky).toContainText("QRIS");
-    await expect(sticky).toContainText("Subtotal review (IDR)");
-    await expect(sticky.locator("[data-checkout-sticky-total]")).toHaveText(
-      /Rp\s*88\.000/
-    );
-    await expect(inFlowSubmit).toBeHidden();
-    await expect(stickySubmit).toHaveText(await inFlowSubmit.innerText());
-
-    await page
-      .getByRole("textbox", { name: "Nama pembeli" })
-      .fill("Sticky Buyer");
-    await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
-    await expect(stickySubmit).toBeEnabled();
-    await expect(stickySubmit).toHaveText(await inFlowSubmit.innerText());
-
-    await page.locator("#checkout-payment-disclosure summary").click();
-    await page.getByText("Bayar dengan Binance Pay", { exact: true }).click();
-    await expect(sticky).toContainText("Binance Pay");
-    await expect(sticky).toContainText("Total dasar USDT / estimasi");
-    await expect(sticky.locator("[data-checkout-sticky-total]")).toHaveText(
-      "2.5 USDT"
-    );
-    await expect(stickySubmit).toHaveText(/Buat invoice Binance Pay/);
-    await expect(stickySubmit).toBeEnabled();
-
-    const readMetrics = () =>
-      page.evaluate(() => {
-        const sticky = document.querySelector("[data-checkout-sticky-action]");
-        const main = document.querySelector("main");
-        const stickyRect = sticky?.getBoundingClientRect();
-        const mainStyle = main ? getComputedStyle(main) : null;
-
-        return {
-          position: sticky ? getComputedStyle(sticky).position : "",
-          bottom: stickyRect?.bottom ?? 0,
-          viewportHeight: window.innerHeight,
-          height: stickyRect?.height ?? 0,
-          paddingBottom: mainStyle
-            ? Number.parseFloat(mainStyle.paddingBottom)
-            : 0,
-          documentWidth: Math.max(
-            document.documentElement.scrollWidth,
-            document.body.scrollWidth
-          ),
-        };
-      });
-
-    await expect
-      .poll(async () => {
-        const metrics = await readMetrics();
-        return metrics.paddingBottom - metrics.height;
-      })
-      .toBeGreaterThanOrEqual(-1);
-    const metrics = await readMetrics();
-    expect(metrics.position).toBe("fixed");
-    expect(
-      Math.abs(metrics.bottom - metrics.viewportHeight)
-    ).toBeLessThanOrEqual(2);
-    expect(metrics.paddingBottom).toBeGreaterThanOrEqual(metrics.height - 1);
-    expect(metrics.documentWidth).toBeLessThanOrEqual(390);
-
-    await scrollCheckoutToSettledBottom(page);
-    const bottomMetrics = await page.evaluate(() => {
-      const sticky = document.querySelector("[data-checkout-sticky-action]");
-      const form = document.querySelector("#checkout-form");
-      const stickyTop = sticky?.getBoundingClientRect().top ?? 0;
-      const formBottom = form?.getBoundingClientRect().bottom ?? 0;
-
-      return { stickyTop, formBottom };
-    });
-    expect(bottomMetrics.formBottom).toBeLessThanOrEqual(
-      bottomMetrics.stickyTop + 1
-    );
-
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await expect(sticky).toBeHidden();
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect(sticky).toBeVisible();
-
-    let checkoutRequests = 0;
-    page.on("request", (request) => {
-      if (
-        request.method() === "POST" &&
-        new URL(request.url()).pathname.endsWith("/shop/checkout")
-      ) {
-        checkoutRequests += 1;
-      }
-    });
-    await Promise.all([
-      page.waitForURL(customerInvoiceUrlPattern, {
-        waitUntil: "domcontentloaded",
-      }),
-      stickySubmit.click(),
-    ]);
-    expect(checkoutRequests).toBe(1);
-  } finally {
-    await runArtisan([
-      "tinker",
-      "--execute",
-      `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['binance_pay_enabled' => false]);`,
-    ]);
+    await addProductCardToCart(page, name);
   }
+  await page.goto(`${baseUrl}/shop/checkout`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expectStorefrontPageCheckout(page);
+  await page.addStyleTag({ content: "html { font-size: 200%; }" });
+  await expect(
+    page.getByRole("list", { name: "Produk" }).getByRole("listitem")
+  ).toHaveCount(8);
+  await expect(page.getByText("Jumlah 1", { exact: true })).toHaveCount(8);
+  await expect(page.locator("[data-checkout-order-subtotal]")).toHaveText(
+    "Rp80.000"
+  );
+  await expectStorefrontCheckoutResponsiveContract(page, viewport);
+  await page.screenshot({
+    path: testInfo.outputPath("cart-320-text200.png"),
+    fullPage: true,
+  });
 });
 
 test("customer checkout: switches payment copy and CTA without JavaScript", async ({
@@ -847,40 +870,22 @@ test("customer checkout: switches payment copy and CTA without JavaScript", asyn
     });
     await expect(page.locator("#checkout-form")).toBeVisible();
 
-    const paymentDisclosure = page.locator("#checkout-payment-disclosure");
-    await paymentDisclosure.locator("summary").click();
-    const binanceRadio = page.getByRole("radio", { name: /Binance Pay/ });
-    await page.getByText("Bayar dengan Binance Pay", { exact: true }).click();
-    await expect(binanceRadio).toBeChecked();
     await expect(
-      page.locator(
-        '[data-checkout-payment-option][data-payment-value="binance_pay_id"] [data-checkout-payment-copy]'
-      )
-    ).toContainText("Total dasar USDT / estimasi");
-    await expect(
-      page
-        .getByRole("region", { name: "Metode pembayaran dipilih" })
-        .getByRole("button", { name: /Buat invoice Binance Pay/ })
+      page.getByRole("button", { name: "Buat invoice QRIS" })
     ).toBeVisible();
+    const subtotal = page.locator("[data-checkout-order-subtotal]");
+    await expect(subtotal).toHaveText("Rp88.000", { useInnerText: true });
+    await page.locator("#checkout-payment-disclosure summary").press("Enter");
+    await page.getByRole("radio", { name: "Binance Pay" }).check();
+    await expect(subtotal).toHaveText("2.5 USDT", { useInnerText: true });
     await expect(
-      page
-        .getByRole("region", { name: "Metode pembayaran dipilih" })
-        .getByRole("button", { name: /Buat invoice QRIS/ })
-    ).toBeHidden();
-    await page
-      .locator('label[for="checkout-payment-option-qris"]')
-      .evaluate((label) => label.click());
-    await expect(page.locator("#checkout-payment-option-qris")).toBeChecked();
-    await expect(
-      page
-        .getByRole("region", { name: "Metode pembayaran dipilih" })
-        .getByRole("button", { name: /Buat invoice QRIS/ })
+      page.getByRole("button", { name: "Buat invoice Binance Pay" })
     ).toBeVisible();
+    await page.getByRole("radio", { name: "QRIS" }).check();
+    await expect(subtotal).toHaveText("Rp88.000", { useInnerText: true });
     await expect(
-      page
-        .getByRole("region", { name: "Metode pembayaran dipilih" })
-        .getByRole("button", { name: /Buat invoice Binance Pay/ })
-    ).toBeHidden();
+      page.getByRole("button", { name: "Buat invoice QRIS" })
+    ).toBeVisible();
   } finally {
     await context.close();
     await runArtisan([
@@ -1260,7 +1265,7 @@ test("customer checkout: rejects invalid proof, caps pending invoices, and repla
     });
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.locator("[data-checkout-sticky-submit]:visible").click(),
+    page.locator("[data-checkout-submit]").click(),
   ]);
   await expect(page).toHaveURL(checkoutUrl);
   await expect(page.locator("#checkout-error-summary")).toContainText(
@@ -1291,7 +1296,7 @@ test("customer checkout: rejects invalid proof, caps pending invoices, and repla
   await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.locator("[data-checkout-sticky-submit]:visible").click(),
+    page.locator("[data-checkout-submit]").click(),
   ]);
   await expect(page).toHaveURL(checkoutUrl);
   await expect(page.locator("#checkout-error-summary")).toBeVisible();
@@ -1373,7 +1378,7 @@ test("customer checkout: completes a multi-item Cart purchase through shared rev
   ]);
   await expect(page).toHaveURL(/\/shop\/checkout(?:\?|$)/);
   await expect(
-    page.getByRole("heading", { name: "Review pesanan sebelum bayar." })
+    page.getByRole("heading", { name: "Ringkasan pesanan" })
   ).toBeVisible();
   await expectStorefrontPageCheckout(page);
   await completeManualCheckout(page, "Cart Direct Buyer");
@@ -1383,7 +1388,7 @@ test("customer checkout: completes a multi-item Cart purchase through shared rev
 
 test("customer checkout: restores direct and Cart validation failures on canonical pages", async ({
   page,
-}) => {
+}, testInfo) => {
   const retiredRequests = observeRetiredCheckoutRequests(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
@@ -1394,10 +1399,57 @@ test("customer checkout: restores direct and Cart validation failures on canonic
   await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.locator("[data-checkout-sticky-submit]:visible").click(),
+    page.locator("[data-checkout-submit]").click(),
   ]);
   await expect(page).toHaveURL(directCheckoutUrl);
   await expect(page.locator("#checkout-error-summary")).toBeFocused();
+  const contrast = {};
+  for (const theme of ["light", "dark"]) {
+    if ((await page.locator("html").getAttribute("data-theme")) !== theme) {
+      await page.locator("[data-theme-toggle]").click();
+    }
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    const buyer = page.getByLabel("Nama pembeli");
+    await buyer.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    await expect(buyer).toBeFocused();
+    await expect(buyer).toHaveCSS("outline-style", "solid");
+    const samples = [
+      ['label[for="checkout-buyer-name"]', "color", 4.5],
+      ["#checkout-challenge-status", "color", 4.5],
+      ["#checkout-error-summary", "color", 4.5],
+      ["#checkout-buyer-name-error", "color", 4.5],
+      ["[data-checkout-submit]", "color", 4.5],
+      ["#checkout-buyer-name", "borderTopColor", 3],
+      ["#checkout-buyer-name", "outlineColor", 3],
+    ];
+    contrast[theme] = [];
+    for (const [selector, property, minimum] of samples) {
+      const { foreground, background } = await page
+        .locator(selector)
+        .evaluate(readAdminContrastSampleInBrowser, property);
+      const ratio = adminContrastRatio(foreground, background);
+      expect(ratio, `${theme}: ${selector} ${property}`).toBeGreaterThanOrEqual(
+        minimum
+      );
+      contrast[theme].push({
+        selector,
+        property,
+        foreground,
+        background,
+        ratio,
+        minimum,
+      });
+    }
+    await page.screenshot({
+      path: testInfo.outputPath(`validation-${theme}.png`),
+      fullPage: true,
+    });
+  }
+  writeFileSync(
+    testInfo.outputPath("contrast.json"),
+    JSON.stringify(contrast, null, 2)
+  );
   await expect(page.getByRole("textbox", { name: "Nama pembeli" })).toHaveValue(
     "x"
   );
@@ -1419,7 +1471,7 @@ test("customer checkout: restores direct and Cart validation failures on canonic
   await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.locator("[data-checkout-sticky-submit]:visible").click(),
+    page.locator("[data-checkout-submit]").click(),
   ]);
   await expect(page).toHaveURL(cartCheckoutUrl);
   await expect(page.locator("#checkout-error-summary")).toBeFocused();
@@ -1462,7 +1514,7 @@ test("customer checkout: restores provider and stock failures on canonical pages
   try {
     await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.locator("[data-checkout-sticky-submit]:visible").click(),
+      page.locator("[data-checkout-submit]").click(),
     ]);
     await expect(page).toHaveURL(/\/shop\/checkout\/products\/\d+(?:\?|$)/);
     expect(new URL(page.url()).pathname).toBe(
@@ -1499,7 +1551,7 @@ test("customer checkout: restores provider and stock failures on canonical pages
   try {
     await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.locator("[data-checkout-sticky-submit]:visible").click(),
+      page.locator("[data-checkout-submit]").click(),
     ]);
     expect(new URL(page.url()).pathname).toBe(
       new URL(providerFailureUrl).pathname
@@ -1616,7 +1668,7 @@ test("customer checkout: proves direct and Family review geometry across require
     waitUntil: "domcontentloaded",
   });
   const longProductMetrics = await page
-    .locator("[data-checkout-item] h3")
+    .locator("[data-checkout-item-name]")
     .evaluate((heading) => ({
       clientWidth: heading.clientWidth,
       scrollWidth: heading.scrollWidth,
@@ -1900,7 +1952,7 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
 
   const buyerName = page.getByRole("textbox", { name: "Nama pembeli" });
   const terms = page.getByRole("checkbox", { name: /Saya menyetujui/ });
-  const submit = page.locator("[data-checkout-sticky-submit]:visible");
+  const submit = page.locator("[data-checkout-submit]");
   await buyerName.focus();
   await page.keyboard.type("Keyboard Buyer");
   await terms.focus();
@@ -1930,24 +1982,20 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
     const contactDisclosure = page.locator("#checkout-contact-details");
     await expect(paymentDisclosure).not.toHaveAttribute("open", "");
     await expect(contactDisclosure).not.toHaveAttribute("open", "");
-    await page.getByText("Ubah metode pembayaran", { exact: true }).click();
+    await paymentDisclosure.locator("summary").press("Enter");
     await expect(paymentDisclosure).toHaveAttribute("open", "");
     await expect(
       page.getByRole("radio", { name: /Binance Pay/ })
     ).toBeVisible();
-    await page
-      .locator('label[for="checkout-payment-option-binance_pay_id"]')
-      .click();
+    await page.getByRole("radio", { name: "Binance Pay" }).check();
     await expect(
-      page
-        .getByRole("region", { name: "Metode pembayaran dipilih" })
-        .getByRole("button", { name: /Buat invoice Binance Pay/ })
+      page.getByRole("button", { name: "Buat invoice Binance Pay" })
     ).toBeVisible();
-    await page
-      .getByText("Tambahkan email atau kontak bantuan", { exact: true })
-      .click();
+    await contactDisclosure.locator("summary").press("Enter");
     await expect(contactDisclosure).toHaveJSProperty("open", true);
-    await expect(page.getByRole("textbox", { name: "Email" })).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: /^Email untuk data akun/ })
+    ).toBeVisible();
   } finally {
     await runArtisan([
       "tinker",
@@ -1959,13 +2007,6 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
   await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
     waitUntil: "domcontentloaded",
   });
-  const menuButton = page.getByRole("button", { name: "Buka menu navigasi" });
-  await menuButton.click();
-  const menu = page.getByLabel("Menu navigasi Lhie Store");
-  await expect(menu).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(menu).toBeHidden();
-  await expect(menuButton).toBeFocused();
   await expectStorefrontCheckoutResponsiveContract(page, {
     width: 390,
     height: 844,
@@ -6623,7 +6664,7 @@ function adminContrastRatio(foreground, background) {
 
 // Runs in the page: the AA verdict must use rendered pixels, so the text color
 // is composited over the first opaque ancestor background.
-const readAdminContrastSampleInBrowser = (element) => {
+const readAdminContrastSampleInBrowser = (element, property = "color") => {
   const parse = (value) => {
     const match =
       /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?\s*\)/.exec(
@@ -6649,7 +6690,8 @@ const readAdminContrastSampleInBrowser = (element) => {
 
   let background = null;
 
-  for (let node = element; node instanceof Element; node = node.parentElement) {
+  const start = property === "color" ? element : element.parentElement;
+  for (let node = start; node instanceof Element; node = node.parentElement) {
     const layer = parse(getComputedStyle(node).backgroundColor);
 
     if (layer.alpha === 0) {
@@ -6666,7 +6708,7 @@ const readAdminContrastSampleInBrowser = (element) => {
   background ??= { red: 255, green: 255, blue: 255 };
 
   const style = getComputedStyle(element);
-  const foreground = parse(style.color);
+  const foreground = parse(style[property]);
 
   return {
     text: (element.textContent ?? "").trim().slice(0, 48),
@@ -7078,7 +7120,7 @@ async function completeManualCheckout(page, buyerName) {
   await expectStorefrontPageCheckout(page);
   await page.getByRole("textbox", { name: "Nama pembeli" }).fill(buyerName);
   await page.getByRole("checkbox", { name: /Saya menyetujui/ }).check();
-  await page.locator("[data-checkout-sticky-submit]:visible").click();
+  await page.locator("[data-checkout-submit]").click();
   await expect(page).toHaveURL(customerInvoiceUrlPattern);
   await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
     "data-invoice-state",
@@ -7091,9 +7133,7 @@ async function expectStorefrontPageCheckout(page) {
   await page.waitForLoadState("domcontentloaded");
   await expect(page).toHaveURL(/\/shop\/checkout(?:\/products\/\d+)?(?:\?|$)/);
   await expect(
-    page.getByRole("heading", {
-      name: /Review (produk|pesanan) sebelum bayar\./,
-    })
+    page.getByRole("heading", { name: "Ringkasan pesanan" })
   ).toBeVisible();
   await expect(page.locator("#checkout-form")).toBeVisible();
   await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(
@@ -7102,81 +7142,11 @@ async function expectStorefrontPageCheckout(page) {
   expect(page.url()).not.toContain("checkout=1");
 }
 
-async function scrollCheckoutToSettledBottom(page) {
-  await page.waitForFunction(() => {
-    const fontsReady = !document.fonts || document.fonts.status === "loaded";
-    const imagesReady = Array.from(document.images).every(
-      (image) => image.complete
-    );
-
-    return fontsReady && imagesReady;
-  });
-
-  await page.evaluate(async () => {
-    document.documentElement.style.scrollBehavior = "auto";
-    document.body.style.scrollBehavior = "auto";
-    const scrollingElement =
-      document.scrollingElement ?? document.documentElement;
-    const nextFrame = () =>
-      new Promise((resolve) => window.requestAnimationFrame(resolve));
-    let previousHeight = -1;
-    let stableFrames = 0;
-
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      scrollingElement.scrollTop = scrollingElement.scrollHeight;
-      await nextFrame();
-
-      const maxScrollTop = Math.max(
-        0,
-        scrollingElement.scrollHeight - scrollingElement.clientHeight
-      );
-      const sticky = document.querySelector("[data-checkout-sticky-action]");
-      const form = document.querySelector("#checkout-form");
-      const stickyRect = sticky?.getBoundingClientRect();
-      const formRect = form?.getBoundingClientRect();
-      const atBottom = Math.abs(scrollingElement.scrollTop - maxScrollTop) <= 1;
-      const formIsUncovered =
-        stickyRect && formRect ? formRect.bottom <= stickyRect.top + 1 : false;
-      const heightIsStable = scrollingElement.scrollHeight === previousHeight;
-
-      if (atBottom && formIsUncovered && heightIsStable) {
-        stableFrames += 1;
-        if (stableFrames >= 2) {
-          return;
-        }
-      } else {
-        stableFrames = 0;
-      }
-
-      previousHeight = scrollingElement.scrollHeight;
-    }
-
-    throw new Error(
-      `Checkout did not settle at the bottom: ${JSON.stringify({
-        scrollTop: scrollingElement.scrollTop,
-        maxScrollTop: Math.max(
-          0,
-          scrollingElement.scrollHeight - scrollingElement.clientHeight
-        ),
-        documentHeight: scrollingElement.scrollHeight,
-        stickyTop: document
-          .querySelector("[data-checkout-sticky-action]")
-          ?.getBoundingClientRect().top,
-        formBottom: document
-          .querySelector("#checkout-form")
-          ?.getBoundingClientRect().bottom,
-      })}`
-    );
-  });
-}
-
 async function expectStorefrontCheckoutRecovery(page) {
   await page.waitForLoadState("domcontentloaded");
   await expect(page).toHaveURL(/\/shop\/checkout(?:\/products\/\d+)?(?:\?|$)/);
   await expect(
-    page.getByRole("heading", {
-      name: /Review (produk|pesanan) sebelum bayar\./,
-    })
+    page.getByRole("heading", { name: "Ringkasan pesanan" })
   ).toBeVisible();
   await expect(page.locator("#checkout-error-summary")).toBeVisible();
   expect(page.url()).not.toContain("checkout=1");
@@ -7273,7 +7243,7 @@ async function expectStorefrontCheckoutResponsiveContract(page, viewport) {
     ).filter(isVisible);
     const normalTextSizes = [
       ...document.querySelectorAll(
-        "#checkout-form > div > label, [data-checkout-item] p.text-sm, [data-checkout-payment-amount-help]"
+        "#checkout-form > div > label, [data-checkout-item] p.text-sm, [data-checkout-order-subtotal]"
       ),
     ]
       .filter(isVisible)
@@ -7352,65 +7322,7 @@ async function expectStorefrontCheckoutResponsiveContract(page, viewport) {
 
   await expectStorefrontCheckoutFocusIndicators(page);
 
-  if (viewport.width === 390) {
-    const flowBudget = await page.evaluate(() => {
-      window.scrollTo(0, 0);
-      const submit = [
-        ...document.querySelectorAll(
-          "[data-checkout-submit], [data-checkout-sticky-submit]"
-        ),
-      ].find((element) => {
-        const style = window.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-
-        return (
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          style.opacity !== "0" &&
-          rect.width > 0 &&
-          rect.height > 0
-        );
-      });
-      if (!submit) {
-        throw new Error("No visible checkout submit control");
-      }
-      const rect = submit.getBoundingClientRect();
-      let positionedAncestor = null;
-      for (let ancestor = submit; ancestor; ancestor = ancestor.parentElement) {
-        if (
-          ["fixed", "sticky"].includes(
-            window.getComputedStyle(ancestor).position
-          )
-        ) {
-          positionedAncestor = ancestor;
-          break;
-        }
-      }
-      const positionedRect = positionedAncestor?.getBoundingClientRect();
-
-      return {
-        submitTop: positionedRect
-          ? positionedRect.top
-          : rect.top + window.scrollY,
-        viewportHeight: window.innerHeight,
-        contactOpen: document.querySelector("#checkout-contact-details")?.open,
-        paymentOpen:
-          document.querySelector("#checkout-payment-disclosure")?.open ?? false,
-      };
-    });
-
-    expect(flowBudget.submitTop).toBeLessThanOrEqual(
-      flowBudget.viewportHeight * 2 + 1
-    );
-    expect(flowBudget.contactOpen).toBe(false);
-    expect(flowBudget.paymentOpen).toBe(false);
-  }
-
-  const submit = page
-    .locator(
-      "[data-checkout-submit]:visible, [data-checkout-sticky-submit]:visible"
-    )
-    .first();
+  const submit = page.locator("[data-checkout-submit]");
   await submit.evaluate((element) =>
     element.scrollIntoView({
       block: "center",
