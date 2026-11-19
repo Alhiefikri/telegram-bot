@@ -65,9 +65,9 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee($expectedQrDataUri, false)
             ->assertSee('Pembayaran QRIS')
             ->assertSeeInOrder([
-                $expectedQrDataUri,
                 'Total bayar QRIS',
                 'Rp121.200',
+                $expectedQrDataUri,
                 'Batas bayar',
                 'Cek status pembayaran',
                 'Ringkasan invoice',
@@ -138,6 +138,69 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertSee('Coba ambil total QRIS')
             ->assertDontSee('data:image/png;base64,'.base64_encode('png-for:'.$paymentNumber), false)
             ->assertDontSee('Pakasir');
+    }
+
+    public function test_manual_qris_requires_proof_to_admin_and_never_offers_an_expired_qr(): void
+    {
+        config()->set('services.support.whatsapp_number', '6281234567890');
+        [$order, $payment] = $this->pendingNativeQrisOrder(88000, null, null, 'manual-unused');
+        $payment->update([
+            'provider' => 'manual',
+            'method' => 'QR_MANUAL',
+            'provider_total_payment' => 99000,
+        ]);
+
+        $url = URL::signedRoute('storefront.shop.orders.show', $order, null, false);
+        $this->get($url)->assertOk()
+            ->assertSee('Rp88.000')
+            ->assertSee('/qr-lhie.jpg', false)
+            ->assertSee('Kirim nomor invoice dan bukti bayar ke admin.')
+            ->assertSee('WhatsApp Support')
+            ->assertDontSee('Rp99.000')
+            ->assertDontSee('data-shop-payment-status', false)
+            ->assertDontSee('Cek status pembayaran');
+
+        $order->update(['expires_at' => now()->subMinute()]);
+        $this->get($url)->assertOk()
+            ->assertSee('Batas pembayaran terlewati')
+            ->assertSee('Jika sudah membayar, hubungi bantuan')
+            ->assertDontSee('/qr-lhie.jpg', false)
+            ->assertDontSee('Pindai QRIS')
+            ->assertDontSee('data-shop-payment-status', false);
+    }
+
+    public function test_pending_automatic_invoice_never_displays_a_qr_after_the_order_deadline(): void
+    {
+        $this->pakasirConfigIsReady();
+        $this->qrisRendererReturnsDeterministicPng();
+        [$order, $payment] = $this->pendingNativeQrisOrder(88000, 880, 88880, 'unused');
+        $order->update(['expires_at' => now()->subMinute()]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee('Batas pembayaran terlewati')
+            ->assertSee('Jika sudah membayar, hubungi bantuan')
+            ->assertDontSee('data:image/png;base64,', false)
+            ->assertDontSee('Pindai QRIS');
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+    }
+
+    public function test_automatic_invoice_shows_the_earliest_saved_payment_deadline(): void
+    {
+        $this->pakasirConfigIsReady();
+        $this->qrisRendererReturnsDeterministicPng();
+        [$order, $payment] = $this->pendingNativeQrisOrder(88000, 880, 88880, 'unused');
+        $providerDeadline = now()->addMinutes(10)->startOfMinute();
+        $payment->update([
+            'expired_at' => now()->addMinutes(20),
+            'provider_expires_at' => $providerDeadline,
+        ]);
+
+        $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
+            ->assertOk()
+            ->assertSee($providerDeadline->copy()->timezone(config('app.timezone'))->format('d M Y H:i T'))
+            ->assertSee('data-payment-countdown', false)
+            ->assertSee($providerDeadline->toIso8601String(), false);
     }
 
     public function test_new_web_order_recovery_key_is_copyable_once_after_primary_payment_action(): void

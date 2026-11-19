@@ -17,6 +17,13 @@
         @endforeach
     </ul>
 
+    @if ($isPendingPayment && $isQrisPayable && $payment?->provider_fee !== null)
+        <div class="mt-2 flex flex-wrap items-baseline justify-between gap-2 text-sm">
+            <span class="font-semibold text-[var(--sf-muted)]">{{ __($qrisFeePayer === 'customer' ? 'storefront.invoice.qris.label.qris_fee_customer' : 'storefront.invoice.qris.label.qris_fee_store', [], $storefrontLocale ?? 'id') }}</span>
+            <span class="font-bold text-[var(--sf-ink)]">{{ $storefront->idr($payment->provider_fee) }}</span>
+        </div>
+    @endif
+
     <dl class="mt-2 grid gap-x-6 gap-y-2 border-t border-[var(--sf-border)] pt-3 text-sm sm:grid-cols-2">
         <div class="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <dt class="font-semibold text-[var(--sf-muted)]">{{ __('storefront.invoice.shop.order_status', [], $storefrontLocale ?? 'id') }}</dt>

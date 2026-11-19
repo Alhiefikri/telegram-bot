@@ -1,126 +1,68 @@
 @php
     $storefrontLocale = $storefrontLocale ?? 'id';
     $statusCopy = $paymentStatusCopy['qris'] ?? [];
-    $hasNativeQris = $isPendingPayment && $isQrisPayable && filled($qrisImageSource ?? $qrisImageDataUri);
-    $isManualQris = $isManualQris ?? false;
-    $isHostedPakasir = $isHostedPakasir ?? false;
-    $isSakurupiah = $isSakurupiah ?? strtolower((string) $payment?->provider) === 'sakurupiah';
-    $isWijayaPay = $isWijayaPay ?? strtolower((string) $payment?->provider) === 'wijayapay';
-    $isAutomaticQris = $isSakurupiah || $isWijayaPay;
-    $isHostedSakurupiah = $isHostedSakurupiah ?? ($isSakurupiah && ! $hasNativeQris && filled($hostedPaymentUrl));
-    $paymentDeadlineLabel = $paymentDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
-    $customerPaysQrisFee = isset($qrisFeePayer)
-        ? $qrisFeePayer === 'customer'
-        : (! $isAutomaticQris && config('services.pakasir.qris_fee.payer', 'customer') === 'customer');
+    $hasNativeQris = $isQrisPayable && ! $qrisExpired && filled($qrisImageSource ?? $qrisImageDataUri);
+    $showQris = ! $qrisExpired && ($isManualQris || $hasNativeQris);
+    $paymentDeadlineLabel = $qrisDeadline?->copy()->timezone((string) config('app.timezone'))->format('d M Y H:i T');
 @endphp
 
-<x-storefront.panel as="section" padding="none" class="invoice-payment-panel mt-5 overflow-hidden" aria-label="{{ __('storefront.invoice.qris.aria_label', [], $storefrontLocale) }}">
-    <div class="invoice-payment-grid grid lg:grid-cols-2">
-        <div class="invoice-payment-visual min-w-0 bg-[var(--sf-surface-warm)] p-4 sm:p-6">
-            @if ($isPendingPayment && $paymentDeadline)
-                @include('storefront.partials.shop.payment-countdown')
-            @endif
-
-            @if ($isManualQris)
-                <div class="payment-qris-stage relative mt-4 overflow-hidden rounded-xl border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[5px_5px_0_var(--sf-shadow)]">
-                    <div class="payment-qris-poster mx-auto max-w-sm">
-                        <div class="qris-frame relative mx-auto max-w-[360px] overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[5px_5px_0_var(--sf-shadow)]">
-                            <img src="{{ asset('qr-lhie.jpg') }}" alt="{{ __('storefront.invoice.qris.alt.native', ['invoice' => $order->invoice_number], $storefrontLocale) }}" class="relative z-10 aspect-square w-full object-contain">
-                        </div>
-                    </div>
-                </div>
-            @elseif ($hasNativeQris)
-                <div class="payment-qris-stage relative mt-4 overflow-hidden rounded-xl border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[5px_5px_0_var(--sf-shadow)]">
-                    <div class="payment-qris-poster mx-auto max-w-sm">
-                        <div class="qris-frame relative mx-auto max-w-[360px] overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] bg-white p-3 shadow-[5px_5px_0_var(--sf-shadow)]">
-                            @if ($qrisImageSource !== null)
-                                <div class="relative z-10 aspect-square w-full overflow-hidden" data-native-qris-crop="top-square">
-                                    <img src="{{ $qrisImageSource }}" alt="{{ __('storefront.invoice.qris.alt.native', ['invoice' => $order->invoice_number], $storefrontLocale) }}" class="block h-auto w-full max-w-none" data-qris-image data-qris-fallback-src="{{ $qrisImageFallbackUrl ?? '' }}">
-                                </div>
-                            @else
-                                <img src="{{ $qrisImageDataUri }}" alt="{{ __('storefront.invoice.qris.alt.native', ['invoice' => $order->invoice_number], $storefrontLocale) }}" class="relative z-10 aspect-square w-full object-contain">
-                            @endif
-                            <div class="qris-scan-line" aria-hidden="true"></div>
-                        </div>
-                        <div class="payment-qris-corners" aria-hidden="true"></div>
-                    </div>
-                </div>
-            @elseif (($isHostedPakasir || $isHostedSakurupiah) && $isPendingPayment && filled($hostedPaymentUrl))
-                <div class="invoice-payment-placeholder mt-4 grid min-h-64 place-items-center rounded-xl border-[3px] border-[var(--sf-border)] bg-white p-5 text-center shadow-[5px_5px_0_var(--sf-shadow)]">
-                    <div>
-                        <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Pembayaran QRIS</p>
-                        <p class="mt-2 font-display text-xl font-black text-[var(--sf-ink)]">Lanjut ke halaman pembayaran</p>
-                        <a href="{{ $hostedPaymentUrl }}" target="_blank" rel="noreferrer" class="neo-button mt-4 inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">{{ __('storefront.invoice.qris.button.pakasir', [], $storefrontLocale) }}</a>
-                    </div>
-                </div>
-            @else
-                <div class="invoice-payment-placeholder mt-4 grid min-h-64 place-items-center rounded-xl border-[3px] border-[var(--sf-border)] bg-white p-5 text-center shadow-[5px_5px_0_var(--sf-shadow)]">
-                    <div>
-                        <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">QRIS</p>
-                        <p class="mt-2 font-display text-xl font-black text-[var(--sf-ink)]">{{ $qrisReadinessTitle }}</p>
-                        <p class="mt-2 text-sm font-bold leading-6 text-[var(--sf-muted)]">{{ $qrisReadinessMessage }}</p>
-                    </div>
-                </div>
-            @endif
-        </div>
-
-        <div class="invoice-payment-details min-w-0 p-4 sm:p-6">
-            <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                    <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Pembayaran QRIS</p>
-                    <h2 class="mt-1 font-display text-2xl font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.qris.title.default', [], $storefrontLocale) }}</h2>
-                    <p class="mt-2 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                        {{ $isManualQris
-                            ? 'Bayar dengan QRIS pada invoice ini, lalu hubungi admin dengan nomor invoice setelah pembayaran.'
-                            : __($isHostedPakasir
-                                ? 'storefront.invoice.qris.description.hosted'
-                                : ($isSakurupiah
-                                    ? 'storefront.invoice.qris.description.sakurupiah'
-                                    : ($isWijayaPay
-                                        ? 'storefront.invoice.qris.description.wijayapay'
-                                        : ($isQrisPayable
-                                            ? 'storefront.invoice.qris.description.payable'
-                                            : 'storefront.invoice.qris.description.not_ready'))), [], $storefrontLocale) }}
-                    </p>
-                </div>
-                <span class="inline-flex shrink-0 rounded-full border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-[var(--sf-ink)] shadow-[3px_3px_0_var(--sf-shadow)]">
-                    {{ $isPaid ? __('storefront.invoice.qris.badge.paid', [], $storefrontLocale) : ($isPendingPayment ? __('storefront.invoice.qris.badge.pending', [], $storefrontLocale) : $qrisReadinessTitle) }}
-                </span>
+<x-storefront.panel as="section" padding="none" class="invoice-qris-panel mt-3" aria-label="{{ __('storefront.invoice.qris.aria_label', [], $storefrontLocale) }}">
+    <div class="invoice-qris-layout">
+        <div class="invoice-qris-main">
+            <div class="invoice-qris-total">
+                <span>{{ __('storefront.invoice.qris.label.qris_total', [], $storefrontLocale) }}</span>
+                <strong>{{ $qrisExpired ? 'Tidak dapat dibayar' : ($qrisTotal ?? __('storefront.invoice.qris.label.waiting_provider', [], $storefrontLocale)) }}</strong>
             </div>
 
-            <dl class="mt-5 grid gap-2 text-sm font-bold">
-                <div class="flex min-w-0 items-start justify-between gap-4 border-b border-[var(--sf-border)] pb-3">
-                    <dt class="text-[var(--sf-muted)]">{{ __('storefront.invoice.shop.products', [], $storefrontLocale) }}</dt>
-                    <dd class="max-w-[65%] text-right font-black text-[var(--sf-ink)]">{{ $order->orderItems->pluck('product_name')->join(', ') }}</dd>
+            @if ($showQris)
+                <div class="invoice-qris-image" data-invoice-qris>
+                    <span class="invoice-qris-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v6h-2M14 18h2v2h-2z" /></svg> QRIS</span>
+                    <div class="invoice-qris-frame">
+                        @if ($isManualQris)
+                            <img src="{{ asset('qr-lhie.jpg') }}" alt="{{ __('storefront.invoice.qris.alt.manual', ['invoice' => $order->invoice_number], $storefrontLocale) }}">
+                        @elseif ($qrisImageSource !== null)
+                            <div class="invoice-qris-crop" data-native-qris-crop="top-square"><img src="{{ $qrisImageSource }}" alt="{{ __('storefront.invoice.qris.alt.native', ['invoice' => $order->invoice_number], $storefrontLocale) }}" data-qris-image data-qris-fallback-src="{{ $qrisImageFallbackUrl ?? '' }}"></div>
+                        @else
+                            <img src="{{ $qrisImageDataUri }}" alt="{{ __('storefront.invoice.qris.alt.native', ['invoice' => $order->invoice_number], $storefrontLocale) }}">
+                        @endif
+                    </div>
                 </div>
-                <div class="flex items-center justify-between gap-4 border-b border-[var(--sf-border)] pb-3">
-                    <dt class="text-[var(--sf-muted)]">{{ __('storefront.invoice.qris.label.product_total', [], $storefrontLocale) }}</dt>
-                    <dd class="text-right font-black text-[var(--sf-ink)]">{{ $storefront->idr($order->total_amount) }}</dd>
+            @elseif ($isHostedQris)
+                <div class="invoice-qris-placeholder" data-invoice-qris>
+                    <p>Buka halaman pembayaran untuk melihat QRIS dan total final.</p>
+                    <a href="{{ $hostedPaymentUrl }}" target="_blank" rel="noopener noreferrer" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">{{ __('storefront.invoice.qris.button.pakasir', [], $storefrontLocale) }}</a>
                 </div>
-                <div class="flex items-center justify-between gap-4 border-b border-[var(--sf-border)] pb-3">
-                    <dt class="text-[var(--sf-muted)]">Metode</dt>
-                    <dd class="text-right font-black text-[var(--sf-ink)]">QRIS</dd>
+            @else
+                <div class="invoice-qris-placeholder" role="status">
+                    <strong>{{ $qrisExpired ? 'Batas pembayaran terlewati' : $qrisReadinessTitle }}</strong>
+                    <p>{{ $qrisExpired ? 'Jangan bayar QR lama. Jika sudah membayar, hubungi bantuan dengan nomor invoice dan bukti pembayaran.' : $qrisReadinessMessage }}</p>
                 </div>
-                <div class="flex items-center justify-between gap-4 border-b border-[var(--sf-border)] pb-3">
-                    <dt class="text-[var(--sf-muted)]">{{ $isManualQris ? __('storefront.invoice.qris.label.payment_fee', [], $storefrontLocale) : ($customerPaysQrisFee ? __('storefront.invoice.qris.label.qris_fee_customer', [], $storefrontLocale) : __('storefront.invoice.qris.label.qris_fee_store', [], $storefrontLocale)) }}</dt>
-                    <dd class="text-right font-black text-[var(--sf-ink)]">{{ $payment?->provider_fee !== null ? $storefront->idr($payment->provider_fee) : '-' }}</dd>
-                </div>
-                <div class="flex items-center justify-between gap-4 border-b-[3px] border-[var(--sf-border)] pb-3 text-lg">
-                    <dt class="font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.qris.label.qris_total', [], $storefrontLocale) }}</dt>
-                    <dd class="text-right font-display text-2xl font-black text-[var(--sf-accent)]">{{ $isManualQris ? $storefront->idr($order->total_amount) : ($isQrisPayable && $payableAmount !== null ? ($payableAmountDisplay ?? $storefront->idr($payableAmount)) : __('storefront.invoice.qris.label.waiting_provider', [], $storefrontLocale)) }}</dd>
-                </div>
-                <div class="flex items-center justify-between gap-4">
-                    <dt class="text-[var(--sf-muted)]">{{ __('storefront.invoice.qris.label.deadline', [], $storefrontLocale) }}</dt>
-                    <dd class="text-right font-black text-[var(--sf-ink)]">{{ $paymentDeadlineLabel ?? '-' }}</dd>
-                </div>
-            </dl>
+            @endif
 
+            <div class="invoice-qris-deadline">
+                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 7v5l3 2" /></svg> {{ __('storefront.invoice.qris.label.deadline', [], $storefrontLocale) }}</span>
+                <time @if ($qrisDeadline) datetime="{{ $qrisDeadline->toIso8601String() }}" @endif>{{ $paymentDeadlineLabel ?? '-' }}</time>
+            </div>
+        </div>
 
-            @if ($isPendingPayment && ! $isManualQris)
-                <div class="mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-muted)]"
+        <div class="invoice-qris-next">
+            @if ($showQris)
+                <p data-invoice-qris-instruction>{{ $isManualQris ? 'Pindai QRIS dan bayar sesuai total di invoice. Kirim nomor invoice dan bukti bayar ke admin.' : 'Pindai QRIS dan bayar sesuai total di invoice. Setelah bayar, cek status di halaman ini.' }}</p>
+                @if (! $isManualQris)
+                    <p>Jangan bayar QR lama setelah kedaluwarsa atau dibatalkan. Jika sudah membayar, hubungi bantuan dengan nomor invoice dan bukti pembayaran.</p>
+                @endif
+                <p class="invoice-qris-expired-message" data-invoice-qris-expired hidden>Batas pembayaran terlewati. Jangan bayar QR lama. Jika sudah membayar, hubungi bantuan dengan nomor invoice dan bukti pembayaran.</p>
+            @endif
+
+            @if ($qrisDeadline)
+                @include('storefront.partials.shop.payment-countdown', ['paymentDeadline' => $qrisDeadline, 'paymentDeadlineTimestamp' => $qrisDeadline->toIso8601String()])
+            @endif
+
+            @if (! $isManualQris)
+                <div class="invoice-qris-status"
                      data-shop-payment-status
                      data-payment-kind="qris"
-                     data-qris-waiting="{{ $isAutomaticQris && ! $isQrisPayable ? 'true' : 'false' }}"
+                     data-qris-waiting="{{ $qrisAutoReadinessPoll ? 'true' : 'false' }}"
                      data-status-url="{{ $statusUrl }}"
                      data-redirect-url="{{ $redirectUrl }}"
                      data-terminal="{{ $isTerminal ? 'true' : 'false' }}"
@@ -129,27 +71,17 @@
                      data-poll-max-attempts="{{ $paymentStatusPollMaxAttempts ?? 9 }}"
                      data-poll-max-duration-ms="{{ $paymentStatusPollMaxDurationMs ?? 180000 }}"
                      data-status-copy='@json($statusCopy)'>
-                    <p class="font-black text-[var(--sf-ink)]" data-payment-status-title>{{ $isQrisPayable ? $qrisRetryLabel : $qrisReadinessTitle }}</p>
-                    <p data-payment-status-message>{{ $isQrisPayable ? __('storefront.invoice.qris.status.after_payment', [], $storefrontLocale) : $qrisReadinessMessage }}</p>
+                    <p class="font-black" data-payment-status-title>{{ $qrisExpired ? 'Batas pembayaran terlewati' : ($isQrisPayable ? $qrisRetryLabel : $qrisReadinessTitle) }}</p>
+                    <p data-payment-status-message>{{ $qrisExpired ? 'Jika sudah membayar, jangan bayar lagi. Hubungi bantuan dengan nomor invoice dan bukti pembayaran.' : ($isQrisPayable ? __('storefront.invoice.qris.status.after_payment', [], $storefrontLocale) : $qrisReadinessMessage) }}</p>
                     <p class="sr-only" aria-live="polite" data-payment-status-announcement></p>
-                    <button type="button" class="neo-button mt-3 inline-flex min-h-10 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white" data-payment-status-check>{{ $qrisRetryLabel }}</button>
+                    <button type="button" class="neo-button mt-3 inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white" data-payment-status-check>{{ $qrisRetryLabel }}</button>
                     <div class="mt-3 {{ $isQrisPayable ? 'hidden' : 'flex' }} flex-wrap gap-3" data-payment-status-followup>
-                        <a href="{{ $homeUrl }}" class="neo-button inline-flex min-h-10 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">{{ __('storefront.invoice.qris.button.shop_again', [], $storefrontLocale) }}</a>
-                        <a href="#invoice-support" class="inline-flex min-h-10 items-center justify-center rounded-lg border-2 border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.qris.button.help', [], $storefrontLocale) }}</a>
+                        <a href="#invoice-support" class="inline-flex min-h-11 items-center justify-center rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface)] px-4 text-sm font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.qris.button.help', [], $storefrontLocale) }}</a>
                     </div>
                 </div>
-            @elseif ($isPendingPayment && $isManualQris)
-                <div class="mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-muted)]">
-                    <p class="font-black text-[var(--sf-ink)]">Pembayaran QRIS belum terdeteksi</p>
-                    <p>Setelah membayar, hubungi admin dengan nomor invoice ini.</p>
-                </div>
-            @elseif (! $isPaid)
-                <div class="mt-4 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-muted)]" data-terminal="true" role="status" aria-live="polite">
-                    <p class="font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.qris.terminal.title', [], $storefrontLocale) }}</p>
-                    <p>{{ $statusMessage }}</p>
-                </div>
+            @else
+                <a href="#invoice-support" class="invoice-qris-help">Hubungi admin untuk konfirmasi</a>
             @endif
-
         </div>
     </div>
 </x-storefront.panel>
