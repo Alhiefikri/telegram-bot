@@ -11,6 +11,7 @@ use App\Models\Product;
 use App\Models\SupplierFulfillment;
 use App\Services\PaymentReceiptReport;
 use App\Support\DogfoodTiming;
+use App\Support\StockDisplay;
 use Illuminate\Database\Eloquent\Collection;
 
 class TelegramAdminPaidOrderNotifier
@@ -21,6 +22,7 @@ class TelegramAdminPaidOrderNotifier
         private readonly PaymentReceiptReport $receiptReport,
         private readonly TelegramUiIcons $uiIcons,
         private readonly TelegramProductNameRenderer $productNames,
+        private readonly TelegramLocalFulfillmentLink $fulfillmentLink,
     ) {}
 
     /**
@@ -52,16 +54,18 @@ class TelegramAdminPaidOrderNotifier
         $claimed = $order->fresh(['customer', 'orderItems', 'payments']) ?? $order;
         $fulfillments = SupplierFulfillment::query()->with(['currentPurchase', 'purchases.supplier', 'manualHandoffs'])
             ->where('order_id', $claimed->getKey())->orderBy('id')->get();
+        $review = $this->fulfillmentLink->reviewFor($claimed);
+        $fulfillmentUrl = $review === null ? null : $this->fulfillmentLink->url($review);
 
         return DogfoodTiming::time('dogfood.telegram.checkout_step', [
             'step' => 'admin_paid_order_notification',
             'payment_mode' => $this->paymentMode($claimed),
             'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
             'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed, $reviewNotice, $outcome, $fulfillments)), $this->dashboardReplyMarkup($claimed, $fulfillments)));
+        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed, $reviewNotice, $outcome, $fulfillments, $fulfillmentUrl !== null)), $this->dashboardReplyMarkup($claimed, $fulfillments, $fulfillmentUrl)));
     }
 
-    private function paidMessage(Order $order, bool $reviewNotice, ?array $outcome, Collection $fulfillments): string
+    private function paidMessage(Order $order, bool $reviewNotice, ?array $outcome, Collection $fulfillments, bool $canFillAccounts): string
     {
         $payment = $this->relevantPayment($order);
         if ($outcome === null && $reviewNotice && app(AdminPaidOrderOutcome::class)->applies($order)) {
@@ -77,11 +81,13 @@ class TelegramAdminPaidOrderNotifier
             'Pembeli: '.$this->buyerLabel($order),
             'Sumber: '.$this->sourceLabel($order),
             'Status pembayaran: '.($order->api_order_claim_id !== null ? $order->payment_status->value : 'Paid'),
-            ...($outcome['lines'] ?? $this->fulfillmentStatusLines($order, $fulfillments)),
+            ...($canFillAccounts
+                ? ['Fulfillment: menunggu akun lokal dari Owner.']
+                : ($outcome['lines'] ?? $this->fulfillmentStatusLines($order, $fulfillments))),
             ...$this->supplierOrderLines($fulfillments),
             ...($order->api_order_claim_id !== null || $reviewNotice ? [
                 'Status order: '.$order->order_status->value,
-                'Review operator: '.(ManualFulfillmentReview::query()->where('order_id', $order->id)->open()->exists() ? 'diperlukan; buka dashboard' : 'tidak ada review terbuka'),
+                'Review operator: '.(ManualFulfillmentReview::query()->where('order_id', $order->id)->open()->exists() ? 'diperlukan' : 'tidak ada review terbuka'),
             ] : []),
             'Metode: '.$this->paymentLabel($payment),
             'Earning: '.$this->earningLabel($payment, $order),
@@ -94,7 +100,9 @@ class TelegramAdminPaidOrderNotifier
             '',
             'Paid at: '.$this->timeLabel($payment?->paid_at ?? $order->updated_at),
             '',
-            $outcome['action'] ?? 'Cek dashboard untuk proses order ini.',
+            $canFillAccounts
+                ? 'Tekan Isi akun pesanan untuk melengkapi akun invoice ini. Jangan kirim data akun lewat chat.'
+                : ($outcome['action'] ?? 'Buka detail invoice untuk memeriksa pesanan ini.'),
         ];
 
         return implode("\n", $lines);
@@ -234,7 +242,7 @@ class TelegramAdminPaidOrderNotifier
                 continue;
             }
 
-            $lines[] = '- '.$productName.': '.$product->availableStock();
+            $lines[] = '- '.$productName.': '.StockDisplay::label($product->availableStock());
         }
 
         if ($lines === []) {
@@ -335,9 +343,9 @@ class TelegramAdminPaidOrderNotifier
         return $date->copy()->timezone((string) config('app.timezone'))->format('d M Y, H:i');
     }
 
-    private function dashboardReplyMarkup(Order $order, Collection $fulfillments): array
+    private function dashboardReplyMarkup(Order $order, Collection $fulfillments, ?string $fulfillmentUrl): array
     {
-        $rows = [];
+        $rows = $fulfillmentUrl === null ? [] : [[['text' => '🔐 Isi akun pesanan', 'url' => $fulfillmentUrl, 'style' => 'primary']]];
         if ($order->payment_status === PaymentStatus::Paid) {
             foreach ($fulfillments->where('state', 'review') as $fulfillment) {
                 if ($fulfillment->manual_takeover_at !== null || $fulfillment->manualHandoffs->isNotEmpty()

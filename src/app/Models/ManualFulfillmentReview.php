@@ -40,6 +40,11 @@ class ManualFulfillmentReview extends Model
 
     public const REASON_BSC_MANUAL_REVIEW = 'bsc_manual_review';
 
+    public function acceptsLocalCredentials(): bool
+    {
+        return in_array($this->reason, [self::REASON_UNIQUE_EMAIL_UNAVAILABLE, self::REASON_LOCAL_CREDENTIALS_MISSING, self::REASON_MANUAL_UNLIMITED], true);
+    }
+
     public function scopeOwnerNotifiable(Builder $query): void
     {
         $query->where(function (Builder $eligible): void {

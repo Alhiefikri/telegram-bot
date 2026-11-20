@@ -43,13 +43,13 @@ class ProductCredentialAllocator
 
             return;
         }
-        $credentialCount = ProductStockItem::where('product_id', $product->id)->whereNull('supplier_purchase_id')->count();
+        $credentialCount = ProductStockItem::where('product_id', $product->id)->localCatalogStock()->count();
         if ($credentialCount === 0) {
             return;
         }
 
         $credentials = ProductStockItem::where('product_id', $product->id)
-            ->whereNull('supplier_purchase_id')
+            ->localCatalogStock()
             ->whereNull('order_item_id')
             ->whereNull('retired_at')
             ->orderBy('id')
@@ -73,7 +73,7 @@ class ProductCredentialAllocator
         }
 
         ProductStockItem::whereIn('order_item_id', $orderItemIds)
-            ->whereNull('supplier_purchase_id')
+            ->localCatalogStock()
             ->whereNull('retired_at')
             ->update(['order_item_id' => null, 'updated_at' => now()]);
     }

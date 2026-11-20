@@ -101,12 +101,14 @@ class Product extends Model
                             FROM {$stockItemsTable}
                             WHERE {$stockItemsTable}.product_id = {$productsTable}.id
                                 AND {$stockItemsTable}.supplier_purchase_id IS NULL
+                                AND {$stockItemsTable}.is_order_only = FALSE
                         )
                         OR EXISTS (
                             SELECT 1
                             FROM {$stockItemsTable}
                             WHERE {$stockItemsTable}.product_id = {$productsTable}.id
                                 AND {$stockItemsTable}.supplier_purchase_id IS NULL
+                                AND {$stockItemsTable}.is_order_only = FALSE
                                 AND {$stockItemsTable}.order_item_id IS NULL
                                 AND {$stockItemsTable}.retired_at IS NULL
                         )
@@ -128,8 +130,8 @@ class Product extends Model
             $available->where('manual_unlimited', true)->orWhere(function (Builder $local): void {
                 $local->whereColumn('stock', '>', 'reserved_stock')
                     ->where(fn (Builder $query) => $query
-                        ->whereDoesntHave('stockItems', fn (Builder $items) => $items->whereNull('supplier_purchase_id'))
-                        ->orWhereHas('stockItems', fn (Builder $items) => $items->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')));
+                        ->whereDoesntHave('stockItems', fn (Builder $items) => $items->localCatalogStock())
+                        ->orWhereHas('stockItems', fn (Builder $items) => $items->localCatalogStock()->whereNull('order_item_id')->whereNull('retired_at')));
             })->orWhere(fn (Builder $external) => $external
                 ->where('supplier_available_stock', '>', 0)
                 ->where('supplier_available_until', '>', now()));
@@ -154,9 +156,9 @@ class Product extends Model
             ->addSelect(['local_stock_items_exists' => ProductStockItem::query()
                 ->selectRaw('1')
                 ->whereColumn('product_stock_items.product_id', $this->qualifyColumn('id'))
-                ->whereNull('supplier_purchase_id')
+                ->localCatalogStock()
                 ->limit(1)])
-            ->withCount(['stockItems as local_available_stock_items_count' => fn (Builder $items) => $items->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
+            ->withCount(['stockItems as local_available_stock_items_count' => fn (Builder $items) => $items->localCatalogStock()->whereNull('order_item_id')->whereNull('retired_at')]);
     }
 
     public function availableStock(): int
@@ -199,10 +201,10 @@ class Product extends Model
         }
 
         if ($this->relationLoaded('stockItems')) {
-            return $this->stockItems->whereNull('supplier_purchase_id')->isNotEmpty();
+            return $this->stockItems->whereNull('supplier_purchase_id')->where('is_order_only', false)->isNotEmpty();
         }
 
-        return $this->stockItems()->whereNull('supplier_purchase_id')->exists();
+        return $this->stockItems()->localCatalogStock()->exists();
     }
 
     public function availableStockItemCount(): int
@@ -212,10 +214,10 @@ class Product extends Model
         }
 
         if ($this->relationLoaded('stockItems')) {
-            return $this->stockItems->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')->count();
+            return $this->stockItems->whereNull('supplier_purchase_id')->where('is_order_only', false)->whereNull('order_item_id')->whereNull('retired_at')->count();
         }
 
-        return $this->stockItems()->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')->count();
+        return $this->stockItems()->localCatalogStock()->whereNull('order_item_id')->whereNull('retired_at')->count();
     }
 
     public function isPublicVisible(): bool

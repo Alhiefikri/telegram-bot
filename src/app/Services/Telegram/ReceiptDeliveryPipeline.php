@@ -53,7 +53,11 @@ final class ReceiptDeliveryPipeline
                 ->with(['customer', 'orderItems.stockItems', 'orderItems.product'])
                 ->findOrFail($claimed->source_id);
 
+            $manualGroup = TelegramOutboundEffectService::manualReceiptGroupKey((string) $order->id);
             if (! $this->receiptIsEligible($order)
+                || (TelegramOutboundEffectService::hasOrderOnlyReceipt($order)
+                    && ! ($this->isExplicitReceiptEffect($claimed) && ($claimed->outcome_metadata['account_count'] ?? 0) > 0)
+                    && ! in_array($claimed->effect_group_key, [$manualGroup, $manualGroup.':text-fallback'], true))
                 || (string) $order->customer?->telegram_id !== (string) $claimed->telegram_chat_id) {
                 $this->ledger->finalizeNotDeliverable(
                     (string) $claimed->getKey(),
@@ -405,6 +409,8 @@ final class ReceiptDeliveryPipeline
             TelegramOutboundEffectService::receiptEffectGroupKey((string) $orderId),
             TelegramOutboundEffectService::receiptTextFallbackEffectGroupKey((string) $orderId),
             TelegramOutboundEffectService::legacyReceiptEffectGroupKey((string) $orderId),
+            TelegramOutboundEffectService::manualReceiptGroupKey((string) $orderId),
+            TelegramOutboundEffectService::manualReceiptGroupKey((string) $orderId).':text-fallback',
         ], true)) {
             return false;
         }

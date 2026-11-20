@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\Telegram\Concerns\HasAdminWebAppButton;
 use App\Support\Money;
+use App\Support\StockDisplay;
 use Illuminate\Support\Carbon;
 
 class TelegramAdminStatsIntents
@@ -44,7 +45,7 @@ class TelegramAdminStatsIntents
         foreach ($products as $product) {
             $available = $product->availableStock();
             $icon = $this->uiIcons->renderLegacyIcons($available <= 0 ? '❌' : ($available <= 2 ? '⚠️' : '✅'));
-            $line = $icon.' '.$this->productNames->renderSelection($product->name, $icons[(int) $product->getKey()]).': '.($available > 0 ? $available : 'habis');
+            $line = $icon.' '.$this->productNames->renderSelection($product->name, $icons[(int) $product->getKey()]).': '.($available > 0 ? StockDisplay::label($available) : 'habis');
             if ($product->reserved_stock > 0) {
                 $line .= ' ('.$product->reserved_stock.' direservasi)';
             }

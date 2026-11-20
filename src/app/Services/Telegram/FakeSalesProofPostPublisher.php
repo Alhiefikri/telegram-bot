@@ -7,6 +7,7 @@ use App\Models\StoreChannelSetting;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\PaidInvoice\PaidInvoiceSyntheticPresentationAdapter;
 use App\Storefront\StorefrontUrl;
+use App\Support\StockDisplay;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -227,7 +228,7 @@ class FakeSalesProofPostPublisher
             ->map(fn (Product $product): array => [
                 'id' => (int) $product->id,
                 'name' => $product->name,
-                'label' => $product->name.' · stok '.$product->availableStock(),
+                'label' => $product->name.' · stok '.StockDisplay::label($product->availableStock()),
             ])
             ->values()
             ->all();

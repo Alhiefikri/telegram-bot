@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\CredentialFormat;
 use App\Services\Credentials\StructuredCredentialPayload;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 use Throwable;
@@ -12,7 +13,12 @@ use Throwable;
 #[Fillable(['product_id', 'order_item_id', 'supplier_purchase_id', 'supplier_unit_index', 'retired_at', 'retired_reason', 'secret', 'credential_format', 'credential_payload'])]
 class ProductStockItem extends Model
 {
-    protected $hidden = ['supplier_purchase_id', 'supplier_unit_index', 'supplierPurchase', 'supplier_purchase', 'supplierAccountUnit', 'supplier_account_unit', 'secret', 'credential_payload'];
+    protected $hidden = ['is_order_only', 'supplier_purchase_id', 'supplier_unit_index', 'supplierPurchase', 'supplier_purchase', 'supplierAccountUnit', 'supplier_account_unit', 'secret', 'credential_payload'];
+
+    public function scopeLocalCatalogStock(Builder $query): void
+    {
+        $query->whereNull('supplier_purchase_id')->where('is_order_only', false);
+    }
 
     public function supplierPurchase()
     {
@@ -73,6 +79,7 @@ class ProductStockItem extends Model
             'order_item_id' => 'integer',
             'supplier_purchase_id' => 'integer',
             'supplier_unit_index' => 'integer',
+            'is_order_only' => 'boolean',
             'retired_at' => 'datetime',
             'credential_format' => CredentialFormat::class,
             'credential_payload' => 'encrypted:array',

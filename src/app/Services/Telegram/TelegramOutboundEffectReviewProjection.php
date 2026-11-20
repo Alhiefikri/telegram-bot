@@ -72,6 +72,8 @@ final class TelegramOutboundEffectReviewProjection
             TelegramOutboundEffectService::receiptEffectGroupKey((string) $effect->source_id),
             TelegramOutboundEffectService::receiptTextFallbackEffectGroupKey((string) $effect->source_id),
             TelegramOutboundEffectService::legacyReceiptEffectGroupKey((string) $effect->source_id),
+            TelegramOutboundEffectService::manualReceiptGroupKey((string) $effect->source_id),
+            TelegramOutboundEffectService::manualReceiptGroupKey((string) $effect->source_id).':text-fallback',
         ], true)) {
             return;
         }

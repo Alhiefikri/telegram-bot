@@ -45,7 +45,7 @@ class AdminManualFulfillmentReviewController extends Controller
         $handoffFulfillments = $review->reason === 'supplier_fulfillment'
             ? SupplierFulfillment::query()->where('order_id', $review->order_id)->with('manualHandoffs.actor')->orderBy('id')->get()
             : collect();
-        $localCredentialItems = in_array($review->reason, [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)
+        $localCredentialItems = $review->acceptsLocalCredentials()
             ? $review->order->orderItems->map(function ($item): array {
                 $allocated = $item->stockItems()->whereNull('supplier_purchase_id')->whereNull('retired_at')->count();
 
@@ -127,7 +127,7 @@ class AdminManualFulfillmentReviewController extends Controller
 
     public function provideCredentials(Request $request, ManualFulfillmentReview $review, ManualFulfillmentResolutionService $resolutions): RedirectResponse
     {
-        Gate::authorize('resolve', $review);
+        Gate::authorize('provideCredentials', $review);
 
         try {
             $data = Validator::make($request->all(), [
