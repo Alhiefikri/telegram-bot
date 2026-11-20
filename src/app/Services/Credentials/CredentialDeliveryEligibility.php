@@ -44,7 +44,8 @@ final class CredentialDeliveryEligibility
         $pending = collect(app(SupplierFulfillmentService::class)->pendingOrderIds($ids))->flip();
         $review = ManualFulfillmentReview::query()->whereIn('order_id', $ids)->openLatePayment()->pluck('order_id')->flip();
         $uniqueReview = ManualFulfillmentReview::query()->whereIn('order_id', $ids)
-            ->where('reason', ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)->open()->pluck('order_id')->flip();
+            ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING])
+            ->open()->pluck('order_id')->flip();
         $missingUniqueLocal = OrderItem::query()->whereIn('order_id', $ids)
             ->where('deferred_local_quantity', '>', 0)
             ->whereRaw('(SELECT COUNT(*) FROM product_stock_items WHERE product_stock_items.order_item_id = order_items.id AND supplier_purchase_id IS NULL AND retired_at IS NULL) < COALESCE(local_quantity, quantity)')

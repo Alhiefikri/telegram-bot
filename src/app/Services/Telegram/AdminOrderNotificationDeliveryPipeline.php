@@ -10,7 +10,9 @@ use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\TelegramOutboundEffect;
 use App\Support\DogfoodTiming;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Throwable;
 
@@ -34,6 +36,7 @@ final class AdminOrderNotificationDeliveryPipeline
         private readonly TelegramAdminOrderNotifier $adminOrderNotifier,
         private readonly TelegramAdminPaidOrderNotifier $adminPaidOrderNotifier,
         private readonly TelegramOutboundResponseValidator $responseValidator,
+        private readonly TelegramBotClient $bot,
     ) {}
 
     public function deliver(TelegramOutboundEffect $effect): void
@@ -69,6 +72,17 @@ final class AdminOrderNotificationDeliveryPipeline
 
             if (! $this->eligible($order, (string) $claimed->effect_type)) {
                 $this->finalizeNotDeliverable($claimed, 'admin_notification_not_eligible', 'Telegram admin notification was no longer eligible for delivery.');
+
+                return;
+            }
+
+            // Local credential reviews for Telegram buyers share the paid
+            // notice. Keep legacy effect history, but do not send a second card.
+            if ($claimed->effect_type === TelegramOutboundEffectType::AdminOrderReviewNotification->value
+                && app(AdminPaidOrderOutcome::class)->applies($order)
+                && ManualFulfillmentReview::query()->whereKey($claimed->source_id)
+                    ->where('reason', ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)->exists()) {
+                $this->finalizeNotDeliverable($claimed, 'admin_notification_not_eligible', 'Local credential review is covered by the paid order notice.');
 
                 return;
             }
@@ -109,6 +123,9 @@ final class AdminOrderNotificationDeliveryPipeline
             if ($finalized !== null) {
                 $this->observeAdminNotice($claimed, $finalized, $order);
                 $this->synchronizeSentProjection($finalized);
+                if ($finalized->outcome_metadata['clean_up_local_review'] ?? false) {
+                    $this->cleanUpLocalReviewNotices($finalized);
+                }
             }
 
             if ($claimed->effect_type === TelegramOutboundEffectType::AdminOrderExpiredNotification->value) {
@@ -218,7 +235,13 @@ final class AdminOrderNotificationDeliveryPipeline
                 return false;
             }
             if (in_array($locked->state, [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed], true)) {
-                $locked->outcome_metadata = array_merge($locked->outcome_metadata ?? [], ['paid_outcome' => $outcome]);
+                $locked->outcome_metadata = array_merge($locked->outcome_metadata ?? [], [
+                    'paid_outcome' => $outcome,
+                    'clean_up_local_review' => $outcome['resolved'] && $order->order_status === OrderStatus::Completed
+                        && ManualFulfillmentReview::query()->where('order_id', $order->id)
+                            ->where('reason', ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)
+                            ->where('state', ManualFulfillmentReview::STATE_FULFILLED)->exists(),
+                ]);
                 $locked->save();
             }
 
@@ -269,6 +292,60 @@ final class AdminOrderNotificationDeliveryPipeline
         }
 
         return $count;
+    }
+
+    public function recoverLocalReviewCleanup(int $chunk): int
+    {
+        $effects = app(TelegramOutboundRecoveryPage::class)->load(
+            'local_review_notice_cleanup',
+            TelegramOutboundEffect::query()->where('effect_type', TelegramOutboundEffectType::AdminOrderPaidNotification->value)
+                ->where('state', TelegramOutboundEffectState::Sent)
+                ->where('outcome_metadata->clean_up_local_review', true)
+                ->whereNull('outcome_metadata->local_review_cleanup_finished'),
+            max(1, min(10, $chunk)),
+        );
+        foreach ($effects as $effect) {
+            $this->cleanUpLocalReviewNotices($effect);
+        }
+
+        return $effects->count();
+    }
+
+    private function cleanUpLocalReviewNotices(TelegramOutboundEffect $result): void
+    {
+        try {
+            $reviewIds = ManualFulfillmentReview::query()->where('order_id', $result->source_id)
+                ->where('reason', ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)->pluck('id')->map(fn ($id) => (string) $id);
+            $notices = TelegramOutboundEffect::query()->where('state', TelegramOutboundEffectState::Sent)
+                ->where('telegram_chat_id', $result->telegram_chat_id)
+                ->whereNotNull('telegram_message_id')->where('telegram_message_id', '!=', $result->telegram_message_id)
+                ->where(fn ($query) => $query->whereKey($result->supersedes_effect_id)
+                    ->orWhere(fn ($reviews) => $reviews->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)
+                        ->where('source_type', ManualFulfillmentReview::class)->whereIn('source_id', $reviewIds)))
+                ->get();
+            foreach ($notices->unique('telegram_message_id') as $notice) {
+                if (! $this->responseValidator->isValidMessageId((string) $notice->telegram_message_id)) {
+                    continue;
+                }
+                try {
+                    $this->bot->deleteMessage($notice->telegram_chat_id, $notice->telegram_message_id);
+                } catch (RequestException $exception) {
+                    $description = strtolower((string) $exception->response->json('description'));
+                    if ($exception->response->status() !== 400
+                        || (! str_contains($description, 'message to delete not found') && ! str_contains($description, "message can't be deleted"))) {
+                        throw $exception;
+                    }
+                }
+            }
+            $result->refresh();
+            $result->update(['outcome_metadata' => array_merge($result->outcome_metadata ?? [], ['local_review_cleanup_finished' => true])]);
+        } catch (Throwable $exception) {
+            // The result is already acknowledged. Retry only deletion, never sending.
+            Log::warning('telegram.local_review_cleanup_failed', [
+                'effect_id' => $result->id,
+                'exception' => $exception::class,
+            ]);
+        }
     }
 
     public function recoverMissingReviews(int $chunk = 100): int

@@ -156,6 +156,7 @@ class RecoverTelegramOutboundEffects extends Command
             $operations['recover_missing_api_sales_proofs'] = fn (): int => app(SalesProofDeliveryPipeline::class)->recoverMissingApiProofs($pageLimit);
             $operations['recover_admin_order_reviews'] = fn (): int => app(AdminOrderNotificationDeliveryPipeline::class)->recoverMissingReviews($pageLimit);
             $operations['recover_admin_paid_outcome_updates'] = fn (): int => app(AdminOrderNotificationDeliveryPipeline::class)->recoverPaidOutcomeUpdates($pageLimit);
+            $operations['recover_local_review_cleanup'] = fn (): int => app(AdminOrderNotificationDeliveryPipeline::class)->recoverLocalReviewCleanup($pageLimit);
 
             $operations['recover_sales_proof_posts'] = function () use ($pages, $pageLimit, $outboundEffects, $dispatcher, &$dispatched): void {
                 $salesProofPosts = SalesProofPost::query()
@@ -249,6 +250,17 @@ class RecoverTelegramOutboundEffects extends Command
                                             ->whereRaw('expired_admin_discovery_effects.source_id = CAST(orders.id AS TEXT)');
                                     });
                             })
+                            ->orWhere(function ($manual): void {
+                                $manual->where('order_status', 'completed')->where('payment_status', 'paid')
+                                    ->whereHas('orderItems.stockItems', fn ($stock) => $stock->where('is_order_only', true))
+                                    ->whereNotExists(function ($effects): void {
+                                        $effects->selectRaw('1')->from('telegram_outbound_effects as manual_receipts')
+                                            ->where('manual_receipts.source_type', Order::class)
+                                            ->where('manual_receipts.effect_type', TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS)
+                                            ->whereRaw('manual_receipts.source_id = CAST(orders.id AS TEXT)')
+                                            ->where('manual_receipts.effect_group_key', 'like', '%:manual-local%');
+                                    });
+                            })
                             ->orWhere(function ($pendingAdmin): void {
                                 $pendingAdmin
                                     ->where('order_status', 'pending_payment')
@@ -303,7 +315,8 @@ class RecoverTelegramOutboundEffects extends Command
                             $stage = 'receipt_materialization';
 
                             try {
-                                if ($outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS) === null) {
+                                if (TelegramOutboundEffectService::hasOrderOnlyReceipt($order)
+                                    || $outboundEffects->forOrder($order->id, TelegramOutboundEffectService::TYPE_RECEIPT_CREDENTIALS) === null) {
                                     $effect = $outboundEffects->recordReceipt($order, $order->customer);
                                     if ($effect !== null) {
                                         $stage = 'receipt_dispatch';

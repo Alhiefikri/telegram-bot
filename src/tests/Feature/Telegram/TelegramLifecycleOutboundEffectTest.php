@@ -188,7 +188,7 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
         );
     }
 
-    public function test_recovery_keeps_a_sent_paid_notice_while_recovering_the_independent_review_effect(): void
+    public function test_recovery_keeps_a_sent_paid_notice_and_suppresses_the_duplicate_review(): void
     {
         $this->configureAdminTarget();
         Queue::fake();
@@ -237,15 +237,16 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
 
         $this->fakeTelegramHttp();
         app(AdminOrderNotificationDeliveryPipeline::class)->deliver($reviewEffect->fresh());
-        $this->assertSame(TelegramOutboundEffectState::Sent, $reviewEffect->fresh()->state);
-        $this->assertSame('123457', (string) $reviewEffect->fresh()->telegram_message_id);
-        $reviewSentAt = $reviewEffect->fresh()->sent_at;
+        $this->assertSame(TelegramOutboundEffectState::Failed, $reviewEffect->fresh()->state);
+        $this->assertSame('admin_notification_not_eligible', $reviewEffect->fresh()->last_error_code);
+        $this->assertNull($reviewEffect->fresh()->telegram_message_id);
+        Http::assertNothingSent();
 
         Queue::fake();
         $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
         $this->artisan('telegram:recover-outbound', ['--chunk' => 25])->assertSuccessful();
 
-        $this->assertTrue($reviewSentAt->equalTo($reviewEffect->fresh()->sent_at));
+        $this->assertNull($reviewEffect->fresh()->sent_at);
         $this->assertSame('907', (string) $paidEffect->fresh()->telegram_message_id);
         Queue::assertNotPushed(
             SendAdminOrderPaidNotification::class,

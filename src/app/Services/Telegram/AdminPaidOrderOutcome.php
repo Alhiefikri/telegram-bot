@@ -24,6 +24,10 @@ final class AdminPaidOrderOutcome
         $fulfillments = SupplierFulfillment::query()->with(['purchases.supplier', 'manualHandoffs'])->where('order_id', $order->id)->get()->keyBy('order_item_id');
         $effects = TelegramOutboundEffect::query()->where('source_type', Order::class)->where('source_id', (string) $order->id)
             ->where('effect_type', TelegramOutboundEffectType::ReceiptCredentials->value)->get();
+        if (TelegramOutboundEffectService::hasOrderOnlyReceipt($order)) {
+            $effects = $effects->filter(fn ($effect) => ($effect->outcome_metadata['account_count'] ?? 0) > 0
+                || str_starts_with((string) $effect->effect_group_key, TelegramOutboundEffectService::manualReceiptGroupKey($order->id)));
+        }
         $complete = false;
         foreach ($effects->groupBy('effect_group_key') as $key => $group) {
             if (app(TelegramOutboundEffectLedgerProtocol::class)->isReceiptGroupComplete($key)

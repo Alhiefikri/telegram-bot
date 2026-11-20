@@ -11,6 +11,7 @@ use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\Pricing\ProductPriceTierQuote;
 use App\Services\Pricing\ProductQuantityPricing;
 use App\Storefront\StorefrontUrl;
+use App\Support\StockDisplay;
 use InvalidArgumentException;
 use Throwable;
 
@@ -45,7 +46,7 @@ class TelegramProductNotificationService
                 $this->locale->translate($customer, 'notification.product.created.lead'),
                 $this->productNames->renderSelection($product->name, $icon),
                 $this->customerPriceLine($product, $this->locale->code($customer)),
-                $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
+                $this->locale->translate($customer, 'notification.product.stock', ['stock' => StockDisplay::label($availableStock)]),
                 ...$this->customerTierLines($customer, $promotedTier),
                 '',
                 $this->locale->translate($customer, 'notification.product.description'),
@@ -87,7 +88,7 @@ class TelegramProductNotificationService
                     $this->locale->translate($customer, 'notification.product.restock.lead'),
                     $this->productNames->renderSelection($product->name, $icon),
                     $this->customerPriceLine($product, $this->locale->code($customer)),
-                    $this->locale->translate($customer, 'notification.product.stock', ['stock' => $availableStock]),
+                    $this->locale->translate($customer, 'notification.product.stock', ['stock' => StockDisplay::label($availableStock)]),
                     ...$this->customerTierLines($customer, $promotedTier),
                     '',
                     $this->locale->translate($customer, 'notification.product.description'),
@@ -295,7 +296,7 @@ class TelegramProductNotificationService
                 $lead,
                 $this->productNames->renderSelection($product->name, $icon),
                 $this->customerPriceLine($product, $locale),
-                $this->locale->translateLocale($locale, 'notification.product.stock', ['stock' => $availableStock]),
+                $this->locale->translateLocale($locale, 'notification.product.stock', ['stock' => StockDisplay::label($availableStock)]),
                 ...$this->customerTierLines($customer, $promotedTier),
                 '',
                 $this->locale->translateLocale($locale, 'notification.product.description'),
@@ -497,7 +498,7 @@ class TelegramProductNotificationService
                 'quantity' => $addedQuantity,
             ]),
             $this->locale->translateLocale($locale, 'notification.store_channel.restock.available', [
-                'stock' => $availableStock,
+                'stock' => StockDisplay::label($availableStock),
             ]),
             $unitPrice,
         ];

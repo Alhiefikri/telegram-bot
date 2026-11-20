@@ -6,6 +6,7 @@ use App\Catalog\CatalogProductReadModel;
 use App\Models\Customer;
 use App\Services\Catalog\CatalogBrowse;
 use App\Storefront\StorefrontUrl;
+use App\Support\StockDisplay;
 
 /**
  * Render the public stock snapshot used by /stock and /stocks.
@@ -96,7 +97,7 @@ final class TelegramStockIntents
             'icon' => $this->captions->icon($this->icons->resolve($product->icon, $product->customEmojiId)),
             'name' => $this->escapeHtml($name),
             'price' => $this->price($customer, $product),
-            'stock' => (string) $product->availableStock,
+            'stock' => StockDisplay::label($product->availableStock),
             'sold' => (string) $product->soldQuantity,
             'status' => $status,
         ]);

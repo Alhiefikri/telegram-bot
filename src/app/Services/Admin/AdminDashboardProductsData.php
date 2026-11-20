@@ -381,8 +381,8 @@ final class AdminDashboardProductsData
     {
         $summary = $this->stockItemSummaries(collect([(int) $product->getKey()]))->get($product->getKey());
         // Availability must use full counts, not the bounded history relation.
-        $product->loadExists(['stockItems as local_stock_items_exists' => fn ($query) => $query->whereNull('supplier_purchase_id')]);
-        $product->loadCount(['stockItems as local_available_stock_items_count' => fn ($query) => $query->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')]);
+        $product->loadExists(['stockItems as local_stock_items_exists' => fn ($query) => $query->localCatalogStock()]);
+        $product->loadCount(['stockItems as local_available_stock_items_count' => fn ($query) => $query->localCatalogStock()->whereNull('order_item_id')->whereNull('retired_at')]);
         $products = new EloquentCollection([$product]);
         $this->loadOrderedStockItems($products);
         $stockItems = $product->stockItems

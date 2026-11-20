@@ -29,10 +29,13 @@
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-admin-ink">{{ $review->order->invoice_number }}</h1>
             @if ($review->reason === \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE)
                 <x-admin-dashboard.notice tone="warning" class="mt-4">Pembayaran sudah diterima. Lengkapi akun lokal dengan email yang belum pernah dialokasikan kepada pelanggan ini untuk Product yang sama. Password berbeda tetap dihitung sebagai email yang sama.</x-admin-dashboard.notice>
+            @elseif ($review->reason === \App\Models\ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)
+                <x-admin-dashboard.notice tone="warning" class="mt-4">Pembayaran sudah diterima. Cek invoice, pembeli, dan jumlah unit sebelum mengisi akun.</x-admin-dashboard.notice>
             @else
                 <x-admin-dashboard.notice tone="warning" class="mt-4">Evidence pembayaran ini membutuhkan keputusan manual. Fulfillment tidak dijalankan otomatis.</x-admin-dashboard.notice>
             @endif
             <dl class="mt-5 grid gap-3 sm:grid-cols-2">
+                <div><dt class="text-xs font-medium text-admin-muted">Pembeli</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->order->customer?->first_name ?: 'Pelanggan' }} @if ($review->order->customer?->telegram_id) · Telegram ID {{ $review->order->customer->telegram_id }} @endif</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Status review</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->state }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Alasan</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->reason }}</dd></div>
                 <div><dt class="text-xs font-medium text-admin-muted">Jumlah</dt><dd class="text-sm font-semibold text-admin-ink">{{ $amount }}</dd></div>
@@ -89,13 +92,13 @@
                 @endforeach
             </x-admin-dashboard.card>
         @endif
-        @can('resolve', $review)
+        @can('provideCredentials', $review)
             @if ($review->state === \App\Models\ManualFulfillmentReview::STATE_PENDING
-                && $review->reason === \App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+                && $review->acceptsLocalCredentials()
                 && $review->order->order_status === \App\Enums\OrderStatus::Processing
                 && $review->order->payment_status === \App\Enums\PaymentStatus::Paid
                 && $localCredentialItems->contains(fn ($row) => $row['missing'] > 0))
-                <x-admin-dashboard.card as="section" padding="compact" shadow="sm" class="mt-4">
+                <x-admin-dashboard.card as="section" id="local-credentials" padding="compact" shadow="sm" class="mt-4">
                     <h2 class="text-lg font-semibold text-admin-ink">Lengkapi akun lokal</h2>
                     <p class="mt-1 text-sm leading-6 text-admin-muted">Kirim seluruh unit lokal yang kurang dalam satu pengajuan. Akun ini langsung menjadi milik pesanan, tanpa menambah stok tersedia atau membuat pembelian supplier. Input akun tidak disimpan di formulir setelah gagal.</p>
                     <form method="POST" action="{{ route('admin.manual-fulfillment-reviews.credentials', $review) }}" class="mt-4 grid gap-4" autocomplete="off">
@@ -119,11 +122,13 @@
                                 </fieldset>
                             @endif
                         @endforeach
-                        <x-admin-dashboard.field-label>
-                            Catatan resolusi
-                            <x-admin-dashboard.textarea name="reason" required maxlength="2000" class="mt-1" />
-                            <small class="mt-1 block text-xs text-admin-muted">Tulis catatan pemeriksaan tanpa password atau data akun.</small>
-                        </x-admin-dashboard.field-label>
+                        @if ($review->reason !== \App\Models\ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)
+                            <x-admin-dashboard.field-label>
+                                Catatan resolusi
+                                <x-admin-dashboard.textarea name="reason" required maxlength="2000" class="mt-1" />
+                                <small class="mt-1 block text-xs text-admin-muted">Tulis catatan pemeriksaan tanpa password atau data akun.</small>
+                            </x-admin-dashboard.field-label>
+                        @endif
                         <x-admin-dashboard.button type="submit" variant="primary">Simpan akun dan lanjutkan pengiriman</x-admin-dashboard.button>
                     </form>
                 </x-admin-dashboard.card>

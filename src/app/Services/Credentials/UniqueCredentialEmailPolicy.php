@@ -91,7 +91,7 @@ final class UniqueCredentialEmailPolicy
         }
         $selected = [];
         foreach (ProductStockItem::query()->where('product_id', $item->product_id)
-            ->whereNull('supplier_purchase_id')->whereNull('order_item_id')->whereNull('retired_at')
+            ->localCatalogStock()->whereNull('order_item_id')->whereNull('retired_at')
             ->orderBy('id')->lazyById(100) as $stock) {
             $email = $this->email($stock);
             if ($email === null || isset($seen[$email])) {

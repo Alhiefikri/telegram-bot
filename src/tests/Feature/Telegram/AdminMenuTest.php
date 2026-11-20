@@ -750,6 +750,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         config()->set('services.telegram.admin_user_id', '999');
         $this->fakeTelegramHttp();
         Product::factory()->create(['name' => 'Canva Pro', 'stock' => 4, 'reserved_stock' => 1]);
+        Product::factory()->create(['name' => 'GPT API', 'stock' => 2147483647, 'reserved_stock' => 2]);
 
         $this->postTelegramWebhook($this->messageUpdate(320, '/stock', ['id' => 999], 999))->assertOk();
 
@@ -758,6 +759,8 @@ class AdminMenuTest extends TelegramBotTestSupport
             && ($request['parse_mode'] ?? null) === 'HTML'
             && str_contains($request['text'], '📦 Stok Produk')
             && str_contains($request['text'], 'Canva Pro — Rp10.000 · stok 3 · terjual 0')
+            && str_contains($request['text'], 'GPT API — Rp10.000 · stok ∞')
+            && ! str_contains($request['text'], '2147483645')
             && str_contains($request['text'], 'start=product_'));
     }
 

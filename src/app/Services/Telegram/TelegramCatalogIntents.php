@@ -24,6 +24,7 @@ use App\Services\Pricing\ProductPriceQuote;
 use App\Services\Pricing\ProductPriceTierQuote;
 use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\UsdtFunding\CustomerUsdtFundingGate;
+use App\Support\StockDisplay;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
 
@@ -624,7 +625,7 @@ class TelegramCatalogIntents
             }
         }
         if ($availableStock > 0) {
-            $lines[] = $this->locale->translate($customer, 'catalog.stock').$availableStock;
+            $lines[] = $this->locale->translate($customer, 'catalog.stock').StockDisplay::label($availableStock);
         } else {
             $lines[] = $this->locale->translate($customer, 'catalog.status.sold_out');
         }
@@ -723,7 +724,7 @@ class TelegramCatalogIntents
         $lines[] = '━━━━━━━━━━━━━━';
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.product').$this->captions->icon($this->detailIcon($product)).' '.$product->name;
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.current', ['quantity' => $selection['quantity']]);
-        $lines[] = $this->locale->translate($customer, 'catalog.quantity.available_stock').$availableStock;
+        $lines[] = $this->locale->translate($customer, 'catalog.quantity.available_stock').StockDisplay::label($availableStock);
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'catalog.quantity.custom_instruction', ['example' => 5]);
 
@@ -873,7 +874,7 @@ class TelegramCatalogIntents
                     $chatId,
                     $product,
                     $retry,
-                    $this->locale->translate($customer, 'catalog.quantity.over_stock', ['stock' => $availableStock]),
+                    $this->locale->translate($customer, 'catalog.quantity.over_stock', ['stock' => StockDisplay::label($availableStock)]),
                 );
 
                 return;
@@ -1274,7 +1275,7 @@ class TelegramCatalogIntents
         return $number.'. '.$this->captions->icon($icon).' '.$this->escapeText($product->name)."\n"
             .$this->escapeText($this->locale->translate($customer, 'catalog.family.standalone_summary', [
                 'price' => number_format($product->priceAmount, 0, ',', '.'),
-                'stock' => $product->availableStock,
+                'stock' => StockDisplay::label($product->availableStock),
             ]));
     }
 
@@ -1301,7 +1302,7 @@ class TelegramCatalogIntents
         return $this->locale->translate(
             $customer,
             $isAvailable ? 'catalog.family.button_stock' : 'catalog.family.button_sold_out',
-            ['stock' => $availableStock],
+            ['stock' => StockDisplay::label($availableStock)],
         );
     }
 
@@ -1321,7 +1322,7 @@ class TelegramCatalogIntents
         $lines[] = $this->locale->translate($customer, $member->isAvailable
             ? 'catalog.family.option_stock'
             : 'catalog.family.option_sold_out', [
-                'stock' => $member->availableStock,
+                'stock' => StockDisplay::label($member->availableStock),
             ]);
         $lines[] = $this->locale->translate($customer, 'catalog.family.option_sold', [
             'sold' => $member->soldQuantity,

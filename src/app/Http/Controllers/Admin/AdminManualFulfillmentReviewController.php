@@ -42,7 +42,7 @@ class AdminManualFulfillmentReviewController extends Controller
         $handoffFulfillments = $review->reason === 'supplier_fulfillment'
             ? SupplierFulfillment::query()->where('order_id', $review->order_id)->with('manualHandoffs.actor')->orderBy('id')->get()
             : collect();
-        $localCredentialItems = $review->reason === ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
+        $localCredentialItems = $review->acceptsLocalCredentials()
             ? $review->order->orderItems->map(function ($item): array {
                 $allocated = $item->stockItems()->whereNull('supplier_purchase_id')->whereNull('retired_at')->count();
 
@@ -117,11 +117,12 @@ class AdminManualFulfillmentReviewController extends Controller
 
     public function provideCredentials(Request $request, ManualFulfillmentReview $review, ManualFulfillmentResolutionService $resolutions): RedirectResponse
     {
-        Gate::authorize('resolve', $review);
+        Gate::authorize('provideCredentials', $review);
 
         try {
+            $isOrderOnly = $review->reason === ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING;
             $data = Validator::make($request->all(), [
-                'reason' => ['required', 'string', 'max:2000'],
+                'reason' => [$isOrderOnly ? 'exclude' : 'required', 'string', 'max:2000'],
                 'items' => ['required', 'array'],
                 'items.*' => ['required', 'array'],
                 'items.*.format' => ['required', 'in:legacy,structured_account'],
@@ -147,7 +148,7 @@ class AdminManualFulfillmentReviewController extends Controller
                 $review,
                 $request->attributes->get('adminUser'),
                 $credentials,
-                $data['reason'],
+                $data['reason'] ?? '',
                 $request->ip(),
             );
         } catch (ValidationException $exception) {

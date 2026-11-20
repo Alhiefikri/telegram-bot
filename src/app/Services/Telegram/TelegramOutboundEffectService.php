@@ -1493,7 +1493,11 @@ class TelegramOutboundEffectService
             return null;
         }
 
-        $groupKeys = [
+        $manual = self::hasOrderOnlyReceipt($source);
+        $groupKeys = $manual ? [
+            self::manualReceiptGroupKey((string) $source->getKey()).':text-fallback',
+            self::manualReceiptGroupKey((string) $source->getKey()),
+        ] : [
             self::receiptTextFallbackEffectGroupKey((string) $source->getKey()),
             self::receiptEffectGroupKey((string) $source->getKey()),
             self::legacyReceiptEffectGroupKey((string) $source->getKey()),
@@ -1501,11 +1505,11 @@ class TelegramOutboundEffectService
         $hasExistingGroup = TelegramOutboundEffect::query()->whereIn('effect_group_key', $groupKeys)->exists();
         $prepared = $hasExistingGroup ? null : $this->prepareReceiptGroup($source);
 
-        return DB::transaction(function () use ($source, $customer, $groupKeys, $prepared): ?TelegramOutboundEffect {
+        return DB::transaction(function () use ($source, $customer, $groupKeys, $prepared, $manual): ?TelegramOutboundEffect {
             $locked = Order::query()->lockForUpdate()->findOrFail($source->getKey());
             $lockedCustomer = $customer ?? $locked->customer;
 
-            if (! $this->receiptEligible($locked, $lockedCustomer)) {
+            if (! $this->receiptEligible($locked, $lockedCustomer) || $manual !== self::hasOrderOnlyReceipt($locked)) {
                 return null;
             }
 
@@ -1527,7 +1531,7 @@ class TelegramOutboundEffectService
                 }
             }
 
-            if ($existingGroups->isNotEmpty() || $locked->telegram_receipt_sent_at !== null) {
+            if ($existingGroups->isNotEmpty() || (! $manual && $locked->telegram_receipt_sent_at !== null)) {
                 return null;
             }
 
@@ -1542,6 +1546,7 @@ class TelegramOutboundEffectService
                 $lockedCustomer,
                 $prepared['plan'],
                 $prepared['text_fallback'],
+                groupKey: $manual ? self::manualReceiptGroupKey((string) $locked->getKey()) : null,
             );
         }, 5);
     }
@@ -1794,7 +1799,13 @@ class TelegramOutboundEffectService
                 return null;
             }
 
-            $groupKey = self::receiptTextFallbackEffectGroupKey((string) $order->getKey());
+            $manualGroup = self::manualReceiptGroupKey((string) $order->getKey());
+            if (self::hasOrderOnlyReceipt($order) && $locked->effect_group_key !== $manualGroup) {
+                return null;
+            }
+            $groupKey = $locked->effect_group_key === $manualGroup
+                ? $manualGroup.':text-fallback'
+                : self::receiptTextFallbackEffectGroupKey((string) $order->getKey());
             if (TelegramOutboundEffect::query()->where('effect_group_key', $groupKey)->exists()) {
                 return $this->ledger->nextReceiptEffect($groupKey);
             }
@@ -1862,6 +1873,17 @@ class TelegramOutboundEffectService
         return 'order:'.$orderId.':'.self::TYPE_RECEIPT_CREDENTIALS.':v2';
     }
 
+    public static function manualReceiptGroupKey(string $orderId): string
+    {
+        return self::receiptEffectGroupKey($orderId).':manual-local';
+    }
+
+    public static function hasOrderOnlyReceipt(Order $order): bool
+    {
+        return $order->order_status === OrderStatus::Completed
+            && $order->orderItems()->whereHas('stockItems', fn ($stock) => $stock->where('is_order_only', true))->exists();
+    }
+
     public static function legacyReceiptEffectGroupKey(string $orderId): string
     {
         return 'order:'.$orderId.':'.self::TYPE_RECEIPT_CREDENTIALS.':v1';
@@ -1899,6 +1921,10 @@ class TelegramOutboundEffectService
             $version = 'v2';
         } elseif ($receiptGroupKey === self::receiptTextFallbackEffectGroupKey($orderId)) {
             $version = 'text-fallback';
+        } elseif ($receiptGroupKey === self::manualReceiptGroupKey($orderId)) {
+            $version = 'manual-local';
+        } elseif ($receiptGroupKey === self::manualReceiptGroupKey($orderId).':text-fallback') {
+            $version = 'manual-local-text-fallback';
         } elseif (preg_match('/\A'.preg_quote($baseGroupKey, '/').':resend:v([1-9][0-9]*)\z/D', $receiptGroupKey, $matches) === 1) {
             $version = 'resend-v'.$matches[1];
         } else {
@@ -2475,9 +2501,10 @@ class TelegramOutboundEffectService
         bool $textFallback,
         bool $explicit = false,
         ?TelegramOutboundEffect $supersedes = null,
+        ?string $groupKey = null,
     ): TelegramOutboundEffect {
         $baseGroupKey = self::receiptEffectGroupKey((string) $order->getKey());
-        $groupKey = $baseGroupKey;
+        $groupKey ??= $baseGroupKey;
 
         if ($explicit) {
             $version = 2;
@@ -2858,6 +2885,8 @@ class TelegramOutboundEffectService
 
         return $groupKey === $baseGroupKey
             || $groupKey === self::receiptTextFallbackEffectGroupKey($orderId)
+            || $groupKey === self::manualReceiptGroupKey($orderId)
+            || $groupKey === self::manualReceiptGroupKey($orderId).':text-fallback'
             || preg_match('/\A'.preg_quote($baseGroupKey, '/').':resend:v[1-9][0-9]*\z/D', $groupKey) === 1;
     }
 

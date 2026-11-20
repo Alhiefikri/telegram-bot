@@ -7,6 +7,7 @@ use App\Enums\ExternalMoneyReceiptClaimOutcome;
 use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\UserRole;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\SendTelegramReceipt;
@@ -19,6 +20,7 @@ use App\Models\OrderItem;
 use App\Models\OrderRefund;
 use App\Models\Payment;
 use App\Models\PaymentBscDetail;
+use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Models\SalesProofPost;
 use App\Models\StoreChannelSetting;
@@ -99,12 +101,14 @@ class ManualFulfillmentResolutionService
             Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
             app(SupplierFulfillmentService::class)->lockForReview($order);
             $locked = ManualFulfillmentReview::query()->lockForUpdate()->findOrFail($review->id);
+            $orderOnly = $locked->reason === ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING;
+            abort_if($orderOnly && $actor->role !== UserRole::Owner, 403);
             if ($locked->reason === 'supplier_fulfillment'
                 && AuditLog::query()->where('subject_type', ManualFulfillmentReview::class)->where('subject_id', (string) $locked->id)
                     ->where('action', 'manual_fulfillment_review.local_credentials_provided')->exists()) {
                 return $locked;
             }
-            if ($locked->reason !== ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE) {
+            if (! $locked->acceptsLocalCredentials()) {
                 throw new InvalidOrderTransition('This review does not accept local credentials.');
             }
             if ($locked->state === ManualFulfillmentReview::STATE_FULFILLED) {
@@ -117,6 +121,14 @@ class ManualFulfillmentResolutionService
                 || $order->order_status !== OrderStatus::Processing
                 || OrderRefund::query()->where('order_id', $order->id)->exists()) {
                 throw new InvalidOrderTransition('Only an active paid local credential review can accept accounts.');
+            }
+            if ($orderOnly && (SupplierFulfillment::query()->where('order_id', $order->id)->exists()
+                || $order->orderItems()->where('supplier_quantity', '>', 0)->exists()
+                || ManualFulfillmentReview::query()->where('order_id', $order->id)->where('id', '!=', $locked->id)->open()->exists())) {
+                throw new InvalidOrderTransition('Pesanan ini memerlukan review terpisah sebelum akun dapat disimpan.');
+            }
+            if ($orderOnly) {
+                $reason = 'Akun disediakan untuk pesanan ini.';
             }
             if (trim($reason) === '' || mb_strlen($reason) > 2000) {
                 throw ValidationException::withMessages(['reason' => 'Catatan resolusi wajib diisi, maksimal 2000 karakter.']);
@@ -150,6 +162,7 @@ class ManualFulfillmentResolutionService
                 }
             }
             $policy = app(UniqueCredentialEmailPolicy::class);
+            Product::withTrashed()->whereKey(array_keys($byProduct))->orderBy('id')->lockForUpdate()->get();
             foreach ($items as $item) {
                 if (isset($candidates[$item->id])) {
                     $policy->assertCanAssign($item, $byProduct[$item->product_id]);
@@ -158,6 +171,7 @@ class ManualFulfillmentResolutionService
             foreach ($candidates as $itemId => $accounts) {
                 foreach ($accounts as $account) {
                     $account->order_item_id = $itemId;
+                    $account->is_order_only = $orderOnly;
                     $account->save();
                 }
             }

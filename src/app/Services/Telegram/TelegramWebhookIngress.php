@@ -95,6 +95,18 @@ class TelegramWebhookIngress
 
     private function minimizedMessage(array $message): array
     {
+        foreach (['text', 'caption'] as $field) {
+            if (is_string($message[$field] ?? null)
+                && ($command = TelegramManualFulfillmentCommand::normalize($message[$field])) !== null) {
+                return [
+                    'message_id' => $message['message_id'],
+                    'text' => $command,
+                    'from' => Arr::only((array) $message['from'], ['id', 'is_bot', 'first_name', 'username']),
+                    'chat' => Arr::only((array) $message['chat'], ['id', 'type']),
+                ];
+            }
+        }
+
         $minimized = Arr::only($message, ['message_id', 'text', 'caption']);
         $minimized['from'] = Arr::only((array) $message['from'], ['id', 'is_bot', 'first_name', 'username']);
         $minimized['chat'] = Arr::only((array) $message['chat'], ['id', 'type']);

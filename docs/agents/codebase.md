@@ -76,6 +76,27 @@ no supplier fulfillment, no open manual review and no Order Refund. It only
 changes the Order status; it does not resend receipts or issue payments. Its
 cursor rotates through candidates so ineligible rows cannot block later Orders.
 
+For paid local orders with `local_credentials_missing`, the paid and review
+notices link straight to the invoice's credential form. Other notices link to
+the order details without proposing account entry. `/fulfill <invoice>` also
+works only in the configured
+Telegram admin's own private chat and contains no credentials. It opens the
+invoice's HTTPS review form on the configured application origin. The link is
+not an authorization token: only a signed-in Owner can submit accounts. The
+same locked resolution service checks the order, payment and unit count; the
+encrypted accounts are order-only, never catalog stock. Completed manual orders
+use a separate, recoverable receipt group so an old payment receipt without
+credentials cannot block delivery. Supplier and late-payment reviews keep their
+existing workflows. Tests: `ManualFulfillmentCommandTest` and
+`LocalCredentialFulfillmentReviewTest`.
+
+For Telegram buyers, `local_credentials_missing` uses the paid admin notice
+instead of sending an additional review card. Once the result is acknowledged,
+outbound recovery can delete the superseded paid card and known legacy review
+cards in the same chat; a lost cleanup wakeup does not resend the result.
+Telegram may refuse to delete old messages. The legacy unlimited-stock ceiling
+is formatted as `∞` for display; checkout and API quantities stay numeric.
+
 ## Read-only notification retention (#676)
 
 `telegram:notification-retention-dry-run` delegates to

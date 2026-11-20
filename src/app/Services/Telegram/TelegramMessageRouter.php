@@ -43,10 +43,17 @@ class TelegramMessageRouter
         private TelegramUsdtFundingCallbackHandler $usdtFunding,
         private TelegramUsdtFundingSession $usdtFundingSession,
         private TelegramContentIntents $content,
+        private TelegramManualFulfillmentCommand $manualFulfillment,
     ) {}
 
     public function route(Customer $customer, string $chatId, array $message, string $chatType = 'private'): void
     {
+        if (($command = TelegramManualFulfillmentCommand::normalize((string) ($message['text'] ?? $message['caption'] ?? ''))) !== null) {
+            $this->manualFulfillment->handle($customer, $chatId, (string) Arr::get($message, 'chat.type'), $command);
+
+            return;
+        }
+
         $text = TelegramBroadcastCommand::normalize((string) (Arr::get($message, 'text') ?: Arr::get($message, 'caption', '')));
         $text = preg_replace('/^\\/payment(?:@[A-Za-z0-9_]+)?(?:\\s+|$)/u', '/payment ', $text) ?? $text;
         $text = trim($text);

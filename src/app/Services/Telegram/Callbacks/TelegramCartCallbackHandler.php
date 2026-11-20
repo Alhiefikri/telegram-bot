@@ -15,6 +15,7 @@ use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramCatalogIntents;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramLocale;
+use App\Support\StockDisplay;
 
 class TelegramCartCallbackHandler implements TelegramCallbackHandler
 {
@@ -232,7 +233,7 @@ class TelegramCartCallbackHandler implements TelegramCallbackHandler
                 return;
             }
             if ($quantity > $availableStock) {
-                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.quantity.maximum', ['stock' => $availableStock]));
+                $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.quantity.maximum', ['stock' => StockDisplay::label($availableStock)]));
 
                 return;
             }
