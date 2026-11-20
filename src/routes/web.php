@@ -65,6 +65,7 @@ use App\Http\Controllers\StorefrontController;
 use App\Http\Controllers\StorefrontFunnelEventController;
 use App\Http\Controllers\StorefrontLegacyProductFamilyRedirectController;
 use App\Http\Controllers\StorefrontLlmsController;
+use App\Http\Controllers\StorefrontLocaleController;
 use App\Http\Controllers\StorefrontLoginGuideController;
 use App\Http\Controllers\StorefrontOrderAccessController;
 use App\Http\Controllers\StorefrontPolicyController;
@@ -99,22 +100,29 @@ Route::get('/api-docs', [StorefrontApiDocsController::class, 'index'])->name('st
 Route::get('/api-docs/openapi.json', [StorefrontApiDocsController::class, 'openapi'])->name('storefront.api-docs.openapi');
 Route::get('/api-docs/reference.md', [StorefrontApiDocsController::class, 'reference'])->name('storefront.api-docs.reference');
 Route::get('/', StorefrontController::class)
+    ->middleware('storefront.locale')
     ->withoutMiddleware([
         StartSession::class,
         ShareErrorsFromSession::class,
         PreventRequestForgery::class,
     ])
     ->name('storefront.home');
-Route::get('/panduan', [StorefrontLoginGuideController::class, 'index'])->name('storefront.guides.index');
-Route::get('/gpt/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'])->name('storefront.login-guide');
+Route::get('/bahasa/{locale}', [StorefrontLocaleController::class, 'catalog'])
+    ->middleware('storefront.locale:private')
+    ->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])
+    ->name('storefront.locale.catalog');
+Route::post('/bahasa', [StorefrontLocaleController::class, 'update'])
+    ->middleware('storefront.locale:private')->name('storefront.locale.update');
+Route::get('/panduan', [StorefrontLoginGuideController::class, 'index'])->middleware('storefront.locale')->name('storefront.guides.index');
+Route::get('/gpt/panduan-login-akun', [StorefrontLoginGuideController::class, 'show'])->middleware('storefront.locale:private')->name('storefront.login-guide');
 Route::redirect('/panduan-login-akun', '/gpt/panduan-login-akun');
-Route::get('/privasi', [StorefrontPolicyController::class, 'privacy'])->name('storefront.policies.privacy');
-Route::get('/syarat-ketentuan', [StorefrontPolicyController::class, 'terms'])->name('storefront.policies.terms');
-Route::get('/refund', [StorefrontPolicyController::class, 'refund'])->name('storefront.policies.refund');
-Route::get('/pilihan/{productFamily:slug}', StorefrontProductFamilyController::class)->name('storefront.product-families.show');
+Route::get('/privasi', [StorefrontPolicyController::class, 'privacy'])->middleware('storefront.locale')->name('storefront.policies.privacy');
+Route::get('/syarat-ketentuan', [StorefrontPolicyController::class, 'terms'])->middleware('storefront.locale')->name('storefront.policies.terms');
+Route::get('/refund', [StorefrontPolicyController::class, 'refund'])->middleware('storefront.locale')->name('storefront.policies.refund');
+Route::get('/pilihan/{productFamily:slug}', StorefrontProductFamilyController::class)->middleware('storefront.locale')->name('storefront.product-families.show');
 Route::get('/produk-keluarga/{slug}', StorefrontLegacyProductFamilyRedirectController::class)->name('storefront.product-families.legacy');
-Route::get('/pemulihan-pesanan', [StorefrontPolicyController::class, 'recovery'])->name('storefront.policies.recovery');
-Route::get('/produk/{product}', StorefrontProductController::class)->name('storefront.products.show');
+Route::get('/pemulihan-pesanan', [StorefrontPolicyController::class, 'recovery'])->middleware('storefront.locale')->name('storefront.policies.recovery');
+Route::get('/produk/{product}', StorefrontProductController::class)->middleware('storefront.locale')->name('storefront.products.show');
 Route::post('/produk/{product}/waitlist', [StorefrontWaitlistController::class, 'store'])
     ->middleware('throttle:storefront-waitlist')
     ->name('storefront.waitlist.store');
@@ -129,11 +137,13 @@ Route::post('/storefront/events', StorefrontFunnelEventController::class)
     ->middleware('throttle:120,1')
     ->withoutMiddleware(PreventRequestForgery::class)
     ->name('storefront.events.store');
-Route::get('/akses-pesanan', [StorefrontOrderAccessController::class, 'create'])->name('storefront.order-access.create');
-Route::post('/akses-pesanan', [StorefrontOrderAccessController::class, 'store'])->middleware('throttle:storefront-order-access')->name('storefront.order-access.store');
-Route::get('/akses-pesanan/{order}', [StorefrontOrderAccessController::class, 'show'])->name('storefront.order-access.show');
+Route::middleware('storefront.locale:private')->group(function (): void {
+    Route::get('/akses-pesanan', [StorefrontOrderAccessController::class, 'create'])->name('storefront.order-access.create');
+    Route::post('/akses-pesanan', [StorefrontOrderAccessController::class, 'store'])->middleware('throttle:storefront-order-access')->name('storefront.order-access.store');
+    Route::get('/akses-pesanan/{order}', [StorefrontOrderAccessController::class, 'show'])->name('storefront.order-access.show');
+});
 
-Route::prefix('shop')->name('storefront.shop.')->group(function (): void {
+Route::prefix('shop')->name('storefront.shop.')->middleware('storefront.locale:private')->group(function (): void {
     Route::get('/', StorefrontShopController::class)->name('index');
     Route::get('cart', [StorefrontShopCartController::class, 'index'])->name('cart');
     Route::post('cart/items', [StorefrontShopCartController::class, 'store'])->name('cart.items.store');
@@ -185,8 +195,8 @@ Route::prefix('akun')->name('customer.')->middleware([ValidateCustomerSession::c
         Route::post('keamanan/password', [CustomerPasswordAuthenticationController::class, 'setPassword'])->middleware('throttle:customer-login-consume')->name('password.enroll');
         Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');
         Route::get('saldo', [CustomerAccountController::class, 'balance'])->name('balance.show');
-        Route::post('pesanan/{order}/status', [CustomerAccountController::class, 'status'])->middleware('throttle:automatic-payment-status-refresh')->name('orders.status');
-        Route::get('pesanan/{order}', [CustomerAccountController::class, 'show'])->name('orders.show');
+        Route::post('pesanan/{order}/status', [CustomerAccountController::class, 'status'])->middleware(['storefront.locale:private', 'throttle:automatic-payment-status-refresh'])->name('orders.status');
+        Route::get('pesanan/{order}', [CustomerAccountController::class, 'show'])->middleware('storefront.locale:private')->name('orders.show');
         Route::get('klaim-pesanan', [CustomerAccountController::class, 'claimForm'])->name('claim.create');
         Route::post('klaim-pesanan', [CustomerAccountController::class, 'claim'])->middleware('throttle:customer-order-claim')->name('claim.store');
     });

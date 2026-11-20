@@ -8,6 +8,7 @@
             <a href="#support" class="home-catalog-link hidden min-h-11 items-center rounded-lg md:inline-flex">Bantuan</a>
             <a href="{{ route('storefront.order-access.create') }}" class="home-catalog-link inline-flex min-h-11 items-center rounded-lg">Pesanan</a>
             <a href="{{ route('storefront.shop.cart') }}" class="home-catalog-link inline-flex min-h-11 items-center rounded-lg">Keranjang</a>
+            @include('storefront.partials.locale-selector')
             <x-theme-toggle class="home-catalog-link inline-flex h-11 w-11 items-center justify-center rounded-lg" />
         </div>
     </nav>

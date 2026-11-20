@@ -39,14 +39,9 @@ class StorefrontLandingPageTest extends TestCase
             ->assertDontSee('/admin/login', false)
             ->assertDontSee("Let's get started");
 
-        $this->assertSame(
-            'max-age=60, public, s-maxage=300, stale-while-revalidate=60',
-            $response->headers->get('Cache-Control'),
-        );
-        $this->assertSame(
-            'public, max-age=300, stale-while-revalidate=60',
-            $response->headers->get('CDN-Cache-Control'),
-        );
+        $response->assertHeader('Cache-Control', 'no-store, private');
+        $this->assertFalse($response->headers->has('CDN-Cache-Control'));
+        $this->assertFalse($response->headers->has('Surrogate-Control'));
         $this->assertFalse($response->headers->has('Set-Cookie'));
         $this->assertStringNotContainsString('name="csrf-token"', (string) $response->getContent());
         $this->assertStringContainsString('/build/assets/storefront-', (string) $response->getContent());

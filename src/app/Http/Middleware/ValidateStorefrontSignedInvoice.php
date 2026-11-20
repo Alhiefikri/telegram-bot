@@ -12,17 +12,22 @@ class ValidateStorefrontSignedInvoice
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (! app()->environment('testing') && ! $request->has('expires')) {
+        if (! $this->isValid($request)) {
             throw new InvalidSignatureException;
         }
 
-        if ($request->hasValidSignatureWhileIgnoring([], false)
-            || $request->hasValidSignatureWhileIgnoring([], true)
-            || $this->hasValidLegacyAppUrlSignature($request)) {
-            return $next($request);
+        return $next($request);
+    }
+
+    public function isValid(Request $request): bool
+    {
+        if (! app()->environment('testing') && ! $request->has('expires')) {
+            return false;
         }
 
-        throw new InvalidSignatureException;
+        return $request->hasValidSignatureWhileIgnoring([], false)
+            || $request->hasValidSignatureWhileIgnoring([], true)
+            || $this->hasValidLegacyAppUrlSignature($request);
     }
 
     private function hasValidLegacyAppUrlSignature(Request $request): bool

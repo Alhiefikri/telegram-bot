@@ -68,6 +68,7 @@ class StorefrontCatalogPageBuilder
             ]),
             'family' => $selectedFamily,
             'familyUnavailable' => $familyUnavailable,
+            'localeCatalogReturn' => $this->urls->homeCatalogUrl($search, $family, $page, absolute: false),
             'familyPageUrl' => $family === null ? null : $this->urls->familyUrl($family, $returnUrl.'#products'),
             'search' => $search,
             'searchMaxLength' => StorefrontCatalogSearch::MAX_LENGTH,
