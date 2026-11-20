@@ -18,7 +18,7 @@
 
         <div class="flex flex-grow flex-col justify-between space-y-3 p-3 sm:space-y-4 sm:p-4">
             <div class="min-w-0">
-                <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sf-muted)]">{{ $family->optionCount }} pilihan</p>
+                <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sf-muted)]">{{ trans_choice('storefront_funnel.plan_count', $family->optionCount) }}</p>
                 <h3 class="mt-1 min-h-[44px] break-words font-display text-sm font-black leading-snug text-[var(--sf-ink)] sm:min-h-[52px] sm:text-lg"><span class="line-clamp-2">{{ $family->displayName }}</span></h3>
                 @if ($family->description)
                     <p class="mt-2 hidden text-xs font-medium leading-5 text-[var(--sf-muted)] sm:line-clamp-2">{{ $family->description }}</p>
@@ -28,7 +28,7 @@
             <div class="flex flex-col gap-3 border-t border-dashed border-[var(--sf-border)] pt-3">
                 <div class="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
                     <span class="w-full break-words font-display text-base font-black leading-tight tracking-tight text-[var(--sf-accent)] sm:text-xl"><span class="block text-[10px] font-bold tracking-normal text-[var(--sf-muted)]">{{ __('storefront_funnel.from_price') }}</span>{{ $family->minimumPriceAmount !== null ? $storefront->idr($family->minimumPriceAmount) : '—' }}</span>
-                    <span class="max-w-full rounded-md bg-[var(--sf-yellow)] px-2 py-1 text-[10px] font-bold leading-4 text-[var(--sf-ink)]">{{ $family->availableOptionCount }} tersedia</span>
+                    <span class="max-w-full rounded-md bg-[var(--sf-yellow)] px-2 py-1 text-[10px] font-bold leading-4 text-[var(--sf-ink)]">{{ __('storefront_funnel.plans_available_count', ['count' => $family->availableOptionCount]) }}</span>
                     @if ($family->minimumUsdtPriceAmount !== null)
                         <span class="max-w-full break-words text-[10px] font-bold leading-4 text-[var(--sf-muted)]">{{ $storefront->usdt($family->minimumUsdtPriceAmount) }}</span>
                     @endif

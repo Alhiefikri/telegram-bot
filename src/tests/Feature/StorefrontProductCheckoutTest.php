@@ -15,6 +15,7 @@ use App\Storefront\StorefrontCheckoutChallenge;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\Support\FakeStorefrontCheckoutChallenge;
 use Tests\TestCase;
 
@@ -638,6 +639,37 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringContainsString('name="terms_accepted" type="checkbox" value="1" required checked', $html);
         $this->assertStringContainsString('id="checkout-submit-disabled-help"', $html);
         $this->assertStringNotContainsString('must-not-be-flashed', $html);
+    }
+
+    public function test_telegram_stock_floor_is_explained_in_each_visitor_locale(): void
+    {
+        config(['services.storefront.telegram_reservation_floor' => 1]);
+        $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 0]);
+        $review = route('storefront.shop.checkout.product', $product);
+
+        foreach ([
+            'id' => 'Stok terakhir disisakan untuk pembelian lewat Telegram.',
+            'ms' => 'Baki stok terakhir dikhaskan untuk pembelian melalui Telegram.',
+            'en' => 'The last units are reserved for Telegram purchases.',
+        ] as $locale => $message) {
+            $this->withCookie('storefront_locale', $locale)
+                ->from($review)
+                ->post(route('storefront.shop.checkout'), [
+                    'product_id' => $product->id,
+                    'quantity' => 1,
+                    'buyer_name' => 'Fixture Buyer',
+                    'payment_method' => 'qris',
+                    'checkout_attempt' => (string) Str::uuid(),
+                    'terms_accepted' => '1',
+                ])->assertRedirect($review)->assertSessionHasErrors('product_id');
+
+            $this->get($review)->assertOk()->assertSee($message);
+        }
+
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertDatabaseCount('payments', 0);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        Http::assertNothingSent();
     }
 
     public function test_checkout_error_reopens_contact_disclosure_and_focuses_error_summary(): void

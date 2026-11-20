@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Models\User;
+use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -122,6 +124,36 @@ class StorefrontHomeCatalogTest extends TestCase
         $this->get('/')->assertOk()->assertSee('value="family-28"', false)->assertDontSee('>Plan 28</a>', false)->assertSee('rel="next"', false);
         $this->get('/?page=2')->assertOk()->assertSee('>Plan 28</a>', false);
         $this->get('/?family=family-28')->assertOk()->assertSee('>Plan 28</a>', false);
+    }
+
+    public function test_warm_home_cache_tracks_maintenance_without_hiding_details_or_waitlist(): void
+    {
+        $family = ProductFamily::factory()->create(['slug' => 'maintenance-plans']);
+        $ready = $this->plan('Ready Plan', $family, 3);
+        $soldOut = $this->plan('Sold Out Plan', $family, 0);
+        $actor = User::factory()->create();
+        $maintenance = app(CheckoutMaintenance::class);
+        $checkout = route('storefront.shop.checkout.product', $ready);
+        $details = route('storefront.products.show', $ready);
+        $waitlist = route('storefront.products.show', $soldOut);
+
+        $this->get('/')->assertOk()->assertSee($checkout, false);
+        $this->get('/')->assertOk()->assertSee($checkout, false);
+        $active = $maintenance->change(true, 'Fixture maintenance notice', $maintenance->current()->version, $actor, null);
+        foreach (['/', '/', '/?family=maintenance-plans'] as $path) {
+            $this->get($path)->assertOk()->assertSee('Fixture maintenance notice')
+                ->assertSee('Lihat detail Plan')->assertSee($details, false)
+                ->assertSee($waitlist, false)->assertSee('#waitlist', false)
+                ->assertDontSee($checkout, false)->assertDontSee('Beli sekarang');
+        }
+        $this->get($details)->assertOk()->assertSee('Ready Plan');
+        $this->get($waitlist)->assertOk()->assertSee('Dapatkan kabar saat stok tersedia');
+
+        $maintenance->change(false, null, $active->newState->version, $actor, null);
+        foreach (['/', '/?family=maintenance-plans'] as $path) {
+            $this->get($path)->assertOk()->assertSee($checkout, false)
+                ->assertSee('Beli sekarang')->assertDontSee('Fixture maintenance notice');
+        }
     }
 
     private function plan(string $name, ?ProductFamily $family, int $stock): Product

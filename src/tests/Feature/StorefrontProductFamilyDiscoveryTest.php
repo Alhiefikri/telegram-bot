@@ -62,7 +62,7 @@ class StorefrontProductFamilyDiscoveryTest extends TestCase
             ->assertSee('Netflix')
             ->assertSee('Spotify Standalone')
             ->assertSee('data-family-id="'.$family->id.'"', false)
-            ->assertSee('2 pilihan')
+            ->assertSee('2 Plan')
             ->assertSee('1 tersedia');
 
         $search = $this->get(route('storefront.shop.index', ['q' => 'Netflix Individual', 'category' => 'streaming', 'sort' => 'price_asc', 'page' => 1]));

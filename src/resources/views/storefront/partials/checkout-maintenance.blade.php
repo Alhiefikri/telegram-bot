@@ -12,7 +12,7 @@
     >
         <div class="flex items-start gap-3">
             <span class="mt-0.5 text-xl" aria-hidden="true">⏳</span>
-            <div>
+            <div class="min-w-0 wrap-anywhere">
                 <h2 id="checkout-maintenance-title" class="font-display text-sm font-black uppercase tracking-wide">{{ __('storefront_funnel.maintenance_heading') }}</h2>
                 <p class="mt-2 text-sm font-semibold leading-6">{{ $notice }}</p>
             </div>

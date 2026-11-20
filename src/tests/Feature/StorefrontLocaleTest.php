@@ -6,6 +6,7 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Storefront\StorefrontPresenter;
 use Illuminate\Cache\Events\CacheHit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -21,6 +22,26 @@ class StorefrontLocaleTest extends TestCase
     use StorefrontSignedInvoiceScenarios;
 
     private const COOKIE = 'storefront_locale';
+
+    public function test_home_purchase_guide_and_family_use_visitor_copy_without_rewriting_merchant_content(): void
+    {
+        $family = ProductFamily::factory()->create(['name' => 'Merchant Family', 'description' => 'Merchant family details']);
+        Product::factory()->for($family, 'family')->create(['name' => 'Merchant Monthly', 'stock' => 2]);
+        Product::factory()->for($family, 'family')->create(['name' => 'Merchant Annual', 'stock' => 0]);
+
+        foreach ([
+            'id' => ['Belanja produk digital dalam tiga langkah.', 'Checkout sebagai tamu', '2 Plan', '1 tersedia', 'Lihat detail Plan'],
+            'ms' => ['Beli produk digital dalam tiga langkah.', 'Buat pesanan sebagai tetamu', '2 Plan', '1 tersedia', 'Lihat butiran Plan'],
+            'en' => ['Buy digital products in three steps.', 'Check out as a guest', '2 Plans', '1 available', 'View plan details'],
+        ] as $locale => [$guide, $step, $count, $available, $detail]) {
+            $this->withCookie(self::COOKIE, $locale);
+            $this->get('/')->assertOk()->assertSee($guide)->assertSee($step);
+            $this->get('/shop')->assertOk()->assertSee($count)->assertSee($available)->assertSee('Merchant Family');
+            $this->get(route('storefront.product-families.show', $family->slug))->assertOk()
+                ->assertSee($count)->assertSee($available)->assertSee($detail)
+                ->assertSee('Merchant Family')->assertSee('Merchant family details')->assertSee('Merchant Annual');
+        }
+    }
 
     public function test_funnel_copy_and_provider_economics_follow_the_visitor_locale(): void
     {

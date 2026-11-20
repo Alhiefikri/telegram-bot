@@ -23,7 +23,7 @@
                     return [
                         'id' => $presentation->id,
                         'name' => $name,
-                        'checkoutLabel' => $presentation->isAvailable ? __('storefront_funnel.buy_now') : __('storefront_funnel.view_option'),
+                        'checkoutLabel' => $presentation->isAvailable ? __('storefront_funnel.buy_now') : __('storefront_funnel.view_plan'),
                         'checkoutAriaLabel' => __($presentation->isAvailable ? 'storefront_funnel.buy_named' : 'storefront_funnel.view_named_details', ['name' => $name]),
                         'selectionAnnouncement' => __('storefront_funnel.option_selected', ['name' => $name]),
                         'priceLabel' => $storefront->idr($presentation->priceAmount),
@@ -53,19 +53,18 @@
                                     <span class="sr-only">{{ __('storefront_funnel.image') }} {{ $family->name }}</span>
                                 @endif
                             </div>
-                            <p class="product-media-caption">{{ $family->name }} <span>· {{ $family->optionCount }} pilihan paket</span></p>
+                            <p class="product-media-caption break-words">{{ $family->name }} <span>· {{ trans_choice('storefront_funnel.plan_count', $family->optionCount) }}</span></p>
                         </div>
 
                         <div class="min-w-0 p-5 sm:p-7">
-                            <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">{{ __('storefront_funnel.choose_package') }}</p>
-                            <h1 id="family-title" class="mt-2 font-display text-2xl font-black leading-tight tracking-tight sm:text-5xl">{{ $family->name }}</h1>
+                            <h1 id="family-title" class="mt-2 wrap-anywhere font-display text-2xl font-black leading-tight tracking-tight sm:text-5xl">{{ $family->name }}</h1>
                             @if ($family->description)
                                 <p class="mt-3 max-w-3xl whitespace-pre-line break-words text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $family->description }}</p>
                             @endif
 
                             <div class="mt-4 flex flex-wrap items-center gap-2 text-xs font-black">
-                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1.5">{{ $family->optionCount }} Plan</span>
-                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-1.5">{{ $family->availableOptionCount }} tersedia</span>
+                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1.5">{{ trans_choice('storefront_funnel.plan_count', $family->optionCount) }}</span>
+                                <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-1.5">{{ __('storefront_funnel.plans_available_count', ['count' => $family->availableOptionCount]) }}</span>
                                 <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-1.5">{{ __('storefront_funnel.from_price') }} {{ $family->minimumPriceAmount !== null ? $storefront->idr($family->minimumPriceAmount) : '—' }}</span>
                             </div>
 
@@ -114,7 +113,7 @@
                                                 @keydown="handleOptionKeydown($event, '{{ $presentation->id }}', $refs)"
                                                 class="family-option-button group inline-flex min-h-11 min-w-[7.5rem] max-w-full items-center justify-between gap-2 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] px-3 py-2 text-left transition"
                                             >
-                                                <span id="family-option-title-{{ $presentation->id }}" class="min-w-0 truncate font-display text-sm font-black leading-tight text-[var(--sf-ink)]">{{ $optionLabel }}</span>
+                                                <span id="family-option-title-{{ $presentation->id }}" class="min-w-0 wrap-anywhere font-display text-sm font-black leading-tight text-[var(--sf-ink)]">{{ $optionLabel }}</span>
                                                 <span class="h-2 w-2 shrink-0 rounded-full {{ $presentation->isAvailable ? 'bg-[var(--sf-success)]' : 'bg-[#c94856]' }}" aria-hidden="true"></span>
                                             </a>
 

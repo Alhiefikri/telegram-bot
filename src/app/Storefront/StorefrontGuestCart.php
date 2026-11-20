@@ -4,7 +4,6 @@ namespace App\Storefront;
 
 use App\Enums\CartOrigin;
 use App\Enums\CartStatus;
-use App\Exceptions\InvalidCartState;
 use App\Models\Cart;
 use App\Models\Customer;
 use App\Models\Product;
@@ -59,7 +58,7 @@ final class StorefrontGuestCart
             return Cache::lock($this->lockKey($clientKey), 15)
                 ->block(5, fn (): Cart => $this->createOrReuseActive($session, $clientKey));
         } catch (LockTimeoutException $exception) {
-            throw new InvalidCartState(StorefrontLocale::text('cart_locked'), previous: $exception);
+            throw new StorefrontCheckoutError('cart_locked', previous: $exception);
         }
     }
 

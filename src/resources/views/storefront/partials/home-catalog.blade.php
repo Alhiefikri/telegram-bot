@@ -74,7 +74,7 @@
                                 @if ($product->cover->icon)
                                     <span aria-hidden="true" class="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--sf-surface-warm)]">{{ $product->cover->icon }}</span>
                                 @elseif ($product->cover->imageUrl)
-                                    <img src="{{ $product->cover->imageUrl }}" alt="" width="32" height="32" loading="lazy" class="size-8 shrink-0 rounded-lg object-cover">
+                                    <img src="{{ $product->cover->imageUrl }}" alt="" width="32" height="32" loading="lazy" class="size-8 shrink-0 rounded-lg object-contain">
                                 @endif
                                 <div class="min-w-0">
                                     @if ($plan['familyName'])
@@ -92,7 +92,11 @@
                                     <p class="text-sm text-[var(--sf-muted)]">{{ $product->stockLabel }}</p>
                                 </div>
                                 @if ($product->isAvailable)
-                                    <a href="{{ $plan['checkoutUrl'] }}" class="home-catalog-primary inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-bold">{{ __('storefront_funnel.buy_now') }}</a>
+                                    @if ($checkoutMaintenance->active)
+                                        <a href="{{ $plan['productUrl'] }}" class="home-catalog-link inline-flex min-h-11 items-center rounded-lg px-1 py-2 text-sm font-semibold underline">{{ __('storefront_funnel.view_plan') }}</a>
+                                    @else
+                                        <a href="{{ $plan['checkoutUrl'] }}" class="home-catalog-primary inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-bold">{{ __('storefront_funnel.buy_now') }}</a>
+                                    @endif
                                 @elseif ($product->canJoinWaitlist)
                                     <a href="{{ $plan['productUrl'] }}#waitlist" class="home-catalog-link inline-flex min-h-11 items-center rounded-lg px-1 py-2 text-sm font-semibold underline">{{ $product->waitlistCtaLabel }}</a>
                                 @endif

@@ -9,6 +9,7 @@ use App\Http\Requests\StorefrontShopCartUpdateRequest;
 use App\Models\Product;
 use App\Services\CartService;
 use App\Storefront\StorefrontCartPageBuilder;
+use App\Storefront\StorefrontCheckoutError;
 use App\Storefront\StorefrontGuestCart;
 use App\Storefront\StorefrontLocale;
 use Illuminate\Contracts\View\View;
@@ -37,8 +38,8 @@ class StorefrontShopCartController extends Controller
             return redirect()
                 ->route('storefront.shop.cart')
                 ->with('storefront_cart_notice', StorefrontLocale::text('cart_added'));
-        } catch (InvalidCartState|InsufficientStock $exception) {
-            return $this->cartError($exception->getMessage());
+        } catch (InvalidCartState|InsufficientStock|StorefrontCheckoutError $exception) {
+            return $this->cartError(StorefrontCheckoutError::message($exception));
         }
     }
 
@@ -47,7 +48,7 @@ class StorefrontShopCartController extends Controller
         try {
             $cart = $guestCart->current($request->session());
             if ($cart === null) {
-                throw new InvalidCartState(StorefrontLocale::text('stale_cart'));
+                return $this->cartError(StorefrontLocale::text('stale_cart'));
             }
 
             $this->carts->setItemQuantity(
@@ -59,8 +60,8 @@ class StorefrontShopCartController extends Controller
             return redirect()
                 ->route('storefront.shop.cart')
                 ->with('storefront_cart_notice', StorefrontLocale::text('cart_updated'));
-        } catch (InvalidCartState|InsufficientStock $exception) {
-            return $this->cartError($exception->getMessage());
+        } catch (InvalidCartState|InsufficientStock|StorefrontCheckoutError $exception) {
+            return $this->cartError(StorefrontCheckoutError::message($exception));
         }
     }
 
@@ -69,7 +70,7 @@ class StorefrontShopCartController extends Controller
         try {
             $cart = $guestCart->current($request->session());
             if ($cart === null) {
-                throw new InvalidCartState(StorefrontLocale::text('stale_cart'));
+                return $this->cartError(StorefrontLocale::text('stale_cart'));
             }
 
             $this->carts->removeItem($cart, $this->product($product));
@@ -77,8 +78,8 @@ class StorefrontShopCartController extends Controller
             return redirect()
                 ->route('storefront.shop.cart')
                 ->with('storefront_cart_notice', StorefrontLocale::text('cart_removed'));
-        } catch (InvalidCartState|InsufficientStock $exception) {
-            return $this->cartError($exception->getMessage());
+        } catch (InvalidCartState|InsufficientStock|StorefrontCheckoutError $exception) {
+            return $this->cartError(StorefrontCheckoutError::message($exception));
         }
     }
 
@@ -86,7 +87,7 @@ class StorefrontShopCartController extends Controller
     {
         $product = Product::withTrashed()->find($productId);
         if ($product === null) {
-            throw new InvalidCartState(StorefrontLocale::text('product_unavailable'));
+            throw new StorefrontCheckoutError('product_unavailable');
         }
 
         return $product;

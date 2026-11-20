@@ -9,6 +9,7 @@ use App\Catalog\CatalogFamilyReadModel;
 use App\Catalog\CatalogProductReadModel;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use Illuminate\Support\Collection;
 
 class StorefrontCatalogPageBuilder
@@ -36,7 +37,7 @@ class StorefrontCatalogPageBuilder
     /**
      * @return array<string, mixed>
      */
-    public function homeViewData(string $search, ?string $family, int $page, bool $isVariant): array
+    public function homeViewData(string $search, ?string $family, int $page, bool $isVariant, CheckoutMaintenanceState $maintenance): array
     {
         $entries = collect($this->catalog->publicEntriesForPlanFilter());
         $families = $entries->pluck('family')->filter()->keyBy('slug');
@@ -50,7 +51,6 @@ class StorefrontCatalogPageBuilder
         $perPage = StorefrontCatalogQuery::PRODUCTS_PER_PAGE;
         $page = min($page, max(1, (int) ceil($results->count() / $perPage)));
         $returnUrl = $this->urls->homeCatalogUrl($search, $family, $page);
-        $maintenance = $this->maintenance->current();
 
         return [
             'storefront' => $this->storefront,

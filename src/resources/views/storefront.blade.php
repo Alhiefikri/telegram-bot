@@ -3,7 +3,7 @@
 <head>
     @include('storefront.partials.head', ['metadata' => $metadata])
 </head>
-<body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)] motion-reduce:animate-none">
+<body class="overflow-x-clip antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)] motion-reduce:animate-none">
     <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-clip">
         @include('storefront.partials.home-header')
 

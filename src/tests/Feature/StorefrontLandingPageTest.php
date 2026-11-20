@@ -169,7 +169,7 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertStringNotContainsString('neo-marquee', $html);
         $this->assertStringContainsString('data-endpoint="'.route('storefront.verified-purchase-activity').'"', $activityHtml);
         $this->assertStringContainsString('Lihat ringkasan checkout dan akses ulang', $html);
-        $this->assertStringContainsString('QRIS final muncul di halaman invoice setelah checkout.', $html);
+        $this->assertStringContainsString('Jika memilih QRIS, kode pembayaran muncul di halaman invoice.', $html);
         $this->assertStringContainsString('/panduan', $html);
         $this->assertStringContainsString('Akses Pesanan', $html);
     }
