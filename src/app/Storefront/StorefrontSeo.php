@@ -263,8 +263,8 @@ final class StorefrontSeo
     private function catalogBreadcrumbs(): array
     {
         return [
-            ['name' => 'Beranda', 'url' => route('storefront.home')],
-            ['name' => 'Katalog', 'url' => route('storefront.shop.index')],
+            ['name' => StorefrontLocale::text('home'), 'url' => route('storefront.home')],
+            ['name' => StorefrontLocale::text('catalog_short'), 'url' => route('storefront.shop.index')],
         ];
     }
 

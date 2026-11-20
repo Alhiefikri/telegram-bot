@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StorefrontWaitlistRequest;
 use App\Models\Product;
 use App\Services\ProductWaitlistSubscriptionService;
+use App\Storefront\StorefrontLocale;
 use App\Storefront\StorefrontPageMetadata;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,7 +24,7 @@ class StorefrontWaitlistController extends Controller
 
         return redirect()
             ->to(route('storefront.products.show', ['product' => $product]).'#waitlist')
-            ->with('storefront_waitlist_notice', config('storefront.waitlist.notices.pending_confirmation'))
+            ->with('storefront_waitlist_notice', StorefrontLocale::text('waitlist_pending'))
             ->header('Cache-Control', 'no-store, private');
     }
 
@@ -53,9 +54,10 @@ class StorefrontWaitlistController extends Controller
     private function resultResponse(array $result): Response
     {
         $copy = config('storefront.waitlist');
-        $status = (string) ($result['status'] ?? ProductWaitlistSubscriptionService::RESULT_EXPIRED_LINK);
-        $message = (string) ($copy['notices'][$status] ?? $copy['notices'][ProductWaitlistSubscriptionService::RESULT_EXPIRED_LINK]);
-        $title = (string) ($copy['result_titles'][$status] ?? $copy['result_titles'][ProductWaitlistSubscriptionService::RESULT_EXPIRED_LINK]);
+        $status = $result['status'];
+        $status = isset($copy['result_titles'][$status]) ? $status : ProductWaitlistSubscriptionService::RESULT_EXPIRED_LINK;
+        $message = StorefrontLocale::text('waitlist_'.$status);
+        $title = StorefrontLocale::text('waitlist_title_'.$status);
         $metadata = new StorefrontPageMetadata(
             title: $title.' | Lhie Store',
             description: $message,
@@ -64,7 +66,7 @@ class StorefrontWaitlistController extends Controller
             ogType: 'website',
             ogImage: url((string) config('storefront.product_placeholder')),
             ogImageAlt: 'Lhie Store',
-            locale: (string) config('storefront.locale', 'id'),
+            locale: StorefrontLocale::code(),
         );
 
         return response()->view('storefront.waitlist-result', [

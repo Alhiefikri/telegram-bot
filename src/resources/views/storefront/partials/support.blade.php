@@ -2,12 +2,12 @@
     <div class="neo-panel-pop relative overflow-hidden bg-[var(--sf-accent)] p-4 text-white sm:p-7">
         <div class="relative z-10 flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div class="max-w-2xl">
-                <p class="text-[11px] font-black uppercase tracking-[0.16em] text-white/80">Bantuan dan akses pesanan</p>
-                <h2 class="mt-2 font-display text-xl font-black tracking-tight sm:text-3xl">{{ $supportContext['title'] ?? 'Butuh bantuan?' }}</h2>
+                <p class="text-[11px] font-black uppercase tracking-[0.16em] text-white/80">{{ __('storefront_funnel.help_and_orders') }}</p>
+                <h2 class="mt-2 font-display text-xl font-black tracking-tight sm:text-3xl">{{ $supportContext['title'] ?? __('storefront_funnel.need_help') }}</h2>
                 <p class="mt-2 text-sm font-semibold leading-relaxed text-white/90">{{ $supportContext['body'] ?? $copy['support']['body'] }}</p>
             </div>
 
-            <div class="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row lg:flex-col" aria-label="Pilihan support storefront">
+            <div class="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row lg:flex-col" aria-label="{{ __('storefront_funnel.support_options') }}">
                 @foreach (($supportContext['categories'][0]['options'] ?? []) as $option)
                     @if ($option['available'])
                         <a href="{{ $option['href'] }}"
@@ -25,12 +25,12 @@
                               data-support-channel="{{ $option['key'] }}"
                               data-support-category="general"
                               data-support-message="{{ $option['message'] }}">
-                            {{ $option['label'] }} belum aktif
+                            {{ __('storefront_funnel.channel_unavailable', ['channel' => $option['label']]) }}
                         </span>
                     @endif
                 @endforeach
                 <a href="{{ route('storefront.order-access.create') }}" class="inline-flex min-h-11 items-center justify-center rounded-lg border-[3px] border-[var(--sf-border)] bg-white px-5 text-sm font-black text-[var(--sf-ink)] shadow-[4px_4px_0_var(--sf-shadow)]">
-                    Akses Pesanan
+                    {{ __('storefront_funnel.order_access_title') }}
                 </a>
             </div>
         </div>

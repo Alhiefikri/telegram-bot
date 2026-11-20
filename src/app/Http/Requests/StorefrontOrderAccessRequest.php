@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Storefront\StorefrontLocale;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StorefrontOrderAccessRequest extends FormRequest
@@ -30,9 +31,13 @@ class StorefrontOrderAccessRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'invoice_number.required' => 'Masukkan nomor invoice.',
-            'access_key.required' => 'Masukkan recovery key.',
-            'access_key.min' => 'Recovery key tidak lengkap.',
+            'invoice_number.required' => StorefrontLocale::text('invoice_required'),
+            'invoice_number.string' => StorefrontLocale::text('invoice_invalid'),
+            'invoice_number.max' => StorefrontLocale::text('invoice_invalid'),
+            'access_key.required' => StorefrontLocale::text('key_required'),
+            'access_key.min' => StorefrontLocale::text('key_short'),
+            'access_key.string' => StorefrontLocale::text('key_invalid'),
+            'access_key.max' => StorefrontLocale::text('key_invalid'),
         ];
     }
 }

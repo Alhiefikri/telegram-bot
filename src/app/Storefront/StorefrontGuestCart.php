@@ -59,7 +59,7 @@ final class StorefrontGuestCart
             return Cache::lock($this->lockKey($clientKey), 15)
                 ->block(5, fn (): Cart => $this->createOrReuseActive($session, $clientKey));
         } catch (LockTimeoutException $exception) {
-            throw new InvalidCartState('Keranjang sedang diproses. Coba lagi sebentar.', previous: $exception);
+            throw new InvalidCartState(StorefrontLocale::text('cart_locked'), previous: $exception);
         }
     }
 

@@ -18,7 +18,7 @@
         <a
             href="{{ $productUrl }}"
             class="relative z-10 block rounded-t-[0.7rem] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-inset"
-            aria-label="Lihat detail {{ $presentation->name }}"
+            aria-label="{{ __('storefront_funnel.view_named_details', ['name' => $presentation->name]) }}"
         >
             @include('storefront.components.product-cover', [
                 'presentation' => $presentation,
@@ -59,7 +59,7 @@
                         href="{{ $checkoutUrl }}"
                         class="neo-button neo-sheen inline-flex min-h-12 min-w-0 items-center justify-center gap-1.5 rounded-[0.7rem] border border-[var(--sf-border)] bg-[var(--sf-accent)] px-2 py-2 text-center text-xs font-black leading-4 text-white transition-colors hover:bg-[var(--sf-accent-deep)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)] sm:text-sm"
                     >
-                        <span>Beli sekarang</span>
+                        <span>{{ __('storefront_funnel.buy_now') }}</span>
                         <span aria-hidden="true" class="shrink-0 transition-transform duration-300 group-hover:translate-x-1">→</span>
                     </a>
                     <div class="flex min-w-0 justify-end">
@@ -69,8 +69,8 @@
                             <input type="hidden" name="quantity" value="1">
                             <button
                                 type="submit"
-                                aria-label="Tambahkan {{ $presentation->name }} ke keranjang"
-                                title="Tambah ke keranjang"
+                                aria-label="{{ __('storefront_funnel.add_named_to_cart', ['name' => $presentation->name]) }}"
+                                title="{{ __('storefront_funnel.add_to_cart') }}"
                                 class="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 text-[var(--sf-ink)] transition-colors hover:bg-[var(--sf-surface-warm)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]"
                             >
                                 <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h2l2.4 12h11.2l2-8H7"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M13 3v6m-3-3h6"/></svg>

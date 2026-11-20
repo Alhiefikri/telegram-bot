@@ -10,7 +10,7 @@
             <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-muted)]">{{ $brand }}</p>
             <h1 class="mt-3 font-display text-3xl font-black leading-tight sm:text-4xl">{{ $title }}</h1>
             <p class="mt-4 text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ $message }}</p>
-            <x-storefront.button :href="$homeUrl" class="mt-7">Kembali ke katalog</x-storefront.button>
+            <x-storefront.button :href="$homeUrl" class="mt-7">{{ __('storefront_funnel.back_catalog') }}</x-storefront.button>
         </section>
     </main>
 </body>

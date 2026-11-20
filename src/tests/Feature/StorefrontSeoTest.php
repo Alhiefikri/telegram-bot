@@ -90,7 +90,7 @@ class StorefrontSeoTest extends TestCase
 
         $this->assertIsArray($breadcrumbData);
         $this->assertSame(['Beranda', 'Katalog'], array_column($breadcrumbData['itemListElement'], 'name'));
-        $this->assertStringContainsString('<nav aria-label="Breadcrumb"', $shopHtml);
+        $this->assertStringContainsString('<nav aria-label="Jejak navigasi"', $shopHtml);
         $this->assertStringContainsString('>Beranda<', $shopHtml);
         $this->assertStringContainsString('aria-current="page"', $shopHtml);
     }

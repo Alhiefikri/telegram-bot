@@ -11,7 +11,7 @@
         <div class="invoice-qris-main">
             <div class="invoice-qris-total">
                 <span>{{ __('storefront.invoice.qris.label.qris_total', [], $storefrontLocale) }}</span>
-                <strong>{{ $qrisExpired ? 'Tidak dapat dibayar' : ($qrisTotal ?? __('storefront.invoice.qris.label.waiting_provider', [], $storefrontLocale)) }}</strong>
+                <strong>{{ $qrisExpired ? __('storefront_funnel.cannot_pay') : ($qrisTotal ?? __('storefront.invoice.qris.label.waiting_provider', [], $storefrontLocale)) }}</strong>
             </div>
 
             @if ($showQris)
@@ -29,13 +29,13 @@
                 </div>
             @elseif ($isHostedQris)
                 <div class="invoice-qris-placeholder" data-invoice-qris>
-                    <p>Buka halaman pembayaran untuk melihat QRIS dan total final.</p>
+                    <p>{{ __('storefront_funnel.open_hosted_payment') }}</p>
                     <a href="{{ $hostedPaymentUrl }}" target="_blank" rel="noopener noreferrer" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white">{{ __('storefront.invoice.qris.button.pakasir', [], $storefrontLocale) }}</a>
                 </div>
             @else
                 <div class="invoice-qris-placeholder" role="status">
-                    <strong>{{ $qrisExpired ? 'Batas pembayaran terlewati' : $qrisReadinessTitle }}</strong>
-                    <p>{{ $qrisExpired ? 'Jangan bayar QR lama. Jika sudah membayar, hubungi bantuan dengan nomor invoice dan bukti pembayaran.' : $qrisReadinessMessage }}</p>
+                    <strong>{{ $qrisExpired ? __('storefront_funnel.payment_deadline_passed') : $qrisReadinessTitle }}</strong>
+                    <p>{{ $qrisExpired ? __('storefront_funnel.old_qr_warning') : $qrisReadinessMessage }}</p>
                 </div>
             @endif
 
@@ -47,11 +47,11 @@
 
         <div class="invoice-qris-next">
             @if ($showQris)
-                <p data-invoice-qris-instruction>{{ $isManualQris ? 'Pindai QRIS dan bayar sesuai total di invoice. Kirim nomor invoice dan bukti bayar ke admin.' : 'Pindai QRIS dan bayar sesuai total di invoice. Setelah bayar, cek status di halaman ini.' }}</p>
+                <p data-invoice-qris-instruction>{{ $isManualQris ? __('storefront_funnel.manual_qris_instruction') : __('storefront_funnel.auto_qris_instruction') }}</p>
                 @if (! $isManualQris)
-                    <p>Jangan bayar QR lama setelah kedaluwarsa atau dibatalkan. Jika sudah membayar, hubungi bantuan dengan nomor invoice dan bukti pembayaran.</p>
+                    <p>{{ __('storefront_funnel.do_not_pay_old_qr') }}</p>
                 @endif
-                <p class="invoice-qris-expired-message" data-invoice-qris-expired hidden>Batas pembayaran terlewati. Jangan bayar QR lama. Jika sudah membayar, hubungi bantuan dengan nomor invoice dan bukti pembayaran.</p>
+                <p class="invoice-qris-expired-message" data-invoice-qris-expired hidden>{{ __('storefront_funnel.deadline_passed') }}</p>
             @endif
 
             @if ($qrisDeadline)
@@ -71,8 +71,8 @@
                      data-poll-max-attempts="{{ $paymentStatusPollMaxAttempts ?? 9 }}"
                      data-poll-max-duration-ms="{{ $paymentStatusPollMaxDurationMs ?? 180000 }}"
                      data-status-copy='@json($statusCopy)'>
-                    <p class="font-black" data-payment-status-title>{{ $qrisExpired ? 'Batas pembayaran terlewati' : ($isQrisPayable ? $qrisRetryLabel : $qrisReadinessTitle) }}</p>
-                    <p data-payment-status-message>{{ $qrisExpired ? 'Jika sudah membayar, jangan bayar lagi. Hubungi bantuan dengan nomor invoice dan bukti pembayaran.' : ($isQrisPayable ? __('storefront.invoice.qris.status.after_payment', [], $storefrontLocale) : $qrisReadinessMessage) }}</p>
+                    <p class="font-black" data-payment-status-title>{{ $qrisExpired ? __('storefront_funnel.payment_deadline_passed') : ($isQrisPayable ? $qrisRetryLabel : $qrisReadinessTitle) }}</p>
+                    <p data-payment-status-message>{{ $qrisExpired ? __('storefront_funnel.do_not_pay_again') : ($isQrisPayable ? __('storefront.invoice.qris.status.after_payment', [], $storefrontLocale) : $qrisReadinessMessage) }}</p>
                     <p class="sr-only" aria-live="polite" data-payment-status-announcement></p>
                     <button type="button" class="neo-button mt-3 inline-flex min-h-11 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white" data-payment-status-check>{{ $qrisRetryLabel }}</button>
                     <div class="mt-3 {{ $isQrisPayable ? 'hidden' : 'flex' }} flex-wrap gap-3" data-payment-status-followup>
@@ -80,7 +80,7 @@
                     </div>
                 </div>
             @else
-                <a href="#invoice-support" class="invoice-qris-help">Hubungi admin untuk konfirmasi</a>
+                <a href="#invoice-support" class="invoice-qris-help">{{ __('storefront_funnel.contact_admin_to_confirm') }}</a>
             @endif
         </div>
     </div>

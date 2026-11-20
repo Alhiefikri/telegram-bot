@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Storefront\StorefrontLocale;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StorefrontWaitlistRequest extends FormRequest
@@ -27,9 +28,10 @@ class StorefrontWaitlistRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'email.required' => 'Isi alamat email untuk menerima notifikasi.',
-            'email.email' => 'Masukkan alamat email yang valid.',
-            'email.max' => 'Email maksimal 254 karakter.',
+            'email.required' => StorefrontLocale::text('waitlist_email_required'),
+            'email.string' => StorefrontLocale::text('email_invalid'),
+            'email.email' => StorefrontLocale::text('email_invalid'),
+            'email.max' => StorefrontLocale::text('email_max'),
         ];
     }
 

@@ -32,15 +32,15 @@ function optionalSafeInteger(value) {
     : { valid: true, value: parsed };
 }
 
-function formatIdr(amount) {
+function formatIdr(amount, unavailable) {
   return Number.isSafeInteger(amount)
     ? idrFormatter.format(amount)
-    : "Belum tersedia";
+    : unavailable;
 }
 
-function formatUsdt(microAmount) {
+function formatUsdt(microAmount, unavailable) {
   if (!Number.isSafeInteger(microAmount)) {
-    return "Belum tersedia";
+    return unavailable;
   }
 
   return `${(microAmount / 1_000_000).toFixed(6).replace(/\.?0+$/, "")} USDT`;
@@ -164,6 +164,7 @@ function quoteForQuantity(config, value) {
 }
 
 export default function checkoutReview(initialConfig = {}) {
+  const copy = initialConfig.copy ?? {};
   const quantityEditable = initialConfig.quantityEditable === true;
   const minimumQuantity = safeInteger(initialConfig.minimumQuantity) ?? 1;
   const maximumQuantity = safeInteger(initialConfig.maximumQuantity);
@@ -214,16 +215,16 @@ export default function checkoutReview(initialConfig = {}) {
     },
 
     get subtotalIdr() {
-      return formatIdr(this.quote?.idrSubtotal);
+      return formatIdr(this.quote?.idrSubtotal, copy.unavailable);
     },
 
     get subtotalUsdt() {
-      return formatUsdt(this.quote?.usdtSubtotal);
+      return formatUsdt(this.quote?.usdtSubtotal, copy.unavailable);
     },
 
     get tierNote() {
       const minimum = this.quote?.appliedTierMinimum;
-      return minimum ? `Harga grosir diterapkan mulai ${minimum} unit.` : "";
+      return minimum ? (copy.tier?.replace(":count", minimum) ?? "") : "";
     },
 
     syncContact() {
@@ -247,12 +248,12 @@ export default function checkoutReview(initialConfig = {}) {
       channel.required = contact.required = required;
       channel.setCustomValidity(
         required && channel.value !== "whatsapp"
-          ? "Pilih WhatsApp untuk metode pembayaran ini."
+          ? (copy.selectWhatsapp ?? "")
           : ""
       );
       if (required) {
         contact.pattern = "\\+?[0-9][0-9 .\\-]{7,19}";
-        contact.title = "Masukkan nomor WhatsApp yang valid.";
+        contact.title = copy.validWhatsapp ?? "";
       } else {
         contact.removeAttribute("pattern");
         contact.removeAttribute("title");
@@ -307,8 +308,7 @@ export default function checkoutReview(initialConfig = {}) {
       const quantity = this.currentQuantity;
       const quote = this.quote;
       if (quantity === null || quote === null) {
-        this.quantityAnnouncement =
-          "Subtotal produk belum tersedia. Periksa jumlah.";
+        this.quantityAnnouncement = copy.invalidQuantity ?? "";
         return;
       }
 
@@ -316,9 +316,12 @@ export default function checkoutReview(initialConfig = {}) {
         'input[name="payment_method"]:is(:checked, [type="hidden"]):not([value="qris"])'
       );
       const subtotal = isUsdt
-        ? formatUsdt(quote.usdtSubtotal)
-        : formatIdr(quote.idrSubtotal);
-      this.quantityAnnouncement = `Jumlah ${quantity} unit. Subtotal produk ${subtotal}.`;
+        ? formatUsdt(quote.usdtSubtotal, copy.unavailable)
+        : formatIdr(quote.idrSubtotal, copy.unavailable);
+      this.quantityAnnouncement =
+        copy.quantityAnnouncement
+          ?.replace(":quantity", quantity)
+          .replace(":subtotal", subtotal) ?? "";
     },
 
     init() {

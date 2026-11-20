@@ -10,7 +10,7 @@ final class StorefrontCheckoutLimitReached extends InvalidCheckout
     public function __construct(public readonly array $invoiceUrls, bool $sharedNetwork = false)
     {
         parent::__construct($sharedNetwork
-            ? 'Jaringan ini memiliki terlalu banyak pembelian yang menunggu pembayaran. Selesaikan atau batalkan invoice Anda, atau coba lagi nanti. Pembelian ini belum dibuat.'
-            : 'Anda masih memiliki 2 pembelian yang menunggu pembayaran. Selesaikan atau batalkan invoice sebelumnya sebelum membuat pembelian lain. Pembelian ini belum dibuat.');
+            ? StorefrontLocale::text('pending_network_limit')
+            : StorefrontLocale::text('pending_orders_limit'));
     }
 }

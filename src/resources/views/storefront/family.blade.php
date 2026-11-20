@@ -18,10 +18,14 @@
                 $selectedMemberId = $firstAvailableMemberId ?? $members->first()?->presentation->id;
                 $familyQuickBuyOptions = $members->map(function ($member) use ($storefront, $familyUrl, $selectedMemberId): array {
                     $presentation = $member->presentation;
+                    $name = trim((string) ($presentation->familyOptionLabel ?? $presentation->name));
 
                     return [
                         'id' => $presentation->id,
-                        'name' => trim((string) ($presentation->familyOptionLabel ?? $presentation->name)),
+                        'name' => $name,
+                        'checkoutLabel' => $presentation->isAvailable ? __('storefront_funnel.buy_now') : __('storefront_funnel.view_option'),
+                        'checkoutAriaLabel' => __($presentation->isAvailable ? 'storefront_funnel.buy_named' : 'storefront_funnel.view_named_details', ['name' => $name]),
+                        'selectionAnnouncement' => __('storefront_funnel.option_selected', ['name' => $name]),
                         'priceLabel' => $storefront->idr($presentation->priceAmount),
                         'stock' => $presentation->stockAvailable,
                         'selected' => $selectedMemberId === $presentation->id,
@@ -32,7 +36,7 @@
             @endphp
             <section class="family-layout mx-auto max-w-7xl px-5 sm:px-6" x-data="familyQuickBuy(@js($familyQuickBuyOptions))">
                 <a href="{{ $returnUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
-                    <span aria-hidden="true">&larr;</span> Kembali ke katalog
+                    <span aria-hidden="true">&larr;</span> {{ __('storefront_funnel.back_catalog') }}
                 </a>
 
                 <section class="family-product-panel mt-5 rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.08)]" aria-labelledby="family-title">
@@ -40,20 +44,20 @@
                         <div class="family-media-column">
                             <div class="family-hero-art">
                                 @if ($family->imageUrl)
-                                    <button type="button" class="product-image-zoom" data-image-preview-open aria-haspopup="dialog" aria-controls="product-image-preview" aria-label="Perbesar gambar {{ $family->name }}">
+                                    <button type="button" class="product-image-zoom" data-image-preview-open aria-haspopup="dialog" aria-controls="product-image-preview" aria-label="{{ __('storefront_funnel.enlarge_named_image', ['name' => $family->name]) }}">
                                         <img src="{{ $family->imageUrl }}" alt="{{ $family->name }}" width="800" height="800" loading="eager" fetchpriority="high" decoding="async">
-                                        <span class="image-zoom-hint">⤢ Perbesar gambar</span>
+                                        <span class="image-zoom-hint">⤢ {{ __('storefront_funnel.enlarge_image') }}</span>
                                     </button>
                                 @else
                                     <span class="font-display text-7xl font-black text-[var(--sf-accent)]" aria-hidden="true">{{ mb_substr($family->name, 0, 1) }}</span>
-                                    <span class="sr-only">Gambar {{ $family->name }}</span>
+                                    <span class="sr-only">{{ __('storefront_funnel.image') }} {{ $family->name }}</span>
                                 @endif
                             </div>
                             <p class="product-media-caption">{{ $family->name }} <span>· {{ $family->optionCount }} pilihan paket</span></p>
                         </div>
 
                         <div class="min-w-0 p-5 sm:p-7">
-                            <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">Pilih paket</p>
+                            <p class="text-xs font-black uppercase tracking-[0.18em] text-[var(--sf-accent)]">{{ __('storefront_funnel.choose_package') }}</p>
                             <h1 id="family-title" class="mt-2 font-display text-2xl font-black leading-tight tracking-tight sm:text-5xl">{{ $family->name }}</h1>
                             @if ($family->description)
                                 <p class="mt-3 max-w-3xl whitespace-pre-line break-words text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $family->description }}</p>
@@ -62,12 +66,12 @@
                             <div class="mt-4 flex flex-wrap items-center gap-2 text-xs font-black">
                                 <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-1.5">{{ $family->optionCount }} Plan</span>
                                 <span class="rounded-full border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-3 py-1.5">{{ $family->availableOptionCount }} tersedia</span>
-                                <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-1.5">Mulai {{ $family->minimumPriceAmount !== null ? $storefront->idr($family->minimumPriceAmount) : '—' }}</span>
+                                <span class="rounded-full border border-[var(--sf-border)] bg-white px-3 py-1.5">{{ __('storefront_funnel.from_price') }} {{ $family->minimumPriceAmount !== null ? $storefront->idr($family->minimumPriceAmount) : '—' }}</span>
                             </div>
 
                             <div class="mt-6 border-t border-dashed border-[var(--sf-border)] pt-5">
-                                <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Pilih Plan</p>
-                                <div id="family-options" class="family-option-picker mt-3 flex flex-wrap items-center gap-2" role="radiogroup" aria-orientation="horizontal" aria-label="Pilih Plan {{ $family->name }}">
+                                <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">{{ __('storefront_funnel.choose_plan') }}</p>
+                                <div id="family-options" class="family-option-picker mt-3 flex flex-wrap items-center gap-2" role="radiogroup" aria-orientation="horizontal" aria-label="{{ __('storefront_funnel.choose_named_plan', ['name' => $family->name]) }}">
                                     @foreach ($members as $member)
                                         @php
                                             $presentation = $member->presentation;
@@ -105,7 +109,7 @@
                                                 aria-checked="{{ $isSelected ? 'true' : 'false' }}"
                                                 x-bind:aria-checked="isSelected('{{ $presentation->id }}') ? 'true' : 'false'"
                                                 x-bind:tabindex="isSelected('{{ $presentation->id }}') ? 0 : -1"
-                                                aria-label="Pilih Plan {{ $optionLabel }}"
+                                                aria-label="{{ __('storefront_funnel.choose_named_plan', ['name' => $optionLabel]) }}"
                                                 @click.prevent="selectOption('{{ $presentation->id }}')"
                                                 @keydown="handleOptionKeydown($event, '{{ $presentation->id }}', $refs)"
                                                 class="family-option-button group inline-flex min-h-11 min-w-[7.5rem] max-w-full items-center justify-between gap-2 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] px-3 py-2 text-left transition"
@@ -128,17 +132,17 @@
 
                                                 <div class="flex flex-wrap items-center justify-between gap-2">
                                                     <strong class="font-display text-xl text-[var(--sf-accent)]">{{ $option['priceLabel'] }}</strong>
-                                                    <span class="rounded-full border border-[var(--sf-border)] px-2.5 py-1 text-[10px] font-black {{ $presentation->isAvailable ? 'bg-[var(--sf-yellow)]' : 'bg-[#ffd7d7] text-[#9f1d2d]' }}">{{ $presentation->isAvailable ? $presentation->stockLabel : 'Stok habis' }}</span>
+                                                    <span class="rounded-full border border-[var(--sf-border)] px-2.5 py-1 text-[10px] font-black {{ $presentation->isAvailable ? 'bg-[var(--sf-yellow)]' : 'bg-[#ffd7d7] text-[#9f1d2d]' }}">{{ $presentation->isAvailable ? $presentation->stockLabel : __('storefront_funnel.out_of_stock') }}</span>
                                                 </div>
 
                                                 <div class="mt-4 flex flex-col gap-2 sm:flex-row">
                                                     @if ($presentation->isAvailable)
-                                                        <a href="{{ $checkoutUrl }}" data-family-direct-checkout class="neo-button neo-button-stable inline-flex min-h-11 flex-1 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white hover:bg-[var(--sf-accent-deep)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Beli sekarang</a>
+                                                        <a href="{{ $checkoutUrl }}" data-family-direct-checkout class="neo-button neo-button-stable inline-flex min-h-11 flex-1 items-center justify-center bg-[var(--sf-accent)] px-4 text-sm font-black text-white hover:bg-[var(--sf-accent-deep)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">{{ __('storefront_funnel.buy_now') }}</a>
                                                         <form method="POST" action="{{ route('storefront.shop.cart.items.store') }}" class="flex-1">
                                                             @csrf
                                                             <input type="hidden" name="product_id" value="{{ $presentation->id }}">
                                                             <input type="hidden" name="quantity" value="1">
-                                                            <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">Tambah ke keranjang</button>
+                                                            <button type="submit" class="inline-flex min-h-11 w-full items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-white px-4 text-sm font-black text-[var(--sf-ink)] hover:bg-[var(--sf-yellow)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">{{ __('storefront_funnel.add_to_cart') }}</button>
                                                         </form>
                                                     @else
                                                         <a href="{{ $productUrl }}#waitlist" class="inline-flex min-h-11 flex-1 items-center justify-center rounded-[0.7rem] border border-[var(--sf-border)] bg-[var(--sf-yellow)] px-4 text-sm font-black hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sf-accent)]">{{ $presentation->waitlistCtaLabel }}</a>
@@ -150,7 +154,7 @@
                                                             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5.5A2.5 2.5 0 0 1 7.5 3H20v16H7.5A2.5 2.5 0 0 0 5 21V5.5Z"/><path stroke-linecap="round" d="M8 7h8M8 11h7"/></svg>
                                                         </span>
                                                         <div class="min-w-0">
-                                                            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">Deskripsi</p>
+                                                            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--sf-muted)]">{{ __('storefront_funnel.description') }}</p>
                                                             <p class="mt-1 whitespace-pre-line break-words text-sm font-semibold leading-6 text-[var(--sf-ink)]">{{ $description !== '' ? $description : $presentation->descriptionSnippet }}</p>
                                                         </div>
                                                     </div>
@@ -161,7 +165,7 @@
                                                                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3 5 6v5c0 4.6 2.9 8.4 7 10 4.1-1.6 7-5.4 7-10V6l-7-3Z"/><path stroke-linecap="round" d="m9 12 2 2 4-4"/></svg>
                                                             </span>
                                                             <div class="min-w-0">
-                                                                <p class="text-[10px] font-black uppercase tracking-[0.14em] text-[#765800]">Catatan garansi</p>
+                                                                <p class="text-[10px] font-black uppercase tracking-[0.14em] text-[#765800]">{{ __('storefront_funnel.warranty_note') }}</p>
                                                                 <p class="mt-1 whitespace-pre-line break-words text-sm font-semibold leading-6">{{ $presentation->merchandising->warrantyPolicy }}</p>
                                                             </div>
                                                         </div>
@@ -179,21 +183,21 @@
                 </section>
 
                 @if ($quickBuyPresentation !== null)
-                    <div class="family-quick-buy fixed inset-x-0 bottom-0 z-40 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 py-3 shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-family-quick-buy role="region" aria-label="Pembelian cepat" x-bind:data-family-selected-unavailable="isAvailable ? null : 'true'">
+                    <div class="family-quick-buy fixed inset-x-0 bottom-0 z-40 border-t border-[var(--sf-border)] bg-[var(--sf-surface)]/95 px-4 py-3 shadow-[0_-12px_30px_rgb(18_35_63_/_0.12)] backdrop-blur sm:px-6" data-family-quick-buy role="region" aria-label="{{ __('storefront_funnel.quick_purchase') }}" x-bind:data-family-selected-unavailable="isAvailable ? null : 'true'">
                         <div class="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div class="min-w-0">
-                                <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Pilihan Anda</span>
+                                <span class="block text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">{{ __('storefront_funnel.your_selection') }}</span>
                                 <strong data-family-selected-name class="block truncate text-sm font-black text-[var(--sf-ink)]" x-text="selectedOption ? selectedOption.name : ''">{{ trim((string) ($quickBuyPresentation->familyOptionLabel ?? $quickBuyPresentation->name)) }}</strong>
                                 <span data-family-selected-price class="block text-xs font-bold text-[var(--sf-accent)]" x-text="selectedOption ? selectedOption.priceLabel : ''">{{ $storefront->idr($quickBuyPresentation->priceAmount) }}</span>
                             </div>
                             <div class="flex w-full items-center gap-2 sm:w-auto">
-                                <label for="family-quick-quantity" class="sr-only">Jumlah</label>
+                                <label for="family-quick-quantity" class="sr-only">{{ __('storefront_funnel.quantity') }}</label>
                                 <div class="family-quantity-control flex h-11 shrink-0 items-center rounded-lg border border-[var(--sf-border)] bg-white">
-                                    <button type="button" data-family-quantity-step="-1" class="grid h-10 w-9 place-items-center text-lg font-black text-[var(--sf-muted)]" aria-label="Kurangi jumlah" x-bind:disabled="!isAvailable" @click="adjustQuantity(-1)">−</button>
+                                    <button type="button" data-family-quantity-step="-1" class="grid h-10 w-9 place-items-center text-lg font-black text-[var(--sf-muted)]" aria-label="{{ __('storefront_funnel.decrease_quantity') }}" x-bind:disabled="!isAvailable" @click="adjustQuantity(-1)">−</button>
                                     <input id="family-quick-quantity" type="number" value="1" min="1" max="{{ min(20, max(1, $quickBuyPresentation->stockAvailable)) }}" step="1" data-family-quantity class="h-10 w-10 border-x border-[var(--sf-border)] bg-transparent text-center text-sm font-black text-[var(--sf-ink)] focus:outline-none" x-bind:min="quantityMinimum" x-bind:max="quantityMaximum" x-bind:value="quantity" x-bind:disabled="!isAvailable" @input="setQuantity($event.target.value)" @change="$event.target.value = quantity">
-                                    <button type="button" data-family-quantity-step="1" class="grid h-10 w-9 place-items-center text-lg font-black text-[var(--sf-muted)]" aria-label="Tambah jumlah" x-bind:disabled="!isAvailable" @click="adjustQuantity(1)">+</button>
+                                    <button type="button" data-family-quantity-step="1" class="grid h-10 w-9 place-items-center text-lg font-black text-[var(--sf-muted)]" aria-label="{{ __('storefront_funnel.increase_quantity') }}" x-bind:disabled="!isAvailable" @click="adjustQuantity(1)">+</button>
                                 </div>
-                                <a href="{{ $storefront->checkoutProductUrl($quickBuyPresentation->id, $familyUrl) }}" data-family-checkout class="neo-button neo-button-stable inline-flex min-h-11 flex-1 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white sm:min-w-44" x-bind:href="checkoutHref" x-bind:aria-label="checkoutAriaLabel" x-text="checkoutLabel">Beli sekarang</a>
+                                <a href="{{ $storefront->checkoutProductUrl($quickBuyPresentation->id, $familyUrl) }}" data-family-checkout class="neo-button neo-button-stable inline-flex min-h-11 flex-1 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white sm:min-w-44" x-bind:href="checkoutHref" x-bind:aria-label="checkoutAriaLabel" x-text="checkoutLabel">{{ __('storefront_funnel.buy_now') }}</a>
                             </div>
                         </div>
                     </div>

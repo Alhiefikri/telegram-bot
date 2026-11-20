@@ -1,5 +1,5 @@
 @if ($metadata->breadcrumbs !== [])
-    <nav aria-label="Breadcrumb" class="mx-auto max-w-7xl px-5 pt-4 sm:px-6">
+    <nav aria-label="{{ __('storefront_funnel.breadcrumbs') }}" class="mx-auto max-w-7xl px-5 pt-4 sm:px-6">
         <ol class="flex flex-wrap items-center gap-2 text-xs font-black text-[var(--sf-muted)]">
             @foreach ($metadata->breadcrumbs as $breadcrumb)
                 <li class="flex items-center gap-2">

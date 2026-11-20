@@ -11,6 +11,10 @@ function reviewConfig(overrides = {}) {
     baseIdrPrice: 10_000,
     baseUsdtPrice: 1_000_000,
     tiers: [],
+    copy: {
+      unavailable: "Belum tersedia",
+      tier: "Harga grosir diterapkan mulai :count unit.",
+    },
     ...overrides,
   };
 }

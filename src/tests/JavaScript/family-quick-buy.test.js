@@ -11,6 +11,9 @@ function option(id, overrides = {}) {
     selected: false,
     productUrl: `/products/${id}?return=%2Ffamilies%2Fcloud`,
     checkoutUrl: `/checkout/${id}?return=%2Ffamilies%2Fcloud&source=family`,
+    checkoutLabel: "Lihat detail opsi",
+    checkoutAriaLabel: `Lihat detail Package ${id}`,
+    selectionAnnouncement: `Package ${id} dipilih`,
     ...overrides,
   };
 }
@@ -43,6 +46,7 @@ test("selecting another option updates its presentation and checkout URL", () =>
       stock: 3,
       priceLabel: "Rp 2.000",
       name: "Premium",
+      selectionAnnouncement: "Premium dipilih",
       checkoutUrl:
         "/checkout/two?quantity=9&return=%2Ffamilies%2Fcloud&source=family",
     }),

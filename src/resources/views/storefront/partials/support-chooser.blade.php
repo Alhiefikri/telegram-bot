@@ -6,13 +6,13 @@
 
 @if (! empty($supportContext['categories']))
     <x-storefront.panel as="section" id="{{ $supportId }}" padding="sm" class="invoice-support-chooser {{ $supportClass }}" aria-labelledby="{{ $supportId }}-title" data-support-chooser>
-        <h2 id="{{ $supportId }}-title" class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $supportContext['title'] ?? 'Butuh bantuan?' }}</h2>
+        <h2 id="{{ $supportId }}-title" class="font-display text-lg font-black text-[var(--sf-ink)]">{{ $supportContext['title'] ?? __('storefront_funnel.need_help') }}</h2>
         @if (! empty($supportContext['body']))
             <p class="mt-1 text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ $supportContext['body'] }}</p>
         @endif
 
         <div class="mt-3" data-support-select-field hidden>
-            <label for="{{ $supportSelectId }}" class="block text-sm font-bold text-[var(--sf-ink)]">Pilih kendala</label>
+            <label for="{{ $supportSelectId }}" class="block text-sm font-bold text-[var(--sf-ink)]">{{ __('storefront_funnel.choose_issue') }}</label>
             <select id="{{ $supportSelectId }}" class="invoice-support-select mt-2 min-h-11 w-full min-w-0 rounded-lg border-2 border-[var(--sf-muted)] bg-[var(--sf-surface)] px-3 py-2 text-base font-semibold text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" data-support-select>
                 @foreach ($supportContext['categories'] as $category)
                     <option value="{{ $category['key'] }}" @disabled(! collect($category['options'])->contains(fn ($option) => $option['available']))>{{ $category['label'] }}</option>
@@ -21,7 +21,7 @@
         </div>
 
         <details class="mt-3" data-support-options>
-            <summary class="min-h-11 cursor-pointer py-2 text-sm font-bold leading-6 text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" data-support-fallback>Pilih kendala dan kontak admin</summary>
+            <summary class="min-h-11 cursor-pointer py-2 text-sm font-bold leading-6 text-[var(--sf-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]" data-support-fallback>{{ __('storefront_funnel.choose_support') }}</summary>
             <div class="space-y-4" data-support-groups>
                 @foreach ($supportContext['categories'] as $category)
                     <section data-support-group="{{ $category['key'] }}">
@@ -41,7 +41,7 @@
                                     {{ $option['label'] }}
                                 </a>
                             @empty
-                                <p class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">Kontak untuk kendala ini belum tersedia.</p>
+                                <p class="text-sm font-semibold leading-6 text-[var(--sf-muted)]">{{ __('storefront_funnel.support_unavailable') }}</p>
                             @endforelse
                         </div>
                     </section>

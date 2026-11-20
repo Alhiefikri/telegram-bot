@@ -14,8 +14,10 @@ final class StorefrontCheckoutMaintenanceCopy
             return '';
         }
 
+        $notice = StorefrontLocale::text('checkout_maintenance_notice');
+
         return $state->publicNote === null
-            ? self::DEFAULT_NOTICE
-            : self::DEFAULT_NOTICE."\n\nCatatan admin:\n{$state->publicNote}";
+            ? $notice
+            : $notice."\n\n".StorefrontLocale::text('admin_note')."\n".$state->publicNote;
     }
 }

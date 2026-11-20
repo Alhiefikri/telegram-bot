@@ -73,8 +73,8 @@ class StorefrontShopOrderPresenter
             (int) config('services.storefront.payment_status_poll_max_duration_seconds', 180) * 1_000,
         );
         $metadata = $this->seo->privatePage(
-            'Order | '.$brand,
-            'Status checkout dan akses pesanan di '.$brand.'.',
+            StorefrontLocale::text('invoice_title').' | '.$brand,
+            StorefrontLocale::text('invoice_meta', ['brand' => $brand]),
         );
 
         return [

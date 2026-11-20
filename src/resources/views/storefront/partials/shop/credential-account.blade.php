@@ -2,7 +2,7 @@
     <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <h4 class="font-display text-base font-bold text-[var(--sf-ink)]">{{ $secret['label'] }}</h4>
         <div data-copy-group>
-            <button type="button" class="credential-action" data-credential-copy="{{ base64_encode((string) $secret['text']) }}" data-copy-success="{{ $secret['label'] }} tersalin." hidden>Salin akun</button>
+            <button type="button" class="credential-action" data-credential-copy="{{ base64_encode((string) $secret['text']) }}" data-copy-success="{{ __('storefront_funnel.credential_copied', ['label' => $secret['label']]) }}" hidden>{{ __('storefront_funnel.copy_account') }}</button>
             <p class="mt-1 min-h-5 text-xs text-[var(--sf-ink)]" aria-live="polite" data-copy-status></p>
         </div>
     </div>
@@ -42,8 +42,8 @@
             @if ($structured && ($secret['access_method'] ?? null) === 'otp_mail_link' && filled($secret['access_value'] ?? null) && filled($secret['access_domain'] ?? null))
                 <div class="min-w-0 sm:col-span-2">
                     <p class="text-sm font-semibold text-[var(--sf-ink)]">OTP Mail</p>
-                    <p class="mt-1 break-all text-sm text-[var(--sf-muted)]">Domain tujuan: {{ $secret['access_domain'] }}</p>
-                    <a href="{{ $secret['access_value'] }}" target="_blank" rel="noreferrer noopener" referrerpolicy="no-referrer" class="credential-action mt-2">Buka OTP Mail</a>
+                    <p class="mt-1 break-all text-sm text-[var(--sf-muted)]">{{ __('storefront_funnel.target_domain') }} {{ $secret['access_domain'] }}</p>
+                    <a href="{{ $secret['access_value'] }}" target="_blank" rel="noreferrer noopener" referrerpolicy="no-referrer" class="credential-action mt-2">{{ __('storefront_funnel.open_otp_mail') }}</a>
                 </div>
             @endif
         </div>
@@ -51,7 +51,7 @@
         <div class="mt-3">
             @include('storefront.partials.shop.credential-value', [
                 'valueId' => $credentialId.'-raw',
-                'valueLabel' => 'Data akun',
+                'valueLabel' => __('storefront_funnel.account_details'),
                 'accountLabel' => $secret['label'],
                 'value' => $secret['text'],
                 'sensitive' => true,
@@ -60,7 +60,7 @@
     @endif
     @if ($structured && filled($secret['tutorial'] ?? null) && $secret['tutorial'] !== $group['delivery_note'])
         <div class="mt-3 text-sm leading-6 text-[var(--sf-ink)]">
-            <p class="font-semibold">Instruksi akun</p>
+            <p class="font-semibold">{{ __('storefront_funnel.account_instructions') }}</p>
             <p class="mt-1 whitespace-pre-line break-words">{{ $secret['tutorial'] }}</p>
         </div>
     @endif

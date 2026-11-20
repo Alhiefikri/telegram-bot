@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const appDir = fileURLToPath(new URL("../..", import.meta.url));
 let baseUrl, fixture, server, invoiceUrl;
+let localizedFixtures;
 
 test.beforeAll(async () => {
   fixture = mkdtempSync(path.join(tmpdir(), "storefront-home-"));
@@ -41,11 +42,10 @@ test.beforeAll(async () => {
     },
   };
   execFileSync("php", ["artisan", "migrate", "--force"], options);
-  invoiceUrl =
-    baseUrl +
+  localizedFixtures = JSON.parse(
     execFileSync("php", ["artisan", "tinker", "--execute", seed], options)
-      .toString()
-      .trim();
+  );
+  invoiceUrl = baseUrl + localizedFixtures.unavailable;
   server = spawn(
     "php",
     [
@@ -72,6 +72,146 @@ const sizes = [
   [390, 844],
   [320, 568],
 ];
+
+for (const [
+  locale,
+  language,
+  catalog,
+  review,
+  manual,
+  expired,
+  paid,
+  access,
+] of [
+  [
+    "id",
+    "Bahasa Indonesia",
+    "Katalog produk",
+    "Ringkasan pesanan",
+    "Kirim nomor invoice dan bukti bayar ke admin",
+    "Batas pembayaran terlewati",
+    "Pembayaran terverifikasi",
+    "Buka kembali data akun.",
+  ],
+  [
+    "ms",
+    "Bahasa Melayu",
+    "Katalog produk",
+    "Ringkasan pesanan",
+    "bukti bayaran",
+    "Tempoh bayaran tamat",
+    "Bayaran disahkan",
+    "Buka semula data akaun.",
+  ],
+  [
+    "en",
+    "English",
+    "Product catalog",
+    "Order summary",
+    "proof of payment",
+    "Payment deadline passed",
+    "Payment verified",
+    "Reopen your account details.",
+  ],
+]) {
+  for (const [width, height] of sizes) {
+    test(`localized funnel ${locale} at ${width}x${height}`, async ({
+      page,
+    }, info) => {
+      await page.setViewportSize({ width, height });
+      await page.goto(baseUrl);
+      await page.locator("[data-storefront-locale] summary").click();
+      await page.getByRole("link", { name: language }).click();
+
+      async function check(heading, snapshot) {
+        await expect(page.locator("html")).toHaveAttribute("lang", locale);
+        await expect(
+          page.getByRole("heading", { name: heading, exact: true }).first()
+        ).toBeVisible();
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth)
+        ).toBe(width);
+        if (snapshot)
+          await page.screenshot({
+            path: info.outputPath(`${snapshot}.png`),
+            fullPage: true,
+          });
+      }
+      await check(catalog, "catalog");
+      await page.goto(baseUrl + localizedFixtures.product);
+      await check("Desain Bulanan");
+      await expect(
+        page.getByText(
+          locale === "en"
+            ? "English merchant description"
+            : "Base merchant description",
+          { exact: true }
+        )
+      ).toBeVisible();
+      await page.goto(baseUrl + localizedFixtures.review);
+      await check(review, "review");
+      await page.goto(baseUrl + localizedFixtures.unavailable);
+      await check(
+        {
+          id: "Order tidak aktif",
+          ms: "Pesanan tidak aktif",
+          en: "Order inactive",
+        }[locale],
+        "unavailable"
+      );
+      await expect(page.locator("[data-invoice-qris]")).toHaveCount(0);
+      await expect(page.locator("html")).toHaveAttribute("lang", locale);
+      await page.goto(baseUrl + localizedFixtures.manual);
+      await expect(page.locator(".invoice-main")).toContainText(manual);
+      await expect(page.locator(".invoice-main")).toContainText(/Rp\s?35\.000/);
+      const signedUrl = page.url();
+      const otherLocale = locale === "en" ? "ms" : "en";
+      const deadline = await page
+        .locator(".invoice-qris-deadline time")
+        .getAttribute("datetime");
+      await page.locator("[data-storefront-locale] summary").click();
+      await page
+        .locator(`[data-storefront-locale] button[value=${otherLocale}]`)
+        .click();
+      await expect(page).toHaveURL(signedUrl);
+      await expect(page.locator("html")).toHaveAttribute("lang", otherLocale);
+      await expect(page.locator(".invoice-qris-deadline time")).toHaveAttribute(
+        "datetime",
+        deadline
+      );
+      await page.locator("[data-storefront-locale] summary").click();
+      await page
+        .locator(`[data-storefront-locale] button[value=${locale}]`)
+        .click();
+      await expect(page).toHaveURL(signedUrl);
+      await expect(page.locator(".invoice-main")).toContainText(manual);
+      await expect(page.locator("[data-shop-payment-status]")).toHaveCount(0);
+      await check(
+        { id: "Invoice QRIS", ms: "Invois QRIS", en: "QRIS invoice" }[locale],
+        "manual"
+      );
+      await page.locator("#invoice-support > summary").click();
+      const support = page.locator(
+        '[data-support-category="payment_pending"][data-support-channel="whatsapp"]'
+      );
+      const message = new URL(
+        await support.getAttribute("href")
+      ).searchParams.get("text");
+      expect(message).toMatch(/Inv(?:oice|ois): /);
+      expect(message).not.toMatch(/signature|Recovery Key|https?:|password/i);
+      await page.screenshot({
+        path: info.outputPath("support.png"),
+        fullPage: true,
+      });
+      await page.goto(baseUrl + localizedFixtures.expired);
+      await check(expired, "expired");
+      await page.goto(baseUrl + localizedFixtures.paid);
+      await check(paid, "paid");
+      await page.goto(baseUrl + "/akses-pesanan");
+      await check(access, "access");
+    });
+  }
+}
 for (const [width, height] of sizes) {
   for (const theme of ["light", "dark"]) {
     test(`${width}x${height} ${theme}: search, picker and first buy action fit`, async ({
@@ -308,11 +448,18 @@ function contrast(first, second) {
 }
 
 const seed = String.raw`
+\App\Models\ManualPaymentSetting::query()->create(['payment_mode' => 'manual', 'is_active' => true, 'whatsapp_support_number' => '6281234567890']);
 $creative = \App\Models\ProductFamily::factory()->create(['slug'=>'creative','name'=>'Creative Studio', 'sort_order'=>1, 'icon'=>'🎨']);
 $audio = \App\Models\ProductFamily::factory()->create(['slug'=>'audio','name'=>'Audio Library', 'sort_order'=>2]);
 foreach ([[$creative, 'Desain Bulanan', 8], [$creative, 'Desain Tahunan', 0], [$audio, 'Musik Bulanan', 4], [null, 'Penyimpanan Bulanan', 2]] as $index => [$family, $name, $stock]) {
-    \App\Models\Product::factory()->create(['name'=>$name, 'product_family_id'=>$family?->id, 'family_sort_order'=>$index, 'price_amount'=>35000, 'access_duration'=>'30 hari', 'stock'=>$stock, 'reserved_stock'=>0, 'is_active'=>true]);
+    $product = \App\Models\Product::factory()->create(['name'=>$name, 'product_family_id'=>$family?->id, 'family_sort_order'=>$index, 'price_amount'=>35000, 'access_duration'=>'30 hari', 'stock'=>$stock, 'reserved_stock'=>0, 'is_active'=>true, 'description'=>'Base merchant description', 'description_en'=>'English merchant description', 'description_ms'=>'']);
+    if ($index === 0) $featured = $product;
 }
-$order = \App\Models\Order::factory()->create();
-echo \Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $order, absolute: false);
+$urls = ['product' => route('storefront.products.show', $featured, absolute: false), 'review' => route('storefront.shop.checkout.product', $featured, absolute: false)];
+foreach (['unavailable', 'manual', 'expired', 'paid'] as $state) {
+    $order = \App\Models\Order::factory()->create(['order_status' => $state === 'paid' ? 'completed' : 'pending_payment', 'total_amount' => 35000, 'expires_at' => $state === 'expired' ? now()->subMinute() : now()->addHour()]);
+    if ($state !== 'unavailable') \App\Models\Payment::factory()->for($order)->create(['method' => 'QR_MANUAL', 'provider' => 'manual', 'status' => $state === 'paid' ? 'paid' : 'pending', 'expired_at' => $order->expires_at]);
+    $urls[$state] = \Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $order, absolute: false);
+}
+echo json_encode($urls);
 `;

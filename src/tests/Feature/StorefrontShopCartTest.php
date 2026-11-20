@@ -529,7 +529,7 @@ class StorefrontShopCartTest extends TestCase
         $this->assertStringContainsString('Read Only Cart Review', $html);
         $this->assertStringContainsString('Jumlah 2', $html);
         $this->assertStringContainsString('Rp50.000', $html);
-        $this->assertSame(1, substr_count($html, 'Subtotal produk'));
+        $this->assertSame(1, substr_count($html, '<dt>Subtotal produk</dt>'));
         $this->assertStringContainsString('Kembali ke keranjang', $html);
         $this->assertStringContainsString('href="'.route('storefront.shop.cart').'"', $html);
         $this->assertStringContainsString('name="cart_snapshot"', $html);

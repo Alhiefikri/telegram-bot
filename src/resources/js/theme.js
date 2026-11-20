@@ -31,7 +31,9 @@ function writeStoredTheme(theme) {
 
 function updateToggle(toggle, resolvedTheme) {
   const isDark = resolvedTheme === "dark";
-  const nextLabel = isDark ? "Aktifkan mode terang" : "Aktifkan mode gelap";
+  const nextLabel = isDark
+    ? toggle.dataset.enableLight
+    : toggle.dataset.enableDark;
 
   toggle.setAttribute("aria-label", nextLabel);
   toggle.setAttribute("title", nextLabel);
@@ -39,7 +41,9 @@ function updateToggle(toggle, resolvedTheme) {
 
   const label = toggle.querySelector("[data-theme-label]");
   if (label) {
-    label.textContent = isDark ? "Mode terang" : "Mode gelap";
+    label.textContent = isDark
+      ? toggle.dataset.lightLabel
+      : toggle.dataset.darkLabel;
   }
 }
 

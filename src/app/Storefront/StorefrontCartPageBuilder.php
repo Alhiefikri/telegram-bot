@@ -202,7 +202,7 @@ final class StorefrontCartPageBuilder
             if ($product === null) {
                 return new StorefrontCartItemPresentation(
                     productId: (int) $item->product_id,
-                    name: 'Produk tidak ditemukan',
+                    name: StorefrontLocale::text('product_not_found'),
                     productUrl: route('storefront.shop.cart'),
                     quantity: (int) $item->quantity,
                     unitPrice: null,
@@ -211,7 +211,7 @@ final class StorefrontCartPageBuilder
                     usdtSubtotal: null,
                     availableStock: null,
                     isAvailable: false,
-                    conflictMessage: 'Produk ini sudah tidak tersedia. Hapus dari keranjang untuk melanjutkan.',
+                    conflictMessage: StorefrontLocale::text('remove_unavailable_product'),
                     appliedTierMinimum: null,
                 );
             }
@@ -364,11 +364,11 @@ final class StorefrontCartPageBuilder
     private function conflictMessage(bool $isPublic, int $availableStock, int $quantity): ?string
     {
         if (! $isPublic) {
-            return 'Produk ini sudah tidak tersedia untuk pembelian. Hapus dari keranjang untuk melanjutkan.';
+            return StorefrontLocale::text('remove_unpurchasable_product');
         }
 
         if ($availableStock < $quantity) {
-            return 'Stok produk berubah menjadi '.$availableStock.'. Kurangi jumlah atau hapus produk ini untuk melanjutkan.';
+            return StorefrontLocale::text('stock_changed', ['count' => $availableStock]);
         }
 
         return null;

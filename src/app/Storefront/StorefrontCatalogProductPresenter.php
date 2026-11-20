@@ -32,9 +32,9 @@ final class StorefrontCatalogProductPresenter
             stockAvailable: $product->availableStock,
             soldQuantity: $product->soldQuantity,
             isAvailable: $isAvailable,
-            availabilityLabel: $isAvailable ? 'Tersedia' : 'Habis',
-            stockLabel: $isAvailable ? ($product->manualUnlimited ? 'Stok: ∞ · Diproses manual' : 'Stok: '.$product->availableStock) : 'Stok kosong',
-            soldLabel: 'Terjual: '.$product->soldQuantity,
+            availabilityLabel: $isAvailable ? StorefrontLocale::text('available') : StorefrontLocale::text('sold_out'),
+            stockLabel: $isAvailable ? StorefrontLocale::text('stock_count', ['count' => $product->manualUnlimited ? StorefrontLocale::text('manual_stock') : $product->availableStock]) : StorefrontLocale::text('no_stock'),
+            soldLabel: StorefrontLocale::text('sold_count', ['count' => $product->soldQuantity]),
             cover: new StorefrontProductCoverPresentation(
                 theme: StorefrontProductPresentationNormalizer::defaultCoverTheme(),
                 imageUrl: $this->imageUrl($product),
@@ -44,7 +44,7 @@ final class StorefrontCatalogProductPresenter
             checkoutUrl: $this->urls->checkoutProductUrlForId($product->id),
             canJoinWaitlist: ! $isAvailable,
             waitlistUrl: $this->urls->waitlistUrlForId($product->id),
-            waitlistCtaLabel: (string) config('storefront.waitlist.cta', 'Beri tahu saya saat tersedia'),
+            waitlistCtaLabel: StorefrontLocale::text('waitlist'),
             familyOptionLabel: $familyOptionLabel,
         );
     }

@@ -5,7 +5,7 @@
         <div class="reveal-item mb-4 grid gap-3 sm:mb-5 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,25rem)] lg:items-end">
             <div>
                 <div class="mb-2 inline-flex items-center gap-2 text-xs font-bold text-[var(--sf-muted)]">
-                    <span>Katalog aktif · {{ $catalogPage->totalProductCount() }} item katalog</span>
+                    <span>{{ __('storefront_funnel.active_catalog') }} · {{ $catalogPage->totalProductCount() }} item katalog</span>
                 </div>
                 <h2 class="text-balance font-display text-xl font-black tracking-tight text-[var(--sf-ink)] sm:text-3xl">
                     Temukan produk pilihan Anda.
@@ -16,8 +16,8 @@
             </div>
 
             <form action="{{ $catalogPage->searchAction }}" method="GET" class="relative">
-                <label for="shop-search" class="sr-only">Cari produk</label>
-                <input id="shop-search" type="text" name="q" value="{{ $catalogPage->search }}" maxlength="{{ $catalogPage->searchMaxLength }}" placeholder="{{ $copy['catalog']['search_placeholder'] }}" class="neo-input h-12 w-full pl-12 pr-16 text-base font-semibold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] transition-all focus:outline-none sm:h-14 sm:text-sm">
+                <label for="shop-search" class="sr-only">{{ __('storefront_funnel.search_products') }}</label>
+                <input id="shop-search" type="text" name="q" value="{{ $catalogPage->search }}" maxlength="{{ $catalogPage->searchMaxLength }}" placeholder="{{ __('storefront_funnel.search_digital') }}" class="neo-input h-12 w-full pl-12 pr-16 text-base font-semibold text-[var(--sf-ink)] placeholder-[var(--sf-muted)] transition-all focus:outline-none sm:h-14 sm:text-sm">
                 @if ($catalogPage->selectedCategory)
                     <input type="hidden" name="category" value="{{ $catalogPage->selectedCategory }}">
                 @endif
@@ -30,19 +30,19 @@
                     </svg>
                 </div>
                 @if($catalogPage->search !== '')
-                    <a href="{{ $catalogPage->clearSearchUrl }}" class="absolute right-2 top-1/2 inline-flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center text-xs font-black text-[var(--sf-accent)] transition-colors hover:text-[var(--sf-ink)]">Clear</a>
+                    <a href="{{ $catalogPage->clearSearchUrl }}" class="absolute right-2 top-1/2 inline-flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center text-xs font-black text-[var(--sf-accent)] transition-colors hover:text-[var(--sf-ink)]">{{ __('storefront_funnel.clear') }}</a>
                 @endif
             </form>
         </div>
 
         <div class="mb-4 flex flex-col gap-3 border-y border-dashed border-[var(--sf-border)] py-3 sm:mb-5 sm:py-4 lg:flex-row lg:items-center lg:justify-between">
             @if ($catalogPage->hasPublicCategories)
-                <nav class="flex flex-wrap gap-2" aria-label="Filter kategori produk">
+                <nav class="flex flex-wrap gap-2" aria-label="{{ __('storefront_funnel.filter_categories') }}">
                     <a href="{{ $catalogPage->allCategoryUrl }}" @class([
                         'category-btn inline-flex min-h-11 items-center justify-center rounded-full border px-4 py-2 text-center text-xs font-black transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
                         'neo-filter-active' => $catalogPage->selectedCategory === null,
                         'neo-filter-inactive hover:-translate-y-0.5 hover:shadow-[4px_4px_0_var(--sf-shadow)]' => $catalogPage->selectedCategory !== null,
-                    ]) data-filter="all" @if ($catalogPage->selectedCategory === null) aria-current="page" @endif aria-controls="storefront-product-grid">Semua</a>
+                    ]) data-filter="all" @if ($catalogPage->selectedCategory === null) aria-current="page" @endif aria-controls="storefront-product-grid">{{ __('storefront_funnel.all') }}</a>
                     @foreach ($catalogPage->categoryFilters as $category)
                         <a href="{{ $category->url }}" @class([
                             'category-btn inline-flex min-h-11 items-center justify-center rounded-full border px-4 py-2 text-center text-xs font-black transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]',
@@ -68,21 +68,21 @@
                 @if ($catalogPage->selectedCategory)
                     <input type="hidden" name="category" value="{{ $catalogPage->selectedCategory }}">
                 @endif
-                <label for="shop-sort" class="text-xs font-black text-[var(--sf-ink)]">Urutkan</label>
+                <label for="shop-sort" class="text-xs font-black text-[var(--sf-ink)]">{{ __('storefront_funnel.sort') }}</label>
                 <select id="shop-sort" name="sort" class="neo-input h-11 min-w-0 flex-1 px-3 text-xs font-black text-[var(--sf-ink)] focus:outline-none sm:min-w-40 sm:flex-none">
-                    <option value="recommended" @selected($catalogPage->selectedSort === 'recommended')>Direkomendasikan</option>
-                    <option value="newest" @selected($catalogPage->selectedSort === 'newest')>Terbaru</option>
-                    <option value="price_asc" @selected($catalogPage->selectedSort === 'price_asc')>Harga terendah</option>
-                    <option value="price_desc" @selected($catalogPage->selectedSort === 'price_desc')>Harga tertinggi</option>
+                    <option value="recommended" @selected($catalogPage->selectedSort === 'recommended')>{{ __('storefront_funnel.recommended') }}</option>
+                    <option value="newest" @selected($catalogPage->selectedSort === 'newest')>{{ __('storefront_funnel.newest') }}</option>
+                    <option value="price_asc" @selected($catalogPage->selectedSort === 'price_asc')>{{ __('storefront_funnel.lowest_price') }}</option>
+                    <option value="price_desc" @selected($catalogPage->selectedSort === 'price_desc')>{{ __('storefront_funnel.highest_price') }}</option>
                 </select>
-                <button type="submit" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-ink)] px-4 text-xs font-black text-white">Terapkan</button>
+                <button type="submit" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-ink)] px-4 text-xs font-black text-white">{{ __('storefront_funnel.apply') }}</button>
             </form>
         </div>
 
         <div class="mb-3 flex items-end justify-between gap-3">
             <div>
-                <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">Katalog aktif</p>
-                <h3 class="mt-1 font-display text-lg font-black tracking-tight text-[var(--sf-ink)] sm:text-2xl">Tersedia sekarang</h3>
+                <p class="text-xs font-black uppercase tracking-[0.16em] text-[var(--sf-muted)]">{{ __('storefront_funnel.active_catalog') }}</p>
+                <h3 class="mt-1 font-display text-lg font-black tracking-tight text-[var(--sf-ink)] sm:text-2xl">{{ __('storefront_funnel.available_now') }}</h3>
             </div>
             <span class="text-xs font-bold text-[var(--sf-muted)]">{{ $catalogPage->totalProductCount() }} item</span>
         </div>
