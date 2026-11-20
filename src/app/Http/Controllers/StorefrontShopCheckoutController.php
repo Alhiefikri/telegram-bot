@@ -10,6 +10,7 @@ use App\Http\Requests\StorefrontShopCheckoutRequest;
 use App\Models\Order;
 use App\Models\Product;
 use App\Storefront\StorefrontCheckoutChallenge;
+use App\Storefront\StorefrontCheckoutError;
 use App\Storefront\StorefrontCheckoutLimitReached;
 use App\Storefront\StorefrontCheckoutMaintenanceCopy;
 use App\Storefront\StorefrontFunnelEvents;
@@ -63,13 +64,14 @@ class StorefrontShopCheckoutController extends Controller
                 ->with('storefront_checkout_error', $exception->getMessage())
                 ->with('storefront_pending_invoice_urls', $exception->invoiceUrls)
                 ->withErrors([$errorKey => $exception->getMessage()]);
-        } catch (CheckoutMaintenanceActive $exception) {
-            $message = StorefrontCheckoutMaintenanceCopy::notice($exception->state);
+        } catch (CheckoutMaintenanceActive|InvalidCartState|InvalidCheckout|InsufficientStock $exception) {
+            $message = $exception instanceof CheckoutMaintenanceActive
+                ? StorefrontCheckoutMaintenanceCopy::notice($exception->state)
+                : StorefrontCheckoutError::message($exception);
             $events->checkoutSubmitted($product, null, [
                 'status_endpoint_result' => 'rejected',
                 'failure_kind' => $exception::class,
             ] + $eventMetadata);
-
             $recoveryUrl = $isDirectCheckout
                 ? $request->checkoutRecoveryUrl()
                 : route('storefront.shop.checkout.start');
@@ -79,34 +81,6 @@ class StorefrontShopCheckoutController extends Controller
                 ->withInput($request->checkoutRecoveryInput())
                 ->with('storefront_checkout_error', $message)
                 ->withErrors([$errorKey => $message]);
-        } catch (InvalidCartState $exception) {
-            $events->checkoutSubmitted($product, null, [
-                'status_endpoint_result' => 'rejected',
-                'failure_kind' => $exception::class,
-            ] + $eventMetadata);
-            $recoveryUrl = $isDirectCheckout
-                ? $request->checkoutRecoveryUrl()
-                : route('storefront.shop.checkout.start');
-
-            return redirect()
-                ->to($recoveryUrl)
-                ->withInput($request->checkoutRecoveryInput())
-                ->with('storefront_checkout_error', $exception->getMessage())
-                ->withErrors([$errorKey => $exception->getMessage()]);
-        } catch (InvalidCheckout|InsufficientStock $exception) {
-            $events->checkoutSubmitted($product, null, [
-                'status_endpoint_result' => 'rejected',
-                'failure_kind' => $exception::class,
-            ] + $eventMetadata);
-            $recoveryUrl = $isDirectCheckout
-                ? $request->checkoutRecoveryUrl()
-                : route('storefront.shop.checkout.start');
-
-            return redirect()
-                ->to($recoveryUrl)
-                ->withInput($request->checkoutRecoveryInput())
-                ->with('storefront_checkout_error', $exception->getMessage())
-                ->withErrors([$errorKey => $exception->getMessage()]);
         }
 
         if ($result->orderId !== null && $result->recoveryKey !== null) {

@@ -10,6 +10,7 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\CheckoutPaymentUnavailable;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
+use App\Exceptions\TelegramStockReserved;
 use App\Models\BalanceRestoreGate;
 use App\Models\Cart;
 use App\Models\Customer;
@@ -551,7 +552,7 @@ class OrderCheckoutService
         foreach ($items as $item) {
             $product = $products[$item->product_id];
             if (! $product->manual_unlimited && $product->availableStock() - $item->quantity < $floor) {
-                throw new InvalidCheckout('Stok terakhir disisakan untuk pembelian lewat Telegram. Pilih jumlah lebih kecil atau coba lagi nanti.');
+                throw new TelegramStockReserved;
             }
         }
     }

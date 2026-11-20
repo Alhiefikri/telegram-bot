@@ -106,26 +106,6 @@ return [
         ],
     ],
 
-    'payment_flow' => [
-        'eyebrow' => 'Cara beli',
-        'title' => 'Belanja produk digital dalam tiga langkah.',
-        'body' => 'Pilih produk dari katalog, checkout sebagai tamu di website, lalu simpan invoice dan Recovery Key untuk akses ulang pesanan website.',
-        'steps' => [
-            [
-                'title' => 'Pilih produk',
-                'body' => 'Cari produk digital yang dibutuhkan dan pastikan badge stok masih tersedia.',
-            ],
-            [
-                'title' => 'Checkout sebagai tamu',
-                'body' => 'Tidak perlu membuat akun. Isi nama pembeli, lalu buat QRIS langsung dari website.',
-            ],
-            [
-                'title' => 'Terima akses',
-                'body' => 'Website menampilkan data akun setelah pembayaran terverifikasi, dan salinannya juga dikirim ke email yang Anda isi saat checkout. Simpan invoice dan Recovery Key untuk membuka kembali pesanan website; pesanan Telegram tidak memakai key ini.',
-            ],
-        ],
-    ],
-
     'fulfillment' => [
         'automatic_default_instruction' => 'Login dari perangkat pribadi, ganti password setelah berhasil masuk, lalu pindahkan MFA/Authenticator ke perangkat Anda sendiri jika produk mendukungnya.',
         'manual' => [
@@ -142,18 +122,6 @@ return [
             'title' => 'Data akun belum tersedia',
             'body' => 'Pembayaran sudah diterima, tetapi kredensial otomatis belum tersedia di invoice ini. Gunakan bantuan kategori Data akun belum muncul agar admin mengecek invoice tanpa meminta secret.',
         ],
-    ],
-
-    'qris' => [
-        'eyebrow' => 'QRIS Website',
-        'title' => 'QRIS web dibuat per order',
-        'body' => 'QRIS final muncul di halaman invoice setelah checkout. Simpan invoice dan Recovery Key sebelum melanjutkan pembayaran; key ini hanya untuk pesanan website.',
-    ],
-
-    'recovery_access' => [
-        'eyebrow' => 'Akses ulang',
-        'title' => 'Invoice dan Recovery Key untuk pesanan website.',
-        'body' => 'Gunakan halaman Akses Pesanan bila ingin membuka kembali data akun dari pesanan website tanpa membuat akun Lhie Store. Pesanan Telegram dicek lewat bot.',
     ],
 
     'faq' => [

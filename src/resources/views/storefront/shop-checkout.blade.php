@@ -23,7 +23,7 @@
 </head>
 <body class="text-[var(--sf-ink)] antialiased">
     <div class="storefront-shell storefront-checkout-page flex min-h-screen flex-col">
-        <header class="checkout-frame mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-3 py-2">
+        <header class="checkout-frame relative z-50 mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-3 py-2">
             <a href="{{ $homeUrl }}" class="inline-flex min-h-11 min-w-0 items-center" aria-label="{{ __('storefront_funnel.brand_home', ['brand' => $brand]) }}">
                 @include('storefront.components.brand-mark', ['brand' => $brand])
             </a>

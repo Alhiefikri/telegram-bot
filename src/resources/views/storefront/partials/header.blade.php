@@ -22,7 +22,7 @@
 @endphp
 
 <header class="storefront-header relative z-50 mx-auto mb-2 mt-2 w-[calc(100%-2rem)] max-w-7xl rounded-2xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[0_12px_30px_rgb(18_35_63_/_0.1)] sm:mb-4 sm:mt-4" data-storefront-header data-account-identity-url="{{ route('customer.identity') }}" x-data="mobileMenu">
-    <div class="flex min-h-16 w-full flex-wrap items-center gap-2 px-3 py-2 sm:gap-3 sm:px-6 sm:py-3 xl:flex-nowrap">
+    <div class="relative flex min-h-16 w-full flex-wrap items-center gap-2 px-3 py-2 [--locale-panel-top:auto] sm:gap-3 sm:px-6 sm:py-3 xl:flex-nowrap">
         <a href="{{ $homeUrl }}" class="order-1 flex min-w-0 shrink-0 items-center gap-2 lg:w-[8rem] xl:w-[9rem]" aria-label="{{ __('storefront_funnel.brand_home', ['brand' => $brand]) }}">
             @include('storefront.components.brand-mark', ['brand' => $brand])
         </a>

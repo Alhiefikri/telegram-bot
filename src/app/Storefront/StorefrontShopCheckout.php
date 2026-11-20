@@ -6,7 +6,6 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\CheckoutMaintenanceActive;
 use App\Exceptions\InsufficientStock;
-use App\Exceptions\InvalidCheckout;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\Cart;
 use App\Models\Customer;
@@ -79,7 +78,7 @@ class StorefrontShopCheckout
             return Cache::lock('storefront:checkout:'.hash('sha256', $sessionId), 45)
                 ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $sessionId, $termsVersion, $session, $paymentRail, $authorizeNewCheckout, $admission));
         } catch (LockTimeoutException $exception) {
-            throw new InvalidCheckout(StorefrontLocale::text('checkout_locked'), previous: $exception);
+            throw new StorefrontCheckoutError('checkout_locked', previous: $exception);
         }
     }
 
@@ -102,7 +101,7 @@ class StorefrontShopCheckout
         }
 
         if ($input->productId === null) {
-            throw new InvalidCheckout(StorefrontLocale::text('cart_empty_error'));
+            throw new StorefrontCheckoutError('cart_empty_error');
         }
         $product = $this->product($input->productId);
         $paymentIntent = $this->paymentIntent($paymentRail, $product);
@@ -180,11 +179,11 @@ class StorefrontShopCheckout
         } else {
             $cart = $this->guestCarts->current($session);
             if ($cart === null || $cart->cartItems->isEmpty()) {
-                throw new InvalidCheckout(StorefrontLocale::text('cart_empty_error'));
+                throw new StorefrontCheckoutError('cart_empty_error');
             }
 
             if ($input->cartSnapshot !== null && ! $this->guestCarts->matchesSnapshot($cart, $input->cartSnapshot)) {
-                throw new InvalidCheckout(StorefrontLocale::text('cart_changed'));
+                throw new StorefrontCheckoutError('cart_changed');
             }
 
             $paymentIntent = $this->paymentIntentForCart($paymentRail, $cart);
@@ -314,7 +313,7 @@ class StorefrontShopCheckout
         $product = Product::query()->whereKey($productId)->first();
 
         if (! $product) {
-            throw new InvalidCheckout(StorefrontLocale::text('product_unavailable'));
+            throw new StorefrontCheckoutError('product_unavailable');
         }
 
         return $product;
@@ -343,7 +342,7 @@ class StorefrontShopCheckout
             if (! $settings?->binance_pay_enabled
                 || (! filled(config('services.binance.pay_id')) && ! filled(config('services.binance.pay_uid')))
                 || $product->usdt_price_amount === null) {
-                throw new InvalidCheckout(StorefrontLocale::text('binance_unavailable'));
+                throw new StorefrontCheckoutError('binance_unavailable');
             }
 
             return $this->providerResolver->resolve($paymentRail)->paymentIntent;
@@ -351,7 +350,7 @@ class StorefrontShopCheckout
 
         if (CheckoutPaymentIntents::isUsdtBep20Rail($paymentRail)) {
             if ($product->usdt_price_amount === null) {
-                throw new InvalidCheckout(StorefrontLocale::text('bsc_unavailable'));
+                throw new StorefrontCheckoutError('bsc_unavailable');
             }
 
             // Readiness is deliberately checked by OrderCheckoutService after
@@ -360,7 +359,7 @@ class StorefrontShopCheckout
         }
 
         if (ManualPaymentSetting::current() === null) {
-            throw new InvalidCheckout(StorefrontLocale::text('automatic_qris_inactive'));
+            throw new StorefrontCheckoutError('automatic_qris_inactive');
         }
 
         $selection = $this->providerResolver->resolve('qris');
@@ -372,17 +371,17 @@ class StorefrontShopCheckout
     {
         $items = $cart->cartItems;
         if ($items->isEmpty()) {
-            throw new InvalidCheckout(StorefrontLocale::text('cart_empty_error'));
+            throw new StorefrontCheckoutError('cart_empty_error');
         }
 
         $products = $items->map(fn ($item) => $item->product)->values();
         if ($products->contains(fn ($product): bool => $product === null)) {
-            throw new InvalidCheckout(StorefrontLocale::text('cart_unavailable_items'));
+            throw new StorefrontCheckoutError('cart_unavailable_items');
         }
 
         if (CheckoutPaymentIntents::isBinancePaymentRail($paymentRail)
             && $products->contains(fn (Product $product): bool => $product->usdt_price_amount === null)) {
-            throw new InvalidCheckout(StorefrontLocale::text('cart_requires_usdt'));
+            throw new StorefrontCheckoutError('cart_requires_usdt');
         }
 
         /** @var Product $product */
@@ -465,7 +464,7 @@ class StorefrontShopCheckout
     private function assertTermsAccepted(StorefrontShopCheckoutInput $input): void
     {
         if (! $input->termsAccepted) {
-            throw new InvalidCheckout(StorefrontLocale::text('agree_required'));
+            throw new StorefrontCheckoutError('agree_required');
         }
     }
 
@@ -473,7 +472,7 @@ class StorefrontShopCheckout
     {
         $version = config('storefront.policies.terms.version');
         if (! is_string($version) || trim($version) === '') {
-            throw new InvalidCheckout(StorefrontLocale::text('checkout_terms_unavailable'));
+            throw new StorefrontCheckoutError('checkout_terms_unavailable');
         }
 
         return trim($version);
@@ -483,7 +482,7 @@ class StorefrontShopCheckout
     {
         $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
         if (! CheckoutPaymentIntents::isSupportedPaymentRail($paymentRail)) {
-            throw new InvalidCheckout(StorefrontLocale::text('payment_unavailable'));
+            throw new StorefrontCheckoutError('payment_unavailable');
         }
 
         return $paymentRail;

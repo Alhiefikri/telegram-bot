@@ -2,7 +2,6 @@
 
 namespace App\Storefront;
 
-use App\Exceptions\InvalidCheckout;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -30,12 +29,12 @@ class StorefrontCheckoutChallenge
     public function verify(Request $request): void
     {
         if ($this->siteKey() === null) {
-            throw new InvalidCheckout(StorefrontLocale::text('challenge_unavailable'));
+            throw new StorefrontCheckoutError('challenge_unavailable');
         }
 
         $token = $request->input('cf-turnstile-response');
         if (! is_string($token) || trim($token) === '' || strlen($token) > 2048) {
-            throw new InvalidCheckout(StorefrontLocale::text('challenge_failed'));
+            throw new StorefrontCheckoutError('challenge_failed');
         }
 
         try {
@@ -49,7 +48,7 @@ class StorefrontCheckoutChallenge
                 ]);
         } catch (ConnectionException) {
             // Do not retain the transport exception: it can contain request secrets.
-            throw new InvalidCheckout(StorefrontLocale::text('challenge_failed'));
+            throw new StorefrontCheckoutError('challenge_failed');
         }
 
         $result = $response->json();
@@ -58,7 +57,7 @@ class StorefrontCheckoutChallenge
             || ($result['success'] ?? null) !== true
             || ($result['action'] ?? null) !== self::ACTION
             || ($result['hostname'] ?? null) !== $this->expectedHostname()) {
-            throw new InvalidCheckout(StorefrontLocale::text('challenge_failed'));
+            throw new StorefrontCheckoutError('challenge_failed');
         }
     }
 

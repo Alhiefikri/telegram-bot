@@ -773,6 +773,8 @@ test("customer checkout: shows required WhatsApp at 320px and 200% text", async 
   await channel.selectOption("whatsapp");
   await number.fill("+628123456789");
   await expect(number).toHaveJSProperty("validationMessage", "");
+  await expectOpenedLocalePanel(page);
+  await page.locator("[data-storefront-locale] summary").press("Enter");
   await expectNoDocumentOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("required-whatsapp-320-text200.png"),
@@ -842,11 +844,109 @@ test("customer checkout: reflows a long Cart at 320px and 200% text", async ({
   await expect(page.locator("[data-checkout-order-subtotal]")).toHaveText(
     "Rp80.000"
   );
+  await expectOpenedLocalePanel(page);
+  await page.screenshot({ path: testInfo.outputPath("cart-locale-open.png") });
+  await page.locator("[data-storefront-locale] summary").press("Enter");
   await expectStorefrontCheckoutResponsiveContract(page, viewport);
   await page.screenshot({
     path: testInfo.outputPath("cart-320-text200.png"),
     fullPage: true,
   });
+});
+
+test("customer checkout: switches home and signed invoice locale by keyboard without JavaScript", async ({
+  browser,
+}, testInfo) => {
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 320, height: 568 },
+    reducedMotion: "reduce",
+  });
+  try {
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+    // Set text magnification from the test runner, without enabling page scripts.
+    const enlargeText = () =>
+      page.evaluate(() => {
+        document.documentElement.style.fontSize = "200%";
+      });
+    const family = "browser-responsive-family";
+    const home = new URL(`${baseUrl}/?family=${family}&q=browser`);
+    await page.goto(home.href, { waitUntil: "domcontentloaded" });
+    await enlargeText();
+    await expectOpenedLocalePanel(page);
+    await page.screenshot({ path: testInfo.outputPath("home-locale-open.png") });
+    await page
+      .locator("[data-storefront-locale-panel] [lang=en]")
+      .press("Enter");
+    await expect(page).toHaveURL(home.href);
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("#catalog-family")).toHaveValue(family);
+    await expect(page.locator("#catalog-search")).toHaveValue("browser");
+    await enlargeText();
+    await page.locator("#cara-beli summary").press("Enter");
+    await expect(
+      page.getByText("Keep access to your order", { exact: true })
+    ).toBeVisible();
+    await expectNoDocumentOverflow(page);
+
+    const invoice = `${baseUrl}${invoiceFixtures.localeInvoiceUrl}`;
+    await page.goto(invoice, { waitUntil: "domcontentloaded" });
+    await enlargeText();
+    await expectOpenedLocalePanel(page);
+    await page.locator("[data-storefront-locale-panel]").screenshot({
+      path: testInfo.outputPath("invoice-locale-open.png"),
+    });
+    await page
+      .locator("[data-storefront-locale-panel] [lang=ms]")
+      .press("Enter");
+    await expect(page).toHaveURL(invoice);
+    await expect(page.locator("html")).toHaveAttribute("lang", "ms");
+  } finally {
+    await context.close();
+  }
+});
+
+test("customer checkout: keeps the catalog above the fold and sticky anchors clear", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 1366, height: 768 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${baseUrl}/`);
+    for (const target of [
+      page.locator("#catalog-search"),
+      viewport.width === 390
+        ? page.locator("#catalog-family")
+        : page.locator("#catalog-family-title"),
+      page.locator("[data-home-plan]").first(),
+    ]) {
+      await expect(target).toBeInViewport({ ratio: 0.99 });
+    }
+    const buy = page
+      .locator("[data-home-plan]")
+      .first()
+      .getByRole("link", { name: "Beli sekarang" });
+    await buy.click({ trial: true });
+    const thumbnail = page.locator("[data-home-plan] img").first();
+    await expect(thumbnail).toHaveCSS("object-fit", "contain");
+    await expectOpenedLocalePanel(page);
+    await page.locator("[data-storefront-locale] summary").press("Enter");
+    await page.screenshot({
+      path: testInfo.outputPath(`home-${viewport.width}.png`),
+    });
+    await page
+      .locator("#cara-beli")
+      .evaluate((element) => element.scrollIntoView({ behavior: "instant" }));
+    const header = await page.locator("[data-home-header]").boundingBox();
+    const anchor = await page.locator("#cara-beli").boundingBox();
+    expect(header.y).toBeCloseTo(0, 0);
+    expect(anchor.y).toBeGreaterThanOrEqual(header.y + header.height);
+    await expectNoDocumentOverflow(page);
+  }
 });
 
 test("customer checkout: switches payment copy and CTA without JavaScript", async ({
@@ -6400,6 +6500,33 @@ async function expectStatusBadgesReadable(container) {
   ).toEqual([]);
 }
 
+async function expectOpenedLocalePanel(page) {
+  const disclosure = page.locator("[data-storefront-locale]");
+  await disclosure.locator("summary").press("Enter");
+  await expect(disclosure).toHaveJSProperty("open", true);
+  const panel = disclosure.locator("[data-storefront-locale-panel]");
+  const options = panel.locator("[lang]");
+  await expect(options).toHaveCount(3);
+  const viewport = page.viewportSize();
+  async function expectFullyInViewport(locator) {
+    const box = await locator.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    expect(box.y + box.height, JSON.stringify(box)).toBeLessThanOrEqual(
+      viewport.height
+    );
+    await expect(locator).toBeInViewport({ ratio: 0.99 });
+  }
+  await expectFullyInViewport(panel);
+  for (const option of await options.all()) {
+    await page.keyboard.press("Tab");
+    await expect(option).toBeFocused();
+    await expectFullyInViewport(option);
+  }
+  await expectNoDocumentOverflow(page);
+}
+
 async function expectNoDocumentOverflow(page) {
   const metrics = await page.evaluate(() => {
     return {
@@ -8107,6 +8234,7 @@ echo json_encode([
     'adminOrderPath' => route('admin.orders.show', $paidInvoiceOrder, false),
     'longProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $longCheckoutProduct], false),
     'tierProductCheckoutPath' => route('storefront.shop.checkout.product', ['product' => $tierProduct], false),
+    'localeInvoiceUrl' => URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $expiredInvoiceOrder, absolute: false),
     'pendingWithNativeQris' => [
         'orderId' => $qrisOrder->id,
         'showUrl' => URL::signedRoute('storefront.shop.orders.show', ['order' => $qrisOrder, 'key' => 'browser-recovery-key'], null, false),

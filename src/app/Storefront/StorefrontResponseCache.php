@@ -4,6 +4,7 @@ namespace App\Storefront;
 
 use App\Models\Product;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
+use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Support\DogfoodTiming;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Carbon;
@@ -21,7 +22,7 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 23;
+    private const DESIGN_VERSION = 24;
 
     public function __construct(
         private readonly StorefrontCatalogPageBuilder $catalogPages,
@@ -33,17 +34,17 @@ class StorefrontResponseCache
         $search = StorefrontCatalogSearch::normalize($search);
         $startedAt = DogfoodTiming::now();
         $querySnapshot = DogfoodTiming::querySnapshot();
+        $maintenance = $this->maintenance->current();
 
         if ($isVariant || $search !== '' || $family !== null || $page > 1) {
-            $html = $this->render($search, $family, $page, isVariant: true);
+            $html = $this->render($maintenance, $search, $family, $page, isVariant: true);
             $this->log($startedAt, $querySnapshot, $search, false, strlen($html), 'catalog_variant_uncached');
 
             return $html;
         }
 
         $version = $this->version();
-        $maintenanceVersion = $this->maintenance->current()->version;
-        $key = $this->key($version, $maintenanceVersion, $search);
+        $key = $this->key($version, $maintenance->version, $search);
 
         $cached = Cache::get($key);
         if (is_string($cached)) {
@@ -56,7 +57,7 @@ class StorefrontResponseCache
             $lock = Cache::lock($key.':lock', self::LOCK_SECONDS);
             $lock->block(self::LOCK_WAIT_SECONDS);
         } catch (LockTimeoutException) {
-            $html = $this->render($search);
+            $html = $this->render($maintenance, $search);
             $this->log($startedAt, $querySnapshot, $search, false, strlen($html), 'lock_timeout');
 
             return $html;
@@ -71,7 +72,7 @@ class StorefrontResponseCache
             }
 
             $snapshotAt = now();
-            $html = $this->render($search);
+            $html = $this->render($maintenance, $search);
             $expires = now()->addMinutes(self::CACHE_TTL_MINUTES);
             $supplierUntil = Product::query()->where('supplier_available_stock', '>', 0)
                 ->where('supplier_available_until', '>', $snapshotAt)->min('supplier_available_until');
@@ -129,9 +130,9 @@ class StorefrontResponseCache
         return File::exists($path) ? hash_file('sha256', $path) : 'missing';
     }
 
-    private function render(string $search, ?string $family = null, int $page = 1, bool $isVariant = false): string
+    private function render(CheckoutMaintenanceState $maintenance, string $search, ?string $family = null, int $page = 1, bool $isVariant = false): string
     {
-        $viewData = $this->catalogPages->homeViewData($search, $family, $page, $isVariant);
+        $viewData = $this->catalogPages->homeViewData($search, $family, $page, $isVariant, $maintenance);
         $viewData['isPublicHomepage'] = true;
 
         return view('storefront', $viewData)->render();
