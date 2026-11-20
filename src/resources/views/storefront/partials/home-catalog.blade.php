@@ -6,7 +6,7 @@
             <ul class="space-y-1 text-sm">
                 <li>
                     <a href="{{ $resetFamilyUrl }}" @if (!$family) aria-current="true" @endif class="home-family-link flex min-h-11 items-center justify-between gap-2 rounded-lg px-3 py-2">
-                        Semua produk @if (!$family)<span aria-hidden="true">✓</span>@endif
+                        {{ __('storefront_funnel.all_products') }} @if (!$family)<span aria-hidden="true">✓</span>@endif
                     </a>
                 </li>
                 @foreach ($families as $option)

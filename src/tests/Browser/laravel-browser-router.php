@@ -1,9 +1,12 @@
 <?php
 
+use App\Models\Payment;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Facade;
+use Tests\Support\KlikQrisSandboxScenarios;
 
 $publicDirectory = realpath(__DIR__.'/../../public');
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -47,6 +50,34 @@ $app->booted(function () use ($app): void {
             'hostname' => parse_url(config('app.url'), PHP_URL_HOST),
         ]),
     ]);
+    if (getenv('STOREFRONT_RELEASE_FIXTURE') === '1' && $app->environment('testing')) {
+        KlikQrisSandboxScenarios::configureReadySandbox();
+        config(['services.storefront.telegram_reservation_floor' => 0]);
+        $providerState = trim(file_get_contents(dirname(config('database.connections.sqlite.database')).'/provider-state'));
+        if ($providerState === 'EXPIRED') {
+            // Model time passing, not an authoritative provider settlement or cancellation.
+            Date::setTestNow(now()->addMinutes(16));
+        }
+        $http->fake([
+            'https://klikqris.com/api/sandbox/qris/create' => fn (ClientRequest $request) => $http->response(['data' => [
+                'order_id' => $request['order_id'],
+                'amount' => $request['amount'],
+                'total_amount' => $request['amount'] + 16,
+                'status' => 'PENDING',
+                'qris_url' => 'https://klikqris.com/storage/sandbox/qris_release_fixture.png',
+                'expired_at' => now()->addMinutes(15)->toISOString(),
+            ]]),
+            'https://klikqris.com/api/sandbox/qris/status/*' => function (ClientRequest $request) use ($http, $providerState) {
+                $reference = basename($request->url());
+                $payment = Payment::query()->where('provider', 'klikqris')->where('merchant_ref', $reference)->firstOrFail();
+
+                return $http->response(KlikQrisSandboxScenarios::statusPayload($payment, [
+                    'status' => $providerState,
+                    'paid_at' => $providerState === 'SUCCESS' ? now()->toISOString() : null,
+                ]));
+            },
+        ]);
+    }
     $http->preventStrayRequests();
 });
 

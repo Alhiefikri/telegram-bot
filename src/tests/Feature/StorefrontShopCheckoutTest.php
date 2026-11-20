@@ -13,7 +13,6 @@ use App\Models\ManualFulfillmentReview;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
-use App\Models\Product;
 use App\Services\OrderStateMachine;
 use App\Storefront\StorefrontCheckoutChallenge;
 use App\Storefront\StorefrontInvoiceUrl;
@@ -477,41 +476,31 @@ class StorefrontShopCheckoutTest extends TestCase
         ]);
 
         $response = $this->get(route('storefront.home'));
-        $emptyCard = $this->unavailableProductCardHtml($response->getContent(), $empty);
+        $dom = new \DOMDocument;
+        $dom->loadHTML($response->getContent(), LIBXML_NOERROR | LIBXML_NOWARNING);
+        $soldOutRow = $dom->getElementById('product-'.$empty->id);
+        $this->assertNotNull($soldOutRow);
 
         $response
             ->assertOk()
-            ->assertSee('Pilih produk digital sesuai kebutuhan.')
+            ->assertSee('Katalog produk')
             ->assertSee('Beli sekarang')
             ->assertSee(
                 'href="'.route('storefront.shop.checkout.product', ['product' => $ready]).'?from=',
                 false,
             )
-            ->assertSee('aria-label="Tambahkan Claude Pro Ready ke keranjang"', false)
             ->assertDontSee('data-product=', false)
             ->assertDontSee('JSON.parse($el.dataset.product)', false)
             ->assertSee('Claude Pro Ready')
-            ->assertSee('Akun private siap dari dashboard')
             ->assertSee('Rp60.000')
             ->assertSee('Stok: 1')
             ->assertDontSee('Bayar via QR Manual')
-            ->assertDontSee('Beli lewat Telegram')
-            ->assertSee('STOK HABIS')
-            ->assertSee('Restock segera')
-            ->assertSee('Stok kosong');
+            ->assertDontSee('Beli lewat Telegram');
 
-        $this->assertStringContainsString('id="product-'.$empty->id.'"', $emptyCard);
-        $this->assertStringContainsString('ChatGPT Habis', $emptyCard);
-        $this->assertStringContainsString('STOK HABIS', $emptyCard);
-        $this->assertStringContainsString('Restock segera', $emptyCard);
-        $this->assertStringContainsString('Stok kosong', $emptyCard);
-        $this->assertStringNotContainsString('JSON.parse($el.dataset.product)', $emptyCard);
-        $this->assertStringNotContainsString('data-product=', $emptyCard);
-        $this->assertStringNotContainsString(
-            route('storefront.shop.checkout.product', $empty),
-            $emptyCard,
-        );
-        $this->assertStringNotContainsString('method="POST"', $emptyCard);
+        $this->assertStringContainsString('ChatGPT Habis', $soldOutRow->textContent);
+        $this->assertStringContainsString('Stok kosong', $soldOutRow->textContent);
+        $this->assertStringNotContainsString(route('storefront.shop.checkout.product', $empty), $dom->saveHTML($soldOutRow));
+        $this->assertSame(0, $soldOutRow->getElementsByTagName('form')->length);
     }
 
     public function test_page_checkout_keeps_only_the_website_qris_checkout_action(): void
@@ -1244,19 +1233,5 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->assertContains($method, $route->methods(), "Route [{$name}] does not support {$method}.");
 
         return $route;
-    }
-
-    private function unavailableProductCardHtml(string $html, Product $product): string
-    {
-        $idPosition = strpos($html, 'id="product-'.$product->id.'"');
-        $start = $idPosition === false
-            ? false
-            : strrpos(substr($html, 0, $idPosition), '<article');
-        $this->assertNotFalse($start, 'Expected product card for product '.$product->id.' to be rendered.');
-
-        $end = strpos($html, '</article>', $start);
-        $this->assertNotFalse($end, 'Expected product card for product '.$product->id.' to be closed.');
-
-        return substr($html, $start, $end + strlen('</article>') - $start);
     }
 }

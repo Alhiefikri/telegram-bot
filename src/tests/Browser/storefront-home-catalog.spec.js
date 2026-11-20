@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const appDir = fileURLToPath(new URL("../..", import.meta.url));
-let baseUrl, fixture, server, invoiceUrl;
+let baseUrl, fixture, server, invoiceUrl, options;
 let localizedFixtures;
 
 test.beforeAll(async () => {
@@ -22,7 +22,7 @@ test.beforeAll(async () => {
     });
   });
   baseUrl = `http://127.0.0.1:${port}`;
-  const options = {
+  options = {
     cwd: appDir,
     env: {
       ...process.env,
@@ -39,8 +39,10 @@ test.beforeAll(async () => {
       QUEUE_CONNECTION: "sync",
       SESSION_DRIVER: "database",
       TELEGRAM_BOT_TOKEN: "",
+      STOREFRONT_RELEASE_FIXTURE: "1",
     },
   };
+  writeFileSync(path.join(fixture, "provider-state"), "PENDING");
   execFileSync("php", ["artisan", "migrate", "--force"], options);
   localizedFixtures = JSON.parse(
     execFileSync("php", ["artisan", "tinker", "--execute", seed], options)
@@ -72,6 +74,347 @@ const sizes = [
   [390, 844],
   [320, 568],
 ];
+
+for (const [width, height] of sizes) {
+  for (const theme of ["light", "dark"]) {
+    for (const text of width === 320 ? [100, 200] : [100]) {
+      test(`release layout ${width}x${height} ${theme} ${text}%`, async ({
+        page,
+      }, info) => {
+        await page.setViewportSize({ width, height });
+        await page.addInitScript(
+          (value) => localStorage.setItem("lhie-store-theme", value),
+          theme
+        );
+        await page.route(/^(?!http:\/\/127\.0\.0\.1:)/, (route) =>
+          route.abort()
+        );
+        await routeFixtureQr(page);
+        const measurements = {};
+        for (const [name, url, selectors] of [
+          [
+            "home",
+            "/",
+            ["[data-home-plan]:first-child, #products article:first-of-type"],
+          ],
+          [
+            "review",
+            localizedFixtures.review,
+            [
+              "[data-checkout-submit]:visible, [data-checkout-sticky-submit]:visible",
+            ],
+          ],
+          [
+            "invoice",
+            localizedFixtures.ready,
+            [
+              "[data-qris-image]",
+              '.invoice-qris-total strong, .invoice-payment-panel dd:has-text("Rp35.016")',
+              ".invoice-qris-deadline time, .invoice-payment-panel dl > div:last-child > dd",
+            ],
+          ],
+        ]) {
+          await page.goto(baseUrl + url);
+          await expect(page.locator("html")).toHaveAttribute(
+            "data-theme",
+            theme
+          );
+          if (text === 200)
+            await page.addStyleTag({ content: "html { font-size: 200%; }" });
+          await page.evaluate(() => document.fonts.ready);
+          const targets = selectors.map((selector) =>
+            page.locator(selector).first()
+          );
+          const bounds = [];
+          for (const target of targets) {
+            await expect(target).toBeVisible();
+            const rect = await target.boundingBox();
+            bounds.push(Math.max(0, Math.ceil(rect.y + rect.height - height)));
+          }
+          const overflow = await page.evaluate(
+            () => document.documentElement.scrollWidth - innerWidth
+          );
+          if (
+            await page
+              .locator(
+                "#home-catalog-plans, .invoice-qris-total, .checkout-submit"
+              )
+              .count()
+          ) {
+            expect(overflow).toBe(0);
+            if (width >= 390) expect(bounds).toEqual(targets.map(() => 0));
+          }
+          const contrast = {};
+          const pairs = {
+            home: {
+              buy: "[data-home-plan] .home-catalog-primary, #products article a[href*='/checkout/']",
+              family: ".home-family-link[aria-current]",
+              placeholder: "#catalog-search, #storefront-search",
+            },
+            review: { action: "[data-checkout-submit]:visible" },
+            invoice: {
+              total: selectors[1],
+              deadline: selectors[2],
+              instruction:
+                "[data-invoice-qris-instruction], [data-payment-status-message]",
+              status: ".invoice-status, [data-payment-status-title]",
+            },
+          }[name];
+          for (const [key, selector] of Object.entries(pairs)) {
+            const element = page.locator(selector).first();
+            if (await element.count()) {
+              contrast[key] = await contrastRatio(
+                element,
+                key === "placeholder" ? "::placeholder" : null
+              );
+            }
+          }
+          measurements[name] = { scrollToBottomPx: bounds, overflow, contrast };
+          await page.screenshot({
+            path: info.outputPath(`${name}.png`),
+            animations: "disabled",
+          });
+          if (
+            name === "home" &&
+            (await page.locator("#catalog-search").count())
+          ) {
+            const search = page.locator("#catalog-search");
+            await page.getByRole("search").getByRole("button").focus();
+            await page.keyboard.press("Shift+Tab");
+            await expect(search).toBeFocused();
+            const outline = await search.evaluate(
+              (element) => getComputedStyle(element).outlineStyle
+            );
+            expect(outline).toBe("solid");
+            const focus = await contrastRatio(search, null, true);
+            expect(focus).toBeGreaterThanOrEqual(3);
+            contrast.focus = focus;
+            await page.screenshot({ path: info.outputPath("focus.png") });
+            await page.keyboard.press("Tab");
+            await expect(
+              page.getByRole("search").getByRole("button")
+            ).toBeFocused();
+          }
+        }
+        writeFileSync(
+          info.outputPath("geometry.json"),
+          JSON.stringify(measurements, null, 2)
+        );
+      });
+    }
+  }
+}
+
+async function contrastRatio(locator, pseudo, outline = false) {
+  return locator.evaluate(
+    (element, { pseudo, outline }) => {
+      const context = document
+        .createElement("canvas")
+        .getContext("2d", { willReadFrequently: true });
+      const rgba = (color) => {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data];
+      };
+      const over = ([r, g, b, alpha], background) =>
+        [r, g, b].map(
+          (value, i) => (value * alpha + background[i] * (255 - alpha)) / 255
+        );
+      const stack = [];
+      for (
+        let node = outline ? element.parentElement : element;
+        node;
+        node = node.parentElement
+      ) {
+        stack.unshift(rgba(getComputedStyle(node).backgroundColor));
+      }
+      const background = stack.reduce(
+        (under, color) => over(color, under),
+        [255, 255, 255]
+      );
+      const style = getComputedStyle(element, pseudo);
+      const foreground = over(
+        rgba(outline ? style.outlineColor : style.color),
+        background
+      );
+      const luminance = (rgb) =>
+        rgb.reduce((sum, channel, i) => {
+          const value = channel / 255;
+          return (
+            sum +
+            [0.2126, 0.7152, 0.0722][i] *
+              (value <= 0.04045
+                ? value / 12.92
+                : ((value + 0.055) / 1.055) ** 2.4)
+          );
+        }, 0);
+      const [lighter, darker] = [
+        luminance(foreground),
+        luminance(background),
+      ].sort((a, b) => b - a);
+      return Number(((lighter + 0.05) / (darker + 0.05)).toFixed(2));
+    },
+    { pseudo, outline }
+  );
+}
+
+function routeFixtureQr(page) {
+  return page.route(
+    "https://klikqris.com/storage/sandbox/qris_release_fixture.png",
+    (route) =>
+      route.fulfill({
+        contentType: "image/png",
+        body: Buffer.from(localizedFixtures.qr, "base64"),
+      })
+  );
+}
+
+test("release guest direct, cart, payment and Recovery Key", async ({
+  page,
+  browser,
+}) => {
+  const provider = (state) =>
+    writeFileSync(path.join(fixture, "provider-state"), state);
+  const mode = (name) =>
+    execFileSync(
+      "php",
+      [
+        "artisan",
+        "tinker",
+        "--execute",
+        String.raw`\App\Models\ManualPaymentSetting::query()->update(['payment_mode' => '${name}']);`,
+      ],
+      options
+    );
+  const foreign = await browser.newContext();
+  const fresh = await foreign.newPage();
+  const credential = "release-guest@example.test";
+  const qr = page.locator("[data-invoice-qris] img");
+  async function checkout() {
+    await page.locator("#checkout-buyer-name").fill("Disposable guest");
+    await page.locator("#checkout-terms-accepted").check();
+    await page.locator("[data-checkout-submit]").click();
+    await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
+      "data-invoice-state",
+      "pending"
+    );
+  }
+
+  try {
+    // A synthetic image response: no network access to the provider or support.
+    await page.route(/^(?!http:\/\/127\.0\.0\.1:)/, (route) => route.abort());
+    await routeFixtureQr(page);
+    await page.route("https://challenges.cloudflare.com/**", (route) =>
+      route.fulfill({
+        contentType: "application/javascript",
+        body: `window.addEventListener('load', () => {
+        const widget = document.querySelector('.cf-turnstile');
+        if (!widget) return;
+        const input = Object.assign(document.createElement('input'), {type: 'hidden', name: 'cf-turnstile-response', value: 'browser-checkout-proof'});
+        widget.append(input);
+        window.checkoutChallengeReady?.('browser-checkout-proof');
+      });`,
+      })
+    );
+    await fresh.route(/^(?!http:\/\/127\.0\.0\.1:)/, (route) => route.abort());
+    mode("klikqris");
+    provider("PENDING");
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto(baseUrl);
+    await page
+      .getByRole("link", { name: "Creative Studio", exact: true })
+      .click();
+    await page.locator("#catalog-search").fill("Desain Bulanan");
+    await page.getByRole("search").getByRole("button").click();
+    await expect(page.locator("[data-home-plan]")).toHaveCount(1);
+    await page
+      .getByRole("link", { name: "Beli sekarang", exact: true })
+      .click();
+    await checkout();
+    const signed = page.url();
+    const invoice = await page
+      .locator(".invoice-order-hero .font-mono")
+      .innerText();
+    await expect(qr).toBeVisible();
+    await expect(page.locator(".invoice-main")).toContainText("Rp35.016");
+    await page.locator("#invoice-support > summary").click();
+    const key = await page
+      .locator('[aria-labelledby="recovery-key-title"] code')
+      .innerText();
+    const help = page.locator(
+      '[data-support-category="payment_pending"][data-support-channel="whatsapp"]'
+    );
+    const message = new URL(await help.getAttribute("href")).searchParams.get(
+      "text"
+    );
+    expect(message).toContain(invoice);
+    expect(message).not.toContain(key);
+    expect(message).not.toContain("signature");
+    await expect(page.getByText(credential, { exact: true })).toHaveCount(0);
+    provider("SUCCESS");
+    await page.locator("[data-payment-status-check]").click();
+    await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
+      "data-invoice-state",
+      "paid"
+    );
+    async function reveal(target) {
+      await target.locator("[data-credential-disclosure-toggle]").click();
+      await target
+        .getByRole("button", { name: "Ya, tampilkan kredensial" })
+        .click();
+      await expect(target.getByText(credential, { exact: true })).toBeVisible();
+    }
+    await reveal(page);
+    await fresh.goto(signed);
+    await expect(fresh.getByText(credential, { exact: true })).toHaveCount(0);
+    const unsigned = new URL(signed);
+    unsigned.search = "";
+    expect((await fresh.goto(unsigned.href)).status()).toBe(403);
+
+    async function recover(value) {
+      await fresh.goto(baseUrl + "/akses-pesanan");
+      await fresh.locator("#invoice-number").fill(invoice);
+      await fresh.locator("#access-key").fill(value);
+      await fresh
+        .locator('form:has(#access-key) button[type="submit"]')
+        .click();
+    }
+    await recover("LHIE-THISISNOTTHERECOVERYKEY");
+    await expect(fresh.locator("#access-key")).toBeVisible();
+    await recover(key);
+    await reveal(fresh);
+
+    provider("PENDING");
+    await page.goto(baseUrl + localizedFixtures.product);
+    const cartForm = page.locator('form[action$="/shop/cart/items"]').first();
+    await cartForm.getByRole("button").click();
+    await page.goto(baseUrl + "/shop/cart");
+    await page.getByRole("link", { name: /Lanjut.*checkout/i }).click();
+    await checkout();
+    const expiring = page.url();
+    await expect(qr).toBeVisible();
+    provider("EXPIRED");
+    expect((await fresh.goto(expiring)).status()).toBe(200);
+    await expect(fresh.locator(".invoice-main")).toContainText(
+      "Batas pembayaran terlewati"
+    );
+    await expect(fresh.locator("[data-invoice-qris] img")).toHaveCount(0);
+
+    provider("PENDING");
+    mode("manual");
+    await page.goto(baseUrl + localizedFixtures.review);
+    await checkout();
+    await expect(page.locator(".invoice-main")).toContainText(
+      "Kirim nomor invoice dan bukti bayar ke admin"
+    );
+    await expect(page.locator("[data-shop-payment-status]")).toHaveCount(0);
+  } finally {
+    mode("manual");
+    provider("PENDING");
+    await foreign.close();
+  }
+});
 
 for (const [
   locale,
@@ -138,6 +481,11 @@ for (const [
           });
       }
       await check(catalog, "catalog");
+      if (width >= 768) {
+        await expect(
+          page.locator(".home-family-link[aria-current=true]")
+        ).toHaveText(locale === "en" ? /All products/ : /Semua produk/);
+      }
       await page.goto(baseUrl + localizedFixtures.product);
       await check("Desain Bulanan");
       await expect(
@@ -456,10 +804,20 @@ foreach ([[$creative, 'Desain Bulanan', 8], [$creative, 'Desain Tahunan', 0], [$
     if ($index === 0) $featured = $product;
 }
 $urls = ['product' => route('storefront.products.show', $featured, absolute: false), 'review' => route('storefront.shop.checkout.product', $featured, absolute: false)];
+$urls['qr'] = base64_encode(app(\App\Services\Telegram\TelegramQrCodeRenderer::class)->png('DISPOSABLE-737-NOT-PAYABLE'));
+foreach (range(1, 8) as $slot) {
+    \App\Models\ProductStockItem::query()->create(['product_id' => $featured->id, 'secret' => ($slot === 1 ? 'release-guest@example.test' : "release-guest-$slot@example.test").'|synthetic-fixture']);
+}
 foreach (['unavailable', 'manual', 'expired', 'paid'] as $state) {
     $order = \App\Models\Order::factory()->create(['order_status' => $state === 'paid' ? 'completed' : 'pending_payment', 'total_amount' => 35000, 'expires_at' => $state === 'expired' ? now()->subMinute() : now()->addHour()]);
     if ($state !== 'unavailable') \App\Models\Payment::factory()->for($order)->create(['method' => 'QR_MANUAL', 'provider' => 'manual', 'status' => $state === 'paid' ? 'paid' : 'pending', 'expired_at' => $order->expires_at]);
     $urls[$state] = \Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $order, absolute: false);
 }
+$ready = \Tests\Support\KlikQrisSandboxScenarios::klikQrisPayment([
+    'merchant_ref' => 'INV-RELEASE-LAYOUT', 'amount' => 35000, 'provider_total_payment' => 35016, 'provider_expires_at' => now()->addMinutes(15),
+    'provider_payload' => ['data' => ['order_id' => 'INV-RELEASE-LAYOUT', 'amount' => 35000, 'total_amount' => 35016, 'status' => 'PENDING',
+      'qris_url' => 'https://klikqris.com/storage/sandbox/qris_release_fixture.png', 'expired_at' => now()->addMinutes(15)->toISOString()]],
+]);
+$urls['ready'] = \Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $ready->order, absolute: false);
 echo json_encode($urls);
 `;
