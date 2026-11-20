@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\ApplyStorefrontLocale;
 use App\Http\Middleware\AuthorizeAdminAccess;
 use App\Http\Middleware\AuthorizeBscReceiverMutation;
 use App\Http\Middleware\AuthorizeCustomerApiAvailability;
@@ -22,6 +23,7 @@ use Illuminate\Http\Middleware\HandleCors;
 use Illuminate\Http\Middleware\ValidatePathEncoding;
 use Illuminate\Http\Middleware\ValidatePostSize;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
@@ -41,7 +43,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin.customer-api-owner' => AuthorizeCustomerApiAvailability::class,
             'admin.no-cache' => PreventAdminMiniAppCache::class,
             'storefront.signed' => ValidateStorefrontSignedInvoice::class,
+            'storefront.locale' => ApplyStorefrontLocale::class,
         ]);
+        $middleware->prependToPriorityList(StartSession::class, ApplyStorefrontLocale::class);
+        $middleware->trimStrings(except: [fn (Request $request) => $request->isMethod('POST') && $request->is('bahasa')]);
         $middleware->append(RedirectToCanonicalHost::class);
 
         $middleware->use([

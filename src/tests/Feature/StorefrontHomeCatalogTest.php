@@ -128,6 +128,7 @@ class StorefrontHomeCatalogTest extends TestCase
     {
         return Product::factory()->create([
             'name' => $name,
+            'description' => 'Catalog fixture description',
             'product_family_id' => $family?->id,
             'stock' => $stock,
             'reserved_stock' => 0,

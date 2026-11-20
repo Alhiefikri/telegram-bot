@@ -356,15 +356,10 @@ final class StorefrontSeo
 
     private function locale(): string
     {
-        $locale = str_replace('-', '_', trim((string) config('storefront.locale', app()->getLocale())));
-        if ($locale === '') {
-            $locale = 'id';
-        }
-
-        [$language, $country] = array_pad(explode('_', $locale, 2), 2, null);
-        $language = strtolower($language);
-        $country = $country !== null && $country !== '' ? strtoupper($country) : strtoupper($language);
-
-        return $language.'_'.$country;
+        return match (StorefrontLocale::code()) {
+            'ms' => 'ms_MY',
+            'en' => 'en_US',
+            default => 'id_ID',
+        };
     }
 }

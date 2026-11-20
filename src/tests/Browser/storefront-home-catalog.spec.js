@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const appDir = fileURLToPath(new URL("../..", import.meta.url));
-let baseUrl, fixture, server;
+let baseUrl, fixture, server, invoiceUrl;
 
 test.beforeAll(async () => {
   fixture = mkdtempSync(path.join(tmpdir(), "storefront-home-"));
@@ -36,12 +36,16 @@ test.beforeAll(async () => {
       DB_URL: "",
       CACHE_STORE: "array",
       QUEUE_CONNECTION: "sync",
-      SESSION_DRIVER: "array",
+      SESSION_DRIVER: "database",
       TELEGRAM_BOT_TOKEN: "",
     },
   };
   execFileSync("php", ["artisan", "migrate", "--force"], options);
-  execFileSync("php", ["artisan", "tinker", "--execute", seed], options);
+  invoiceUrl =
+    baseUrl +
+    execFileSync("php", ["artisan", "tinker", "--execute", seed], options)
+      .toString()
+      .trim();
   server = spawn(
     "php",
     [
@@ -208,6 +212,84 @@ test("320px catalog still fits at 200% root text size", async ({
   await page.screenshot({ path: info.outputPath("320-568-text-200.png") });
 });
 
+test("guest locale survives a no-JS catalog and signed invoice round trip", async ({
+  browser,
+}) => {
+  const options = {
+    javaScriptEnabled: false,
+    viewport: { width: 390, height: 844 },
+  };
+  const [contextA, contextB, anonymous] = await Promise.all(
+    [1, 2, 3].map(() => browser.newContext(options))
+  );
+  try {
+    const [a, b, guest] = await Promise.all(
+      [contextA, contextB, anonymous].map((context) => context.newPage())
+    );
+    const catalog = `${baseUrl}/?family=creative&q=bulanan`;
+    await Promise.all([a.goto(catalog), b.goto(baseUrl)]);
+    const selector = (page) => page.locator("[data-storefront-locale]");
+    await selector(a).locator("summary").press("Enter");
+    await selector(a).getByRole("link", { name: "English" }).press("Enter");
+    await expect(a).toHaveURL(catalog);
+    await expect(a.locator("html")).toHaveAttribute("lang", "en");
+    await expect(a.locator("[data-home-plan]")).toHaveCount(1);
+    await selector(b).locator("summary").click();
+    await selector(b).getByRole("link", { name: "Bahasa Melayu" }).click();
+    await expect(b.locator("html")).toHaveAttribute("lang", "ms");
+
+    const invoiceResponse = await a.goto(invoiceUrl);
+    expect(invoiceResponse.headers()["referrer-policy"]).toBe("no-referrer");
+    const invoiceState = await a
+      .locator("[data-invoice-state]")
+      .getAttribute("data-invoice-state");
+    const form = selector(a).locator("form");
+    await expect(form).toHaveAttribute("action", "/bahasa");
+    const csrf = await form
+      .locator('input[name="_token"]')
+      .getAttribute("value");
+    const destination = await form
+      .locator('input[name="return"]')
+      .getAttribute("value");
+    const rejected = await contextA.request.post(`${baseUrl}/bahasa`, {
+      form: { locale: "ms", return: destination },
+    });
+    expect(rejected.status()).toBe(419);
+    expect(rejected.headers()["cache-control"]).toBe("no-store, private");
+    expect(csrf).toBeTruthy();
+
+    await selector(a).locator("summary").click();
+    const switched = a.waitForResponse(
+      (response) =>
+        response.url() === `${baseUrl}/bahasa` && response.status() === 303
+    );
+    await selector(a).getByRole("button", { name: "Bahasa Indonesia" }).click();
+    expect((await switched).headers().location).toBe(destination);
+    await expect(a).toHaveURL(invoiceUrl);
+    await expect(a.locator("html")).toHaveAttribute("lang", "id");
+    expect(invoiceState).toBeTruthy();
+    await expect(a.locator("[data-invoice-state]")).toHaveAttribute(
+      "data-invoice-state",
+      invoiceState
+    );
+
+    for (const [page, locale] of [
+      [a, "id"],
+      [b, "ms"],
+      [guest, "id"],
+    ]) {
+      const response = await page.goto(baseUrl);
+      expect(response.headers()["cache-control"]).toBe("no-store, private");
+      await expect(page.locator("html")).toHaveAttribute("lang", locale);
+    }
+    expect(await anonymous.cookies()).toEqual([]);
+  } finally {
+    await Promise.all(
+      [contextA, contextB, anonymous].map((context) => context.close())
+    );
+  }
+});
+
 function contrast(first, second) {
   const luminance = (color) =>
     color
@@ -231,4 +313,6 @@ $audio = \App\Models\ProductFamily::factory()->create(['slug'=>'audio','name'=>'
 foreach ([[$creative, 'Desain Bulanan', 8], [$creative, 'Desain Tahunan', 0], [$audio, 'Musik Bulanan', 4], [null, 'Penyimpanan Bulanan', 2]] as $index => [$family, $name, $stock]) {
     \App\Models\Product::factory()->create(['name'=>$name, 'product_family_id'=>$family?->id, 'family_sort_order'=>$index, 'price_amount'=>35000, 'access_duration'=>'30 hari', 'stock'=>$stock, 'reserved_stock'=>0, 'is_active'=>true]);
 }
+$order = \App\Models\Order::factory()->create();
+echo \Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $order, absolute: false);
 `;

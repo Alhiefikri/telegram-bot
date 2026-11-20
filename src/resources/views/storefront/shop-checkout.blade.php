@@ -27,7 +27,10 @@
             <a href="{{ $homeUrl }}" class="inline-flex min-h-11 min-w-0 items-center" aria-label="Beranda {{ $brand }}">
                 @include('storefront.components.brand-mark', ['brand' => $brand])
             </a>
-            <x-theme-toggle class="checkout-theme h-11 w-11 shrink-0 rounded-lg" />
+            <div class="flex items-center gap-2">
+                @include('storefront.partials.locale-selector')
+                <x-theme-toggle class="checkout-theme h-11 w-11 shrink-0 rounded-lg" />
+            </div>
         </header>
         @php
             $oldReviewField = static function (string $field): mixed {

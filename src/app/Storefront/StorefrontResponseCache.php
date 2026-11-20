@@ -21,7 +21,7 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 21;
+    private const DESIGN_VERSION = 22;
 
     public function __construct(
         private readonly StorefrontCatalogPageBuilder $catalogPages,
@@ -106,7 +106,6 @@ class StorefrontResponseCache
         $context = [
             'checkout_maintenance_version' => $maintenanceVersion,
             'search' => $search,
-            'locale' => app()->getLocale(),
             'storefront_locale' => StorefrontLocale::code(),
             'app_url' => config('app.url'),
             'support_whatsapp_url' => config('services.support.whatsapp_url'),

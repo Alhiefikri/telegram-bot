@@ -90,6 +90,7 @@
         </nav>
 
         <div class="order-2 ml-auto flex min-w-0 items-center justify-end gap-2 lg:order-4 lg:shrink-0">
+            @include('storefront.partials.locale-selector')
             <span class="hidden sm:contents lg:hidden">
                 <x-theme-toggle icon-class="h-7 w-7" class="h-11 w-11 shrink-0 rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
             </span>

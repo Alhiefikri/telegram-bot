@@ -21,16 +21,8 @@ class StorefrontController extends Controller
         $family = is_string($family) && strlen($family) <= 255 ? strtolower(trim($family)) : '!';
         $page = CatalogBrowseQuery::fromValues(page: $query['page'] ?? null)->page;
         $isVariant = $query !== [];
-        $response = response($this->storefrontResponseCache->get($search, $family === '' ? null : $family, $page, $isVariant))
+
+        return response($this->storefrontResponseCache->get($search, $family === '' ? null : $family, $page, $isVariant))
             ->header('Content-Type', 'text/html; charset=UTF-8');
-
-        if (! $isVariant) {
-            return $response
-                ->header('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60')
-                ->header('CDN-Cache-Control', 'public, max-age=300, stale-while-revalidate=60')
-                ->header('Surrogate-Control', 'max-age=300');
-        }
-
-        return $response->header('Cache-Control', 'private, no-store');
     }
 }
