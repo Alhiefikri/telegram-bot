@@ -382,24 +382,38 @@ test("configured Google and Telegram forms link, unlink and sign in without chan
       page.getByText("Telegram sudah terhubung.", { exact: false })
     ).toBeVisible();
     await logout(page);
+    const remember = page.getByRole("checkbox", {
+      name: "Ingat perangkat ini selama 30 hari",
+    });
+    await expect(remember).toBeChecked();
+    await remember.uncheck();
     await page
       .getByRole("button", { name: "Masuk dengan Telegram", exact: true })
       .click();
     const loginLink = await page
-      .getByRole("link", { name: "Buka Store Bot", exact: true })
+      .getByRole("link", { name: "Buka Telegram", exact: true })
       .getAttribute("href");
+    const number = await page.locator(".auth-telegram-number").textContent();
+    expect(number).toMatch(/^[1-9][0-9]$/);
+    await expect(page.getByRole("timer")).toHaveText(/^[0-3]:[0-5][0-9]$/);
+    await expect(
+      page.getByRole("button", { name: "Periksa konfirmasi Telegram" })
+    ).toHaveCount(0);
     if (
       !run("telegram-confirm", {
         capability: new URL(loginLink).searchParams.get("start"),
+        number,
       }).confirmed
     )
       throw new Error("Disposable Telegram login proof failed.");
-    await page
-      .getByRole("button", { name: "Periksa konfirmasi Telegram" })
-      .click();
     await expect(
       page.getByRole("heading", { name: "Pesanan saya", exact: true })
     ).toBeVisible();
+    expect(
+      (await page.context().cookies()).some(
+        (cookie) => cookie.name === "customer_telegram_device"
+      )
+    ).toBe(false);
     await logout(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole("link", { name: "Daftar", exact: true }).click();
@@ -483,18 +497,16 @@ test("Telegram-only accounts verify an unused email on the same account", async 
       .getByRole("button", { name: "Masuk dengan Telegram", exact: true })
       .click();
     const deepLink = await page
-      .getByRole("link", { name: "Buka Store Bot", exact: true })
+      .getByRole("link", { name: "Buka Telegram", exact: true })
       .getAttribute("href");
     if (
       !run("telegram-confirm", {
         capability: new URL(deepLink).searchParams.get("start"),
         actor: "7654322",
+        number: await page.locator(".auth-telegram-number").textContent(),
       }).confirmed
     )
       throw new Error("Disposable Telegram-only proof failed.");
-    await page
-      .getByRole("button", { name: "Periksa konfirmasi Telegram" })
-      .click();
     await expect(
       page.getByRole("heading", { name: "Pesanan saya", exact: true })
     ).toBeVisible();
@@ -524,6 +536,24 @@ test("Telegram-only accounts verify an unused email on the same account", async 
       page.getByText("Telegram sudah terhubung.", { exact: false })
     ).toBeVisible();
     await noOverflow(page);
+    const cookies = await page.context().cookies();
+    const device = cookies.find(
+      (cookie) => cookie.name === "customer_telegram_device"
+    );
+    expect(device).toMatchObject({ httpOnly: true, path: "/akun" });
+    await page.context().clearCookies({
+      name: /^(?!customer_telegram_device$).+/,
+    });
+    await account(page);
+    await expect(
+      page.getByRole("heading", { name: "Akun saya", exact: true })
+    ).toBeVisible();
+    await logout(page);
+    expect(
+      (await page.context().cookies()).some(
+        (cookie) => cookie.name === "customer_telegram_device"
+      )
+    ).toBe(false);
   } finally {
     run("providers-off");
   }

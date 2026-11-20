@@ -177,7 +177,8 @@ class CustomerAuthenticationCompatibilityTest extends TestCase
             parse_str(parse_url($response->json('deep_link'), PHP_URL_QUERY), $query);
             $service = app(CustomerTelegramAuthenticationService::class);
             $actor = (string) $customer->telegram_id;
-            $confirmation = $service->prepare($query['start'], $actor, $actor, 'private');
+            $choices = $service->prepare($query['start'], $actor, $actor, 'private');
+            $confirmation = collect($choices)->firstWhere('text', $response->json('number'))['callback_data'] ?? null;
             $this->assertNotNull($confirmation);
             $this->assertTrue($service->confirm($confirmation, $actor, $actor, 'private'));
             $this->withCookie(config('session.cookie'), session()->getId())->postJson(route('customer.telegram.consume'))->assertOk();

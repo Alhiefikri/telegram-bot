@@ -235,6 +235,23 @@
 .auth-alternatives [data-telegram-status]:empty {
   display: none;
 }
+.auth-telegram-countdown {
+  float: inline-end;
+  font-variant-numeric: tabular-nums;
+}
+.auth-remember-device {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  cursor: pointer;
+}
+.auth-telegram-number {
+  display: block;
+  margin: 0.5rem 0;
+  font-size: 2rem;
+  text-align: center;
+}
 .auth-secondary {
   display: flex;
   align-items: center;

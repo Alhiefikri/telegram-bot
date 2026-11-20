@@ -7,8 +7,10 @@ use App\Models\CustomerAuthMailWork;
 use App\Models\CustomerIdentity;
 use App\Models\User;
 use App\Services\Customer\CustomerTelegramAuthenticationService;
+use App\Services\Customer\CustomerTelegramDevices;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -16,6 +18,8 @@ use Tests\TestCase;
 class CustomerTelegramAuthenticationTest extends TestCase
 {
     use RefreshDatabase;
+
+    private ?string $loginNumber = null;
 
     protected function setUp(): void
     {
@@ -30,7 +34,7 @@ class CustomerTelegramAuthenticationTest extends TestCase
         $this->freshLogin($customer);
         $capability = $this->start(true);
         $service = app(CustomerTelegramAuthenticationService::class);
-        $confirmation = $service->prepare($capability, '456789', '456789', 'private');
+        $confirmation = $service->prepare($capability, '456789', '456789', 'private')[0]['callback_data'] ?? null;
         $this->assertNotNull($confirmation);
         $this->assertNull($customer->fresh()->telegram_id);
         $this->claimStatus()->assertJson(['status' => 'pending']);
@@ -64,6 +68,68 @@ class CustomerTelegramAuthenticationTest extends TestCase
         $this->withCookie(config('session.cookie'), session()->getId())->post(route('customer.logout'));
         $this->assertGuest('customer');
         $this->assertNull(session('customer_telegram_authenticated'));
+    }
+
+    public function test_remembered_telegram_device_restores_after_session_loss_without_fresh_proof_and_logout_revokes_it(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 456789, 'email' => null, 'email_verified_at' => null]);
+        $this->prove($this->start(false), '456789');
+        $response = $this->withCookie(config('session.cookie'), session()->getId())
+            ->postJson(route('customer.telegram.consume'), ['remember_device' => '1'])->assertOk();
+        $cookie = $response->getCookie(CustomerTelegramDevices::COOKIE);
+        $this->assertNotNull($cookie);
+        $this->assertTrue($cookie->isHttpOnly());
+        $this->assertSame('lax', $cookie->getSameSite());
+        $this->assertSame('/akun', $cookie->getPath());
+        $this->assertDatabaseHas('customer_telegram_devices', ['customer_id' => $customer->id, 'token_hash' => hash('sha256', $cookie->getValue())]);
+
+        $this->travel(2)->days();
+        $this->discardBrowserSession();
+        $this->withCookie(CustomerTelegramDevices::COOKIE, $cookie->getValue())
+            ->get(route('customer.orders.index'))->assertOk()->assertSessionMissing('customer_authenticated_at');
+        $this->assertAuthenticatedAs($customer, 'customer');
+        $this->assertGuest('web');
+        $this->withCookie(config('session.cookie'), session()->getId())
+            ->postJson(route('customer.telegram.link'))->assertStatus(422);
+        $this->post(route('customer.logout'))->assertCookieExpired(CustomerTelegramDevices::COOKIE);
+        $this->assertDatabaseCount('customer_telegram_devices', 0);
+        $this->discardBrowserSession();
+        $this->get(route('customer.orders.index'))->assertRedirect(route('customer.account'));
+    }
+
+    public function test_unchecked_telegram_login_does_not_issue_a_device_cookie(): void
+    {
+        Customer::factory()->create(['telegram_id' => 456789]);
+        $this->prove($this->start(false), '456789');
+        $this->consume()->assertOk()->assertCookieMissing(CustomerTelegramDevices::COOKIE);
+        $this->assertDatabaseCount('customer_telegram_devices', 0);
+        $this->discardBrowserSession();
+        $this->get(route('customer.orders.index'))->assertRedirect(route('customer.account'));
+    }
+
+    public function test_remembered_device_fails_after_password_reset_version_change_or_expiry(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 456789]);
+        $this->prove($this->start(false), '456789');
+        $response = $this->withCookie(config('session.cookie'), session()->getId())
+            ->postJson(route('customer.telegram.consume'), ['remember_device' => true])->assertOk();
+        $token = $response->getCookie(CustomerTelegramDevices::COOKIE)->getValue();
+        $this->discardBrowserSession();
+        $this->withCookie(CustomerTelegramDevices::COOKIE, $token);
+        $customer->forceFill(['auth_version' => 1])->save();
+        $this->get(route('customer.orders.index'))->assertRedirect(route('customer.account'))->assertCookieExpired(CustomerTelegramDevices::COOKIE);
+        $customer->forceFill(['auth_version' => 0])->save();
+        $this->travel(30)->days();
+        $this->get(route('customer.orders.index'))->assertRedirect(route('customer.account'))->assertCookieExpired(CustomerTelegramDevices::COOKIE);
+        $this->artisan('customer-auth:cleanup')->assertSuccessful();
+        $this->assertDatabaseCount('customer_telegram_devices', 0);
+    }
+
+    private function discardBrowserSession(): void
+    {
+        Auth::forgetGuards();
+        session()->invalidate();
+        $this->withCookie(config('session.cookie'), session()->getId());
     }
 
     public function test_foreign_canonical_owner_and_existing_target_identity_fail_without_reassignment(): void
@@ -198,7 +264,7 @@ class CustomerTelegramAuthenticationTest extends TestCase
         $service = app(CustomerTelegramAuthenticationService::class);
         $this->assertNull($service->prepare($capability, '456789', '-100123', 'supergroup'));
         $this->assertNull($service->prepare($capability, '456789', '123456', 'private'));
-        $confirmation = $service->prepare($capability, '456789', '456789', 'private');
+        $confirmation = $service->prepare($capability, '456789', '456789', 'private')[0]['callback_data'] ?? null;
         $this->assertNotNull($confirmation);
         $this->assertFalse($service->confirm($confirmation, '123456', '123456', 'private'));
         $this->assertFalse($service->confirm($confirmation, '456789', '-100123', 'group'));
@@ -212,7 +278,7 @@ class CustomerTelegramAuthenticationTest extends TestCase
         $this->freezeTime();
         $this->start(false);
         $expiredId = session('customer_telegram_claim_id');
-        $this->travel(300)->seconds();
+        $this->travel(180)->seconds();
         $this->start(false);
         $liveId = session('customer_telegram_claim_id');
         $this->artisan('customers:cleanup-login-links', ['--chunk' => 1])->assertSuccessful();
@@ -235,12 +301,29 @@ class CustomerTelegramAuthenticationTest extends TestCase
         }
         $this->assertSame('unavailable', $service->status($request));
         for ($i = 0; $i < 30; $i++) {
-            $confirmation = $service->prepare($capability, '456789', '456789', 'private');
+            $confirmation = $service->prepare($capability, '456789', '456789', 'private')[0]['callback_data'] ?? null;
             $this->assertNotNull($confirmation);
         }
         $this->assertFalse($service->confirm($confirmation, '456789', '456789', 'private'));
         $this->assertNull($service->prepare($capability, '456789', '456789', 'private'));
         $this->assertNull($customer->fresh()->telegram_id);
+    }
+
+    public function test_a_stale_tab_cannot_check_or_consume_the_newer_login_request(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 456789]);
+        $this->start(false);
+        $previous = (string) session('customer_telegram_claim_id');
+        $this->prove($this->start(false), '456789');
+        $current = (string) session('customer_telegram_claim_id');
+        $this->withCookie(config('session.cookie'), session()->getId());
+
+        $this->getJson(route('customer.telegram.status'), ['X-Telegram-Login-Request' => $previous])->assertExactJson(['status' => 'invalid']);
+        $this->postJson(route('customer.telegram.consume'), [], ['X-Telegram-Login-Request' => $previous])->assertStatus(422);
+        $this->assertGuest('customer');
+        $this->getJson(route('customer.telegram.status'), ['X-Telegram-Login-Request' => $current])->assertExactJson(['status' => 'confirmed']);
+        $this->postJson(route('customer.telegram.consume'), [], ['X-Telegram-Login-Request' => $current])->assertOk();
+        $this->assertAuthenticatedAs($customer, 'customer');
     }
 
     private function emailCustomer(): Customer
@@ -261,7 +344,14 @@ class CustomerTelegramAuthenticationTest extends TestCase
     {
         $response = $this->withCookie(config('session.cookie'), session()->getId())
             ->postJson(route($link ? 'customer.telegram.link' : 'customer.telegram.login'))->assertCreated();
-        $this->assertSame(300, $response->json('expires_in'));
+        $this->assertSame($link ? 300 : 180, $response->json('expires_in'));
+        $this->loginNumber = $response->json('number');
+        if ($link) {
+            $this->assertNull($this->loginNumber);
+        } else {
+            $this->assertMatchesRegularExpression('/\A[1-9][0-9]\z/', $this->loginNumber);
+            $this->assertSame((string) session('customer_telegram_claim_id'), $response->json('request_id'));
+        }
         parse_str(parse_url($response->json('deep_link'), PHP_URL_QUERY), $query);
         $this->assertMatchesRegularExpression('/\Awa_[A-Za-z0-9_-]{43}\z/', $query['start']);
 
@@ -271,7 +361,10 @@ class CustomerTelegramAuthenticationTest extends TestCase
     private function prove(string $capability, string $actor, bool $success = true): void
     {
         $service = app(CustomerTelegramAuthenticationService::class);
-        $confirmation = $service->prepare($capability, $actor, $actor, 'private');
+        $choices = $service->prepare($capability, $actor, $actor, 'private');
+        $confirmation = $this->loginNumber === null
+            ? ($choices[0]['callback_data'] ?? null)
+            : collect($choices)->firstWhere('text', $this->loginNumber)['callback_data'] ?? null;
         if ($confirmation === null) {
             $this->assertFalse($success);
 

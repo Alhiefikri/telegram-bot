@@ -72,7 +72,10 @@ if ($operation === 'prepare') {
     $proof = json_decode(stream_get_contents(STDIN), true, 8, JSON_THROW_ON_ERROR);
     $service = app(CustomerTelegramAuthenticationService::class);
     $actor = $proof['actor'] ?? '7654321';
-    $confirmation = $service->prepare($proof['capability'], $actor, $actor, 'private');
+    $choices = $service->prepare($proof['capability'], $actor, $actor, 'private');
+    $confirmation = isset($proof['number'])
+        ? collect($choices)->firstWhere('text', $proof['number'])['callback_data'] ?? null
+        : ($choices[0]['callback_data'] ?? null);
     echo json_encode(['confirmed' => $confirmation !== null && $service->confirm($confirmation, $actor, $actor, 'private')]);
 } elseif ($operation === 'invoice-delivery') {
     $order = Order::factory()->create([
