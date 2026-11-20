@@ -11,6 +11,51 @@
 @source "../js/storefront.js";
 @source "../js/theme.js";
 
+/* Catalog controls use the foreground/background pair for the current theme. */
+.home-catalog-control {
+  border: 1px solid var(--sf-muted);
+  background: var(--sf-surface);
+  color: var(--sf-ink);
+}
+
+.home-catalog-control::placeholder {
+  color: var(--sf-muted);
+  opacity: 1;
+}
+
+.home-catalog-primary {
+  background: var(--sf-accent);
+  color: white;
+}
+
+[data-theme="dark"] .home-catalog-primary {
+  color: var(--sf-paper);
+}
+
+.home-catalog-primary:hover {
+  text-decoration: underline;
+}
+
+.home-family-link[aria-current],
+.home-family-link:hover,
+.home-catalog-link:hover {
+  background: var(--sf-accent-soft);
+}
+
+.home-family-link[aria-current] {
+  font-weight: 700;
+}
+
+:is(
+  .home-catalog-control,
+  .home-catalog-primary,
+  .home-family-link,
+  .home-catalog-link
+):focus-visible {
+  outline: 2px solid var(--sf-accent);
+  outline-offset: 2px;
+}
+
 @theme {
   --font-sans: ui-sans-serif, system-ui, sans-serif;
   --font-display: ui-sans-serif, system-ui, sans-serif;

@@ -21,22 +21,22 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 20;
+    private const DESIGN_VERSION = 21;
 
     public function __construct(
         private readonly StorefrontCatalogPageBuilder $catalogPages,
         private readonly CheckoutMaintenance $maintenance,
     ) {}
 
-    public function get(string $search): string
+    public function get(string $search, ?string $family = null, int $page = 1, bool $isVariant = false): string
     {
         $search = StorefrontCatalogSearch::normalize($search);
         $startedAt = DogfoodTiming::now();
         $querySnapshot = DogfoodTiming::querySnapshot();
 
-        if ($search !== '') {
-            $html = $this->render($search);
-            $this->log($startedAt, $querySnapshot, $search, false, strlen($html), 'search_uncached');
+        if ($isVariant || $search !== '' || $family !== null || $page > 1) {
+            $html = $this->render($search, $family, $page, isVariant: true);
+            $this->log($startedAt, $querySnapshot, $search, false, strlen($html), 'catalog_variant_uncached');
 
             return $html;
         }
@@ -130,9 +130,9 @@ class StorefrontResponseCache
         return File::exists($path) ? hash_file('sha256', $path) : 'missing';
     }
 
-    private function render(string $search): string
+    private function render(string $search, ?string $family = null, int $page = 1, bool $isVariant = false): string
     {
-        $viewData = $this->catalogPages->homeViewData($search);
+        $viewData = $this->catalogPages->homeViewData($search, $family, $page, $isVariant);
         $viewData['isPublicHomepage'] = true;
 
         return view('storefront', $viewData)->render();

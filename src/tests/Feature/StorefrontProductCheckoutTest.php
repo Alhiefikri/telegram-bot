@@ -33,7 +33,7 @@ class StorefrontProductCheckoutTest extends TestCase
         ]);
     }
 
-    public function test_catalog_product_cards_use_page_checkout_without_embedded_checkout_payload(): void
+    public function test_home_plan_rows_use_page_checkout_without_embedded_checkout_payload(): void
     {
         $product = Product::factory()->create([
             'name' => 'CapCut Pro',
@@ -50,24 +50,22 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringContainsString('href="'.route('storefront.shop.checkout.product', $product).'?from=', $html);
         $this->assertStringNotContainsString('data-product=', $html);
         $this->assertStringContainsString('CapCut Pro', $html);
-        $this->assertStringContainsString('Akun Private dari dashboard', $html);
         $this->assertStringContainsString('Rp60.000', $html);
         $this->assertStringNotContainsString('Rp85.000', $html);
         $this->assertStringNotContainsString('line-through', $html);
         $this->assertStringContainsString('Stok: 8', $html);
         $this->assertStringContainsString('Beli sekarang', $html);
-        $this->assertStringContainsString('aria-label="Tambahkan CapCut Pro ke keranjang"', $html);
         $this->assertStringNotContainsString('Bayar via QR Manual', $html);
         $this->assertStringNotContainsString('Beli lewat Telegram', $html);
         $this->assertStringNotContainsString('&amp;quot;', $html);
         $this->assertStringNotContainsString('POPULER', $html);
         $this->assertStringNotContainsString('Best', $html);
-        $this->assertStringContainsString('Habis', $html);
+        $this->assertStringContainsString('Stok kosong', $html);
     }
 
-    public function test_single_catalog_product_is_centered_in_grid(): void
+    public function test_single_home_plan_has_a_stable_catalog_anchor(): void
     {
-        Product::factory()->create([
+        $product = Product::factory()->create([
             'name' => 'Produk Tunggal',
             'stock' => 1,
             'reserved_stock' => 0,
@@ -75,9 +73,8 @@ class StorefrontProductCheckoutTest extends TestCase
 
         $this->get('/')
             ->assertOk()
-            ->assertSee('id="storefront-product-grid"', false)
-            ->assertSee('storefront-product-grid--single mx-auto max-w-xs', false)
-            ->assertDontSee('sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', false);
+            ->assertSee('id="home-catalog-plans"', false)
+            ->assertSee('id="product-'.$product->id.'"', false);
     }
 
     public function test_product_detail_exposes_page_checkout_cart_and_order_access_without_checkout_side_effects(): void

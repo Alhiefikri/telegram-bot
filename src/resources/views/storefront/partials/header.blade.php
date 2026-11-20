@@ -56,12 +56,6 @@
                 </svg>
                 <span class="sr-only">Kategori</span>
             </a>
-            <a href="{{ $homeUrl }}#trending" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="Trending" title="Trending">
-                <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 3c.5 3-1.5 4.5-3 6.5C8.5 11.5 9 14 11 15c-.5-2 1-3.5 2.5-4.5C15 12 16 14 16 16a4 4 0 1 1-7.5-1.9C6.8 16.8 8.8 21 13 21a6 6 0 0 0 5.8-7.5C18.1 10.3 15.6 6 13 3Z" />
-                </svg>
-                <span class="sr-only">Trending</span>
-            </a>
             <a href="{{ $homeUrl }}#cara-beli" class="storefront-nav-link group relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-colors hover:bg-[var(--sf-surface)]" aria-label="Cara beli" title="Cara beli">
                 <svg class="h-7 w-7 transition-transform duration-180 group-hover:-translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M5 6h14M5 12h14M5 18h9" />
@@ -180,12 +174,6 @@
                     </span>
                     <span>Kategori</span>
                 </a>
-                <a href="{{ $homeUrl }}#trending" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-surface-warm)]">
-                    <span class="grid h-8 w-8 place-items-center rounded-md border border-[var(--sf-border)] bg-white text-[var(--sf-ink)]">
-                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 3c.5 3-1.5 4.5-3 6.5C8.5 11.5 9 14 11 15c-.5-2 1-3.5 2.5-4.5C15 12 16 14 16 16a4 4 0 1 1-7.5-1.9C6.8 16.8 8.8 21 13 21a6 6 0 0 0 5.8-7.5C18.1 10.3 15.6 6 13 3Z" /></svg>
-                    </span>
-                    <span>Trending</span>
-                </a>
                 <a href="{{ $cartUrl }}" class="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-[var(--sf-surface-warm)]">
                     <span class="grid h-8 w-8 place-items-center rounded-md border border-[var(--sf-border)] bg-white text-[var(--sf-ink)]">
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 7h12l-1 13H7L6 7Zm3 0a3 3 0 0 1 6 0" /></svg>
@@ -243,7 +231,6 @@
             <div class="flex flex-wrap gap-2 text-xs font-black">
                 <a href="{{ $shopUrl }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Produk</a>
                 <a href="{{ $homeUrl }}#kategori" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Kategori</a>
-                <a href="{{ $homeUrl }}#trending" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Trending</a>
                 <a href="{{ $cartUrl }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Keranjang @if ($cartCount !== null)({{ $cartCount }})@endif</a>
                 <a href="{{ route('storefront.order-access.create') }}" class="inline-flex min-h-11 items-center rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2">Akses Pesanan</a>
                 <a href="{{ $accountUrl }}" class="inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg bg-[var(--sf-surface-warm)] px-3 py-2 text-[var(--sf-ink)]" aria-label="{{ $accountAccessibleLabel }}" title="{{ $accountAccessibleLabel }}">

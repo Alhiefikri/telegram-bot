@@ -33,7 +33,8 @@ class StorefrontBannersTest extends TestCase
         $first = $setting->homepage_banners[0]['path'];
         Storage::disk('public')->assertExists($first);
         $this->assertSame(1, $setting->homepage_banners_version);
-        $this->get('/')->assertOk()->assertSee('Promo Oktober')->assertSee('/storage/'.$first, false);
+        $this->get('/')->assertOk()->assertDontSee('Promo Oktober');
+        $this->get('/shop')->assertOk()->assertSee('Promo Oktober')->assertSee('/storage/'.$first, false);
         $this->get('/admin?tab=produk')->assertOk()->assertSee('Simpan banner beranda');
         $this->assertDatabaseHas('audit_logs', ['action' => 'storefront.banners.updated']);
         $slots[0]['image'] = UploadedFile::fake()->image('replacement.png', 2400, 600);
@@ -44,7 +45,7 @@ class StorefrontBannersTest extends TestCase
         $slots[0] = ['remove' => true];
         $this->post(route('admin.storefront-banners.update'), ['version' => 2, 'banners' => $slots])->assertSessionHasNoErrors();
         Storage::disk('public')->assertMissing($second);
-        $this->get('/')->assertOk()->assertDontSee('Promo Oktober')->assertSee('storefront-banner-empty');
+        $this->get('/shop')->assertOk()->assertDontSee('Promo Oktober')->assertSee('storefront-banner-empty');
     }
 
     public function test_stale_editor_cannot_overwrite_current_banners_or_leave_uploaded_files(): void
@@ -75,7 +76,7 @@ class StorefrontBannersTest extends TestCase
         $this->assertSame(2046, $published[0]['width']);
         $this->assertSame(769, $published[0]['height']);
         $this->assertSame('2046 / 769', $banners->heroAspect($published));
-        $this->get('/')->assertOk()->assertSee('--sf-banner-aspect: 2046 / 769', false);
+        $this->get('/shop')->assertOk()->assertSee('--sf-banner-aspect: 2046 / 769', false);
         $this->get('/admin?tab=produk')->assertOk()->assertSee('aspect-ratio: 2046 / 769', false);
     }
 
@@ -92,7 +93,7 @@ class StorefrontBannersTest extends TestCase
             ->assertSessionHasNoErrors();
 
         $this->assertSame('1000 / 563', $banners->heroAspect($banners->published()));
-        $this->get('/')->assertOk()->assertSee('--sf-banner-aspect: 1000 / 563', false);
+        $this->get('/shop')->assertOk()->assertSee('--sf-banner-aspect: 1000 / 563', false);
     }
 
     public function test_support_cannot_change_banners(): void

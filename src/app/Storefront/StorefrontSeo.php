@@ -15,7 +15,7 @@ final class StorefrontSeo
 
     public const NOINDEX_NOFOLLOW_NOARCHIVE = 'noindex, nofollow, noarchive';
 
-    public function home(string $canonicalUrl, bool $hasSearch = false): StorefrontPageMetadata
+    public function home(string $canonicalUrl, bool $isVariant = false): StorefrontPageMetadata
     {
         $copy = config('storefront');
         $brand = $this->brand();
@@ -25,7 +25,7 @@ final class StorefrontSeo
             title: str_replace(':brand', $brand, (string) ($copy['meta']['title'] ?? $brand)),
             description: (string) ($copy['meta']['description'] ?? ''),
             canonicalUrl: $canonicalUrl,
-            robots: $hasSearch ? self::NOINDEX_FOLLOW : self::INDEX_FOLLOW,
+            robots: $isVariant ? self::NOINDEX_FOLLOW : self::INDEX_FOLLOW,
             jsonLd: $faq === null ? [] : [$faq],
         );
     }

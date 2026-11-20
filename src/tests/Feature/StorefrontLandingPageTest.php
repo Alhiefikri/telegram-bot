@@ -64,46 +64,18 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertFalse($response->headers->has('CDN-Cache-Control'));
     }
 
-    public function test_storefront_mobile_menu_exposes_customer_links_without_admin_ctas(): void
-    {
-        $response = $this->get('/')->assertOk();
-
-        $mobileMenuHtml = $this->htmlBetween($response->getContent(), '<div id="mobile-menu"', '</header>');
-
-        foreach (['Cara Beli', 'Kategori', 'Trending', 'Panduan', 'FAQ', 'Katalog Web', 'Akses Pesanan', 'Daftar / Masuk'] as $customerLinkText) {
-            $this->assertStringContainsString($customerLinkText, $mobileMenuHtml);
-        }
-
-        $this->assertStringContainsString('/panduan', $mobileMenuHtml);
-
-        $this->assertStringNotContainsString('/admin/login', $mobileMenuHtml);
-        $this->assertStringNotContainsString('Login Admin', $mobileMenuHtml);
-        $this->assertStringNotContainsString('Dashboard toko', $mobileMenuHtml);
-    }
-
-    public function test_landing_header_and_hero_expose_web_shop_and_order_access_paths(): void
+    public function test_home_keeps_catalog_order_account_guide_support_and_policy_links(): void
     {
         $shopUrl = route('storefront.shop.index');
         $accessUrl = route('storefront.order-access.create');
         $accountUrl = route('customer.account');
-        $homeUrl = route('storefront.home');
         $html = $this->get('/')->assertOk()->getContent();
-        $headerHtml = $this->htmlBetween($html, '<header', '</header>');
-        $mobileMenuHtml = $this->htmlBetween($html, '<div id="mobile-menu"', '</header>');
-        $heroHtml = $this->htmlBetween($html, '<section class="storefront-hero-card', '</section>');
-
-        $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Produk', 'Desktop product nav should send customers to the catalog grid.');
-        $this->assertStringContainsString('storefront-banner-track', $heroHtml);
-        $this->assertHtmlContainsLink($headerHtml, $shopUrl, 'Katalog Web', 'Desktop header should expose the website checkout path.');
-        $this->assertHtmlContainsLink($headerHtml, $homeUrl.'#kategori', 'Kategori', 'Desktop header should expose category browsing.');
-        $this->assertHtmlContainsLink($headerHtml, $homeUrl.'#trending', 'Trending', 'Desktop header should expose trending products.');
-        $this->assertHtmlContainsLink($headerHtml, $accountUrl, 'Daftar / Masuk', 'Desktop header should expose customer account access.');
-        $this->assertHtmlContainsLink($headerHtml, $accessUrl, 'Akses Pesanan', 'Desktop header should expose repeat order access.');
-
-        $this->assertHtmlContainsLink($mobileMenuHtml, $shopUrl, 'Katalog Web', 'Mobile menu should expose the website checkout path.');
-        $this->assertHtmlContainsLink($mobileMenuHtml, $accessUrl, 'Akses Pesanan', 'Mobile menu should expose repeat order access.');
-
-        $this->assertStringNotContainsString('hero-showcase-caption', $heroHtml);
+        $this->assertHtmlContainsLink($html, $shopUrl, 'Katalog Lengkap');
+        $this->assertHtmlContainsLink($html, $accountUrl, 'Daftar / Masuk');
+        $this->assertHtmlContainsLink($html, $accessUrl, 'Pesanan');
+        $this->assertHtmlContainsLink($html, route('storefront.guides.index'), 'Pusat Panduan');
+        $this->assertHtmlContainsLink($html, '#support', 'Bantuan');
+        $this->assertHtmlContainsLink($html, route('storefront.policies.privacy'), 'Kebijakan Privasi');
     }
 
     public function test_storefront_omits_admin_dashboard_ctas_from_public_landing_page(): void
@@ -175,8 +147,7 @@ class StorefrontLandingPageTest extends TestCase
 
         foreach ([
             'storefront-shell',
-            'storefront-hero-card',
-            'storefront-catalog-card',
+            'home-catalog',
             'motion-reduce:animate-none',
         ] as $needle) {
             $this->assertTrue(str_contains($html, $needle), "Missing storefront hook: {$needle}");
@@ -186,22 +157,18 @@ class StorefrontLandingPageTest extends TestCase
 
     public function test_homepage_uses_a_catalog_first_hierarchy_without_duplicate_marketing_sections(): void
     {
-        $shopUrl = route('storefront.shop.index');
         $html = $this->get('/')->assertOk()->getContent();
-        $heroStart = strpos($html, '<section class="storefront-hero-card');
         $catalogStart = strpos($html, '<section id="products"');
-        $heroHtml = $this->htmlBetween($html, '<section class="storefront-hero-card', '</section>');
         $activityHtml = $this->htmlBetween($html, '<aside id="verified-purchase-activity"', '</aside>');
 
-        $this->assertNotFalse($heroStart);
         $this->assertNotFalse($catalogStart);
-        $this->assertLessThan($catalogStart, $heroStart, 'The compact hero must precede the primary catalog task.');
+        $this->assertLessThan(strpos($html, $activityHtml), $catalogStart);
         $this->assertSame(1, substr_count($html, 'id="products"'));
         $this->assertSame(1, substr_count($html, 'id="cara-beli"'));
         $this->assertSame(1, substr_count($html, 'id="faq"'));
         $this->assertSame(1, substr_count($html, 'id="support"'));
-        $this->assertStringContainsString('storefront-banner-empty', $heroHtml);
-        $this->assertStringNotContainsString('Dari katalog', $heroHtml);
+        $this->assertStringNotContainsString('storefront-hero-card', $html);
+        $this->assertStringNotContainsString('storefront-banner-carousel', $html);
         $this->assertStringNotContainsString('id="featured-offer"', $html);
         $this->assertStringNotContainsString('id="features"', $html);
         $this->assertStringNotContainsString('neo-marquee', $html);
@@ -263,7 +230,6 @@ class StorefrontLandingPageTest extends TestCase
             ->assertOk()
             ->assertSee('Produk Dinamis')
             ->assertSee('🧩')
-            ->assertSee('PRODUK DIGITAL')
             ->assertDontSee('NETFLIX STREAM')
             ->assertDontSee('GEMINI / GOOGLE');
     }
@@ -273,7 +239,6 @@ class StorefrontLandingPageTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSee('Katalog publik sedang disiapkan')
-            ->assertSee('Kategori akan segera hadir')
             ->assertSee('Cek kembali katalog saat stok produk yang Anda cari tersedia.')
             ->assertDontSee('Belum ada data penjualan berbayar selesai untuk menampilkan label produk terlaris.');
     }
@@ -304,7 +269,7 @@ class StorefrontLandingPageTest extends TestCase
 
         $this->assertStringNotContainsString('Trending sekarang', $html);
         $this->assertStringNotContainsString('id="trending"', $html);
-        $this->assertStringContainsString('Tersedia sekarang', $html);
+        $this->assertStringContainsString('Stok: 2', $html);
         $this->assertStringContainsString('Streaming Family', $html);
         $this->assertStringContainsString('Standalone Available Product', $html);
     }
@@ -338,10 +303,7 @@ class StorefrontLandingPageTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSee('Canva Pro Bulanan')
-            ->assertSee('AI Tools')
             ->assertSee('Rp125.000')
-            ->assertSee('Akses desain premium untuk kebutuhan konten harian.')
-            ->assertSee('Terjual: 0')
             ->assertSee('/assets/product-placeholder.svg', false)
             ->assertDontSee('Produk Nonaktif')
             ->assertDontSee('Produk Terhapus')
@@ -391,13 +353,10 @@ class StorefrontLandingPageTest extends TestCase
             ->assertOk()
             ->assertSee('Claude Pro Bulanan')
             ->assertSee('Rp175.000')
-            ->assertSee('Akses Claude premium untuk kerja harian.')
-            ->assertSee('Terjual: 0')
             ->assertSee('Stok: 3')
             ->assertSee(route('storefront.products.show', $product), false)
             ->assertSee(route('storefront.shop.checkout.product', $product), false)
             ->assertSee('Beli sekarang')
-            ->assertSee('aria-label="Tambahkan Claude Pro Bulanan ke keranjang"', false)
             ->assertDontSee('data-product=', false)
             ->assertDontSee('Produk Nonaktif Rahasia')
             ->assertDontSee('claude-user@example.test')
@@ -416,36 +375,13 @@ class StorefrontLandingPageTest extends TestCase
         Product::factory()->create(['category_id' => $deleted->id, 'name' => 'Produk Kategori Terhapus', 'is_active' => true]);
         $deleted->delete();
 
-        $this->get('/')
+        $this->get(route('storefront.shop.index'))
             ->assertOk()
             ->assertSeeInOrder(['Akun Premium', 'AI Tools'])
             ->assertDontSee('Kategori Nonaktif')
             ->assertDontSee('Kategori Terhapus')
             ->assertDontSee('Produk Kategori Nonaktif')
             ->assertDontSee('Produk Kategori Terhapus');
-    }
-
-    public function test_category_controls_render_ordered_accessible_filter_buttons(): void
-    {
-        $later = Category::factory()->create(['name' => 'AI Tools', 'slug' => 'ai-tools', 'sort_order' => 20, 'is_active' => true]);
-        $first = Category::factory()->create(['name' => 'Akun Premium', 'slug' => 'akun-premium', 'sort_order' => 10, 'is_active' => true]);
-        Product::factory()->create(['category_id' => $later->id, 'name' => 'Produk AI', 'is_active' => true]);
-        Product::factory()->create(['category_id' => $first->id, 'name' => 'Produk Premium', 'is_active' => true]);
-
-        $this->get('/')
-            ->assertOk()
-            ->assertSee('id="kategori"', false)
-            ->assertSee('Belanja berdasarkan kategori')
-            ->assertSee('aria-label="Filter kategori produk"', false)
-            ->assertSee('aria-controls="storefront-product-grid"', false)
-            ->assertSeeInOrder([
-                'data-filter="'.$first->id.'"',
-                'Akun Premium',
-                'data-filter="'.$later->id.'"',
-                'AI Tools',
-            ], false)
-            ->assertDontSee('href="#category-akun-premium"', false)
-            ->assertDontSee('id="category-akun-premium"', false);
     }
 
     public function test_out_of_stock_products_are_deprioritized_and_not_presented_as_ready_to_buy(): void
@@ -468,12 +404,10 @@ class StorefrontLandingPageTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSeeInOrder(['Zeta Ready', 'Akun Kosong'])
-            ->assertSee('Terjual: 0')
-            ->assertSee('STOK HABIS')
+            ->assertSee('Stok kosong')
             ->assertDontSee('Ready (1)')
             ->assertDontSee('Stok 0')
             ->assertSee('Beli sekarang')
-            ->assertSee('Restock segera')
             ->assertSee('Beri tahu saya saat tersedia')
             ->assertSee('href="'.route('storefront.products.show', Product::where('name', 'Akun Kosong')->first()).'?from=', false);
     }
@@ -495,7 +429,6 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertStringNotContainsString('<script>', $html);
         $this->assertStringNotContainsString('<style>', $html);
         $this->assertStringNotContainsString('onclick=', $html);
-        $this->assertStringContainsString('Terjual: 0', $html);
         $this->assertStringNotContainsString('★', $html);
         $this->assertStringContainsString('Stok: 3', $html);
     }

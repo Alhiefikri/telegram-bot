@@ -5,17 +5,12 @@
 </head>
 <body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)] motion-reduce:animate-none">
     <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-clip">
-        <div id="scroll-progress" class="scroll-progress" aria-hidden="true"></div>
-        @include('storefront.partials.header')
+        @include('storefront.partials.home-header')
 
         <main class="flex-grow pb-16">
             @include('storefront.partials.checkout-maintenance')
-            @if (!($isPublicHomepage ?? false))
-                @include('storefront.partials.shop.checkout-error')
-            @endif
-            @include('storefront.partials.hero')
+            @include('storefront.partials.home-catalog')
             @include('storefront.partials.verified-purchase-activity')
-            @include('storefront.partials.catalog')
             @include('storefront.partials.purchase-flow')
             @include('storefront.partials.faq')
             @include('storefront.partials.support')

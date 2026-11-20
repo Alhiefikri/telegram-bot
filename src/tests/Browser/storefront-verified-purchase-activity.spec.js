@@ -121,20 +121,22 @@ test("does not rotate verified activity for reduced-motion users", async ({
   await expect(message).toHaveText(initialMessage ?? "");
 });
 
-test("shop catalog uses the same Admin-managed banner images as home", async ({
+test("only the shop catalog shows Admin-managed banner images", async ({
   page,
 }) => {
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-  const homeImages = await page
-    .locator(".storefront-banner-slide img")
-    .evaluateAll((images) => images.map((image) => image.getAttribute("src")));
+  await expect(page.locator(".storefront-banner-carousel")).toHaveCount(0);
   await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".storefront-banner-carousel")).toBeVisible();
   const shopImages = await page
     .locator(".storefront-banner-slide img")
     .evaluateAll((images) => images.map((image) => image.getAttribute("src")));
-  expect(shopImages).toEqual(homeImages);
   expect(shopImages).toHaveLength(3);
+  expect(
+    shopImages.every((src) =>
+      src.endsWith("/assets/storefront-banner-test.svg")
+    )
+  ).toBe(true);
   await page
     .locator(".storefront-banner-carousel")
     .getByRole("button", { name: "Banner berikutnya" })
@@ -149,7 +151,7 @@ test("carousel supports navigation, pause, reduced motion and mobile layout", as
 }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   const carousel = page.locator(".storefront-banner-carousel");
   const heroBox = await carousel.boundingBox();
   expect(heroBox?.width ?? 0).toBeGreaterThanOrEqual(350);
@@ -204,7 +206,7 @@ test("reveals banner arrows on hover and keeps them usable by keyboard", async (
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   const carousel = page.locator(".storefront-banner-carousel");
   await carousel.scrollIntoViewIfNeeded();
   const overshoot = await page.evaluate(
@@ -268,7 +270,7 @@ test("carousel advances automatically and pauses on hover", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   const carousel = page.locator(".storefront-banner-carousel");
   await carousel.scrollIntoViewIfNeeded();
   await page.mouse.move(0, 0);
@@ -285,7 +287,7 @@ test("keeps the active banner centered once the slide width is capped", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   const carousel = page.locator(".storefront-banner-carousel");
   await carousel.scrollIntoViewIfNeeded();
   await carousel
@@ -326,7 +328,7 @@ test("keeps the neighbouring banner a narrow peek", async ({ page }) => {
   // slide cap left most of the second banner on screen instead of a hint.
   for (const width of [1440, 1920, 2505]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
     const carousel = page.locator(".storefront-banner-carousel");
     await carousel.scrollIntoViewIfNeeded();
     await carousel
@@ -425,6 +427,7 @@ test("purchase activity stays in page flow without covering catalog or checkout"
         return {
           bottom: box.bottom,
           followingTop: following.top,
+          catalogBottom: following.bottom,
           top: box.top,
           bannerBottom: banner?.bottom,
           right: box.right,
@@ -434,7 +437,11 @@ test("purchase activity stays in page flow without covering catalog or checkout"
         };
       });
       expect(layout.position).toBe("static");
-      expect(layout.bottom).toBeLessThanOrEqual(layout.followingTop);
+      if (pathname === "/") {
+        expect(layout.top).toBeGreaterThanOrEqual(layout.catalogBottom);
+      } else {
+        expect(layout.bottom).toBeLessThanOrEqual(layout.followingTop);
+      }
       if (layout.bannerBottom !== undefined) {
         expect(layout.top).toBeGreaterThanOrEqual(layout.bannerBottom);
       }

@@ -21,6 +21,15 @@ class StorefrontUrl
         return $productId === null ? $url : preg_replace('/#products$/', '#product-'.$productId, $url);
     }
 
+    public function homeCatalogUrl(string $search, ?string $family = null, int $page = 1): string
+    {
+        return route('storefront.home', array_filter([
+            'family' => $family,
+            'q' => $search !== '' ? $search : null,
+            'page' => $page > 1 ? $page : null,
+        ], static fn (mixed $value): bool => $value !== null));
+    }
+
     public function shopCatalogUrl(StorefrontCatalogQuery $query, bool $withFragment = false): string
     {
         $url = route('storefront.shop.index');
