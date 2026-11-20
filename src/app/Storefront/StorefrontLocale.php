@@ -21,4 +21,10 @@ final class StorefrontLocale
             ?? LocalizedProductCopy::normalize((string) config('storefront.locale', self::DEFAULT))
             ?? self::DEFAULT;
     }
+
+    /** @param array<string, mixed> $replace */
+    public static function text(string $key, array $replace = []): string
+    {
+        return (string) __('storefront_funnel.'.$key, $replace, self::code());
+    }
 }

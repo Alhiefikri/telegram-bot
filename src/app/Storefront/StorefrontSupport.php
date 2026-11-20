@@ -18,17 +18,17 @@ class StorefrontSupport
     public function prePurchase(Product $product): array
     {
         return $this->context(
-            title: 'Butuh bantuan?',
-            body: 'Tanya ketersediaan, kecocokan produk, atau detail checkout sebelum membeli.',
+            title: StorefrontLocale::text('need_help'),
+            body: StorefrontLocale::text('pre_purchase_help'),
             subject: ['product_id' => $product->getKey()],
             categories: [
                 [
                     'key' => 'pre_purchase',
-                    'label' => 'Tanya produk sebelum beli',
+                    'label' => StorefrontLocale::text('pre_purchase_issue'),
                     'message' => implode("\n", [
-                        'Halo Admin Lhie Store, saya mau tanya sebelum membeli.',
-                        'Produk: '.$this->safeLine($product->name),
-                        'URL produk: '.route('storefront.products.show', $product),
+                        StorefrontLocale::text('pre_purchase_message'),
+                        StorefrontLocale::text('support_product', ['name' => $this->safeLine($product->name)]),
+                        StorefrontLocale::text('support_product_url', ['url' => route('storefront.products.show', $product)]),
                     ]),
                 ],
             ],
@@ -41,14 +41,14 @@ class StorefrontSupport
     public function general(): array
     {
         return $this->context(
-            title: 'Butuh bantuan?',
-            body: 'Pilih kanal support sebelum membeli, saat checkout, atau saat butuh arahan pesanan.',
+            title: StorefrontLocale::text('need_help'),
+            body: StorefrontLocale::text('general_help'),
             subject: [],
             categories: [
                 [
                     'key' => 'general',
-                    'label' => 'Tanya admin Lhie Store',
-                    'message' => 'Halo Admin Lhie Store, saya butuh bantuan di storefront.',
+                    'label' => StorefrontLocale::text('general_issue'),
+                    'message' => StorefrontLocale::text('general_message'),
                 ],
             ],
         );
@@ -60,39 +60,39 @@ class StorefrontSupport
     public function order(Order $order): array
     {
         return $this->context(
-            title: 'Butuh bantuan?',
-            body: 'Pilih kategori masalah. Pesan hanya membawa nomor invoice dan konteks masalah, tanpa Recovery Key atau data kredensial. Support tidak dapat membuka kredensial dari invoice saja.',
+            title: StorefrontLocale::text('need_help'),
+            body: StorefrontLocale::text('order_help'),
             subject: ['order_id' => $order->getKey()],
             categories: [
                 [
                     'key' => 'payment_pending',
-                    'label' => 'QRIS / pembayaran belum terdeteksi',
-                    'message' => $this->orderMessage($order, 'QRIS / pembayaran belum terdeteksi'),
+                    'label' => StorefrontLocale::text('payment_pending_issue'),
+                    'message' => $this->orderMessage($order, StorefrontLocale::text('payment_pending_issue')),
                 ],
                 [
                     'key' => 'payment_final',
-                    'label' => 'Pembayaran gagal, expired, atau dibatalkan',
-                    'message' => $this->orderMessage($order, 'Pembayaran gagal, expired, atau dibatalkan'),
+                    'label' => StorefrontLocale::text('payment_final_issue'),
+                    'message' => $this->orderMessage($order, StorefrontLocale::text('payment_final_issue')),
                 ],
                 [
                     'key' => 'credentials_missing',
-                    'label' => 'Data akun belum muncul',
-                    'message' => $this->orderMessage($order, 'Data akun belum muncul'),
+                    'label' => StorefrontLocale::text('credentials_missing_issue'),
+                    'message' => $this->orderMessage($order, StorefrontLocale::text('credentials_missing_issue')),
                 ],
                 [
                     'key' => 'credentials_invalid',
-                    'label' => 'Kredensial tidak valid',
-                    'message' => $this->orderMessage($order, 'Kredensial tidak valid'),
+                    'label' => StorefrontLocale::text('credentials_invalid_issue'),
+                    'message' => $this->orderMessage($order, StorefrontLocale::text('credentials_invalid_issue')),
                 ],
                 [
                     'key' => 'mfa_problem',
-                    'label' => 'MFA / Authenticator bermasalah',
-                    'message' => $this->orderMessage($order, 'MFA / Authenticator bermasalah'),
+                    'label' => StorefrontLocale::text('mfa_issue'),
+                    'message' => $this->orderMessage($order, StorefrontLocale::text('mfa_issue')),
                 ],
                 [
                     'key' => 'login_failed',
-                    'label' => 'Login gagal',
-                    'message' => $this->orderMessage($order, 'Login gagal'),
+                    'label' => StorefrontLocale::text('login_issue'),
+                    'message' => $this->orderMessage($order, StorefrontLocale::text('login_issue')),
                 ],
             ],
         );
@@ -107,8 +107,8 @@ class StorefrontSupport
 
         return [
             'key' => 'whatsapp',
-            'label' => 'WhatsApp Support',
-            'description' => $baseUrl ? 'Buka chat WhatsApp dengan pesan siap kirim.' : 'Nomor WhatsApp belum dikonfigurasi.',
+            'label' => StorefrontLocale::text('whatsapp_support'),
+            'description' => $baseUrl ? StorefrontLocale::text('whatsapp_description') : StorefrontLocale::text('whatsapp_unconfigured'),
             'message' => $message,
             'href' => $baseUrl ? $this->appendText($baseUrl, 'text', $message) : null,
             'available' => $baseUrl !== null,
@@ -124,8 +124,8 @@ class StorefrontSupport
 
         return [
             'key' => 'telegram_admin',
-            'label' => 'Telegram Admin',
-            'description' => 'Buka chat admin manusia, bukan Telegram Bot. Template pesan juga tersedia bila aplikasi Telegram tidak mengisi otomatis.',
+            'label' => StorefrontLocale::text('telegram_admin'),
+            'description' => StorefrontLocale::text('telegram_description'),
             'message' => $message,
             'href' => $baseUrl ? $this->appendText($baseUrl, 'text', $message) : null,
             'available' => $baseUrl !== null,
@@ -135,9 +135,9 @@ class StorefrontSupport
     private function orderMessage(Order $order, string $category): string
     {
         return implode("\n", [
-            'Halo Admin Lhie Store, saya butuh bantuan untuk pesanan website.',
-            'Invoice: '.$this->safeLine($order->invoice_number),
-            'Kategori masalah: '.$category,
+            StorefrontLocale::text('order_message'),
+            StorefrontLocale::text('support_invoice', ['invoice' => $this->safeLine($order->invoice_number)]),
+            StorefrontLocale::text('support_issue', ['issue' => $category]),
         ]);
     }
 

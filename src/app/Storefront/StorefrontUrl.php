@@ -95,10 +95,10 @@ class StorefrontUrl
         $path = $this->localPath($returnUrl);
 
         return match (true) {
-            is_string($path) && $this->isFamilyPath($path) => 'Kembali ke pilihan',
-            is_string($path) && str_starts_with($path, '/shop/cart') => 'Kembali ke keranjang',
-            is_string($path) && str_starts_with($path, '/produk/') => 'Kembali ke produk',
-            default => 'Kembali ke katalog',
+            is_string($path) && $this->isFamilyPath($path) => StorefrontLocale::text('back_options'),
+            is_string($path) && str_starts_with($path, '/shop/cart') => StorefrontLocale::text('back_cart'),
+            is_string($path) && str_starts_with($path, '/produk/') => StorefrontLocale::text('back_product'),
+            default => StorefrontLocale::text('back_catalog'),
         };
     }
 

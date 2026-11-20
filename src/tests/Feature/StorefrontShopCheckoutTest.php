@@ -531,7 +531,7 @@ class StorefrontShopCheckoutTest extends TestCase
                 'payment_secret' => 'must-not-be-flashed', ]);
         $response
             ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
-            ->assertSessionHasErrors(['buyer_name' => 'The buyer name field must be at least 2 characters.']);
+            ->assertSessionHasErrors(['buyer_name' => 'Nama pembeli harus antara 2 dan 40 karakter.']);
         $response->assertSessionMissing('_old_input.payment_secret');
 
         $html = $this->get($response->headers->get('Location'))

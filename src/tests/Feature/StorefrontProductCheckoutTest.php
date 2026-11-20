@@ -502,7 +502,7 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringNotContainsString('data-storefront-checkout-scroll', $html);
         $this->assertStringContainsString('Email atau kontak bantuan', $html);
         $this->assertStringContainsString('Buat invoice QRIS', $html);
-        $this->assertSame(1, substr_count($html, 'Subtotal produk'));
+        $this->assertSame(1, substr_count($html, '<dt>Subtotal produk</dt>'));
         $this->assertStringNotContainsString('Harga USDT satuan', $html);
         $this->assertStringNotContainsString('QR Manual', $html);
         $this->assertStringNotContainsString('KlikQRIS', $html);

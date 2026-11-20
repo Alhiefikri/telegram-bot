@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\ManualPaymentSetting;
 use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Storefront\StorefrontLocale;
 use App\Storefront\StorefrontUrl;
 use App\Support\PaymentProvider;
 use Illuminate\Contracts\Validation\Validator;
@@ -73,7 +74,7 @@ class StorefrontShopCheckoutRequest extends FormRequest
             if (! $this->filled('product_id') && $this->filled('quantity')) {
                 $validator->errors()->add(
                     'quantity',
-                    'Jumlah hanya boleh dikirim untuk checkout langsung.',
+                    StorefrontLocale::text('quantity_direct_only'),
                 );
             }
         });
@@ -121,26 +122,33 @@ class StorefrontShopCheckoutRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'checkout_attempt.*' => 'Buka ulang halaman checkout sebelum membuat pesanan.',
-            'product_id.required' => 'Pilih produk yang ingin dibeli.',
-            'product_id.required_without' => 'Pilih produk atau gunakan snapshot keranjang untuk checkout.',
-            'product_id.prohibits' => 'Pilih produk atau gunakan snapshot keranjang, bukan keduanya.',
-            'quantity.*' => 'Jumlah produk tidak valid.',
-            'buyer_name.required' => 'Isi nama pembeli dulu.',
-            'buyer_name.regex' => 'Gunakan huruf, angka, spasi, titik, strip, atau underscore untuk nama pembeli.',
-            'terms_accepted.required' => 'Setujui Syarat Penggunaan dan Kebijakan Refund untuk melanjutkan checkout.',
-            'terms_accepted.accepted' => 'Setujui Syarat Penggunaan dan Kebijakan Refund untuk melanjutkan checkout.',
-            'email.email' => 'Masukkan alamat email yang valid.',
-            'email.max' => 'Email maksimal 254 karakter.',
-            'support_contact_channel.*' => 'Pilih kanal bantuan yang tersedia.',
-            'support_contact_channel.required' => 'Pilih WhatsApp untuk checkout Sakurupiah.',
-            'support_contact_channel.required_with' => 'Pilih kanal bantuan atau kosongkan kontak bantuan.',
-            'support_contact_value.required_with' => 'Isi kontak bantuan atau kosongkan kanal bantuan.',
-            'support_contact_value.required' => 'Masukkan nomor WhatsApp untuk checkout Sakurupiah.',
-            'support_contact_value.regex' => 'Masukkan nomor WhatsApp yang valid untuk checkout Sakurupiah.',
-            'payment_method.*' => 'Pilih metode pembayaran yang tersedia.',
-            'cart_snapshot.required_without' => 'Gunakan snapshot keranjang atau pilih satu produk untuk checkout.',
-            'cart_snapshot.prohibits' => 'Pilih snapshot keranjang atau satu produk, bukan keduanya.',
+            'checkout_attempt.*' => StorefrontLocale::text('reopen_checkout'),
+            'product_id.required' => StorefrontLocale::text('choose_product_purchase'),
+            'product_id.required_without' => StorefrontLocale::text('choose_product_or_cart'),
+            'product_id.prohibits' => StorefrontLocale::text('choose_either'),
+            'product_id.*' => StorefrontLocale::text('choose_product_purchase'),
+            'quantity.*' => StorefrontLocale::text('invalid_quantity'),
+            'buyer_name.required' => StorefrontLocale::text('buyer_required'),
+            'buyer_name.regex' => StorefrontLocale::text('buyer_invalid'),
+            'buyer_name.string' => StorefrontLocale::text('buyer_invalid'),
+            'buyer_name.min' => StorefrontLocale::text('buyer_length'),
+            'buyer_name.max' => StorefrontLocale::text('buyer_length'),
+            'terms_accepted.required' => StorefrontLocale::text('agree_required'),
+            'terms_accepted.accepted' => StorefrontLocale::text('agree_required'),
+            'email.email' => StorefrontLocale::text('email_invalid'),
+            'email.max' => StorefrontLocale::text('email_max'),
+            'email.string' => StorefrontLocale::text('email_invalid'),
+            'support_contact_channel.*' => StorefrontLocale::text('choose_support_channel'),
+            'support_contact_channel.required' => StorefrontLocale::text('choose_sakurupiah_whatsapp'),
+            'support_contact_channel.required_with' => StorefrontLocale::text('choose_or_clear_channel'),
+            'support_contact_value.required_with' => StorefrontLocale::text('enter_or_clear_contact'),
+            'support_contact_value.required' => StorefrontLocale::text('enter_sakurupiah_whatsapp'),
+            'support_contact_value.regex' => StorefrontLocale::text('valid_sakurupiah_whatsapp'),
+            'support_contact_value.*' => StorefrontLocale::text('contact_invalid'),
+            'payment_method.*' => StorefrontLocale::text('available_payment_method'),
+            'cart_snapshot.required_without' => StorefrontLocale::text('cart_or_one_product'),
+            'cart_snapshot.prohibits' => StorefrontLocale::text('cart_or_one_only'),
+            'cart_snapshot.*' => StorefrontLocale::text('reopen_checkout'),
         ];
     }
 

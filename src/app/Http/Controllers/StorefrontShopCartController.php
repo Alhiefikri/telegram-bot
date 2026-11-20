@@ -10,6 +10,7 @@ use App\Models\Product;
 use App\Services\CartService;
 use App\Storefront\StorefrontCartPageBuilder;
 use App\Storefront\StorefrontGuestCart;
+use App\Storefront\StorefrontLocale;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -35,7 +36,7 @@ class StorefrontShopCartController extends Controller
 
             return redirect()
                 ->route('storefront.shop.cart')
-                ->with('storefront_cart_notice', 'Produk ditambahkan ke keranjang.');
+                ->with('storefront_cart_notice', StorefrontLocale::text('cart_added'));
         } catch (InvalidCartState|InsufficientStock $exception) {
             return $this->cartError($exception->getMessage());
         }
@@ -46,7 +47,7 @@ class StorefrontShopCartController extends Controller
         try {
             $cart = $guestCart->current($request->session());
             if ($cart === null) {
-                throw new InvalidCartState('Keranjang sudah kedaluwarsa atau belum dibuat.');
+                throw new InvalidCartState(StorefrontLocale::text('stale_cart'));
             }
 
             $this->carts->setItemQuantity(
@@ -57,7 +58,7 @@ class StorefrontShopCartController extends Controller
 
             return redirect()
                 ->route('storefront.shop.cart')
-                ->with('storefront_cart_notice', 'Jumlah produk diperbarui.');
+                ->with('storefront_cart_notice', StorefrontLocale::text('cart_updated'));
         } catch (InvalidCartState|InsufficientStock $exception) {
             return $this->cartError($exception->getMessage());
         }
@@ -68,14 +69,14 @@ class StorefrontShopCartController extends Controller
         try {
             $cart = $guestCart->current($request->session());
             if ($cart === null) {
-                throw new InvalidCartState('Keranjang sudah kedaluwarsa atau belum dibuat.');
+                throw new InvalidCartState(StorefrontLocale::text('stale_cart'));
             }
 
             $this->carts->removeItem($cart, $this->product($product));
 
             return redirect()
                 ->route('storefront.shop.cart')
-                ->with('storefront_cart_notice', 'Produk dihapus dari keranjang.');
+                ->with('storefront_cart_notice', StorefrontLocale::text('cart_removed'));
         } catch (InvalidCartState|InsufficientStock $exception) {
             return $this->cartError($exception->getMessage());
         }
@@ -85,7 +86,7 @@ class StorefrontShopCartController extends Controller
     {
         $product = Product::withTrashed()->find($productId);
         if ($product === null) {
-            throw new InvalidCartState('Produk tidak ditemukan atau sudah tidak tersedia.');
+            throw new InvalidCartState(StorefrontLocale::text('product_unavailable'));
         }
 
         return $product;

@@ -25,12 +25,9 @@ export default function initCredentialSecrets(root = document) {
     value.hidden = true;
     value.textContent = "";
     secret.querySelector("[data-secret-mask]").hidden = false;
-    toggle.textContent = "Tampilkan";
+    toggle.textContent = toggle.dataset.show;
     toggle.setAttribute("aria-pressed", "false");
-    toggle.setAttribute(
-      "aria-label",
-      `Tampilkan ${toggle.dataset.secretLabel}`
-    );
+    toggle.setAttribute("aria-label", toggle.dataset.showLabel);
   };
   const maskAll = () => secrets.forEach(mask);
 
@@ -39,9 +36,10 @@ export default function initCredentialSecrets(root = document) {
     if (confirmation?.open) confirmation.close("cancel");
     disclosures.forEach((disclosure) => {
       disclosure.open = false;
-      disclosure.querySelector(
+      const toggle = disclosure.querySelector(
         "[data-credential-disclosure-toggle]"
-      ).textContent = "Lihat kredensial akun";
+      );
+      toggle.textContent = toggle.dataset.show;
       disclosure.querySelectorAll("[data-copy-status]").forEach((status) => {
         status.textContent = "";
       });
@@ -59,9 +57,10 @@ export default function initCredentialSecrets(root = document) {
       return;
     }
     disclosure.open = true;
-    disclosure.querySelector(
+    const toggle = disclosure.querySelector(
       "[data-credential-disclosure-toggle]"
-    ).textContent = "Sembunyikan kredensial akun";
+    );
+    toggle.textContent = toggle.dataset.hide;
   });
   confirmation?.addEventListener("click", (event) => {
     if (event.target !== confirmation) return;
@@ -110,12 +109,9 @@ export default function initCredentialSecrets(root = document) {
       );
       value.hidden = false;
       secret.querySelector("[data-secret-mask]").hidden = true;
-      toggle.textContent = "Sembunyikan";
+      toggle.textContent = toggle.dataset.hide;
       toggle.setAttribute("aria-pressed", "true");
-      toggle.setAttribute(
-        "aria-label",
-        `Sembunyikan ${toggle.dataset.secretLabel}`
-      );
+      toggle.setAttribute("aria-label", toggle.dataset.hideLabel);
     });
     secret.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
@@ -139,12 +135,13 @@ export default function initCredentialSecrets(root = document) {
       try {
         await navigator.clipboard.writeText(decodeCredential(button));
         if (status) {
-          status.textContent = button.dataset.copySuccess || "Tersalin.";
+          status.textContent = button.dataset.copySuccess ?? "";
         }
       } catch {
         if (status) {
           status.textContent =
-            "Tidak dapat menyalin. Tampilkan data, lalu salin teks secara manual.";
+            button.closest("[data-credential-copy-failed]")?.dataset
+              .credentialCopyFailed ?? "";
         }
       }
     });

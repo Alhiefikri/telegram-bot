@@ -6,7 +6,12 @@
 <button
     type="button"
     data-theme-toggle
-    aria-label="Aktifkan mode gelap"
+    @php($themeLocale = request()->attributes->get(\App\Storefront\StorefrontLocale::class, 'id'))
+    aria-label="{{ __('storefront_funnel.enable_dark_mode', [], $themeLocale) }}"
+    data-enable-light="{{ __('storefront_funnel.enable_light_mode', [], $themeLocale) }}"
+    data-enable-dark="{{ __('storefront_funnel.enable_dark_mode', [], $themeLocale) }}"
+    data-light-label="{{ __('storefront_funnel.light_mode', [], $themeLocale) }}"
+    data-dark-label="{{ __('storefront_funnel.dark_mode', [], $themeLocale) }}"
     aria-pressed="false"
     {{ $attributes->class(['theme-toggle inline-flex min-h-11 items-center justify-center gap-2']) }}
 >
@@ -17,5 +22,5 @@
     <svg data-theme-icon="dark" class="{{ $iconClass }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" d="M20.7 15.3A8.5 8.5 0 0 1 8.7 3.3 8.5 8.5 0 1 0 20.7 15.3Z" />
     </svg>
-    <span @class(['sr-only' => ! $showLabel]) data-theme-label>Mode gelap</span>
+    <span @class(['sr-only' => ! $showLabel]) data-theme-label>{{ __('storefront_funnel.dark_mode', [], $themeLocale) }}</span>
 </button>

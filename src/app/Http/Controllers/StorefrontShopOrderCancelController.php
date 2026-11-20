@@ -7,6 +7,7 @@ use App\Services\AuditLogger;
 use App\Services\CustomerCancellationOutcome;
 use App\Services\CustomerPendingOrderCancellation;
 use App\Storefront\StorefrontInvoiceUrl;
+use App\Storefront\StorefrontLocale;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
@@ -18,17 +19,17 @@ class StorefrontShopOrderCancelController extends Controller
 
         if ($outcome === CustomerCancellationOutcome::Paid) {
             return redirect($urls->show($order))
-                ->withErrors(['order' => 'Pembayaran QRIS sudah diterima, jadi pesanan tidak bisa dibatalkan.']);
+                ->withErrors(['order' => StorefrontLocale::text('cancel_paid')]);
         }
 
         if ($outcome === CustomerCancellationOutcome::VerificationUnavailable) {
             return redirect($urls->show($order))
-                ->withErrors(['order' => 'Status pembayaran QRIS belum dapat diverifikasi. Pesanan tidak dibatalkan; coba lagi sebentar.']);
+                ->withErrors(['order' => StorefrontLocale::text('cancel_unverified')]);
         }
 
         if ($outcome !== CustomerCancellationOutcome::Cancelled) {
             return redirect($urls->show($order))
-                ->withErrors(['order' => 'Pesanan sudah diproses atau bukti pembayaran sedang diverifikasi, jadi tidak bisa dibatalkan.']);
+                ->withErrors(['order' => StorefrontLocale::text('cancel_in_progress')]);
         }
 
         $cancelled = $order->fresh();
@@ -46,6 +47,6 @@ class StorefrontShopOrderCancelController extends Controller
         ], ip: $request->ip());
 
         return redirect($urls->show($cancelled))
-            ->with('status', 'Pesanan dibatalkan. Stok dan data akun sudah dilepas.');
+            ->with('status', StorefrontLocale::text('cancel_success'));
     }
 }

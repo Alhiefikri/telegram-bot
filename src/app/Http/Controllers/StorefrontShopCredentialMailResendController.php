@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Services\OrderCredentialMailService;
+use App\Storefront\StorefrontLocale;
 use App\Storefront\StorefrontOrderAccess;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -34,21 +35,19 @@ class StorefrontShopCredentialMailResendController extends Controller
         $event = $mails->eventFor($order);
         if ($event === null || ! $mails->isDeliverable($order)) {
             return back()->withErrors([
-                'credential_mail' => (string) config('storefront.credential_email.resend_unavailable'),
+                'credential_mail' => StorefrontLocale::text('mail_resend_unavailable'),
             ]);
         }
 
         $rearmed = $mails->rearm($order);
         if ($rearmed === null) {
             return back()->withErrors([
-                'credential_mail' => (string) config('storefront.credential_email.resend_pending'),
+                'credential_mail' => StorefrontLocale::text('mail_resend_pending'),
             ]);
         }
 
-        return back()->with('status', str_replace(
-            ':email',
-            OrderCredentialMailService::maskedRecipient($rearmed->recipient_email) ?? 'email pesanan',
-            (string) config('storefront.credential_email.resend_sent'),
-        ));
+        return back()->with('status', StorefrontLocale::text('mail_resend_sent', [
+            'email' => OrderCredentialMailService::maskedRecipient($rearmed->recipient_email) ?? StorefrontLocale::text('order_email'),
+        ]));
     }
 }

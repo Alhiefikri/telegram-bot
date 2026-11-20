@@ -2,20 +2,77 @@
 
 namespace Tests\Feature;
 
+use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\Product;
+use App\Storefront\StorefrontPresenter;
 use Illuminate\Cache\Events\CacheHit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
+use Tests\Support\StorefrontSignedInvoiceScenarios;
 use Tests\TestCase;
 
 class StorefrontLocaleTest extends TestCase
 {
     use RefreshDatabase;
+    use StorefrontSignedInvoiceScenarios;
 
     private const COOKIE = 'storefront_locale';
+
+    public function test_funnel_copy_and_provider_economics_follow_the_visitor_locale(): void
+    {
+        $this->pakasirConfigIsReady();
+        $this->qrisRendererReturnsDeterministicPng();
+        config(['services.support.whatsapp_number' => '6281234567890']);
+        [$order, $payment] = $this->pendingNativeQrisOrder(66_000, 500, 66_500, 'fixture');
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'is_active' => true]);
+        $product = Product::factory()->create([
+            'name' => 'Merchant Plan',
+            'description' => 'Base merchant details',
+            'description_en' => 'English merchant details',
+            'description_ms' => ' ',
+            'stock' => 3,
+            'is_active' => true,
+        ]);
+        $invoice = URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $order, absolute: false);
+        $deadline = $payment->expired_at->toIso8601String();
+        $total = app(StorefrontPresenter::class)->idr($payment->provider_total_payment);
+
+        foreach ([
+            'id' => ['Base merchant details', 'Nama pembeli', 'Pindai QRIS', 'Masukkan nomor invoice.', 'Kategori masalah:'],
+            'ms' => ['Base merchant details', 'Nama pembeli', 'Imbas QRIS', 'Masukkan nombor invois.', 'Kategori masalah:'],
+            'en' => ['English merchant details', 'Buyer name', 'Scan the QRIS code', 'Enter the invoice number.', 'Issue:'],
+        ] as $locale => [$details, $buyerName, $paymentInstruction, $required, $issueLabel]) {
+            $this->withCookie(self::COOKIE, $locale);
+            $this->get(route('storefront.products.show', $product))->assertOk()
+                ->assertSee('Merchant Plan')->assertSee($details);
+            $this->get(route('storefront.shop.checkout.product', $product))->assertOk()
+                ->assertSee('Merchant Plan')->assertSee($buyerName);
+            $this->from('/akses-pesanan')->post('/akses-pesanan', ['access_key' => ''])
+                ->assertRedirect('/akses-pesanan')->assertSessionHasErrors(['invoice_number' => $required]);
+            $this->get($invoice)->assertOk()->assertSee('<html lang="'.$locale.'"', false)
+                ->assertSee($total)->assertSee($deadline)->assertSee($paymentInstruction)->assertSee($issueLabel);
+        }
+        $this->assertSame('pending', $payment->fresh()->status->value);
+    }
+
+    public function test_funnel_translations_have_the_same_keys_and_placeholders(): void
+    {
+        $base = require lang_path('id/storefront_funnel.php');
+        foreach (['ms', 'en'] as $locale) {
+            $translations = require lang_path($locale.'/storefront_funnel.php');
+            $this->assertSame(array_keys($base), array_keys($translations));
+            foreach ($base as $key => $text) {
+                $this->assertNotSame('', trim($translations[$key]), $locale.'.'.$key);
+                preg_match_all('/:[a-z_]+\b/', $text, $expected);
+                preg_match_all('/:[a-z_]+\b/', $translations[$key], $actual);
+                $this->assertEqualsCanonicalizing($expected[0], $actual[0], $locale.'.'.$key);
+            }
+        }
+    }
 
     public function test_cold_and_warm_catalog_html_are_isolated_by_locale_and_filters_bypass_html_cache(): void
     {

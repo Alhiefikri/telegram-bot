@@ -79,7 +79,7 @@ class StorefrontShopCheckout
             return Cache::lock('storefront:checkout:'.hash('sha256', $sessionId), 45)
                 ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $sessionId, $termsVersion, $session, $paymentRail, $authorizeNewCheckout, $admission));
         } catch (LockTimeoutException $exception) {
-            throw new InvalidCheckout('Checkout sedang diproses. Tunggu sebentar lalu buka kembali invoice Anda.', previous: $exception);
+            throw new InvalidCheckout(StorefrontLocale::text('checkout_locked'), previous: $exception);
         }
     }
 
@@ -102,13 +102,13 @@ class StorefrontShopCheckout
         }
 
         if ($input->productId === null) {
-            throw new InvalidCheckout('Keranjang kosong.');
+            throw new InvalidCheckout(StorefrontLocale::text('cart_empty_error'));
         }
         $product = $this->product($input->productId);
         $paymentIntent = $this->paymentIntent($paymentRail, $product);
 
         if (! $product->isPublicVisible() || $product->availableStock() < $input->quantity) {
-            throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
+            throw new InsufficientStock(StorefrontLocale::text('insufficient_stock'));
         }
 
         $order = DB::transaction(function () use ($input, $product, $paymentIntent, $termsVersion): Order {
@@ -168,7 +168,7 @@ class StorefrontShopCheckout
             $paymentIntent = $this->paymentIntent($paymentRail, $product);
 
             if (! $product->isPublicVisible() || $product->availableStock() < $input->quantity) {
-                throw new InsufficientStock('Stok produk tidak cukup atau tidak tersedia.');
+                throw new InsufficientStock(StorefrontLocale::text('insufficient_stock'));
             }
 
             $cart = DB::transaction(function () use ($session, $product, $input): Cart {
@@ -180,11 +180,11 @@ class StorefrontShopCheckout
         } else {
             $cart = $this->guestCarts->current($session);
             if ($cart === null || $cart->cartItems->isEmpty()) {
-                throw new InvalidCheckout('Keranjang kosong.');
+                throw new InvalidCheckout(StorefrontLocale::text('cart_empty_error'));
             }
 
             if ($input->cartSnapshot !== null && ! $this->guestCarts->matchesSnapshot($cart, $input->cartSnapshot)) {
-                throw new InvalidCheckout('Keranjang berubah. Periksa kembali item dan jumlah sebelum checkout.');
+                throw new InvalidCheckout(StorefrontLocale::text('cart_changed'));
             }
 
             $paymentIntent = $this->paymentIntentForCart($paymentRail, $cart);
@@ -314,7 +314,7 @@ class StorefrontShopCheckout
         $product = Product::query()->whereKey($productId)->first();
 
         if (! $product) {
-            throw new InvalidCheckout('Produk tidak ditemukan atau sudah tidak tersedia.');
+            throw new InvalidCheckout(StorefrontLocale::text('product_unavailable'));
         }
 
         return $product;
@@ -343,7 +343,7 @@ class StorefrontShopCheckout
             if (! $settings?->binance_pay_enabled
                 || (! filled(config('services.binance.pay_id')) && ! filled(config('services.binance.pay_uid')))
                 || $product->usdt_price_amount === null) {
-                throw new InvalidCheckout('Binance Pay belum tersedia untuk produk ini.');
+                throw new InvalidCheckout(StorefrontLocale::text('binance_unavailable'));
             }
 
             return $this->providerResolver->resolve($paymentRail)->paymentIntent;
@@ -351,7 +351,7 @@ class StorefrontShopCheckout
 
         if (CheckoutPaymentIntents::isUsdtBep20Rail($paymentRail)) {
             if ($product->usdt_price_amount === null) {
-                throw new InvalidCheckout('BSC payment rail is not available for this product.');
+                throw new InvalidCheckout(StorefrontLocale::text('bsc_unavailable'));
             }
 
             // Readiness is deliberately checked by OrderCheckoutService after
@@ -360,7 +360,7 @@ class StorefrontShopCheckout
         }
 
         if (ManualPaymentSetting::current() === null) {
-            throw new InvalidCheckout('QRIS otomatis belum aktif. Hubungi admin atau coba lagi nanti.');
+            throw new InvalidCheckout(StorefrontLocale::text('automatic_qris_inactive'));
         }
 
         $selection = $this->providerResolver->resolve('qris');
@@ -372,17 +372,17 @@ class StorefrontShopCheckout
     {
         $items = $cart->cartItems;
         if ($items->isEmpty()) {
-            throw new InvalidCheckout('Keranjang kosong.');
+            throw new InvalidCheckout(StorefrontLocale::text('cart_empty_error'));
         }
 
         $products = $items->map(fn ($item) => $item->product)->values();
         if ($products->contains(fn ($product): bool => $product === null)) {
-            throw new InvalidCheckout('Keranjang berisi produk yang tidak tersedia.');
+            throw new InvalidCheckout(StorefrontLocale::text('cart_unavailable_items'));
         }
 
         if (CheckoutPaymentIntents::isBinancePaymentRail($paymentRail)
             && $products->contains(fn (Product $product): bool => $product->usdt_price_amount === null)) {
-            throw new InvalidCheckout('Semua produk di keranjang harus memiliki harga USDT untuk pembayaran Binance.');
+            throw new InvalidCheckout(StorefrontLocale::text('cart_requires_usdt'));
         }
 
         /** @var Product $product */
@@ -465,7 +465,7 @@ class StorefrontShopCheckout
     private function assertTermsAccepted(StorefrontShopCheckoutInput $input): void
     {
         if (! $input->termsAccepted) {
-            throw new InvalidCheckout('Setujui Syarat Penggunaan dan Kebijakan Refund untuk melanjutkan checkout.');
+            throw new InvalidCheckout(StorefrontLocale::text('agree_required'));
         }
     }
 
@@ -473,7 +473,7 @@ class StorefrontShopCheckout
     {
         $version = config('storefront.policies.terms.version');
         if (! is_string($version) || trim($version) === '') {
-            throw new InvalidCheckout('Checkout terms are not configured.');
+            throw new InvalidCheckout(StorefrontLocale::text('checkout_terms_unavailable'));
         }
 
         return trim($version);
@@ -483,7 +483,7 @@ class StorefrontShopCheckout
     {
         $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
         if (! CheckoutPaymentIntents::isSupportedPaymentRail($paymentRail)) {
-            throw new InvalidCheckout('Metode pembayaran tidak tersedia.');
+            throw new InvalidCheckout(StorefrontLocale::text('payment_unavailable'));
         }
 
         return $paymentRail;

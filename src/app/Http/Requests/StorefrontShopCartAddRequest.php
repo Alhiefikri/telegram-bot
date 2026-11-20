@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Storefront\StorefrontLocale;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StorefrontShopCartAddRequest extends FormRequest
@@ -28,8 +29,8 @@ class StorefrontShopCartAddRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'product_id.*' => 'Pilih produk yang ingin dimasukkan ke keranjang.',
-            'quantity.*' => 'Jumlah produk harus antara 1 dan 20.',
+            'product_id.*' => StorefrontLocale::text('choose_cart_product'),
+            'quantity.*' => StorefrontLocale::text('cart_quantity_add'),
         ];
     }
 }

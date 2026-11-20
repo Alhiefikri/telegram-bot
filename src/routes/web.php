@@ -124,11 +124,13 @@ Route::get('/produk-keluarga/{slug}', StorefrontLegacyProductFamilyRedirectContr
 Route::get('/pemulihan-pesanan', [StorefrontPolicyController::class, 'recovery'])->middleware('storefront.locale')->name('storefront.policies.recovery');
 Route::get('/produk/{product}', StorefrontProductController::class)->middleware('storefront.locale')->name('storefront.products.show');
 Route::post('/produk/{product}/waitlist', [StorefrontWaitlistController::class, 'store'])
-    ->middleware('throttle:storefront-waitlist')
+    ->middleware(['storefront.locale:private', 'throttle:storefront-waitlist'])
     ->name('storefront.waitlist.store');
 Route::get('/waitlist/confirm/{subscription}', [StorefrontWaitlistController::class, 'confirm'])
+    ->middleware('storefront.locale:private')
     ->name('storefront.waitlist.confirm');
 Route::get('/waitlist/unsubscribe/{subscription}', [StorefrontWaitlistController::class, 'unsubscribe'])
+    ->middleware('storefront.locale:private')
     ->name('storefront.waitlist.unsubscribe');
 Route::get('/aktivitas-pembelian-terverifikasi', StorefrontVerifiedPurchaseActivityController::class)
     ->middleware('throttle:storefront-verified-purchase-activity')

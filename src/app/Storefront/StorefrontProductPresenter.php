@@ -83,15 +83,15 @@ class StorefrontProductPresenter
             : [];
         $isBuyable = $isAvailable && ! $maintenanceState->active && $checkoutChoices !== [];
         $statusLabel = ! $isAvailable
-            ? 'Restock segera'
+            ? StorefrontLocale::text('restock')
             : ($maintenanceState->active
-                ? 'Checkout maintenance'
-                : ($isBuyable ? 'Siap dibeli' : $checkoutReadiness->label));
+                ? StorefrontLocale::text('checkout_maintenance')
+                : ($isBuyable ? StorefrontLocale::text('ready_to_buy') : $checkoutReadiness->label));
         $cardActionLabel = ! $isAvailable
-            ? 'Stok kosong'
+            ? StorefrontLocale::text('no_stock')
             : ($maintenanceState->active
-                ? 'Checkout maintenance'
-                : ($isBuyable ? 'Beli sekarang' : $checkoutReadiness->label));
+                ? StorefrontLocale::text('checkout_maintenance')
+                : ($isBuyable ? StorefrontLocale::text('buy_now') : $checkoutReadiness->label));
         // A variant without its own icon shows the family icon the catalog uses.
         $icon = $this->familyIcons->forProduct($product);
         $description = LocalizedProductCopy::text($product->getAttributes(), 'description', StorefrontLocale::code());
@@ -108,8 +108,8 @@ class StorefrontProductPresenter
             soldQuantity: $soldQuantity,
             isAvailable: $isAvailable,
             isBuyable: $isBuyable,
-            availabilityLabel: $isAvailable ? 'Tersedia' : 'Habis',
-            stockLabel: $isAvailable ? 'Stok: '.$stockAvailable : 'Stok kosong',
+            availabilityLabel: $isAvailable ? StorefrontLocale::text('available') : StorefrontLocale::text('sold_out'),
+            stockLabel: $isAvailable ? StorefrontLocale::text('stock_count', ['count' => $stockAvailable]) : StorefrontLocale::text('no_stock'),
             soldLabel: 'Terjual: '.$soldQuantity,
             statusLabel: $statusLabel,
             cardActionLabel: $cardActionLabel,
@@ -126,7 +126,7 @@ class StorefrontProductPresenter
             usdtPriceAmount: $product->usdt_price_amount !== null ? (int) $product->usdt_price_amount : null,
             canJoinWaitlist: ! $isAvailable,
             waitlistUrl: route('storefront.waitlist.store', ['product' => $product->getKey()]),
-            waitlistCtaLabel: (string) config('storefront.waitlist.cta', 'Beri tahu saya saat tersedia'),
+            waitlistCtaLabel: StorefrontLocale::text('waitlist'),
             familyOptionLabel: $familyOptionLabel,
             reachableQuantityPriceTiers: $reachableQuantityPriceTiers,
         );
@@ -169,10 +169,10 @@ class StorefrontProductPresenter
             $isManual = $readiness->provider === PaymentProvider::MANUAL;
             $choices['website_qris'] = new StorefrontProductCheckoutChoice(
                 key: 'website_qris',
-                label: $isManual ? 'Bayar via QR Manual' : 'Bayar via QRIS',
+                label: $isManual ? StorefrontLocale::text('pay_manual_qr') : StorefrontLocale::text('pay_qris'),
                 description: $isManual
-                    ? 'Scan QR manual pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.'
-                    : 'QRIS otomatis dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
+                    ? StorefrontLocale::text('manual_qr_choice_help')
+                    : StorefrontLocale::text('automatic_qris_help'),
                 enabled: true,
                 provider: $readiness->provider,
             );
@@ -188,11 +188,11 @@ class StorefrontProductPresenter
         if ($binancePayAvailable || $bscAvailable) {
             $choices['website_binance_pay'] = new StorefrontProductCheckoutChoice(
                 key: 'website_binance_pay',
-                label: 'Bayar dengan USDT',
+                label: StorefrontLocale::text('pay_usdt'),
                 description: match (true) {
-                    $binancePayAvailable && $bscAvailable => 'Pilih metode pembayaran USDT: Binance Pay atau USDT BSC BEP20.',
-                    $binancePayAvailable => 'Checkout dengan Binance Pay.',
-                    default => 'Checkout dengan USDT BSC BEP20.',
+                    $binancePayAvailable && $bscAvailable => StorefrontLocale::text('usdt_choose_method'),
+                    $binancePayAvailable => StorefrontLocale::text('checkout_binance'),
+                    default => StorefrontLocale::text('checkout_bsc'),
                 },
                 enabled: true,
             );
@@ -200,8 +200,8 @@ class StorefrontProductPresenter
             if ($binancePayAvailable) {
                 $choices['website_binance_pay_id'] = new StorefrontProductCheckoutChoice(
                     key: 'website_binance_pay_id',
-                    label: 'Bayar dengan Binance Pay',
-                    description: 'Kirim jumlah USDT persis melalui Binance Pay ID. Ikuti instruksi pembayaran pada invoice.',
+                    label: StorefrontLocale::text('pay_binance'),
+                    description: StorefrontLocale::text('binance_choice_help'),
                     enabled: true,
                 );
             }
@@ -209,8 +209,8 @@ class StorefrontProductPresenter
             if ($bscAvailable) {
                 $choices['website_usdt_bep20'] = new StorefrontProductCheckoutChoice(
                     key: 'website_usdt_bep20',
-                    label: 'Bayar dengan USDT BSC BEP20',
-                    description: 'Kirim jumlah USDT persis melalui BNB Smart Chain (BEP20). Masukkan TX hash setelah membayar.',
+                    label: StorefrontLocale::text('pay_bsc'),
+                    description: StorefrontLocale::text('bsc_choice_help'),
                     enabled: true,
                 );
             }
@@ -243,8 +243,8 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: null,
                 ready: false,
-                label: 'Checkout belum tersedia',
-                notice: 'Checkout pembayaran belum aktif. Hubungi admin atau coba lagi nanti.',
+                label: StorefrontLocale::text('checkout_unavailable'),
+                notice: StorefrontLocale::text('checkout_inactive'),
             );
         }
 
@@ -253,8 +253,8 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
                 ready: true,
-                label: 'QR Manual',
-                notice: 'Pembayaran manual: scan QR pada invoice, bayar tepat sesuai total produk, lalu hubungi admin dengan bukti pembayaran dan nomor invoice ini.',
+                label: StorefrontLocale::text('manual_qr'),
+                notice: StorefrontLocale::text('manual_qr_help'),
             );
         }
 
@@ -262,8 +262,8 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
                 ready: true,
-                label: 'QRIS otomatis',
-                notice: 'QRIS otomatis dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.',
+                label: StorefrontLocale::text('automatic_qris'),
+                notice: StorefrontLocale::text('automatic_qris_help'),
             );
         }
 
@@ -271,8 +271,8 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
                 ready: false,
-                label: 'QRIS otomatis belum siap',
-                notice: 'QRIS otomatis sedang belum siap. Coba lagi nanti atau hubungi admin.',
+                label: StorefrontLocale::text('automatic_qris_unready'),
+                notice: StorefrontLocale::text('automatic_qris_unready_help'),
             );
         }
 
@@ -284,10 +284,10 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
                 ready: $readiness->isReady(),
-                label: $readiness->isReady() ? 'QRIS otomatis' : 'QRIS otomatis belum siap',
+                label: $readiness->isReady() ? StorefrontLocale::text('automatic_qris') : StorefrontLocale::text('automatic_qris_unready'),
                 notice: $readiness->isReady()
-                    ? 'QRIS otomatis dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.'
-                    : 'QRIS otomatis sedang belum siap. Coba lagi nanti atau hubungi admin.',
+                    ? StorefrontLocale::text('automatic_qris_help')
+                    : StorefrontLocale::text('automatic_qris_unready_help'),
             );
         }
 
@@ -299,18 +299,18 @@ class StorefrontProductPresenter
             return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
                 provider: $provider,
                 ready: $readiness->isReady(),
-                label: $readiness->isReady() ? 'QRIS otomatis' : 'QRIS otomatis belum siap',
+                label: $readiness->isReady() ? StorefrontLocale::text('automatic_qris') : StorefrontLocale::text('automatic_qris_unready'),
                 notice: $readiness->isReady()
-                    ? 'QRIS otomatis dibuat setelah checkout. Bayar hanya total final yang tampil di invoice.'
-                    : 'QRIS otomatis sedang belum siap. Coba lagi nanti atau hubungi admin.',
+                    ? StorefrontLocale::text('automatic_qris_help')
+                    : StorefrontLocale::text('automatic_qris_unready_help'),
             );
         }
 
         return $this->checkoutReadiness = new StorefrontProductCheckoutReadiness(
             provider: $provider,
             ready: false,
-            label: 'Checkout belum tersedia',
-            notice: 'Provider pembayaran ini belum tersedia untuk checkout baru. Coba lagi nanti atau hubungi admin.',
+            label: StorefrontLocale::text('checkout_unavailable'),
+            notice: StorefrontLocale::text('checkout_provider_unavailable'),
         );
     }
 

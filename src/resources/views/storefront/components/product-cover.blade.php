@@ -12,9 +12,9 @@
 @endphp
 
 @if ($context === 'detail' && $imageUrl)
-    <button type="button" class="product-image-zoom product-detail-image" data-image-preview-open aria-haspopup="dialog" aria-controls="product-image-preview" aria-label="Perbesar gambar {{ $presentation->name }}">
+    <button type="button" class="product-image-zoom product-detail-image" data-image-preview-open aria-haspopup="dialog" aria-controls="product-image-preview" aria-label="{{ __('storefront_funnel.enlarge_named_image', ['name' => $presentation->name]) }}">
         <img src="{{ $imageUrl }}" alt="{{ $presentation->name }}" width="800" height="800" loading="eager" fetchpriority="high" decoding="async">
-        <span class="image-zoom-hint">⤢ Perbesar gambar</span>
+        <span class="image-zoom-hint">⤢ {{ __('storefront_funnel.enlarge_image') }}</span>
     </button>
 @elseif ($context === 'featured')
     <div class="storefront-media-frame relative mx-auto flex aspect-square w-full flex-col items-center justify-center overflow-hidden rounded-lg border border-[var(--sf-border)] {{ $imageUrl ? 'bg-white p-0' : $coverTheme['bg'].' p-6' }} text-center shadow-[0_12px_30px_rgb(18_35_63_/_0.12)]" data-media-frame>
@@ -39,7 +39,7 @@
         @if (!$imageUrl)
             <span class="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-md {{ $coverTheme['badge_bg'] }} px-2 py-1 text-[9px] font-black uppercase tracking-wider">{{ $coverTheme['badge'] }}</span>
         @endif
-        <span class="sr-only">Gambar produk</span>
+        <span class="sr-only">{{ __('storefront_funnel.product_image') }}</span>
     </div>
 @else
     <div class="storefront-media-frame relative flex aspect-square w-full flex-col items-center justify-center overflow-hidden {{ $imageUrl ? 'bg-white' : $coverTheme['bg'] }}" data-media-frame>
@@ -59,7 +59,7 @@
                 @endif
                 <div class="max-w-full rounded-full bg-[var(--sf-yellow)] px-2 py-1 text-[8px] font-black uppercase leading-3 tracking-wider text-[var(--sf-ink)] sm:text-[9px]">{{ $coverTheme['desc'] }}</div>
             </div>
-            <span class="sr-only">Gambar default {{ $presentation->name }}</span>
+            <span class="sr-only">{{ __('storefront_funnel.default_product_image', ['name' => $presentation->name]) }}</span>
         @endif
 
         <div class="absolute left-2.5 right-2.5 top-2.5 z-10 flex items-start justify-between gap-1.5">

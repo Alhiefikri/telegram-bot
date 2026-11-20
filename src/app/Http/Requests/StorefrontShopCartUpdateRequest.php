@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Storefront\StorefrontLocale;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StorefrontShopCartUpdateRequest extends FormRequest
@@ -27,7 +28,7 @@ class StorefrontShopCartUpdateRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'quantity.*' => 'Jumlah produk harus antara 0 dan 20.',
+            'quantity.*' => StorefrontLocale::text('cart_quantity_update'),
         ];
     }
 }

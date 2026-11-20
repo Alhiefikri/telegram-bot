@@ -41,6 +41,9 @@ export default function familyQuickBuy(initialOptions) {
       selected: Boolean(option.selected),
       productUrl: String(option.productUrl ?? ""),
       checkoutUrl: String(option.checkoutUrl ?? ""),
+      checkoutLabel: String(option.checkoutLabel ?? ""),
+      checkoutAriaLabel: String(option.checkoutAriaLabel ?? ""),
+      selectionAnnouncement: String(option.selectionAnnouncement ?? ""),
     })
   );
   const initialOption =
@@ -87,14 +90,11 @@ export default function familyQuickBuy(initialOptions) {
     },
 
     get checkoutLabel() {
-      return this.isAvailable ? "Beli sekarang" : "Lihat detail opsi";
+      return this.selectedOption?.checkoutLabel ?? "";
     },
 
     get checkoutAriaLabel() {
-      const name = this.selectedOption?.name || "opsi";
-      return this.isAvailable
-        ? `Beli ${name} sekarang`
-        : `Lihat detail ${name}`;
+      return this.selectedOption?.checkoutAriaLabel ?? "";
     },
 
     isSelected(productId) {
@@ -115,7 +115,7 @@ export default function familyQuickBuy(initialOptions) {
       this.quantity = normalizeQuantity(this.quantity, this.quantityMaximum);
 
       if (changed && announce) {
-        this.announcement = `${option.name || "Opsi"} dipilih`;
+        this.announcement = option.selectionAnnouncement;
       }
     },
 

@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Http\Requests\StorefrontOrderAccessRequest;
 use App\Models\Order;
 use App\Storefront\StorefrontFunnelEvents;
+use App\Storefront\StorefrontLocale;
 use App\Storefront\StorefrontOrderAccess;
 use App\Storefront\StorefrontPresenter;
 use App\Storefront\StorefrontSeo;
@@ -20,8 +21,8 @@ class StorefrontOrderAccessController extends Controller
     {
         $brand = $storefront->brand();
         $metadata = $seo->privatePage(
-            'Akses Pesanan | '.$brand,
-            'Buka kembali data pesanan menggunakan kredensial akses yang tersimpan secara pribadi.',
+            StorefrontLocale::text('order_access_title').' | '.$brand,
+            StorefrontLocale::text('order_access_meta'),
         );
 
         return response()->view('storefront.order-access', [
@@ -43,7 +44,7 @@ class StorefrontOrderAccessController extends Controller
 
         if (! $order || $order->payment_status !== PaymentStatus::Paid || ! $access->authenticate($request, $order, (string) $request->validated('access_key'))) {
             return redirect()->route('storefront.order-access.create')
-                ->with('storefront_order_access_error', 'Nomor invoice atau recovery key tidak cocok.');
+                ->with('storefront_order_access_error', StorefrontLocale::text('access_mismatch'));
         }
 
         return redirect()->route('storefront.order-access.show', $order);
