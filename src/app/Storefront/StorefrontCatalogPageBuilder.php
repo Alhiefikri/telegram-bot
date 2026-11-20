@@ -38,7 +38,7 @@ class StorefrontCatalogPageBuilder
      */
     public function homeViewData(string $search, ?string $family, int $page, bool $isVariant): array
     {
-        $entries = collect($this->catalog->publicEntriesForPlanFilter());
+        $entries = collect($this->catalog->allPublicEntries());
         $families = $entries->pluck('family')->filter()->keyBy('slug');
         $selectedFamily = $family === null ? null : $families->get($family);
         $familyUnavailable = $family !== null && $selectedFamily === null;

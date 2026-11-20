@@ -32,7 +32,7 @@ Alur customer berjalan dari Telegram:
 3. Customer juga bisa membuka katalog dengan `/katalog`, atau mencari produk langsung dengan `/cari keyword`.
 4. `/produk`, `/product`, dan tombol Lihat Produk menampilkan entri Product Family dan Product mandiri; setiap baris hanya memuat nomor, icon, nama, dan total stok, maksimal 10 entri per halaman. Tombol family memakai icon Product dan maksimal dua per baris.
 5. Customer menekan satu family untuk melihat quote setiap Product/SKU di pesan katalog yang sama. Tombol opsi memakai ikon yang sama dan maksimal dua per baris; setiap quote dirender sebagai blok kutipan Telegram.
-6. `/stock` menampilkan snapshot stok publik yang tersedia, dikelompokkan per Product Family dan Plan. Setiap Plan memuat harga, stok, jumlah terjual, ikon family/Product yang tersimpan (termasuk custom emoji), dan tautan teks `Beli` yang menyamarkan deeplink `/start product_ID`.
+6. `/stock` dan `/stocks` menampilkan snapshot stok produk publik, dikelompokkan per Product Family dan Plan. Setiap Plan memuat harga, stok, jumlah terjual, dan ikon family/Product yang tersimpan (termasuk custom emoji). Produk dengan stok 0 tetap muncul sebagai `🔴 Habis`; hanya produk yang tersedia yang memiliki tautan `Beli`.
 7. Customer memilih satu Product option. Callback mengedit pesan yang sama menjadi Product Detail ketika callback membawa `message_id`; Product ID asli tetap diteruskan ke quantity, Cart, checkout, Order, inventory, waitlist, dan delivery tanpa membuat entitas variant baru.
 8. Product Detail memisahkan informasi produk, harga/stok/deskripsi, quantity/subtotal, kontrol quantity, payment rail, dan navigasi kembali.
 9. Quantity dimulai dari `1`, dapat dinaikkan/diturunkan dengan `−`/`+`, atau diisi sekali melalui `Enter custom quantity`. Klik cepat `−`/`+` dari sesi detail yang sama dihitung satu kali per update unik dan tetap dibatasi live stock; tombol bayar dari quantity sebelumnya kedaluwarsa. Input custom yang tidak valid tetap di mode input; Cancel kembali ke quantity sebelumnya yang masih valid terhadap live stock dan membatalkan kontrol `−`/`+` sebelum input manual.
@@ -75,6 +75,23 @@ Catatan:
 - Saat admin menangkap premium emoji lewat Store Bot, glyph Unicode yang terkait ikut disimpan sebagai fallback untuk teks dan Web Storefront. Di dalam family, satu icon dari member dengan custom emoji dipakai oleh seluruh Plan row dan tombol.
 - Nilai icon katalog dapat diubah langsung dari Admin Dashboard tanpa mengubah `.env`, rebuild image, atau clear config.
 - Store Bot memakai `editMessageText` dengan `callback_query.message.message_id` untuk family, category, quote, detail, dan navigasi balik satu pesan. `sendMessage` hanya dipakai bila tidak ada pesan asal atau Telegram menolak edit secara definitif; timeout/connection failure tidak memicu blind resend.
+
+### Mengatur menu `/` Telegram
+
+Daftar saran saat customer mengetik `/` atau menekan **Menu** dikelola oleh Telegram, bukan oleh pilihan bahasa di dalam Store Bot. Untuk menjadikan bahasa Inggris sebagai default, owner membuka [@BotFather](https://t.me/BotFather), menjalankan `/setcommands`, memilih `@lhiestore_bot`, lalu mengirim daftar berikut sebagai daftar default:
+
+```text
+start - Open the main menu
+products - Browse the product catalog
+search - Search products, e.g. /search netflix
+orders - Check your latest order status
+history - View your order history
+account - View your account
+support - Get help
+language - Change the bot language
+```
+
+Daftar ini mengganti seluruh menu default. Jika ada perintah publik lain yang masih ditampilkan, sertakan juga deskripsi bahasa Inggrisnya. Setelah disimpan, buka chat bot dan ketik `/` untuk memeriksa hasilnya. Jika beberapa pengguna masih melihat daftar lama, periksa apakah ada daftar khusus bahasa atau cakupan chat yang mengalahkan default Telegram. Perintah lama seperti `/katalog`, `/cari`, `/pesanan`, dan `/riwayat` tetap bisa diketik; pilihan bahasa di dalam bot tidak berubah. Perubahan menu ini tidak perlu deploy.
 
 ### Mengatur urutan Product Family
 

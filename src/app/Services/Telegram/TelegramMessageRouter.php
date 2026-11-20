@@ -432,6 +432,6 @@ class TelegramMessageRouter
 
     private function isPublicStockCommand(string $text): bool
     {
-        return preg_match('/^\/stock(?:@[A-Za-z0-9_]{1,32})?$/', $text) === 1;
+        return preg_match('/^\/stocks?(?:@[A-Za-z0-9_]{1,32})?$/', $text) === 1;
     }
 }

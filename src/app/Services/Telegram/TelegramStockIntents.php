@@ -2,24 +2,19 @@
 
 namespace App\Services\Telegram;
 
-use App\Catalog\CatalogBrowseQuery;
-use App\Catalog\CatalogFamilyReadModel;
-use App\Catalog\CatalogIcon;
 use App\Catalog\CatalogProductReadModel;
 use App\Models\Customer;
 use App\Services\Catalog\CatalogBrowse;
 use App\Storefront\StorefrontUrl;
 
 /**
- * Render the public stock snapshot used by the /stock command.
+ * Render the public stock snapshot used by /stock and /stocks.
  *
  * CatalogBrowse owns public visibility and live availability, while
  * StorefrontUrl owns the Telegram start-link contract.
  */
 final class TelegramStockIntents
 {
-    private const CATALOG_PER_PAGE = 100;
-
     public function __construct(
         private readonly TelegramBotClient $bot,
         private readonly TelegramLocale $locale,
@@ -32,34 +27,8 @@ final class TelegramStockIntents
 
     public function send(Customer $customer, string $chatId): void
     {
-        $result = $this->browse->browsePublic(new CatalogBrowseQuery(perPage: self::CATALOG_PER_PAGE));
-        $families = [];
-        $standalone = [];
-
-        foreach ($result->entries as $entry) {
-            if ($entry->family instanceof CatalogFamilyReadModel) {
-                $members = array_values(array_filter(
-                    $entry->family->members,
-                    static fn (mixed $member): bool => $member instanceof CatalogProductReadModel
-                        && $member->isAvailable
-                        && $member->availableStock > 0,
-                ));
-
-                if ($members !== []) {
-                    $families[] = [$entry->family, $members];
-                }
-
-                continue;
-            }
-
-            if ($entry->product instanceof CatalogProductReadModel
-                && $entry->product->isAvailable
-                && $entry->product->availableStock > 0) {
-                $standalone[] = $entry->product;
-            }
-        }
-
-        if ($families === [] && $standalone === []) {
+        $entries = $this->browse->allPublicEntries();
+        if ($entries === []) {
             $this->bot->sendMessage(
                 $chatId,
                 $this->locale->translate($customer, 'stock.empty'),
@@ -74,56 +43,62 @@ final class TelegramStockIntents
             '━━━━━━━━━━━━━━',
         ];
 
-        foreach ($families as [$family, $members]) {
-            /** @var CatalogFamilyReadModel $family */
-            /** @var list<CatalogProductReadModel> $members */
-            $icon = $this->familyIcon($family);
+        $hasAvailableProducts = false;
+        $hasOtherHeading = false;
+        foreach ($entries as $entry) {
+            $hasAvailableProducts = $hasAvailableProducts || $entry->isAvailable();
+            $family = $entry->family;
+            if ($family === null) {
+                if ($entry->product === null) {
+                    continue;
+                }
+                if (! $hasOtherHeading) {
+                    $lines[] = '';
+                    $lines[] = $this->locale->translate($customer, 'stock.other_heading');
+                    $hasOtherHeading = true;
+                }
+                $lines[] = $this->variantLine($customer, $entry->product);
+
+                continue;
+            }
+
             $lines[] = '';
             $lines[] = $this->locale->translate($customer, 'stock.family_heading', [
-                'icon' => $this->captions->icon($icon),
+                'icon' => $this->captions->icon($this->icons->resolve($family->icon, $family->customEmojiId)),
                 'name' => $this->escapeHtml($family->name),
             ]);
-            foreach ($members as $member) {
-                $lines[] = $this->variantLine($customer, $member, $this->catalogIcon($member));
+            foreach ($family->members as $member) {
+                $lines[] = $this->variantLine($customer, $member);
             }
         }
 
-        if ($standalone !== []) {
+        if ($hasAvailableProducts) {
             $lines[] = '';
-            $lines[] = $this->locale->translate($customer, 'stock.other_heading');
-            foreach ($standalone as $product) {
-                $lines[] = $this->variantLine($customer, $product, $this->catalogIcon($product));
-            }
+            $lines[] = $this->locale->translate($customer, 'stock.footer');
         }
-
-        $lines[] = '';
-        $lines[] = $this->locale->translate($customer, 'stock.footer');
 
         foreach ($this->chunker->fromLines($lines) as $chunk) {
             $this->bot->sendMessage($chatId, $chunk, options: ['parse_mode' => 'HTML']);
         }
     }
 
-    private function variantLine(
-        Customer $customer,
-        CatalogProductReadModel $product,
-        CatalogIcon $icon,
-    ): string {
+    private function variantLine(Customer $customer, CatalogProductReadModel $product): string
+    {
         $name = $product->label !== '' ? $product->label : $product->name;
-        $url = htmlspecialchars(
-            $this->urls->telegramProductStartUrlForId($product->id),
-            ENT_QUOTES | ENT_SUBSTITUTE,
-            'UTF-8',
-        );
-        $buy = '<a href="'.$url.'">'.$this->captions->escapeTextPreservingIcons($this->locale->translate($customer, 'stock.buy')).'</a>';
+        $status = $this->locale->translate($customer, 'stock.sold_out');
+        if ($product->isAvailable) {
+            $url = $this->escapeHtml($this->urls->telegramProductStartUrlForId($product->id));
+            $buy = $this->captions->escapeTextPreservingIcons($this->locale->translate($customer, 'stock.buy'));
+            $status = '<a href="'.$url.'">'.$buy.'</a>';
+        }
 
         return $this->locale->translate($customer, 'stock.variant', [
-            'icon' => $this->captions->icon($icon),
+            'icon' => $this->captions->icon($this->icons->resolve($product->icon, $product->customEmojiId)),
             'name' => $this->escapeHtml($name),
             'price' => $this->price($customer, $product),
             'stock' => (string) $product->availableStock,
             'sold' => (string) $product->soldQuantity,
-            'buy' => $buy,
+            'status' => $status,
         ]);
     }
 
@@ -136,16 +111,6 @@ final class TelegramStockIntents
         }
 
         return $this->locale->translate($customer, $key, $replace);
-    }
-
-    private function catalogIcon(CatalogProductReadModel $product): CatalogIcon
-    {
-        return $this->icons->resolve($product->icon, $product->customEmojiId);
-    }
-
-    private function familyIcon(CatalogFamilyReadModel $family): CatalogIcon
-    {
-        return $this->icons->resolve($family->icon, $family->customEmojiId);
     }
 
     private function escapeHtml(string $value): string

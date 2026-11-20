@@ -5,6 +5,7 @@ namespace Tests\Feature\Telegram;
 use App\Jobs\SendTelegramBroadcastBatch;
 use App\Models\Customer;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Models\TelegramBroadcast;
 use App\Models\TelegramUiIcon;
@@ -768,7 +769,7 @@ class AdminMenuTest extends TelegramBotTestSupport
         Product::factory()->create(['name' => 'Canva Pro', 'stock' => 4, 'reserved_stock' => 1]);
 
         $this->postTelegramWebhook(
-            $this->messageUpdate(321, '/stock', ['id' => 999], -100123, 'group')
+            $this->messageUpdate(321, '/stocks@lhiestore_bot', ['id' => 999], -100123, 'group')
         )->assertOk();
 
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
@@ -776,6 +777,43 @@ class AdminMenuTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'Canva Pro — Rp10.000 · stok 3 · terjual 0'));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
             && str_contains((string) ($request['text'] ?? ''), 'direservasi'));
+    }
+
+    public function test_stocks_lists_sold_out_plans_and_standalone_products_without_buy_links(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 111, 'locale' => 'id']);
+        $family = ProductFamily::factory()->create(['name' => 'Empty Family']);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'family_option_label' => 'Monthly Plan',
+            'stock' => 0,
+        ]);
+        Product::factory()->create(['name' => 'Reserved Product', 'stock' => 1, 'reserved_stock' => 1]);
+        Product::factory()->create(['name' => 'Hidden Product', 'is_active' => false, 'stock' => 0]);
+
+        $this->postTelegramWebhook($this->messageUpdate(322, '/stocks', ['id' => 111], 111))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request['text'], '<b>Empty Family</b>')
+            && str_contains($request['text'], 'Monthly Plan — Rp10.000 · stok 0 · terjual 0 · 🔴 Habis')
+            && str_contains($request['text'], 'Reserved Product — Rp10.000 · stok 0 · terjual 0 · 🔴 Habis')
+            && ! str_contains($request['text'], 'Hidden Product')
+            && ! str_contains($request['text'], 'start=product_')
+            && ! str_contains($request['text'], 'Tekan Beli'));
+    }
+
+    public function test_stock_lists_sold_out_products_beyond_the_first_catalog_page(): void
+    {
+        $this->fakeTelegramHttp();
+        Customer::factory()->create(['telegram_id' => 111, 'locale' => 'en']);
+        Product::factory()->count(100)->create(['stock' => 1, 'reserved_stock' => 0]);
+        Product::factory()->create(['name' => 'Restock Target', 'stock' => 0, 'reserved_stock' => 0]);
+
+        $this->postTelegramWebhook($this->messageUpdate(323, '/stock', ['id' => 111], 111))->assertOk();
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && str_contains($request['text'], 'Restock Target — Rp10.000 · stock 0 · sold 0 · 🔴 Out of stock'));
     }
 
     public function test_non_admin_cannot_open_product_stock_overview(): void
