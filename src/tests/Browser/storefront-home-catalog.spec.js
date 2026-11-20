@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const appDir = fileURLToPath(new URL("../..", import.meta.url));
+const qrFixturePayload =
+  "DISPOSABLE-STOREFRONT-NOT-PAYABLE:" + "0123456789".repeat(18);
 let baseUrl, fixture, server, invoiceUrl, options;
 let localizedFixtures;
 
@@ -67,6 +69,11 @@ test.beforeAll(async () => {
 test.afterAll(() => {
   server?.kill();
   if (fixture) rmSync(fixture, { recursive: true, force: true });
+});
+
+test.beforeEach(async ({ context }) => {
+  // Never render the actual storefront's static payment QR in test artifacts.
+  await context.route(`${baseUrl}/qr-lhie.jpg`, fulfillFixtureQr);
 });
 
 const sizes = [
@@ -143,6 +150,22 @@ for (const [width, height] of sizes) {
           ) {
             expect(overflow).toBe(0);
             if (width >= 390) expect(bounds).toEqual(targets.map(() => 0));
+          }
+          if (name === "invoice" && text === 200) {
+            const actions = [
+              page.locator("[data-payment-status-check]"),
+              page.locator("#invoice-support > summary"),
+            ];
+            for (const action of actions) {
+              await action.scrollIntoViewIfNeeded();
+              await expect(action).toBeInViewport({ ratio: 1 });
+              const { x, width: actionWidth } = await action.boundingBox();
+              expect(x).toBeGreaterThanOrEqual(0);
+              expect(x + actionWidth).toBeLessThanOrEqual(width);
+            }
+            await page.evaluate(() =>
+              window.scrollTo({ top: 0, behavior: "instant" })
+            );
           }
           const contrast = {};
           const pairs = {
@@ -262,12 +285,242 @@ async function contrastRatio(locator, pseudo, outline = false) {
 function routeFixtureQr(page) {
   return page.route(
     "https://klikqris.com/storage/sandbox/qris_release_fixture.png",
-    (route) =>
-      route.fulfill({
-        contentType: "image/png",
-        body: Buffer.from(localizedFixtures.qr, "base64"),
-      })
+    fulfillFixtureQr
   );
+}
+
+function fulfillFixtureQr(route) {
+  return route.fulfill({
+    contentType: "image/png",
+    body: Buffer.from(localizedFixtures.qr, "base64"),
+  });
+}
+
+for (const [width, height] of sizes.slice(0, 2)) {
+  for (const theme of ["light", "dark"]) {
+    test(`release QR decode ${width}x${height} ${theme}`, async ({
+      page,
+    }, info) => {
+      test.skip(
+        process.env.STOREFRONT_QR_DECODE !== "1",
+        "Enable with STOREFRONT_QR_DECODE=1 and ZBar installed"
+      );
+      await page.setViewportSize({ width, height });
+      await page.addInitScript(
+        (value) => localStorage.setItem("lhie-store-theme", value),
+        theme
+      );
+      await page.route(/^(?!http:\/\/127\.0\.0\.1:)/, (route) => route.abort());
+      await routeFixtureQr(page);
+      await page.goto(baseUrl + localizedFixtures.ready);
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await expect(page.locator(".invoice-qris-total strong")).toHaveText(
+        "Rp35.016"
+      );
+      const frame = page.locator(".invoice-qris-frame");
+      const image = frame.locator("img");
+      await image.evaluate((img) => img.decode());
+      for (const target of [
+        frame,
+        page.locator(".invoice-qris-total"),
+        page.locator(".invoice-qris-deadline"),
+      ]) {
+        await expect(target).toBeInViewport({ ratio: 1 });
+      }
+      const snapshot = info.outputPath("synthetic-qr.png");
+      await frame.screenshot({ path: snapshot, scale: "css" });
+      const decoded = execFileSync("zbarimg", ["-q", "--raw", snapshot], {
+        encoding: "utf8",
+      });
+      expect(decoded).toBe(`${qrFixturePayload}\n`);
+      const dimensions = await frame.boundingBox();
+      const imageDimensions = await image.boundingBox();
+      writeFileSync(
+        info.outputPath("qr-decode.json"),
+        JSON.stringify(
+          {
+            viewport: { width, height },
+            theme,
+            frame: { width: dimensions.width, height: dimensions.height },
+            image: {
+              width: imageDimensions.width,
+              height: imageDimensions.height,
+            },
+            payload: qrFixturePayload,
+          },
+          null,
+          2
+        )
+      );
+    });
+  }
+}
+
+for (const [locale, language, headline, badge, manualWait, cancelled] of [
+  [
+    "id",
+    "Bahasa Indonesia",
+    "Batas pembayaran terlewati",
+    "Batas bayar terlewati",
+    "tunggu konfirmasi admin",
+    "Order dibatalkan",
+  ],
+  [
+    "ms",
+    "Bahasa Melayu",
+    "Tempoh bayaran tamat",
+    "Tempoh bayaran tamat",
+    "tunggu pengesahan admin",
+    "Pesanan dibatalkan",
+  ],
+  [
+    "en",
+    "English",
+    "Payment deadline passed",
+    "Payment deadline passed",
+    "wait for staff confirmation",
+    "Order cancelled",
+  ],
+]) {
+  for (const rail of ["ready", "manual"]) {
+    test(`release QRIS deadline ${rail} ${locale} without navigation`, async ({
+      page,
+    }, info) => {
+      await page.route(/^(?!http:\/\/127\.0\.0\.1:)/, (route) => route.abort());
+      await routeFixtureQr(page);
+      await page.goto(baseUrl);
+      await page.locator("[data-storefront-locale] summary").click();
+      await page.getByRole("link", { name: language }).click();
+      const deadlineMs = Date.parse(localizedFixtures[`${rail}Deadline`]);
+      await page.clock.install({ time: deadlineMs - 11_000 });
+      await page.clock.pauseAt(deadlineMs - 10_000);
+
+      let automaticChecks = 0;
+      await page.route("**/shop/orders/*/status**", async (route) => {
+        if (route.request().headers()["x-storefront-auto-poll"] === "1") {
+          automaticChecks++;
+        }
+        await route.fulfill({
+          json: {
+            ok: true,
+            is_paid: false,
+            is_terminal: true,
+            payment_status: "failed",
+            order_status: "cancelled",
+            message: "Verified terminal fixture",
+          },
+        });
+      });
+      const url = baseUrl + localizedFixtures[rail];
+      await page.goto(url);
+      await expect(page.locator("html")).toHaveAttribute("lang", locale);
+      const qr = page.locator("[data-invoice-qris]");
+      const total = page.locator(".invoice-qris-total strong");
+      const deadline = page.locator(".invoice-qris-deadline time");
+      const deadlineText = await deadline.innerText();
+      const timer = page.getByRole("timer");
+      await expect(qr).toBeVisible();
+      await expect(total).toHaveText(
+        rail === "manual" ? "Rp35.000" : "Rp35.016"
+      );
+      await expect(timer).toHaveText("00:00:10");
+      const announcement = page.locator("[data-qris-deadline-announcement]");
+      await expect(announcement).toBeEmpty();
+      await announcement.evaluate((element) => {
+        window.deadlineAnnouncements = 0;
+        new MutationObserver(() => window.deadlineAnnouncements++).observe(
+          element,
+          { childList: true }
+        );
+      });
+      // A fractional last second still displays permission to pay until the deadline.
+      await page.clock.setSystemTime(deadlineMs - 9_500);
+      await page.clock.runFor(9_000);
+      await expect(timer).toHaveText("00:00:01");
+      await expect(qr).toBeVisible();
+      await page.clock.runFor(1_000);
+      await expect(qr).toBeHidden();
+      await expect(
+        page.locator("[data-invoice-qris-instruction]")
+      ).toBeHidden();
+      await expect(total).toBeHidden();
+      await expect(timer).toBeHidden();
+      await expect(deadline).toHaveText(deadlineText);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        headline
+      );
+      await expect(page.locator("[data-invoice-badge]")).toHaveText(badge);
+      // A deadline is not a terminal Order state.
+      await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
+        "data-invoice-state",
+        "pending"
+      );
+      await expect(page).toHaveURL(url);
+      await expect(announcement).toContainText(headline);
+      const notice = page.locator("[data-qris-deadline-notice]");
+      await expect(notice).toBeVisible();
+      if (rail === "manual") {
+        await expect(notice).toContainText(manualWait);
+        await expect(
+          page.locator("[data-shop-payment-status], input[type=file]")
+        ).toHaveCount(0);
+        await page.locator(".invoice-qris-help").click();
+        await expect(page.locator("#invoice-support")).toHaveAttribute(
+          "open",
+          ""
+        );
+      } else {
+        await expect(page.locator("[data-payment-status-check]")).toBeEnabled();
+        await expect(
+          page.locator("[data-payment-status-followup] a")
+        ).toBeVisible();
+      }
+      await notice.screenshot({ path: info.outputPath("deadline-notice.png") });
+      await page.evaluate(() =>
+        document.dispatchEvent(new Event("visibilitychange"))
+      );
+      await page.clock.runFor(21_000);
+      expect(await page.evaluate(() => window.deadlineAnnouncements)).toBe(1);
+      if (rail === "ready") {
+        await expect(page.locator("[data-payment-status-message]")).toHaveText(
+          "Verified terminal fixture"
+        );
+        await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
+          "data-invoice-state",
+          "terminal"
+        );
+        await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+          cancelled
+        );
+        await expect(notice).toBeHidden();
+        await expect(qr).toBeHidden();
+        expect(automaticChecks).toBe(1);
+      } else {
+        expect(automaticChecks).toBe(0);
+        // Reopen against the same pending Payment, now beyond the saved deadline
+        // on the server as well. The server does not manufacture an Order outcome.
+        const providerState = path.join(fixture, "provider-state");
+        writeFileSync(providerState, "EXPIRED");
+        try {
+          expect((await page.goto(url)).status()).toBe(200);
+          await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+            headline
+          );
+          await expect(page.locator("[data-invoice-badge]")).toHaveText(badge);
+          await expect(qr).toHaveCount(0);
+          await expect(total).toHaveCount(0);
+          await expect(notice).toContainText(manualWait);
+          await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
+            "data-invoice-state",
+            "pending"
+          );
+          await expect(announcement).toBeEmpty();
+        } finally {
+          writeFileSync(providerState, "PENDING");
+        }
+      }
+    });
+  }
 }
 
 test("release guest direct, cart, payment and Recovery Key", async ({
@@ -331,6 +584,7 @@ test("release guest direct, cart, payment and Recovery Key", async ({
     await page
       .getByRole("link", { name: "Beli sekarang", exact: true })
       .click();
+    await page.clock.install();
     await checkout();
     const signed = page.url();
     const invoice = await page
@@ -352,12 +606,26 @@ test("release guest direct, cart, payment and Recovery Key", async ({
     expect(message).not.toContain(key);
     expect(message).not.toContain("signature");
     await expect(page.getByText(credential, { exact: true })).toHaveCount(0);
+    const deadline = await page
+      .locator(".invoice-qris-deadline time")
+      .getAttribute("datetime");
+    await page.clock.setSystemTime(new Date(deadline));
+    await page.clock.runFor(1_000);
+    await expect(qr).toBeHidden();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Batas pembayaran terlewati"
+    );
     provider("SUCCESS");
     await page.locator("[data-payment-status-check]").click();
     await expect(page.locator("[data-invoice-state]")).toHaveAttribute(
       "data-invoice-state",
       "paid"
     );
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Pembayaran terverifikasi"
+    );
+    await expect(page.locator("[data-qris-deadline-notice]")).toHaveCount(0);
+    await page.clock.setSystemTime(new Date());
     async function reveal(target) {
       await target.locator("[data-credential-disclosure-toggle]").click();
       await target
@@ -804,14 +1072,15 @@ foreach ([[$creative, 'Desain Bulanan', 8], [$creative, 'Desain Tahunan', 0], [$
     if ($index === 0) $featured = $product;
 }
 $urls = ['product' => route('storefront.products.show', $featured, absolute: false), 'review' => route('storefront.shop.checkout.product', $featured, absolute: false)];
-$urls['qr'] = base64_encode(app(\App\Services\Telegram\TelegramQrCodeRenderer::class)->png('DISPOSABLE-737-NOT-PAYABLE'));
+$urls['qr'] = base64_encode(app(\App\Services\Telegram\TelegramQrCodeRenderer::class)->png('${qrFixturePayload}'));
 foreach (range(1, 8) as $slot) {
     \App\Models\ProductStockItem::query()->create(['product_id' => $featured->id, 'secret' => ($slot === 1 ? 'release-guest@example.test' : "release-guest-$slot@example.test").'|synthetic-fixture']);
 }
 foreach (['unavailable', 'manual', 'expired', 'paid'] as $state) {
-    $order = \App\Models\Order::factory()->create(['order_status' => $state === 'paid' ? 'completed' : 'pending_payment', 'total_amount' => 35000, 'expires_at' => $state === 'expired' ? now()->subMinute() : now()->addHour()]);
+    $order = \App\Models\Order::factory()->create(['order_status' => $state === 'paid' ? 'completed' : 'pending_payment', 'total_amount' => 35000, 'expires_at' => $state === 'expired' ? now()->subMinute() : now()->addMinutes(15)]);
     if ($state !== 'unavailable') \App\Models\Payment::factory()->for($order)->create(['method' => 'QR_MANUAL', 'provider' => 'manual', 'status' => $state === 'paid' ? 'paid' : 'pending', 'expired_at' => $order->expires_at]);
     $urls[$state] = \Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $order, absolute: false);
+    if ($state === 'manual') $urls['manualDeadline'] = $order->expires_at->toIso8601String();
 }
 $ready = \Tests\Support\KlikQrisSandboxScenarios::klikQrisPayment([
     'merchant_ref' => 'INV-RELEASE-LAYOUT', 'amount' => 35000, 'provider_total_payment' => 35016, 'provider_expires_at' => now()->addMinutes(15),
@@ -819,5 +1088,6 @@ $ready = \Tests\Support\KlikQrisSandboxScenarios::klikQrisPayment([
       'qris_url' => 'https://klikqris.com/storage/sandbox/qris_release_fixture.png', 'expired_at' => now()->addMinutes(15)->toISOString()]],
 ]);
 $urls['ready'] = \Illuminate\Support\Facades\URL::temporarySignedRoute('storefront.shop.orders.show', now()->addHour(), $ready->order, absolute: false);
+$urls['readyDeadline'] = $ready->provider_expires_at->toIso8601String();
 echo json_encode($urls);
 `;

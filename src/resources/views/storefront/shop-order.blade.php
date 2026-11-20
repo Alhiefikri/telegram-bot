@@ -32,37 +32,39 @@
                 </a>
 
                 @php
-                    $headline = $isPaid ? __('storefront_funnel.payment_verified') : ($isBscPayment ? __('storefront_funnel.bsc_order_created') : ($isBinancePay ? __('storefront_funnel.binance_order_created') : ($qrisExpired ? __('storefront_funnel.payment_deadline_passed') : (($isManualQris || $isQrisPayable || $isHostedQris) ? __('storefront_funnel.qris_invoice') : $qrisReadinessTitle))));
-                    $summary = $isPaid
-                        ? __('storefront_funnel.paid_summary')
-                        : ($isBscPayment ? __('storefront_funnel.bsc_summary') : ($isBinancePay ? __('storefront_funnel.binance_summary') : ($qrisExpired ? __('storefront_funnel.qris_expired_summary') : (($isManualQris || $isQrisPayable || $isHostedQris) ? __('storefront_funnel.pending_summary') : __('storefront_funnel.qris_unready_summary')))));
-
-                    if ($isTerminal && ! $isPaid) {
-                        $headline = match ($order->order_status?->value) {
-                            'cancelled' => __('storefront_funnel.order_cancelled'),
-                            'expired' => __('storefront_funnel.order_expired'),
-                            default => __('storefront_funnel.order_inactive'),
-                        };
-                        $summary = match ($order->order_status?->value) {
-                            'cancelled' => __('storefront_funnel.cancelled_summary'),
-                            'expired' => strtolower((string) $payment?->provider) === 'sakurupiah'
-                                ? __('storefront_funnel.expired_qris_summary')
-                                : __('storefront_funnel.expired_summary'),
-                            default => __('storefront_funnel.terminal_summary'),
-                        };
-                    }
+                    $finalBadge = __('storefront_funnel.final_status');
+                    $qrisHeroCopy = [
+                        'deadline' => [__('storefront_funnel.payment_deadline_passed'), __('storefront_funnel.expired_badge'), __('storefront_funnel.qris_expired_summary')],
+                        'paid' => [__('storefront_funnel.payment_verified'), __('storefront_funnel.verified'), __('storefront_funnel.paid_summary')],
+                        'terminal' => [__('storefront_funnel.order_inactive'), $finalBadge, __('storefront_funnel.terminal_summary')],
+                        'cancelled' => [__('storefront_funnel.order_cancelled'), $finalBadge, __('storefront_funnel.cancelled_summary')],
+                        'expired' => [__('storefront_funnel.order_expired'), $finalBadge, __(strtolower((string) $payment?->provider) === 'sakurupiah' ? 'storefront_funnel.expired_qris_summary' : 'storefront_funnel.expired_summary')],
+                    ];
+                    $pendingBadge = __('storefront_funnel.pending_badge');
+                    [$headline, $badge, $summary] = match (true) {
+                        $isPaid => $qrisHeroCopy['paid'],
+                        $isTerminal => $qrisHeroCopy[$order->order_status?->value] ?? $qrisHeroCopy['terminal'],
+                        $isBscPayment => [__('storefront_funnel.bsc_order_created'), $pendingBadge, __('storefront_funnel.bsc_summary')],
+                        $isBinancePay => [__('storefront_funnel.binance_order_created'), $pendingBadge, __('storefront_funnel.binance_summary')],
+                        $qrisExpired => $qrisHeroCopy['deadline'],
+                        $isManualQris || $isQrisPayable || $isHostedQris => [__('storefront_funnel.qris_invoice'), $pendingBadge, __('storefront_funnel.pending_summary')],
+                        default => [$qrisReadinessTitle, $pendingBadge, __('storefront_funnel.qris_unready_summary')],
+                    };
                 @endphp
 
-                <div class="invoice-order-hero mx-auto flex min-w-0 max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-invoice-state="{{ $isPaid ? 'paid' : ($isPendingPayment ? 'pending' : 'terminal') }}">
+                <div class="invoice-order-hero mx-auto flex min-w-0 max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-invoice-state="{{ $isPaid ? 'paid' : ($isPendingPayment ? 'pending' : 'terminal') }}"
+                    @if ($isPendingPayment && ! $isBscPayment && ! $isBinancePay)
+                        data-qris-hero-copy='@json($qrisHeroCopy)'
+                    @endif>
                     <div class="min-w-0">
                         <p class="invoice-order-label text-sm font-semibold">{{ __('storefront_funnel.web_order') }}</p>
-                        <h1 class="mt-1 text-balance font-display text-2xl font-black leading-tight text-[var(--sf-ink)] sm:text-3xl">{{ $headline }}</h1>
+                        <h1 data-invoice-headline class="mt-1 text-balance font-display text-2xl font-black leading-tight text-[var(--sf-ink)] sm:text-3xl">{{ $headline }}</h1>
                         <p class="mt-1 text-sm font-semibold leading-6 text-[var(--sf-muted)]">
-                            {{ __('storefront_funnel.invoice') }} <span class="break-all font-mono font-bold text-[var(--sf-ink)]">{{ $order->invoice_number }}</span> {{ $summary }}
+                            {{ __('storefront_funnel.invoice') }} <span class="break-all font-mono font-bold text-[var(--sf-ink)]">{{ $order->invoice_number }}</span> <span data-invoice-summary>{{ $summary }}</span>
                         </p>
                     </div>
-                    <span class="invoice-status inline-flex w-fit shrink-0 items-center rounded-lg px-3 py-2 text-sm font-bold">
-                        {{ $isPaid ? __('storefront_funnel.verified') : ($isPendingPayment ? (($qrisExpired && ! $isBscPayment && ! $isBinancePay) ? __('storefront_funnel.expired_badge') : __('storefront_funnel.pending_badge')) : __('storefront_funnel.final_status')) }}
+                    <span data-invoice-badge class="invoice-status inline-flex w-fit shrink-0 items-center rounded-lg px-3 py-2 text-sm font-bold">
+                        {{ $badge }}
                     </span>
                 </div>
 
