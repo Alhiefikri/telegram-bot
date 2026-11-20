@@ -33,21 +33,20 @@ final class TelegramWebAuthenticationAdapter
             return true;
         }
 
-        $confirmation = $this->authentication->prepare('wa_'.$matches[1], $actorId, $chatId, 'private');
-        if ($confirmation === null) {
+        $choices = $this->authentication->prepare('wa_'.$matches[1], $actorId, $chatId, 'private');
+        if ($choices === null) {
             $this->send($chatId, self::INVALID);
 
             return true;
         }
 
+        $login = count($choices) === 3;
         $this->send(
             $chatId,
-            "Konfirmasi akun web\n\nLanjutkan hanya jika Anda baru saja meminta masuk atau menghubungkan Telegram dari situs toko di browser Anda sendiri. Tombol ini membuktikan kepemilikan akun Telegram untuk permintaan tersebut.\n\nJika bukan Anda yang memulai, abaikan pesan ini. Jangan teruskan tautan atau tombol ini kepada siapa pun. Permintaan berakhir dalam 5 menit. Setelah konfirmasi, kembali ke browser yang memulai permintaan untuk menyelesaikannya.",
-            ['inline_keyboard' => [[[
-                'text' => 'Konfirmasi permintaan akun web',
-                'style' => 'primary',
-                'callback_data' => $confirmation,
-            ]]]],
+            $login
+                ? 'Masuk ke '.rtrim((string) config('app.url'), '/')."\n\nPilih angka yang tampil di situs. Setujui hanya permintaan yang Anda mulai sendiri. Jika tidak melihat angkanya, jangan menebak.\n\nIni hanya untuk masuk. Hubungkan akun secara terpisah dari pengaturan keamanan di situs."
+                : "Konfirmasi akun web\n\nLanjutkan hanya jika Anda baru saja meminta menghubungkan Telegram dari situs toko di browser Anda sendiri. Tombol ini membuktikan kepemilikan akun Telegram untuk permintaan tersebut.\n\nJika bukan Anda yang memulai, abaikan pesan ini. Jangan teruskan tautan atau tombol ini kepada siapa pun. Permintaan berakhir dalam 5 menit. Setelah konfirmasi, kembali ke browser yang memulai permintaan untuk menyelesaikannya.",
+            ['inline_keyboard' => [array_map(fn (array $choice): array => $choice + ['style' => 'primary'], $choices)]],
         );
 
         return true;
@@ -63,12 +62,13 @@ final class TelegramWebAuthenticationAdapter
             return true;
         }
 
-        $confirmed = preg_match('/\Awa_confirm:[A-Za-z0-9_-]{43}\z/', $callback['data']) === 1
-            && $this->authentication->confirm($callback['data'], (string) $callback['from']['id'], (string) $chat['id'], 'private');
+        $login = preg_match('/:[1-9][0-9]\z/', $callback['data']) === 1;
+        $confirmed = $this->authentication->confirm($callback['data'], (string) $callback['from']['id'], (string) $chat['id'], 'private');
         try {
             $this->bot->answerCallbackQuery(
                 (string) $callback['id'],
-                $confirmed ? 'Telegram dikonfirmasi. Kembali ke browser yang memulai permintaan.' : self::INVALID,
+                $confirmed ? 'Telegram dikonfirmasi. Kembali ke browser yang memulai permintaan.'
+                    : ($login ? 'Angka salah atau permintaan tidak berlaku. Mulai lagi dari situs toko.' : self::INVALID),
             );
         } catch (Throwable) {
             throw new RuntimeException('Telegram web authentication response is unavailable.');
@@ -77,7 +77,8 @@ final class TelegramWebAuthenticationAdapter
         if ($confirmed) {
             $this->send(
                 (string) $chat['id'],
-                'Telegram dikonfirmasi. Kembali ke situs toko di browser yang memulai permintaan, lalu klik "Periksa konfirmasi Telegram" untuk menyelesaikannya.',
+                $login ? 'Telegram dikonfirmasi. Kembali ke tab situs yang tadi dibuka. Anda akan masuk otomatis.'
+                    : 'Telegram dikonfirmasi. Kembali ke situs toko di browser yang memulai permintaan, lalu klik "Periksa konfirmasi Telegram" untuk menyelesaikannya.',
             );
         }
 

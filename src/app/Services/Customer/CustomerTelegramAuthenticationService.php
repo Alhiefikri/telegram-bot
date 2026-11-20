@@ -10,6 +10,8 @@ use App\Services\Telegram\TelegramBotIdentity;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Random\Engine\Secure;
+use Random\Randomizer;
 use Throwable;
 
 final class CustomerTelegramAuthenticationService
@@ -18,6 +20,7 @@ final class CustomerTelegramAuthenticationService
         private CustomerAuthenticationRateLimiter $limiter,
         private CustomerSessionAuthentication $sessions,
         private readonly TelegramBotIdentity $botIdentity,
+        private readonly CustomerTelegramDevices $devices,
     ) {}
 
     public function ready(): bool
@@ -43,7 +46,8 @@ final class CustomerTelegramAuthenticationService
             }
             $nonce = $this->secret();
             $capability = 'wa_'.$this->secret();
-            $claim = DB::transaction(function () use ($request, $link, $authenticated, $nonce, $capability): ?CustomerTelegramAuthClaim {
+            $expiresIn = $link ? 300 : 180;
+            $claim = DB::transaction(function () use ($request, $link, $authenticated, $nonce, $capability, $expiresIn): ?CustomerTelegramAuthClaim {
                 $customer = $link ? Customer::query()->whereKey($authenticated->getAuthIdentifier())->lockForUpdate()->first() : null;
                 if ($link && (! $customer || $request->session()->get('customer_auth_version') !== $customer->auth_version)) {
                     return null;
@@ -57,7 +61,7 @@ final class CustomerTelegramAuthenticationService
                     'authenticated_at' => $link ? now()->setTimestamp($request->session()->get('customer_authenticated_at')) : null,
                     'session_binding_hash' => $this->binding($request, $nonce),
                     'capability_hash' => hash('sha256', $capability),
-                    'expires_at' => $createdAt->copy()->addMinutes(5),
+                    'expires_at' => $createdAt->copy()->addSeconds($expiresIn),
                     'created_at' => $createdAt,
                     'updated_at' => $createdAt,
                 ])->save();
@@ -72,7 +76,13 @@ final class CustomerTelegramAuthenticationService
             $request->session()->put('customer_telegram_claim_id', $claim->getKey());
             $request->session()->put('customer_telegram_claim_nonce', $nonce);
 
-            return ['deep_link' => 'https://t.me/'.$username.'?start='.$capability, 'expires_in' => 300];
+            $result = ['deep_link' => 'https://t.me/'.$username.'?start='.$capability, 'expires_in' => $expiresIn];
+            if (! $link) {
+                $result['number'] = $this->number($claim);
+                $result['request_id'] = (string) $claim->getKey();
+            }
+
+            return $result;
         } catch (Throwable) {
             $request->session()->put('customer_telegram_claim_error', 'unavailable');
 
@@ -107,7 +117,8 @@ final class CustomerTelegramAuthenticationService
         }
     }
 
-    public function prepare(#[\SensitiveParameter] string $capability, string $actorId, string $chatId, string $chatType): ?string
+    /** @return list<array{text: string, callback_data: string}>|null */
+    public function prepare(#[\SensitiveParameter] string $capability, string $actorId, string $chatId, string $chatType): ?array
     {
         if (! $this->privateActor($actorId, $chatId, $chatType) || preg_match('/\Awa_[A-Za-z0-9_-]{43}\z/', $capability) !== 1) {
             return null;
@@ -121,7 +132,7 @@ final class CustomerTelegramAuthenticationService
                 return null;
             }
 
-            return DB::transaction(function () use ($snapshot, $actorId): ?string {
+            return DB::transaction(function () use ($snapshot, $actorId): ?array {
                 $customerId = $snapshot->operation === 'link' ? $snapshot->customer_id : Customer::query()->where('telegram_id', $actorId)->value('id');
                 $customer = $customerId ? Customer::query()->whereKey($customerId)->lockForUpdate()->first() : null;
                 $claim = CustomerTelegramAuthClaim::query()->whereKey($snapshot->getKey())->lockForUpdate()->first();
@@ -157,7 +168,21 @@ final class CustomerTelegramAuthenticationService
                     'prepared_at' => $claim->prepared_at ?? now(),
                 ])->save();
 
-                return $confirmation;
+                if ($claim->operation === 'link') {
+                    return [['text' => 'Konfirmasi permintaan akun web', 'callback_data' => $confirmation]];
+                }
+
+                $numbers = [$this->number($claim)];
+                while (count($numbers) < 3) {
+                    $decoy = (string) random_int(10, 99);
+                    if (! in_array($decoy, $numbers, true)) {
+                        $numbers[] = $decoy;
+                    }
+                }
+
+                return array_map(fn (string $number): array => [
+                    'text' => $number, 'callback_data' => $confirmation.':'.$number,
+                ], (new Randomizer(new Secure))->shuffleArray($numbers));
             });
         } catch (Throwable) {
             return null;
@@ -166,23 +191,33 @@ final class CustomerTelegramAuthenticationService
 
     public function confirm(#[\SensitiveParameter] string $confirmation, string $actorId, string $chatId, string $chatType): bool
     {
-        if (! $this->privateActor($actorId, $chatId, $chatType) || preg_match('/\Awa_confirm:[A-Za-z0-9_-]{43}\z/', $confirmation) !== 1) {
+        if (! $this->privateActor($actorId, $chatId, $chatType)
+            || preg_match('/\A(wa_confirm:[A-Za-z0-9_-]{43})(?::([1-9][0-9]))?\z/', $confirmation, $matches) !== 1) {
             return false;
         }
         try {
             if (! $this->ready() || ! $this->limiter->allowTelegramProof($actorId)) {
                 return false;
             }
-            $hash = hash('sha256', $confirmation);
+            $hash = hash('sha256', $matches[1]);
+            $number = $matches[2] ?? null;
             $snapshot = CustomerTelegramAuthClaim::query()->where('confirmation_hash', $hash)->first();
             if (! $snapshot) {
                 return false;
             }
 
-            return DB::transaction(function () use ($snapshot, $hash, $actorId): bool {
+            return DB::transaction(function () use ($snapshot, $hash, $actorId, $number): bool {
                 $customer = Customer::query()->whereKey($snapshot->proof_customer_id)->lockForUpdate()->first();
                 $claim = CustomerTelegramAuthClaim::query()->whereKey($snapshot->getKey())->lockForUpdate()->first();
                 if (! $this->active($claim) || $claim->confirmation_hash !== $hash || $claim->confirmed_at !== null || $claim->actor_id !== $actorId) {
+                    return false;
+                }
+                if (($claim->operation === 'login') !== ($number !== null)) {
+                    return false;
+                }
+                if ($number !== null && ! hash_equals($this->number($claim), $number)) {
+                    $this->fail($claim, 'invalid');
+
                     return false;
                 }
                 if (! $customer || $customer->auth_version !== $claim->proof_auth_version || ($claim->operation === 'link' && ! $this->claimFresh($claim))) {
@@ -214,7 +249,8 @@ final class CustomerTelegramAuthenticationService
             if (! $snapshot || $snapshot->proof_customer_id === null) {
                 return false;
             }
-            $customer = DB::transaction(function () use ($snapshot, $request): ?Customer {
+            $device = null;
+            $customer = DB::transaction(function () use ($snapshot, $request, &$device): ?Customer {
                 // Reset and proof consumption use the same Customer-first lock order.
                 $customer = Customer::query()->whereKey($snapshot->proof_customer_id)->lockForUpdate()->first();
                 $claim = CustomerTelegramAuthClaim::query()->whereKey($snapshot->getKey())->lockForUpdate()->first();
@@ -256,6 +292,9 @@ final class CustomerTelegramAuthenticationService
 
                     return null;
                 }
+                if ($claim->operation === 'login' && $request->boolean('remember_device')) {
+                    $device = $this->devices->issue($customer);
+                }
                 $claim->forceFill(['consumed_at' => now()])->save();
 
                 return $customer;
@@ -263,8 +302,14 @@ final class CustomerTelegramAuthenticationService
             if (! $customer) {
                 return false;
             }
+            if ($snapshot->operation === 'login') {
+                $this->devices->forget($request);
+            }
             $this->sessions->authenticate($customer, $request);
             $request->session()->put('customer_telegram_authenticated', true);
+            if ($device !== null) {
+                $this->devices->remember($request, ...$device);
+            }
             $request->session()->forget(['customer_telegram_claim_id', 'customer_telegram_claim_nonce', 'customer_telegram_claim_error']);
 
             return true;
@@ -301,7 +346,10 @@ final class CustomerTelegramAuthenticationService
     {
         $id = $request->session()->get('customer_telegram_claim_id');
 
-        return is_int($id) ? CustomerTelegramAuthClaim::query()->find($id) : null;
+        $expected = $request->header('X-Telegram-Login-Request');
+
+        return is_int($id) && ($expected === null || $expected === (string) $id)
+            ? CustomerTelegramAuthClaim::query()->find($id) : null;
     }
 
     private function browserMatches(CustomerTelegramAuthClaim $claim, Request $request, bool $requireFresh = true): bool
@@ -364,5 +412,13 @@ final class CustomerTelegramAuthenticationService
     private function secret(): string
     {
         return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    }
+
+    private function number(CustomerTelegramAuthClaim $claim): string
+    {
+        // Both channels can derive the same number without exposing it in the deep link.
+        $digest = hash_hmac('sha256', 'telegram-login-number:'.$claim->capability_hash, (string) config('app.key'));
+
+        return (string) (10 + hexdec(substr($digest, 0, 6)) % 90);
     }
 }

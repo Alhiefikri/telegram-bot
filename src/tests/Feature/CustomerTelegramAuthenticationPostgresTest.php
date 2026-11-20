@@ -135,7 +135,9 @@ class CustomerTelegramAuthenticationPostgresTest extends TestCase
         $start = $service->start($request, $link);
         $this->assertNotNull($start);
         parse_str(parse_url($start['deep_link'], PHP_URL_QUERY), $query);
-        $confirmation = $service->prepare($query['start'], $actor, $actor, 'private');
+        $choices = $service->prepare($query['start'], $actor, $actor, 'private');
+        $confirmation = $link ? ($choices[0]['callback_data'] ?? null)
+            : collect($choices)->firstWhere('text', $start['number'])['callback_data'] ?? null;
         $this->assertNotNull($confirmation);
         $this->assertTrue($service->confirm($confirmation, $actor, $actor, 'private'));
 

@@ -10,8 +10,10 @@ use App\Http\Middleware\PreventAdminMiniAppCache;
 use App\Http\Middleware\RedirectToCanonicalHost;
 use App\Http\Middleware\TrustConfiguredHosts;
 use App\Http\Middleware\TrustConfiguredProxies;
+use App\Http\Middleware\ValidateCustomerSession;
 use App\Http\Middleware\ValidateStorefrontSignedInvoice;
 use App\Services\CustomerApi\CustomerApiFailure;
+use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -46,6 +48,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'storefront.locale' => ApplyStorefrontLocale::class,
         ]);
         $middleware->prependToPriorityList(StartSession::class, ApplyStorefrontLocale::class);
+        $middleware->prependToPriorityList(AuthenticatesRequests::class, ValidateCustomerSession::class);
         $middleware->trimStrings(except: [fn (Request $request) => $request->isMethod('POST') && $request->is('bahasa')]);
         $middleware->append(RedirectToCanonicalHost::class);
 

@@ -42,15 +42,18 @@ final class CleanupCustomerAuthTokens extends Command
                     ->where(function (Builder $query) use ($cutoff): void {
                         $query->whereNotNull('consumed_at')->orWhere('expires_at', '<=', $cutoff);
                     })->orderBy('id')->limit($limit)->lockForUpdate()->pluck('id');
+                $deviceIds = $this->option('legacy-only') ? collect() : DB::table('customer_telegram_devices')
+                    ->where('expires_at', '<=', $cutoff)->orderBy('id')->limit($limit)->lockForUpdate()->pluck('id');
 
                 return [
                     'tokens' => $this->option('legacy-only') ? 0 : $this->deletePage($tokens, 'customer_auth_tokens', 'auth_token_id', $limit),
                     'links' => $this->deletePage($links, 'customer_login_links', 'login_link_id', $limit),
                     'telegram_claims' => $claimIds->isEmpty() ? 0 : DB::table('customer_telegram_auth_claims')->whereIn('id', $claimIds)->delete(),
                     'google_claims' => $googleClaimIds->isEmpty() ? 0 : DB::table('customer_google_auth_claims')->whereIn('id', $googleClaimIds)->delete(),
+                    'telegram_devices' => $deviceIds->isEmpty() ? 0 : DB::table('customer_telegram_devices')->whereIn('id', $deviceIds)->delete(),
                 ];
             });
-            $this->info("Deleted customer auth challenges: tokens={$counts['tokens']} login_links={$counts['links']} telegram_claims={$counts['telegram_claims']} google_claims={$counts['google_claims']}.");
+            $this->info("Deleted customer auth challenges: tokens={$counts['tokens']} login_links={$counts['links']} telegram_claims={$counts['telegram_claims']} google_claims={$counts['google_claims']} telegram_devices={$counts['telegram_devices']}.");
 
             return self::SUCCESS;
         } catch (Throwable) {

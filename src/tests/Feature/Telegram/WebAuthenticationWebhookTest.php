@@ -82,17 +82,57 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
     public function test_anonymous_proof_signs_in_existing_canonical_customer_without_registering_another(): void
     {
         $customer = Customer::factory()->create(['telegram_id' => 12345, 'email' => null]);
-        [$browser, $payload] = $this->start();
+        [$browser, $payload, $number] = $this->start();
 
         $this->postTelegramWebhook($this->messageUpdate(61003, '/start@StoreAuthenticationBot '.$payload, ['is_bot' => false]))->assertOk();
+        $buttons = $this->choices();
+        $this->assertCount(3, array_unique(array_column($buttons, 'text')));
+        foreach ($buttons as $button) {
+            $this->assertMatchesRegularExpression('/\A[1-9][0-9]\z/', $button['text']);
+            $this->assertSame('primary', $button['style']);
+            $this->assertLessThanOrEqual(64, strlen($button['callback_data']));
+        }
+        $choice = collect($buttons)->firstWhere('text', $number);
+        $this->assertNotNull($choice);
         $this->assertGuest('customer');
-        $this->postTelegramWebhook($this->callbackUpdate(61004, 'confirm-login', $this->confirmation(), ['is_bot' => false]))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(61004, 'confirm-login', $choice['callback_data'], ['is_bot' => false]))->assertOk();
         $this->assertGuest('customer');
         $this->assertTrue($this->authentication()->consume($browser));
 
         $this->assertAuthenticatedAs($customer, 'customer');
         $this->assertSame(1, Customer::count());
         $this->assertNull(TelegramUpdate::firstOrFail()->customer_id);
+        $this->assertEncryptedUpdates($payload, $choice['callback_data']);
+    }
+
+    public function test_wrong_number_ends_the_login_attempt_without_allowing_a_second_guess(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345]);
+        [$browser, $payload, $number] = $this->start();
+        $this->postTelegramWebhook($this->messageUpdate(61101, '/start '.$payload, ['is_bot' => false]))->assertOk();
+        $buttons = collect($this->choices());
+        $wrong = $buttons->first(fn (array $choice): bool => $choice['text'] !== $number)['callback_data'];
+        $right = $buttons->firstWhere('text', $number)['callback_data'];
+
+        $this->postTelegramWebhook($this->callbackUpdate(61102, 'wrong-number', $wrong, ['is_bot' => false]))->assertOk();
+        $this->assertSame('invalid', $this->authentication()->status($browser));
+        $this->postTelegramWebhook($this->callbackUpdate(61103, 'second-guess', $right, ['is_bot' => false]))->assertOk();
+        $this->assertFalse($this->authentication()->consume($browser));
+        $this->assertGuest('customer');
+    }
+
+    public function test_expired_login_number_cannot_confirm(): void
+    {
+        Customer::factory()->create(['telegram_id' => 12345]);
+        [$browser, $payload, $number] = $this->start();
+        $this->postTelegramWebhook($this->messageUpdate(61104, '/start '.$payload, ['is_bot' => false]))->assertOk();
+        $right = collect($this->choices())->firstWhere('text', $number)['callback_data'];
+
+        $this->travel(180)->seconds();
+        $this->postTelegramWebhook($this->callbackUpdate(61105, 'expired-number', $right, ['is_bot' => false]))->assertOk();
+        $this->assertSame('expired', $this->authentication()->status($browser));
+        $this->assertFalse($this->authentication()->consume($browser));
+        $this->assertGuest('customer');
     }
 
     public function test_unused_actor_cannot_create_a_customer_through_anonymous_sign_in(): void
@@ -366,11 +406,12 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
 
     public function test_auth_capability_redactor_covers_deep_links_and_encoded_callbacks(): void
     {
+        config(['services.telegram.webhook_secret' => 'webhook-fixture-key']);
         $secret = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-        $redacted = TelegramBotApiRedactor::redactText('/start wa_'.$secret.' https://t.me/StoreAuthenticationBot?start=wa_'.$secret.' wa_confirm:'.$secret.' wa_confirm%3A'.$secret);
+        $redacted = TelegramBotApiRedactor::redactText('/start wa_'.$secret.' https://t.me/StoreAuthenticationBot?start=wa_'.$secret.' wa_confirm:'.$secret.':14 wa_confirm%3A'.$secret.'%3A42');
 
         $this->assertStringNotContainsString($secret, $redacted);
-        $this->assertSame(4, substr_count($redacted, '[redacted-secret]'));
+        $this->assertSame('/start [redacted-secret] https://t.me/StoreAuthenticationBot?start=[redacted-secret] [redacted-secret] [redacted-secret]', $redacted);
     }
 
     private function emailCustomer(): Customer
@@ -391,11 +432,20 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $browser->setUserResolver(fn (?string $guard = null) => auth($guard)->user());
         $started = $this->authentication()->start($browser, $customer !== null);
         $this->assertNotNull($started);
-        $this->assertSame(300, $started['expires_in']);
+        $this->assertSame($customer === null ? 180 : 300, $started['expires_in']);
         parse_str((string) parse_url($started['deep_link'], PHP_URL_QUERY), $query);
         $this->assertMatchesRegularExpression('/\Awa_[A-Za-z0-9_-]{43}\z/', $query['start']);
 
-        return [$browser, $query['start']];
+        return [$browser, $query['start'], $started['number'] ?? null];
+    }
+
+    private function choices(): array
+    {
+        $request = Http::recorded(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && isset($request['reply_markup']['inline_keyboard']))->last()[0] ?? null;
+        $this->assertNotNull($request);
+
+        return $request['reply_markup']['inline_keyboard'][0];
     }
 
     private function authentication(): CustomerTelegramAuthenticationService

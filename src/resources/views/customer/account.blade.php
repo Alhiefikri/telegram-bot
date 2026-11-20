@@ -112,6 +112,10 @@
                             <form method="POST" action="{{ route('customer.telegram.login') }}" data-telegram-form data-status-url="{{ route('customer.telegram.status') }}" data-consume-url="{{ route('customer.telegram.consume') }}" data-orders-url="{{ route('customer.orders.index') }}" hidden>
                                 @csrf
                                 <button type="submit" class="auth-secondary">@include('customer.partials.auth-icon', ['icon' => 'telegram']) Masuk dengan Telegram</button>
+                                <label class="auth-help auth-remember-device">
+                                    <input type="checkbox" name="remember_device" value="1" checked>
+                                    Ingat perangkat ini selama 30 hari
+                                </label>
                             </form>
                             <div data-telegram-status role="status" class="auth-help"></div>
                             <noscript><p class="auth-help">Konfirmasi Telegram memerlukan JavaScript. Gunakan password, kode email, atau link email.</p></noscript>
