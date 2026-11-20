@@ -1,12 +1,6 @@
-<!DOCTYPE html>
-<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
-<head>
-    @include('storefront.partials.head', ['metadata' => $metadata])
-</head>
-<body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
-    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-clip">
-        @include('storefront.partials.header')
+@extends('storefront.layouts.store')
 
+@section('content')
         <main class="flex-grow px-5 py-14 sm:px-6 sm:py-20">
             <section class="neo-panel mx-auto max-w-xl bg-[var(--sf-surface)] p-6 sm:p-8" aria-labelledby="order-access-title">
                 <p class="text-sm font-black text-[var(--sf-accent)]">{{ __('storefront_funnel.order_access_title') }}</p>
@@ -52,7 +46,4 @@
             </section>
         </main>
 
-        @include('storefront.partials.footer')
-    </div>
-</body>
-</html>
+@endsection

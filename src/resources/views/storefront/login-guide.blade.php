@@ -1,31 +1,8 @@
-<!DOCTYPE html>
-<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
-<head>
-    @include('storefront.partials.head', ['metadata' => $metadata])
-</head>
-<body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white motion-reduce:animate-none">
-    <div class="storefront-shell min-h-screen">
-        <header class="relative z-50 mx-auto mt-4 w-[calc(100%-2rem)] max-w-6xl rounded-xl border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[6px_6px_0_var(--sf-shadow)]">
-            <div class="flex min-h-16 items-center justify-between gap-4 px-5 py-3">
-                <a href="{{ route('storefront.home') }}" class="flex items-center gap-2" aria-label="Kembali ke beranda {{ $brand }}">
-                    @include('storefront.components.brand-mark', ['brand' => $brand])
-                </a>
+@extends('storefront.layouts.store')
 
-                <nav class="hidden items-center gap-1.5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] p-1 text-xs font-black text-[var(--sf-ink)] md:flex" aria-label="Navigasi panduan login">
-                    <a href="{{ route('storefront.guides.index') }}" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Semua Panduan</a>
-                    <a href="#alur" class="rounded-md bg-[var(--sf-surface)] px-4 py-2 shadow-[3px_3px_0_var(--sf-shadow)]">Alur</a>
-                    <a href="#langkah" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Panduan</a>
-                    <a href="#bantuan" class="rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">Bantuan</a>
-                    <a href="{{ $invoiceReturnUrl ?: route('storefront.order-access.create') }}" class="inline-flex items-center gap-1.5 rounded-md px-4 py-2 transition-colors hover:bg-[var(--sf-surface)]">{{ $invoiceReturnUrl ? 'Kembali ke Invoice' : 'Akses Pesanan' }}</a>
-                </nav>
-                <div class="flex flex-wrap items-center justify-end gap-2">
-                    @include('storefront.partials.locale-selector')
-                    <x-theme-toggle class="h-11 w-11 shrink-0 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] text-[var(--sf-ink)] shadow-[0_4px_10px_rgb(18_35_63_/_0.08)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 focus:outline-none focus:ring-2 focus:ring-[var(--sf-accent)]" />
-                </div>
-            </div>
-        </header>
-
-        <main class="mx-auto max-w-6xl px-5 py-12 sm:px-6 lg:py-18">
+@section('content')
+        <main class="storefront-layout-frame py-10 lg:py-14">
+            <a href="{{ route('storefront.guides.index') }}" class="home-catalog-link mb-4 inline-flex min-h-11 items-center text-sm font-semibold">← Semua Panduan</a>
             <section class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
                 <div>
                     <x-storefront.badge class="px-4 py-2 text-xs tracking-[0.18em]">Panduan setelah pembelian</x-storefront.badge>
@@ -178,6 +155,4 @@
                 </figure>
             </x-storefront.panel>
         </main>
-    </div>
-</body>
-</html>
+@endsection

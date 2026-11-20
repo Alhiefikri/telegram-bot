@@ -21,12 +21,17 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 23;
+    private const DESIGN_VERSION = 35;
 
     public function __construct(
         private readonly StorefrontCatalogPageBuilder $catalogPages,
         private readonly CheckoutMaintenance $maintenance,
     ) {}
+
+    public function fragment(string $search, ?string $family, int $page, bool $isVariant): string
+    {
+        return view('storefront.partials.home-catalog-fragment', $this->catalogPages->homeViewData(StorefrontCatalogSearch::normalize($search), $family, $page, $isVariant))->render();
+    }
 
     public function get(string $search, ?string $family = null, int $page = 1, bool $isVariant = false): string
     {
@@ -108,6 +113,8 @@ class StorefrontResponseCache
             'search' => $search,
             'storefront_locale' => StorefrontLocale::code(),
             'app_url' => config('app.url'),
+            // The rendered HTML can contain absolute URLs from the current request.
+            'request_root' => request()->root(),
             'support_whatsapp_url' => config('services.support.whatsapp_url'),
             'support_whatsapp_number' => config('services.support.whatsapp_number'),
             'support_telegram_admin_url' => config('services.support.telegram_admin_url'),
@@ -131,7 +138,7 @@ class StorefrontResponseCache
 
     private function render(string $search, ?string $family = null, int $page = 1, bool $isVariant = false): string
     {
-        $viewData = $this->catalogPages->homeViewData($search, $family, $page, $isVariant);
+        $viewData = $this->catalogPages->homeViewData($search, $family, $page, $isVariant, withBanners: true);
         $viewData['isPublicHomepage'] = true;
 
         return view('storefront', $viewData)->render();

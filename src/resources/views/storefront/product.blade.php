@@ -1,17 +1,12 @@
-<!DOCTYPE html>
-<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
-<head>
-    @include('storefront.partials.head', ['metadata' => $metadata])
-</head>
-<body class="overflow-x-hidden antialiased selection:bg-[var(--sf-ink)] selection:text-white relative text-[var(--sf-ink)]">
-    <div class="storefront-shell storefront-product-page relative z-10 flex min-h-screen flex-col justify-between overflow-x-clip">
-        @include('storefront.partials.header')
+@extends('storefront.layouts.store')
+@section('shell-class', 'storefront-product-page')
 
+@section('content')
             @include('storefront.partials.checkout-maintenance', ['maintenance' => $checkoutMaintenance])
         <main class="storefront-product-content flex-grow pt-12">
             @include('storefront.partials.breadcrumbs', ['metadata' => $metadata])
             @include('storefront.partials.verified-purchase-activity')
-            <section class="mx-auto max-w-5xl px-5 sm:px-6">
+            <section class="storefront-layout-frame">
                 <a href="{{ $returnUrl }}" class="inline-flex items-center gap-2 text-sm font-black text-[var(--sf-ink)] hover:text-[var(--sf-accent)]">
                     <span aria-hidden="true">&larr;</span> {{ __('storefront_funnel.back_catalog') }}
                 </a>
@@ -159,7 +154,4 @@
         @endif
 
         @include('storefront.partials.image-preview', ['previewImage' => $presentation->cover->imageUrl, 'previewName' => $presentation->name])
-        @include('storefront.partials.footer')
-    </div>
-</body>
-</html>
+@endsection

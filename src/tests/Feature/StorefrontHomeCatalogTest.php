@@ -14,6 +14,39 @@ class StorefrontHomeCatalogTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_family_filter_renders_a_card_per_plan_with_cover_prices_and_details(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'slug' => 'gemini',
+            'image_path' => 'product-families/gemini-cover.webp',
+            'sidebar_icon_path' => 'product-family-icons/gemini.webp',
+        ]);
+        $first = $this->plan('Gemini Bulanan', $family, 2);
+        $first->update(['image_path' => 'products/monthly.webp', 'price_amount' => 25000, 'usdt_price_amount' => 1500000]);
+        $second = $this->plan('Gemini Tahunan', $family, 0);
+        $third = $this->plan('Gemini 18 Bulan', $family, 2);
+
+        $html = $this->get('/?family=gemini')->assertOk()->getContent();
+        $document = new \DOMDocument;
+        @$document->loadHTML($html);
+        $xpath = new \DOMXPath($document);
+
+        $this->assertSame(3, $xpath->query('//*[@id="home-catalog-plans"]/article[@data-home-plan]')->length);
+        $card = fn (Product $plan) => '//*[@id="product-'.$plan->id.'"]';
+        $this->assertSame('/storage/products/monthly.webp', $xpath->evaluate('string('.$card($first).'//img/@src)'));
+        $this->assertStringContainsString('Rp25.000', $xpath->evaluate('string('.$card($first).')'));
+        $this->assertStringContainsString('1.5 USDT', $xpath->evaluate('string('.$card($first).')'));
+        $this->assertStringNotContainsString('USDT', $xpath->evaluate('string('.$card($second).')'));
+
+        $this->assertSame('/storage/product-family-icons/gemini.webp', $xpath->evaluate('string(//*[@aria-labelledby="catalog-family-title"]//a[contains(@href, "family=gemini")]//img/@src)'));
+        $this->assertSame('/storage/product-families/gemini-cover.webp', $xpath->evaluate('string('.$card($second).'//img/@src)'));
+        foreach ([$first, $second, $third] as $plan) {
+            $details = $xpath->evaluate('string('.$card($plan).'//a[@aria-label="Lihat detail '.$plan->name.'"]/@href)');
+            $this->assertStringStartsWith(route('storefront.products.show', $plan).'?from=', $details);
+            $this->assertSame(0, $xpath->query($card($plan).'//img[contains(@src, "product-family-icons")]')->length);
+        }
+    }
+
     public function test_family_and_search_intersect_without_limiting_the_family_picker(): void
     {
         $alpha = ProductFamily::factory()->create(['slug' => 'alpha', 'name' => 'Alpha Family']);
@@ -122,6 +155,47 @@ class StorefrontHomeCatalogTest extends TestCase
         $this->get('/')->assertOk()->assertSee('value="family-28"', false)->assertDontSee('>Plan 28</a>', false)->assertSee('rel="next"', false);
         $this->get('/?page=2')->assertOk()->assertSee('>Plan 28</a>', false);
         $this->get('/?family=family-28')->assertOk()->assertSee('>Plan 28</a>', false);
+    }
+
+    public function test_family_fragment_keeps_the_catalog_contract_with_constant_select_count(): void
+    {
+        $family = ProductFamily::factory()->create(['slug' => 'alpha']);
+        $this->plan('Alpha Plan', $family, 2);
+        $readFragment = function (): int {
+            DB::enableQueryLog();
+            DB::flushQueryLog();
+            try {
+                $this->get('/?family=alpha&q=plan', ['X-Storefront-Catalog' => '1'])
+                    ->assertOk()
+                    ->assertHeader('X-Storefront-Catalog', '1')
+                    ->assertHeader('Vary', 'X-Storefront-Catalog')
+                    ->assertHeader('Cache-Control', 'no-store, private')
+                    ->assertSee('data-catalog-fragment', false)
+                    ->assertSee('data-robots="noindex, follow"', false)
+                    ->assertSee('data-catalog-maintenance', false)
+                    ->assertSee('return=%2F%3Ffamily%3Dalpha%26q%3Dplan', false)
+                    ->assertSee('Alpha Plan')
+                    ->assertDontSee('Unrelated Plan')
+                    ->assertDontSee('<html', false)
+                    ->assertDontSee('csrf-token', false);
+
+                return count(array_filter(DB::getQueryLog(), fn (array $entry) => str_starts_with(strtolower(ltrim($entry['query'])), 'select')));
+            } finally {
+                DB::disableQueryLog();
+            }
+        };
+
+        $readFragment(); // Warm request-independent lookups before comparing catalog sizes.
+        $oneFamilySelects = $readFragment();
+        foreach (range(1, 25) as $index) {
+            $this->plan('Unrelated Plan '.$index, ProductFamily::factory()->create(['slug' => 'extra-'.$index]), 2);
+        }
+        $this->assertGreaterThan(0, $oneFamilySelects);
+        $this->assertSame($oneFamilySelects, $readFragment());
+        $this->get('/?family=alpha&q=plan')->assertOk()
+            ->assertHeaderMissing('X-Storefront-Catalog')
+            ->assertSee('<html', false)
+            ->assertSee('Alpha Plan');
     }
 
     private function plan(string $name, ?ProductFamily $family, int $stock): Product

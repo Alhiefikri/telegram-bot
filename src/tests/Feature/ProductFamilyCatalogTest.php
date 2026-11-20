@@ -1046,6 +1046,27 @@ class ProductFamilyCatalogTest extends TestCase
         $this->assertDatabaseHas('product_families', ['id' => $family->id, 'deleted_at' => null]);
     }
 
+    public function test_admin_can_upload_a_sidebar_icon_without_replacing_the_family_cover(): void
+    {
+        Storage::fake('public');
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $family = ProductFamily::factory()->create(['image_path' => 'product-families/cover.webp']);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.product-families.update', $family), [
+                'name' => $family->name,
+                'sort_order' => 0,
+                'sidebar_icon' => UploadedFile::fake()->image('app.png', 256, 256),
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $family->refresh();
+        $this->assertSame('product-families/cover.webp', $family->image_path);
+        $this->assertStringStartsWith('product-family-icons/', $family->sidebar_icon_path);
+        Storage::disk('public')->assertExists($family->sidebar_icon_path);
+    }
+
     public function test_family_update_slug_writes_durable_alias_for_legacy_public_url(): void
     {
         $admin = User::factory()->create(['role' => UserRole::Admin]);

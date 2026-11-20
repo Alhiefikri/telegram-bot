@@ -33,7 +33,14 @@ class StorefrontBannersTest extends TestCase
         $first = $setting->homepage_banners[0]['path'];
         Storage::disk('public')->assertExists($first);
         $this->assertSame(1, $setting->homepage_banners_version);
-        $this->get('/')->assertOk()->assertDontSee('Promo Oktober');
+        $this->get('/')->assertOk()
+            ->assertSeeInOrder(['data-storefront-carousel', '/storage/'.$first, 'data-home-catalog'], false)
+            ->assertSee('Promo Oktober')
+            ->assertDontSee('data-carousel-next', false);
+        $this->get('/', ['X-Storefront-Catalog' => '1'])->assertOk()
+            ->assertSee('data-home-catalog', false)
+            ->assertDontSee('data-storefront-carousel', false)
+            ->assertDontSee('/storage/'.$first, false);
         $this->get('/shop')->assertOk()->assertSee('Promo Oktober')->assertSee('/storage/'.$first, false);
         $this->get('/admin?tab=produk')->assertOk()->assertSee('Simpan banner beranda');
         $this->assertDatabaseHas('audit_logs', ['action' => 'storefront.banners.updated']);
@@ -42,9 +49,11 @@ class StorefrontBannersTest extends TestCase
         Storage::disk('public')->assertMissing($first);
         $second = $setting->refresh()->homepage_banners[0]['path'];
         Storage::disk('public')->assertExists($second);
+        $this->get('/')->assertOk()->assertSee('/storage/'.$second, false)->assertDontSee('/storage/'.$first, false);
         $slots[0] = ['remove' => true];
         $this->post(route('admin.storefront-banners.update'), ['version' => 2, 'banners' => $slots])->assertSessionHasNoErrors();
         Storage::disk('public')->assertMissing($second);
+        $this->get('/')->assertOk()->assertDontSee('data-storefront-carousel', false);
         $this->get('/shop')->assertOk()->assertDontSee('Promo Oktober')->assertSee('storefront-banner-empty');
     }
 
@@ -67,6 +76,7 @@ class StorefrontBannersTest extends TestCase
         $admin = User::factory()->create(['role' => UserRole::Admin]);
         $slots = $this->slots();
         $slots[0] = ['title' => 'Banner Lebar', 'link' => null, 'image' => UploadedFile::fake()->image('wide.png', 2046, 769)];
+        $slots[1] = ['title' => 'Banner Kedua', 'link' => null, 'image' => UploadedFile::fake()->image('second.png', 1600, 600)];
         $this->actingAs($admin)->post(route('admin.storefront-banners.update'), ['version' => 0, 'banners' => $slots])
             ->assertSessionHasNoErrors();
 
@@ -76,6 +86,8 @@ class StorefrontBannersTest extends TestCase
         $this->assertSame(2046, $published[0]['width']);
         $this->assertSame(769, $published[0]['height']);
         $this->assertSame('2046 / 769', $banners->heroAspect($published));
+        $this->get('/')->assertOk()->assertSee('--sf-banner-aspect: 2046 / 769', false)
+            ->assertSee('Banner Kedua')->assertSee('data-carousel-next', false)->assertSee('data-carousel-pause', false);
         $this->get('/shop')->assertOk()->assertSee('--sf-banner-aspect: 2046 / 769', false);
         $this->get('/admin?tab=produk')->assertOk()->assertSee('aspect-ratio: 2046 / 769', false);
     }

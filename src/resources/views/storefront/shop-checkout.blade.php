@@ -23,15 +23,7 @@
 </head>
 <body class="text-[var(--sf-ink)] antialiased">
     <div class="storefront-shell storefront-checkout-page flex min-h-screen flex-col">
-        <header class="checkout-frame mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-3 py-2">
-            <a href="{{ $homeUrl }}" class="inline-flex min-h-11 min-w-0 items-center" aria-label="{{ __('storefront_funnel.brand_home', ['brand' => $brand]) }}">
-                @include('storefront.components.brand-mark', ['brand' => $brand])
-            </a>
-            <div class="flex items-center gap-2">
-                @include('storefront.partials.locale-selector')
-                <x-theme-toggle class="checkout-theme h-11 w-11 shrink-0 rounded-lg" />
-            </div>
-        </header>
+        @include('storefront.partials.header')
         @php
             $oldReviewField = static function (string $field): mixed {
                 $value = old($field);

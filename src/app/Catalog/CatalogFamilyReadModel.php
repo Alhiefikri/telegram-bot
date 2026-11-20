@@ -30,6 +30,7 @@ final readonly class CatalogFamilyReadModel
         public ?string $customEmojiId = null,
         public ?string $telegramImagePath = null,
         public bool $matchesSearch = false,
+        public ?string $sidebarIconUrl = null,
     ) {}
 
     /** @return array<string, mixed> */

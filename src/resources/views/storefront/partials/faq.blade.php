@@ -1,9 +1,9 @@
-<section id="faq" class="mx-auto max-w-4xl px-4 py-5 sm:px-6 sm:py-10">
+<section id="faq" class="storefront-layout-frame py-5 sm:py-10">
     <h2 class="mb-4 text-center font-display text-xl font-black tracking-tight text-[var(--sf-ink)] sm:mb-5 sm:text-3xl">
         Pertanyaan Umum (FAQ)
     </h2>
 
-    <div class="space-y-2">
+    <div class="grid items-start gap-3 xl:grid-cols-2 xl:gap-4">
         @foreach ($copy['faq'] as $index => $faq)
             <div class="faq-item overflow-hidden rounded-lg border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-[4px_4px_0_var(--sf-shadow)] transition-transform duration-300 motion-reduce:transition-none hover:-translate-y-0.5">
                 <button id="faq-question-{{ $index }}" class="faq-toggle flex min-h-11 w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm font-black text-[var(--sf-ink)] focus:outline-none motion-reduce:transition-none" aria-controls="faq-answer-{{ $index }}" aria-expanded="false">

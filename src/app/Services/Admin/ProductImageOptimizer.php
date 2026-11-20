@@ -13,6 +13,8 @@ final class ProductImageOptimizer
 
     private const FAMILY_DIRECTORY = 'product-families';
 
+    private const FAMILY_SIDEBAR_ICON_DIRECTORY = 'product-family-icons';
+
     private const PLACEHOLDER_DIRECTORY = 'storefront/placeholders';
 
     private const TELEGRAM_DIRECTORY = 'telegram-products';
@@ -80,6 +82,11 @@ final class ProductImageOptimizer
     public function storeFamily(UploadedFile $image): string
     {
         return $this->storeInDirectory($image, self::FAMILY_DIRECTORY);
+    }
+
+    public function storeFamilySidebarIcon(UploadedFile $image): string
+    {
+        return $this->storeInDirectory($image, self::FAMILY_SIDEBAR_ICON_DIRECTORY, 128);
     }
 
     public function storePlaceholder(UploadedFile $image): string
@@ -364,6 +371,7 @@ final class ProductImageOptimizer
             || (! str_starts_with($path, self::DIRECTORY.'/')
                 && ! str_starts_with($path, self::FAMILY_DIRECTORY.'/')
                 && ! str_starts_with($path, self::PLACEHOLDER_DIRECTORY.'/')
+                && ! str_starts_with($path, self::FAMILY_SIDEBAR_ICON_DIRECTORY.'/')
                 && ! str_starts_with($path, self::STOREFRONT_BANNER_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_DIRECTORY.'/')
                 && ! str_starts_with($path, self::TELEGRAM_CHANNEL_DIRECTORY.'/')

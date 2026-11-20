@@ -21,8 +21,11 @@ class AdminProductFamilyUpdateController extends Controller
         $newTelegramImagePath = $request->hasFile('telegram_image') ? $images->storeTelegramFamily($request->file('telegram_image')) : null;
         $oldImagePath = $productFamily->image_path;
         $oldTelegramImagePath = $productFamily->telegram_image_path;
+        $oldSidebarIconPath = $productFamily->sidebar_icon_path;
+        $newSidebarIconPath = null;
 
         try {
+            $newSidebarIconPath = $request->hasFile('sidebar_icon') ? $images->storeFamilySidebarIcon($request->file('sidebar_icon')) : null;
             $family = $families->update($productFamily, [
                 'name' => $validated['name'],
                 'slug' => $validated['slug'] ?? null,
@@ -30,9 +33,11 @@ class AdminProductFamilyUpdateController extends Controller
                 'icon' => $request->exists('icon') ? ($validated['icon'] ?? null) : $productFamily->icon,
                 'sort_order' => (int) $validated['sort_order'],
                 ...($newImagePath === null ? [] : ['image_path' => $newImagePath]),
+                ...($newSidebarIconPath === null ? [] : ['sidebar_icon_path' => $newSidebarIconPath]),
                 ...($newTelegramImagePath === null ? [] : ['telegram_image_path' => $newTelegramImagePath]),
             ], $user, $request->ip());
         } catch (Throwable $exception) {
+            $images->deleteManagedImage($newSidebarIconPath);
             if ($newImagePath !== null) {
                 $images->deleteManagedImage($newImagePath);
             }
@@ -49,6 +54,9 @@ class AdminProductFamilyUpdateController extends Controller
 
         if ($newImagePath !== null && $oldImagePath !== null && $oldImagePath !== $family->image_path) {
             $images->deleteManagedImage($oldImagePath);
+        }
+        if ($newSidebarIconPath !== null && $oldSidebarIconPath !== $family->sidebar_icon_path) {
+            $images->deleteManagedImage($oldSidebarIconPath);
         }
         if ($newTelegramImagePath !== null && $oldTelegramImagePath !== null && $oldTelegramImagePath !== $family->telegram_image_path) {
             $images->deleteManagedImage($oldTelegramImagePath);

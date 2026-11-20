@@ -403,7 +403,7 @@ test("family image stays contained and preview closes with Escape", async ({
   }
 });
 
-test("purchase activity stays in page flow without covering catalog or checkout", async ({
+test("purchase activity sits in the top-right without shifting page content", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -417,40 +417,32 @@ test("purchase activity stays in page flow without covering catalog or checkout"
       await expect(activity).toBeVisible();
       const layout = await activity.evaluate((node) => {
         const box = node.getBoundingClientRect();
-        const following = (
-          document.querySelector("#products") ??
-          document.querySelector(".family-layout")
-        ).getBoundingClientRect();
-        const banner = document
-          .querySelector(".storefront-hero-card")
-          ?.getBoundingClientRect();
+        const content = document.querySelector("main");
+        const before = content.getBoundingClientRect().height;
+        node.classList.add("hidden");
+        const after = content.getBoundingClientRect().height;
+        node.classList.remove("hidden");
         return {
-          bottom: box.bottom,
-          followingTop: following.top,
-          catalogBottom: following.bottom,
+          left: box.left,
           top: box.top,
-          bannerBottom: banner?.bottom,
           right: box.right,
           viewport: innerWidth,
           overflow: document.documentElement.scrollWidth - innerWidth,
           position: getComputedStyle(node).position,
+          heightDelta: before - after,
         };
       });
-      expect(layout.position).toBe("static");
-      if (pathname === "/") {
-        expect(layout.top).toBeGreaterThanOrEqual(layout.catalogBottom);
-      } else {
-        expect(layout.bottom).toBeLessThanOrEqual(layout.followingTop);
-      }
-      if (layout.bannerBottom !== undefined) {
-        expect(layout.top).toBeGreaterThanOrEqual(layout.bannerBottom);
-      }
-      expect(layout.right).toBeLessThanOrEqual(layout.viewport);
+      expect(layout.position).toBe("fixed");
+      expect(layout.top).toBeGreaterThanOrEqual(0);
+      expect(layout.top).toBeLessThan(120);
+      expect(layout.left).toBeGreaterThan(0);
+      expect(layout.viewport - layout.right).toBeLessThan(24);
       expect(layout.overflow).toBeLessThanOrEqual(0);
+      expect(layout.heightDelta).toBe(0);
       const initial = await activity.boundingBox();
       await page.evaluate(() => scrollTo(0, 700));
       const scrolled = await activity.boundingBox();
-      expect(scrolled.y).toBeLessThan(initial.y);
+      expect(scrolled.y).toBe(initial.y);
     }
   }
 });

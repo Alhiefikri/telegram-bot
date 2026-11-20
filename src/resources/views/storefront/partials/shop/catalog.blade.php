@@ -1,7 +1,7 @@
 <section id="products" class="relative border-y border-[var(--sf-border)] bg-[var(--sf-surface)] py-4 sm:py-10">
     <div class="pointer-events-none absolute inset-0 bg-grid-pattern opacity-70"></div>
 
-    <div class="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
+    <div class="storefront-layout-frame relative z-10">
         <div class="reveal-item mb-4 grid gap-3 sm:mb-5 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,25rem)] lg:items-end">
             <div>
                 <div class="mb-2 inline-flex items-center gap-2 text-xs font-bold text-[var(--sf-muted)]">

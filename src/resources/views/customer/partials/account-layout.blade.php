@@ -4,43 +4,7 @@
 <body class="customer-area @yield('account-body-class') text-[var(--sf-ink)]">
     @php($signedInAccount = isset($customer, $accountSummary))
     <div class="{{ $signedInAccount ? 'account-shell' : 'storefront-shell' }} flex min-h-screen flex-col">
-        @if($signedInAccount)
-            <header class="account-site-header">
-                <a class="account-brand" href="{{ route('storefront.home') }}" aria-label="Beranda {{ $brand }}">
-                    @include('storefront.components.brand-mark', ['brand' => $brand])
-                </a>
-                <form class="account-site-search" action="{{ route('storefront.shop.index') }}" method="GET" role="search">
-                    <label class="sr-only" for="account-catalog-search">Cari produk</label>
-                    <input id="account-catalog-search" name="q" type="search" maxlength="{{ \App\Storefront\StorefrontCatalogSearch::MAX_LENGTH }}" placeholder="Cari produk">
-                    <button type="submit">Cari</button>
-                </form>
-                <nav class="account-site-nav" aria-label="Navigasi toko">
-                    <a href="{{ route('storefront.shop.index') }}">Produk</a>
-                    <a class="account-cart-link" href="{{ route('storefront.shop.cart') }}">
-                        @include('customer.partials.account-icon', ['icon' => 'cart'])
-                        <span>
-                            Keranjang
-                            @if(isset($cartItemCount))
-                                ({{ max(0, (int) $cartItemCount) }})
-                            @endif
-                        </span>
-                    </a>
-                    <a href="{{ route('customer.account') }}" @if(request()->routeIs('customer.account')) aria-current="page" @endif>Akun saya</a>
-                    <details class="account-site-menu">
-                        <summary>Menu toko</summary>
-                        <div class="account-site-menu-links">
-                            <a href="{{ route('storefront.home') }}#kategori">Kategori</a>
-                            <a href="{{ route('storefront.home') }}#cara-beli">Cara beli</a>
-                            <a href="{{ route('storefront.order-access.create') }}">Akses pesanan</a>
-                            <a href="{{ route('storefront.guides.index') }}">Panduan</a>
-                        </div>
-                    </details>
-                </nav>
-                <x-theme-toggle icon-class="account-icon" class="account-theme-toggle account-header-theme" />
-            </header>
-        @else
-            <div class="pt-4">@include('storefront.partials.header')</div>
-        @endif
+        @include('storefront.partials.header')
         <main class="account-main {{ $signedInAccount ? '' : 'account-main--guest' }}">
             <header class="account-page-heading">
                 <h1>@yield('account-title')</h1>

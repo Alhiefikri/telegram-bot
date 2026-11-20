@@ -36,7 +36,7 @@ final class CatalogBrowse
     private const CATEGORY_COLUMNS = ['id', 'name', 'slug', 'description', 'sort_order'];
 
     /** @var list<string> */
-    private const FAMILY_COLUMNS = ['id', 'name', 'slug', 'description', 'icon', 'custom_emoji_id', 'image_path', 'telegram_image_path', 'sort_order', 'created_at'];
+    private const FAMILY_COLUMNS = ['id', 'name', 'slug', 'description', 'icon', 'custom_emoji_id', 'image_path', 'sidebar_icon_path', 'telegram_image_path', 'sort_order', 'created_at'];
 
     private const PRODUCT_COLUMNS = [
         'id',
@@ -509,6 +509,7 @@ final class CatalogBrowse
             icon: $icon->icon,
             customEmojiId: $icon->customEmojiId,
             matchesSearch: $matchesSearch || ($search !== '' && $this->matchesFamily($family, $search)),
+            sidebarIconUrl: $this->publicImageUrl($family->sidebar_icon_path),
         );
     }
 

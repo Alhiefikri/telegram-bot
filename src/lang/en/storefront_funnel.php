@@ -16,6 +16,8 @@ return [
     'check_stock_later' => 'Check the catalog again when the product you want is in stock.',
     'plan_list' => 'Plan list',
     'details' => 'Details',
+    'view_details' => 'View details',
+    'loading_catalog' => 'Loading catalog…',
     'buy_now' => 'Buy now',
     'buy_named' => 'Buy :name now',
     'previous' => 'Previous',
