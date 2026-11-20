@@ -80,9 +80,8 @@ final class CatalogBrowse
     }
 
     /** @return list<CatalogBrowseEntry> */
-    public function publicEntriesForPlanFilter(): array
+    public function allPublicEntries(): array
     {
-        // The picker must include every public Family, independent of search or page.
         return $this->browse(new CatalogBrowseQuery, public: true, unpaginated: true)->entries;
     }
 
