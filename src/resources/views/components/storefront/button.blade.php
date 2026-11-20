@@ -7,14 +7,16 @@
 ])
 
 @php
-    $baseClasses = 'neo-button inline-flex items-center justify-center gap-2 font-black transition-colors';
+    $baseClasses = 'neo-button storefront-action inline-flex items-center justify-center gap-2 text-center font-bold';
     $sizeClasses = match ($size) {
         'sm' => 'h-10 px-3 text-[11px]',
+        'compact' => 'min-h-11 px-3.5 py-2 text-sm',
         'lg' => 'h-14 px-7 text-sm',
         default => 'h-12 px-5 text-sm',
     };
     $variantClasses = match ($variant) {
         'secondary', 'surface' => 'bg-[var(--sf-surface)] text-[var(--sf-ink)] hover:bg-[var(--sf-surface-warm)]',
+        'outline' => 'bg-transparent text-[var(--sf-accent)] hover:bg-[var(--sf-accent-soft)]',
         'yellow', 'warning' => 'bg-[var(--sf-yellow)] text-[var(--sf-ink)]',
         'green', 'success' => 'bg-[var(--sf-green)] text-[var(--sf-ink)]',
         'blue', 'info' => 'bg-[var(--sf-blue)] text-white',
@@ -27,6 +29,7 @@
 @if ($href)
     <a
         href="{{ $href }}"
+        data-button-variant="{{ $variant }}"
         @if ($external) target="_blank" rel="noopener noreferrer" @endif
         {{ $attributes->class([$baseClasses, $sizeClasses, $variantClasses]) }}
     >
@@ -35,6 +38,7 @@
 @else
     <button
         type="{{ $type }}"
+        data-button-variant="{{ $variant }}"
         {{ $attributes->class([$baseClasses, $sizeClasses, $variantClasses]) }}
     >
         {{ $slot }}

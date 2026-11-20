@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['name', 'slug', 'description', 'icon', 'custom_emoji_id', 'image_path', 'telegram_image_path', 'sort_order'])]
+#[Fillable(['name', 'slug', 'description', 'icon', 'custom_emoji_id', 'image_path', 'sidebar_icon_path', 'telegram_image_path', 'sort_order'])]
 class ProductFamily extends Model
 {
     /** @use HasFactory<ProductFamilyFactory> */

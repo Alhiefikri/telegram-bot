@@ -36,10 +36,13 @@ export default function initAccountIdentity() {
         return;
       }
 
-      const name = authenticated ? identity.name : "Daftar / Masuk";
-      const label = authenticated ? `Buka profil ${name}` : name;
-
       links.forEach((link) => {
+        const name = authenticated
+          ? identity.name
+          : link.dataset.accountGuestLabel;
+        const label = authenticated
+          ? link.dataset.accountProfileLabel.replace(":name", () => name)
+          : name;
         const accountName = link.querySelector("[data-account-name]");
         accountName.textContent = name;
         accountName.classList.toggle("truncate", authenticated);

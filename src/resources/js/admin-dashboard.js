@@ -87,6 +87,8 @@ const emptyProductFamilyForm = () => ({
   familySortOrder: 0,
   familyImageFileName: EMPTY_IMAGE_FILE_NAME,
   familyImageUrl: "",
+  familySidebarIconUrl: "",
+  familySidebarIconFileName: EMPTY_IMAGE_FILE_NAME,
   telegramFamilyImageUrl: "",
   telegramFamilyImageFileName: EMPTY_IMAGE_FILE_NAME,
 });
@@ -966,6 +968,7 @@ export default function adminDashboard(initialState = {}) {
       });
       this.$nextTick(() => this.$refs.familyOrderTitle?.focus());
       this.resetImageInput("familyImage", "familyImageFileName");
+      this.resetImageInput("familySidebarIcon", "familySidebarIconFileName");
       this.resetImageInput(
         "telegramFamilyImage",
         "telegramFamilyImageFileName"
@@ -1001,10 +1004,12 @@ export default function adminDashboard(initialState = {}) {
           family.sortOrder ??
           0,
         familyImageUrl: family.imageUrl ?? "",
+        familySidebarIconUrl: family.sidebarIconUrl ?? "",
         telegramFamilyImageUrl: family.telegramImageUrl ?? "",
       });
       this.$nextTick(() => this.$refs.familyName?.focus());
       this.resetImageInput("familyImage", "familyImageFileName");
+      this.resetImageInput("familySidebarIcon", "familySidebarIconFileName");
       this.resetImageInput(
         "telegramFamilyImage",
         "telegramFamilyImageFileName"
@@ -1018,6 +1023,7 @@ export default function adminDashboard(initialState = {}) {
         ...emptyProductFamilyForm(),
       });
       this.resetImageInput("familyImage", "familyImageFileName");
+      this.resetImageInput("familySidebarIcon", "familySidebarIconFileName");
       this.resetImageInput(
         "telegramFamilyImage",
         "telegramFamilyImageFileName"

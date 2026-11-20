@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
 final class ProductFamilyManagementService
 {
     /** @var list<string> */
-    private const FAMILY_FIELDS = ['name', 'description', 'icon', 'image_path', 'telegram_image_path', 'sort_order'];
+    private const FAMILY_FIELDS = ['name', 'description', 'icon', 'image_path', 'sidebar_icon_path', 'telegram_image_path', 'sort_order'];
 
     public function __construct(
         private readonly AuditLogger $auditLogger,
@@ -23,7 +23,7 @@ final class ProductFamilyManagementService
     ) {}
 
     /**
-     * @param  array{name: string, description: ?string, icon?: ?string, sort_order: int, slug?: ?string, image_path?: ?string, telegram_image_path?: ?string}  $attributes
+     * @param  array{name: string, description: ?string, icon?: ?string, sort_order: int, slug?: ?string, image_path?: ?string, sidebar_icon_path?: ?string, telegram_image_path?: ?string}  $attributes
      */
     public function create(array $attributes, User $user, ?string $ip = null): ProductFamily
     {
@@ -36,6 +36,7 @@ final class ProductFamilyManagementService
                         'description' => $this->nullableTrim($attributes['description'] ?? null),
                         'icon' => $this->nullableTrim($attributes['icon'] ?? null),
                         'image_path' => $attributes['image_path'] ?? null,
+                        'sidebar_icon_path' => $attributes['sidebar_icon_path'] ?? null,
                         'telegram_image_path' => $attributes['telegram_image_path'] ?? null,
                         'sort_order' => (int) ($attributes['sort_order'] ?? 0),
                     ]);
@@ -62,7 +63,7 @@ final class ProductFamilyManagementService
     }
 
     /**
-     * @param  array{name: string, description: ?string, icon?: ?string, sort_order: int, slug?: ?string, image_path?: ?string, telegram_image_path?: ?string}  $attributes
+     * @param  array{name: string, description: ?string, icon?: ?string, sort_order: int, slug?: ?string, image_path?: ?string, sidebar_icon_path?: ?string, telegram_image_path?: ?string}  $attributes
      */
     public function update(ProductFamily $family, array $attributes, User $user, ?string $ip = null): ProductFamily
     {

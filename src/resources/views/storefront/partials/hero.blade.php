@@ -1,5 +1,7 @@
 <section class="storefront-hero-card storefront-banner-carousel" aria-label="Banner toko" aria-roledescription="carousel" data-storefront-carousel data-carousel-align="center" style="--sf-banner-aspect: {{ $homepageBannerAspect ?? '4 / 1' }}">
-    <h1 class="sr-only">{{ $brand }} — Produk digital</h1>
+    @if ($showHeroHeading ?? true)
+        <h1 class="sr-only">{{ $brand }} — Produk digital</h1>
+    @endif
     <div class="storefront-banner-viewport">
         <div class="storefront-banner-track" data-carousel-track>
             @forelse ($homepageBanners ?? [] as $banner)

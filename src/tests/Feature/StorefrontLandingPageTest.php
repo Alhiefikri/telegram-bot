@@ -59,6 +59,21 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertFalse($response->headers->has('CDN-Cache-Control'));
     }
 
+    public function test_storefront_and_cart_share_the_same_navigation_and_layout_frames(): void
+    {
+        foreach (['/', '/shop', '/shop/cart', '/panduan'] as $path) {
+            $response = $this->get($path)->assertOk()
+                ->assertSee('data-storefront-nav-frame', false)
+                ->assertSee('data-storefront-footer-frame', false)
+                ->assertSee('href="'.route('storefront.shop.cart').'"', false)
+                ->assertSee('href="'.route('storefront.guides.index').'"', false);
+
+            $this->assertSame(1, substr_count($response->getContent(), 'data-storefront-header'));
+        }
+
+        $this->get('/shop/cart')->assertOk()->assertSee('data-storefront-cart-frame', false);
+    }
+
     public function test_home_keeps_catalog_order_account_guide_support_and_policy_links(): void
     {
         $shopUrl = route('storefront.shop.index');
@@ -111,6 +126,27 @@ class StorefrontLandingPageTest extends TestCase
             ->assertDontSee('https://stale-ngrok.example.test/build/assets/', false);
     }
 
+    public function test_homepage_cache_does_not_reuse_links_from_another_origin(): void
+    {
+        $family = ProductFamily::factory()->create(['slug' => 'adobe']);
+        Product::factory()->create([
+            'product_family_id' => $family->id,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $local = 'http://127.0.0.1:18081';
+        $public = 'https://preview.example.test';
+        config(['app.url' => $public]);
+
+        $this->get($local.'/')->assertOk()->assertSee('href="'.$local.'?family=adobe"', false);
+        $this->get($public.'/')
+            ->assertOk()
+            ->assertSee('href="'.$public.'?family=adobe"', false)
+            ->assertDontSee($local, false);
+        $this->get($local.'/')->assertOk()->assertSee('href="'.$local.'?family=adobe"', false);
+    }
+
     public function test_homepage_cache_key_changes_when_vite_manifest_changes(): void
     {
         $manifestPath = public_path('build/manifest.json');
@@ -159,7 +195,7 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertNotFalse($catalogStart);
         $this->assertLessThan(strpos($html, $activityHtml), $catalogStart);
         $this->assertSame(1, substr_count($html, 'id="products"'));
-        $this->assertSame(1, substr_count($html, 'id="cara-beli"'));
+        $this->assertStringNotContainsString('id="cara-beli"', $html);
         $this->assertSame(1, substr_count($html, 'id="faq"'));
         $this->assertSame(1, substr_count($html, 'id="support"'));
         $this->assertStringNotContainsString('storefront-hero-card', $html);
@@ -168,8 +204,8 @@ class StorefrontLandingPageTest extends TestCase
         $this->assertStringNotContainsString('id="features"', $html);
         $this->assertStringNotContainsString('neo-marquee', $html);
         $this->assertStringContainsString('data-endpoint="'.route('storefront.verified-purchase-activity').'"', $activityHtml);
-        $this->assertStringContainsString('Lihat ringkasan checkout dan akses ulang', $html);
-        $this->assertStringContainsString('Jika memilih QRIS, kode pembayaran muncul di halaman invoice.', $html);
+        $this->assertStringNotContainsString('Lihat ringkasan checkout dan akses ulang', $html);
+        $this->assertStringContainsString('purchase-activity-icon', $activityHtml);
         $this->assertStringContainsString('/panduan', $html);
         $this->assertStringContainsString('Akses Pesanan', $html);
     }
@@ -446,7 +482,7 @@ class StorefrontLandingPageTest extends TestCase
             ->assertSee('value="chat"', false)
             ->getContent();
 
-        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="cara-beli"');
+        $catalogHtml = $this->htmlBetween($html, '<section id="products"', '<section id="faq"');
 
         $this->assertStringContainsString('Chat GPT Plus', $catalogHtml);
         $this->assertStringNotContainsString('Canva Pro', $catalogHtml);

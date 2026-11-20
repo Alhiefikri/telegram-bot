@@ -1,5 +1,5 @@
 <footer class="footer-dark border-t-[3px] border-[var(--sf-border)] bg-[var(--sf-ink)] pb-10 pt-16 text-white">
-    <div class="mx-auto grid max-w-6xl gap-10 px-5 sm:grid-cols-2 sm:px-6 lg:grid-cols-4">
+    <x-storefront.frame data-storefront-footer-frame class="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
         <div class="space-y-4">
             @include('storefront.components.brand-mark', ['brand' => $brand])
             <p class="text-sm font-semibold leading-relaxed text-white/70">
@@ -15,8 +15,7 @@
         <div>
             <h3 class="mb-4 font-display text-sm font-black uppercase tracking-[0.14em] text-[var(--sf-yellow)]">{{ __('storefront_funnel.products') }}</h3>
             <ul class="space-y-3 text-sm font-semibold text-white/70">
-                <li><a href="{{ $shopUrl ?? $storefront->catalogUrl() }}" class="transition-colors hover:text-[var(--sf-yellow)]">{{ __('storefront_funnel.full_catalog') }}</a></li>
-                <li><a href="{{ $homeUrl ?? route('storefront.home') }}#cara-beli" class="transition-colors hover:text-[var(--sf-yellow)]">{{ __('storefront_funnel.how_to_buy') }}</a></li>
+                <li><a href="{{ $shopUrl ?? route('storefront.shop.index') }}" class="transition-colors hover:text-[var(--sf-yellow)]">{{ __('storefront_funnel.full_catalog') }}</a></li>
                 <li><a href="{{ route('storefront.guides.index') }}" class="transition-colors hover:text-[var(--sf-yellow)]">{{ __('storefront_funnel.help_center') }}</a></li>
                 <li><a href="{{ $homeUrl ?? route('storefront.home') }}#faq" class="transition-colors hover:text-[var(--sf-yellow)]">FAQ</a></li>
             </ul>
@@ -42,13 +41,13 @@
                 <li><span>{{ __('storefront_funnel.save_access') }}</span></li>
             </ul>
         </div>
-    </div>
+    </x-storefront.frame>
 
-    <div class="mx-auto mt-16 flex max-w-6xl flex-col items-center justify-between border-t-[3px] border-white/15 px-5 pt-8 text-xs font-bold text-white/60 sm:px-6 md:flex-row">
+    <x-storefront.frame class="mt-16 flex flex-col items-center justify-between border-t-[3px] border-white/15 pt-8 text-xs font-bold text-white/60 md:flex-row">
         <p>&copy; {{ now()->year }} {{ __('storefront_funnel.copyright') }}</p>
         <div class="mt-4 flex items-center gap-4 md:mt-0">
             <span>{{ __('storefront_funnel.web_qris') }}</span>
             <span>{{ __('storefront_funnel.self_service_access') }}</span>
         </div>
-    </div>
+    </x-storefront.frame>
 </footer>

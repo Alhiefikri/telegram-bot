@@ -488,6 +488,7 @@ final class AdminDashboardProductsData
                 'sortOrder' => $family->sortOrder,
                 'telegramImageUrl' => $family->telegramImagePath === null ? null : $this->images->telegramUrl($family->telegramImagePath),
                 'imageUrl' => $family->imageUrl,
+                'sidebarIconUrl' => $family->sidebarIconUrl,
                 'updateUrl' => $updateUrl,
             ],
         ];
@@ -554,6 +555,7 @@ final class AdminDashboardProductsData
                     'sortOrder' => $family->sortOrder,
                     'telegramImageUrl' => $family->telegramImagePath === null ? null : $this->images->telegramUrl($family->telegramImagePath),
                     'imageUrl' => $family->imageUrl,
+                    'sidebarIconUrl' => $family->sidebarIconUrl,
                     'updateUrl' => route('admin.product-families.update', ['productFamily' => $family->id]),
                 ],
             ])

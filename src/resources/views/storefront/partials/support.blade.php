@@ -1,4 +1,4 @@
-<section id="support" class="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-10">
+<section id="support" class="storefront-layout-frame py-5 sm:py-10">
     <div class="neo-panel-pop relative overflow-hidden bg-[var(--sf-accent)] p-4 text-white sm:p-7">
         <div class="relative z-10 flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div class="max-w-2xl">

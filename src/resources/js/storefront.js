@@ -138,6 +138,7 @@ function initVerifiedPurchaseActivity() {
   const render = (item, announce = false) => {
     message.textContent = `${item.buyer} membeli ${item.product} · ${item.relative_time}`;
     container.dataset.activityState = "visible";
+    container.inert = false;
     container.setAttribute("aria-hidden", "false");
     if (announce)
       live.textContent = `Aktivitas pembelian baru: ${item.buyer} membeli ${item.product}.`;
@@ -145,8 +146,8 @@ function initVerifiedPurchaseActivity() {
   const hide = () => {
     if (container.dataset.activityState !== "visible") return;
     container.dataset.activityState = "hidden";
+    container.inert = true;
     container.setAttribute("aria-hidden", "true");
-    container.classList.add("opacity-0", "pointer-events-none");
     nextTimer = window.setTimeout(() => {
       nextTimer = null;
       if (!paused && !reducedMotion && items.length > 1) {
@@ -169,9 +170,6 @@ function initVerifiedPurchaseActivity() {
     clearTimers();
     container.classList.remove("hidden");
     render(item, announce);
-    window.requestAnimationFrame(() => {
-      container.classList.remove("opacity-0", "pointer-events-none");
-    });
     scheduleHide();
   };
   const refresh = async () => {
@@ -193,8 +191,9 @@ function initVerifiedPurchaseActivity() {
       if (!items.length) {
         clearTimers();
         container.dataset.activityState = "hidden";
+        container.inert = true;
         container.setAttribute("aria-hidden", "true");
-        container.classList.add("hidden", "opacity-0", "pointer-events-none");
+        container.classList.add("hidden");
         return;
       }
       show(newItem !== null);
@@ -235,6 +234,7 @@ function initVerifiedPurchaseActivity() {
       clearTimers();
       container.classList.add("hidden");
       container.dataset.activityState = "hidden";
+      container.inert = true;
       container.setAttribute("aria-hidden", "true");
     });
   document.addEventListener("visibilitychange", () => {

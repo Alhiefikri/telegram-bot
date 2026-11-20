@@ -25,6 +25,8 @@ return [
     'check_stock_later' => 'Cek kembali katalog saat stok produk yang Anda cari tersedia.',
     'plan_list' => 'Daftar Plan',
     'details' => 'Detail',
+    'view_details' => 'Lihat detail',
+    'loading_catalog' => 'Memuat katalog…',
     'buy_now' => 'Beli sekarang',
     'view_plan' => 'Lihat detail Plan',
     'plan_count' => ':count Plan',

@@ -1,21 +1,15 @@
-<!DOCTYPE html>
-<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
-<head>
-    @include('storefront.partials.head', ['metadata' => $metadata])
-</head>
-<body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white motion-reduce:animate-none">
-    <div class="storefront-shell relative min-h-screen z-10 flex flex-col justify-between overflow-x-clip">
-        @include('storefront.partials.header')
+@extends('storefront.layouts.store')
 
+@section('content')
         <main class="flex-grow pb-16 pt-8 sm:pt-12">
-            <section class="mx-auto max-w-5xl px-5 sm:px-6">
+            <x-storefront.frame as="section" data-storefront-cart-frame>
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                         <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-accent)]">{{ __('storefront_funnel.web_cart') }}</p>
                         <h1 class="mt-2 font-display text-2xl font-black tracking-tight text-[var(--sf-ink)] sm:text-5xl">{{ __('storefront_funnel.review_cart') }}</h1>
                         <p class="mt-3 max-w-2xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ __('storefront_funnel.cart_session') }}</p>
                     </div>
-                    <a href="{{ $shopUrl }}" class="neo-button neo-button-stable inline-flex min-h-11 items-center justify-center bg-white px-4 text-sm font-black text-[var(--sf-ink)]">{{ __('storefront_funnel.add_products') }}</a>
+                    <x-storefront.button :href="$shopUrl" variant="secondary" size="compact">{{ __('storefront_funnel.add_products') }}</x-storefront.button>
                 </div>
 
                 @if (session('storefront_cart_notice'))
@@ -39,10 +33,10 @@
                         <p class="text-xs font-black uppercase tracking-[0.2em] text-[var(--sf-accent)]">{{ __('storefront_funnel.no_items') }}</p>
                         <h2 class="mt-2 font-display text-2xl font-black text-[var(--sf-ink)]">{{ __('storefront_funnel.empty_cart') }}</h2>
                         <p class="mt-3 max-w-xl text-sm font-semibold leading-7 text-[var(--sf-muted)]">{{ __('storefront_funnel.one_checkout') }}</p>
-                        <a href="{{ $shopUrl }}" class="neo-button mt-6 inline-flex min-h-12 items-center justify-center bg-[var(--sf-accent)] px-5 text-sm font-black text-white">{{ __('storefront_funnel.view_catalog') }}</a>
+                        <x-storefront.button :href="$shopUrl" class="mt-6">{{ __('storefront_funnel.view_catalog') }}</x-storefront.button>
                     </div>
                 @else
-                    <div class="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
+                    <div class="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24%)] lg:items-start">
                         <div class="grid gap-4">
                             @foreach ($cartItems as $item)
                                 <article class="neo-panel bg-[var(--sf-surface)] p-4 sm:p-5" data-cart-item="{{ $item->productId }}">
@@ -86,7 +80,7 @@
                                                 @method('PATCH')
                                                 <label for="cart-quantity-{{ $item->productId }}" class="sr-only">{{ __('storefront_funnel.quantity') }} {{ $item->name }}</label>
                                                 <input id="cart-quantity-{{ $item->productId }}" name="quantity" type="number" min="0" max="20" value="{{ $item->quantity }}" class="neo-input h-11 w-20 bg-white px-2 text-center text-base font-black text-[var(--sf-ink)]">
-                                                <button type="submit" class="neo-button inline-flex min-h-11 items-center justify-center bg-[var(--sf-yellow)] px-3 text-sm font-black text-[var(--sf-ink)]">{{ __('storefront_funnel.update') }}</button>
+                                                <x-storefront.button type="submit" size="compact" variant="secondary">{{ __('storefront_funnel.update') }}</x-storefront.button>
                                             </form>
                                             <p class="text-right text-sm font-black text-[var(--sf-ink)]">
                                                 {{ __('storefront_funnel.effective_subtotal') }} {{ $item->subtotal === null ? '—' : $storefront->idr($item->subtotal) }}
@@ -127,16 +121,13 @@
                                 <p role="alert" class="mt-4 rounded-md border-2 border-[var(--sf-border)] bg-[var(--sf-yellow)] px-3 py-2 text-sm font-black leading-6 text-[var(--sf-ink)]">{{ __('storefront_funnel.cart_review_changes') }}</p>
                                 <span class="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[0.7rem] border-[3px] border-[var(--sf-border)] bg-[var(--sf-surface-warm)] px-4 text-center text-sm font-black text-[var(--sf-muted)]">{{ __('storefront_funnel.checkout_not_ready') }}</span>
                             @else
-                                <a href="{{ $checkoutUrl }}" class="neo-button neo-button-stable mt-5 inline-flex min-h-12 w-full items-center justify-center bg-[var(--sf-accent)] px-4 text-center text-sm font-black text-white">{{ __('storefront_funnel.continue_checkout') }}</a>
+                                    <x-storefront.button :href="$checkoutUrl" class="mt-5 w-full">{{ __('storefront_funnel.continue_checkout') }}</x-storefront.button>
                             @endif
                             <p class="mt-4 text-xs font-bold leading-5 text-[var(--sf-muted)]">{{ __('storefront_funnel.recheck_at_order') }}</p>
                         </aside>
                     </div>
                 @endif
-            </section>
+            </x-storefront.frame>
         </main>
 
-        @include('storefront.partials.footer')
-    </div>
-</body>
-</html>
+@endsection

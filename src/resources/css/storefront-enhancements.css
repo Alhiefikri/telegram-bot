@@ -1,5 +1,109 @@
 /* Shared by the public landing bundle and the customer storefront bundle. */
+.storefront-action.neo-button {
+  border: 1px solid var(--sf-border);
+  border-radius: 0.625rem;
+  box-shadow: none;
+  text-decoration: none;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+.storefront-action.neo-button:hover,
+.storefront-action.neo-button:active {
+  transform: none;
+  box-shadow: none;
+}
+.storefront-action.neo-button[data-button-variant="outline"],
+.storefront-action.neo-button[data-button-variant="primary"] {
+  border-color: var(--sf-accent);
+}
+[data-theme="dark"] .storefront-action[data-button-variant="primary"] {
+  color: var(--sf-paper);
+}
+.storefront-action:focus-visible {
+  outline: 2px solid var(--sf-accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .storefront-action.neo-button {
+    transition: none;
+  }
+}
+.storefront-card-hover:focus-within {
+  border-color: var(--sf-accent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .storefront-card-hover:hover {
+    border-color: var(--sf-accent);
+    box-shadow: 0 12px 28px rgb(18 35 63 / 0.14);
+  }
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .storefront-card-hover {
+    transition:
+      transform 220ms ease,
+      border-color 220ms ease,
+      box-shadow 220ms ease;
+  }
+  .storefront-card-hover-media {
+    transition: transform 280ms ease;
+  }
+  .storefront-card-hover:hover {
+    transform: translateY(-4px);
+  }
+  .storefront-card-hover:hover .storefront-card-hover-media {
+    transform: scale(1.035);
+  }
+}
+
+@media (min-width: 48rem) {
+  [data-catalog-family-scroll]:has(> li:nth-child(12)) {
+    gap: 0.375rem;
+    font-size: 1rem;
+  }
+  [data-catalog-family-scroll]:has(> li:nth-child(12)) .catalog-family-button {
+    min-height: 3.125rem;
+    padding-block: 0.375rem;
+  }
+  [data-catalog-family-scroll]:has(> li:nth-child(12)) .catalog-family-icon {
+    width: 2rem;
+    height: 2rem;
+    font-size: 1.125rem;
+  }
+  [data-catalog-family-scroll]:has(> li:nth-child(18)) .catalog-family-button {
+    min-height: 2.75rem;
+  }
+  [data-catalog-family-scroll]:has(> li:nth-child(18)) .catalog-family-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+}
+
 @layer components {
+  :is(.storefront-shell, .account-shell) {
+    --sf-layout-width: 100%;
+    --sf-layout-gutter: clamp(1rem, 3vw, 1.5rem);
+  }
+  .storefront-layout-frame {
+    width: var(--sf-layout-width, 100%);
+    margin-inline: auto;
+    padding-inline: var(--sf-layout-gutter, 1rem);
+  }
+  .storefront-header .home-catalog-link:hover,
+  .storefront-header .home-catalog-link[aria-current="page"] {
+    background: var(--sf-accent-soft);
+  }
+  .storefront-header :is(a, button, summary):focus-visible {
+    outline: 2px solid var(--sf-accent);
+    outline-offset: 2px;
+  }
+  @media (min-width: 64rem) {
+    :is(.storefront-shell, .account-shell) {
+      --sf-layout-width: min(calc(100vw - 3rem), 108rem);
+      --sf-layout-gutter: clamp(1rem, 1.5vw, 2rem);
+    }
+  }
   .storefront-banner-carousel {
     /* The hero rides the floating header card's width, and the slide leaves one
        peek token of room on each side. The track padding below derives from the
@@ -76,16 +180,17 @@
       border-radius: 0.875rem;
     }
   }
-  .storefront-header nav[aria-label="Navigasi utama"] > a {
-    width: 2.75rem;
-    height: 2.75rem;
-  }
-  .storefront-header nav[aria-label="Navigasi utama"] > a > svg {
-    width: 1.5rem;
-    height: 1.5rem;
-    stroke-width: 2.2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+  @media (min-width: 64rem) {
+    .storefront-shell .storefront-banner-carousel {
+      --sf-banner-frame: var(--sf-layout-width);
+      --sf-banner-slide: min(
+        84rem,
+        calc(
+          var(--sf-banner-frame) - 2 *
+            (var(--sf-banner-peek) + var(--sf-banner-gap))
+        )
+      );
+    }
   }
   /* Hero carousel controls ride on the banner: arrows at the slide edges that
      reveal on hover/focus, and a status pill on the banner's bottom edge. The
@@ -371,26 +476,90 @@
       flex-wrap: wrap;
     }
   }
-  .storefront-purchase-activity {
-    flex-shrink: 0;
-    width: 100%;
-    border-block: 1px solid var(--sf-border);
+  .catalog-family-rail {
+    /* The cards set the grid row height; a short result must not create a tall empty row. */
+    contain: size;
+  }
+  .catalog-family-sidebar {
+    height: min(100%, calc(100dvh - 6rem));
+  }
+  [data-catalog-family-scroll] {
+    scrollbar-gutter: stable;
+    overscroll-behavior-y: contain;
+  }
+  .catalog-family-button {
+    border: 1px solid var(--sf-border);
     background: var(--sf-surface);
+  }
+  .catalog-family-button:hover,
+  .catalog-family-button[aria-current="true"] {
+    border-color: var(--sf-accent);
+    background: var(--sf-accent-soft);
+  }
+  [data-catalog-sidebar] a:not([aria-current="true"]) [data-catalog-check] {
+    visibility: hidden;
+  }
+  .storefront-purchase-activity {
+    position: fixed;
+    z-index: 45;
+    inset-block-start: calc(env(safe-area-inset-top, 0px) + 4.75rem);
+    inset-inline-end: max(0.75rem, env(safe-area-inset-right, 0px));
+    width: min(22rem, calc(100% - 1.5rem));
+    border: 1px solid var(--sf-border);
+    border-inline-start: 3px solid var(--sf-success);
+    border-radius: 0.875rem;
+    background: var(--sf-surface);
+    box-shadow: 0 10px 30px rgb(18 35 63 / 0.18);
+  }
+  .storefront-purchase-activity[data-activity-state="hidden"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .storefront-purchase-activity[data-activity-state="visible"] {
+      animation: purchase-toast-in 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+    }
+    .storefront-purchase-activity[data-activity-state="hidden"]:not(.hidden) {
+      animation: purchase-toast-out 300ms ease-in both;
+    }
+  }
+  @keyframes purchase-toast-in {
+    from {
+      opacity: 0;
+      transform: translateX(0.75rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes purchase-toast-out {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(-0.5rem);
+    }
   }
   .purchase-activity-content {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 44px;
-    align-items: center;
-    gap: 0.25rem 0.75rem;
-    max-width: 80rem;
-    margin-inline: auto;
-    padding: 0.5rem 1rem;
+    grid-template-columns: 2rem minmax(0, 1fr) 44px;
+    align-items: start;
+    gap: 0.625rem;
+    padding: 0.75rem 0.375rem 0.75rem 0.75rem;
   }
-  .purchase-activity-label {
-    grid-column: 1;
+  .purchase-activity-icon {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    color: var(--sf-success);
+    background: color-mix(in srgb, var(--sf-success) 13%, var(--sf-surface));
   }
   .purchase-activity-message {
-    grid-column: 1;
     overflow-wrap: anywhere;
   }
   .purchase-activity-close {
@@ -402,27 +571,10 @@
     color: var(--sf-muted);
     border-radius: 50%;
     cursor: pointer;
-    grid-column: 2;
-    grid-row: 1 / 3;
   }
   .purchase-activity-close:focus-visible {
     outline: 2px solid var(--sf-accent);
     outline-offset: 2px;
-  }
-  @media (min-width: 768px) {
-    .purchase-activity-content {
-      grid-template-columns: auto minmax(0, 1fr) 44px;
-      gap: 1.5rem;
-      padding-inline: 1.5rem;
-    }
-    .purchase-activity-message {
-      grid-column: 2;
-      text-align: right;
-    }
-    .purchase-activity-close {
-      grid-column: 3;
-      grid-row: 1;
-    }
   }
   @media (min-width: 1024px) {
     .family-media-column {

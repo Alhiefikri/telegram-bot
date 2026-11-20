@@ -138,7 +138,7 @@
                     <div class="flex items-start justify-between gap-3">
                         <div>
                             <x-admin-dashboard.field-label for="product-family-image">Kartu family · Web Storefront</x-admin-dashboard.field-label>
-                            <p class="mt-1 text-xs leading-5 text-admin-muted">Untuk kartu family di toko web, bukan kartu produk. Cadangan terakhir poster stok Channel saat produk tanpa gambar lain. JPG, PNG, WebP; maks. 5 MB, otomatis WebP maks. 1600px.</p>
+                            <p class="mt-1 text-xs leading-5 text-admin-muted">Gambar kartu di toko web. JPG, PNG, atau WebP, maks. 5 MB.</p>
                         </div>
                         <div x-show="familyImageUrl" x-cloak class="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-admin-line bg-admin-surface"><img x-bind:src="familyImageUrl" alt="Gambar kartu family Storefront tersimpan" class="h-full w-full object-cover"></div>
                     </div>
@@ -153,6 +153,25 @@
                     <p class="mt-2 text-xs text-admin-muted" x-show="familyFormMode === 'edit'">Tanpa upload baru, gambar toko family tersimpan tetap dipakai.</p>
                     @error('image', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                     @error('image', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                </div>
+                <div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <x-admin-dashboard.field-label for="product-family-sidebar-icon">Ikon aplikasi · Sidebar web</x-admin-dashboard.field-label>
+                            <p class="mt-1 text-xs leading-5 text-admin-muted">Unggah logo asli aplikasi (disarankan kotak). Ikon ini hanya tampil di samping nama family, bukan di gambar kartu atau di Telegram. PNG, JPG, atau WebP, maks. 2 MB dan 1024 × 1024 px.</p>
+                        </div>
+                        <img x-show="familySidebarIconUrl" x-cloak x-bind:src="familySidebarIconUrl" alt="Ikon sidebar tersimpan" class="size-10 shrink-0 rounded-md object-contain">
+                    </div>
+                    <x-admin-dashboard.file-upload
+                        id="product-family-sidebar-icon"
+                        name="sidebar_icon"
+                        label="Pilih logo aplikasi"
+                        feedback-expression="familySidebarIconFileName"
+                        x-ref="familySidebarIcon"
+                        x-on:change="familySidebarIconFileName = $event.target.files[0]?.name ?? 'Tidak ada file yang dipilih'"
+                    />
+                    @error('sidebar_icon', 'productFamilyCreate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
+                    @error('sidebar_icon', 'productFamilyUpdate') <x-admin-dashboard.field-error>{{ $message }}</x-admin-dashboard.field-error> @enderror
                 </div>
                 <div class="rounded-lg border border-admin-line bg-admin-surface-muted p-3">
                     <div class="flex items-start justify-between gap-3">

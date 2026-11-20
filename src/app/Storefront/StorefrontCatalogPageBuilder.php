@@ -37,10 +37,11 @@ class StorefrontCatalogPageBuilder
     /**
      * @return array<string, mixed>
      */
-    public function homeViewData(string $search, ?string $family, int $page, bool $isVariant, CheckoutMaintenanceState $maintenance): array
+    public function homeViewData(string $search, ?string $family, int $page, bool $isVariant, CheckoutMaintenanceState $maintenance, bool $withBanners = false): array
     {
         $entries = collect($this->catalog->allPublicEntries());
         $families = $entries->pluck('family')->filter()->keyBy('slug');
+        $familyImages = $families->pluck('imageUrl', 'id');
         $selectedFamily = $family === null ? null : $families->get($family);
         $familyUnavailable = $family !== null && $selectedFamily === null;
         $family = $selectedFamily?->slug;
@@ -64,6 +65,8 @@ class StorefrontCatalogPageBuilder
             'families' => $families->map(fn (CatalogFamilyReadModel $option): array => [
                 'slug' => $option->slug,
                 'name' => $option->name,
+                'icon' => $option->icon,
+                'sidebarIconUrl' => $option->sidebarIconUrl,
                 'url' => $this->urls->homeCatalogUrl($search, $option->slug),
             ]),
             'family' => $selectedFamily,
@@ -74,22 +77,26 @@ class StorefrontCatalogPageBuilder
             'searchMaxLength' => StorefrontCatalogSearch::MAX_LENGTH,
             'resetFamilyUrl' => $this->urls->homeCatalogUrl($search),
             'resetSearchUrl' => $this->urls->homeCatalogUrl('', $family),
-            'plans' => $results->forPage($page, $perPage)->map(function (CatalogProductReadModel $plan) use ($returnUrl): array {
+            'plans' => $results->forPage($page, $perPage)->map(function (CatalogProductReadModel $plan) use ($returnUrl, $familyImages): array {
                 $planReturnUrl = $returnUrl === route('storefront.home')
                     ? $this->urls->catalogUrl($plan->id)
                     : $returnUrl.'#product-'.$plan->id;
+                $presentation = $this->catalogPresenter->present($plan);
 
                 return [
                     'name' => $plan->label,
                     'familyName' => $plan->familyName,
-                    'presentation' => $this->catalogPresenter->present($plan),
+                    'presentation' => $presentation,
+                    'imageUrl' => $plan->imagePath
+                        ? $presentation->cover->imageUrl
+                        : ($familyImages->get($plan->familyId) ?? $presentation->cover->imageUrl),
                     'productUrl' => $this->urls->productUrlForId($plan->id, $planReturnUrl),
                     'checkoutUrl' => $this->urls->checkoutProductUrlForId($plan->id, $planReturnUrl),
                 ];
             }),
             'previousUrl' => $page > 1 ? $this->urls->homeCatalogUrl($search, $family, $page - 1).'#products' : null,
             'nextUrl' => $results->count() > $page * $perPage ? $this->urls->homeCatalogUrl($search, $family, $page + 1).'#products' : null,
-        ];
+        ] + ($withBanners ? $this->bannerViewData() : []);
     }
 
     /**

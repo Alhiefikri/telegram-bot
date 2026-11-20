@@ -117,9 +117,10 @@ class StorefrontLocaleTest extends TestCase
             foreach ($jars as $locale => $jar) {
                 $response = $this->call('GET', $pass === 2 ? '/?q=filter' : '/', [], $jar)
                     ->assertOk()->assertHeader('Cache-Control', 'no-store, private')
+                    ->assertHeader('Vary', 'X-Storefront-Catalog')
                     ->assertSee('<html lang="'.$locale.'"', false);
                 $this->assertStringContainsString($locale === 'en' ? 'Language' : 'Bahasa', $response->getContent());
-                foreach (['Set-Cookie', 'CDN-Cache-Control', 'Surrogate-Control', 'Vary'] as $header) {
+                foreach (['Set-Cookie', 'CDN-Cache-Control', 'Surrogate-Control'] as $header) {
                     $this->assertFalse($response->headers->has($header));
                 }
             }

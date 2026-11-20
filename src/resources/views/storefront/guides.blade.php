@@ -1,14 +1,8 @@
-<!DOCTYPE html>
-<html lang="{{ $metadata->htmlLocale() }}" class="scroll-smooth bg-[var(--sf-paper)]">
-<head>
-    @include('storefront.partials.head', ['metadata' => $metadata])
-</head>
-<body class="relative overflow-x-hidden text-[var(--sf-ink)] antialiased selection:bg-[var(--sf-ink)] selection:text-white">
-    <div class="storefront-shell relative z-10 flex min-h-screen flex-col justify-between overflow-x-clip">
-        @include('storefront.partials.header')
+@extends('storefront.layouts.store')
 
-        <main class="flex-grow px-5 py-14 sm:px-6 sm:py-20">
-            <section class="mx-auto max-w-6xl">
+@section('content')
+        <main class="flex-grow py-14 sm:py-20">
+            <section class="storefront-layout-frame">
                 <div class="max-w-3xl">
                     <x-storefront.badge class="px-4 py-2 text-xs tracking-[0.18em]">Bantuan penggunaan produk</x-storefront.badge>
                     <h1 class="mt-3 text-balance font-display text-2xl font-black leading-tight text-[var(--sf-ink)] sm:mt-5 sm:text-6xl">Pilih panduan yang Anda butuhkan.</h1>
@@ -33,7 +27,4 @@
             </section>
         </main>
 
-        @include('storefront.partials.footer')
-    </div>
-</body>
-</html>
+@endsection

@@ -751,8 +751,8 @@ class StorefrontShopCatalogTest extends TestCase
             ->assertSee(route('storefront.shop.checkout.product', $product), false)
             ->assertDontSee('data-product=', false)
             ->assertDontSee('data-storefront-carousel', false)
-            ->assertSee('Belanja produk digital dalam tiga langkah.')
-            ->assertSee('Lihat ringkasan checkout dan akses ulang')
+            ->assertDontSee('Belanja produk digital dalam tiga langkah.')
+            ->assertDontSee('Lihat ringkasan checkout dan akses ulang')
             ->assertDontSee('Katalog produk digital siap pakai')
             ->assertDontSee('Belum ada produk siap dibeli.');
     }

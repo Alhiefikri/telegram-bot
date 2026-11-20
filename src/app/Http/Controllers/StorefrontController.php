@@ -10,6 +10,8 @@ use Illuminate\Http\Response;
 
 class StorefrontController extends Controller
 {
+    private const CATALOG_FRAGMENT_HEADER = 'X-Storefront-Catalog';
+
     public function __construct(private readonly StorefrontResponseCache $storefrontResponseCache) {}
 
     public function __invoke(Request $request): Response
@@ -21,8 +23,19 @@ class StorefrontController extends Controller
         $family = is_string($family) && strlen($family) <= 255 ? strtolower(trim($family)) : '!';
         $page = CatalogBrowseQuery::fromValues(page: $query['page'] ?? null)->page;
         $isVariant = $query !== [];
+        $family = $family === '' ? null : $family;
+        $fragment = $request->header(self::CATALOG_FRAGMENT_HEADER) === '1';
 
-        return response($this->storefrontResponseCache->get($search, $family === '' ? null : $family, $page, $isVariant))
-            ->header('Content-Type', 'text/html; charset=UTF-8');
+        $response = response($fragment
+            ? $this->storefrontResponseCache->fragment($search, $family, $page, $isVariant)
+            : $this->storefrontResponseCache->get($search, $family, $page, $isVariant))
+            ->header('Content-Type', 'text/html; charset=UTF-8')
+            ->setVary(self::CATALOG_FRAGMENT_HEADER, false);
+
+        if ($fragment) {
+            $response->header(self::CATALOG_FRAGMENT_HEADER, '1');
+        }
+
+        return $response;
     }
 }

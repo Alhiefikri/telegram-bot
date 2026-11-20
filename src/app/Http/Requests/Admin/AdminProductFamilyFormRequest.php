@@ -68,6 +68,7 @@ abstract class AdminProductFamilyFormRequest extends FormRequest
             'icon' => ['nullable', 'string', 'max:32'],
             'sort_order' => ['required', 'integer', 'min:0', 'max:999999'],
             'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=6000,max_height=6000'],
+            'sidebar_icon' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048', 'dimensions:max_width=1024,max_height=1024'],
             'telegram_image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=6000,max_height=6000'],
         ];
     }
