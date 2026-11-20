@@ -1,4 +1,4 @@
-# Storefront redesign release evidence (#737)
+# Storefront redesign release evidence (#737, #738)
 
 Scope: [#731 §6](https://github.com/Alhiefikri/telegram-bot/issues/731), integrating #732 (review), #733 (invoice), #734 (catalog), #735 (visitor locale), and #736 (funnel copy). S6 fixes the English desktop Family reset label, changes the Laravel homepage HTML cache namespace, and removes the unused pre-redesign home partial. `/shop` still owns its separate catalog. Shared theme tokens, payment and fulfillment rules, and invoice URLs are unchanged.
 
@@ -53,7 +53,36 @@ npx playwright test tests/Browser/storefront-home-catalog.spec.js --output=test-
 
 For the baseline, use a separate worktree at `4c18f42c`, copy only the candidate spec and test router into its `src/tests/Browser/`, build that worktree’s assets, and run the same Playwright command with `-g 'release layout'` and a different output directory. Context7 CLI returned `fetch failed`; Laravel 13’s [HTTP testing docs](https://laravel.com/docs/13.x/http-client#preventing-stray-requests) were used to confirm the fake/deny-stray-request fixture pattern.
 
+## Invoice deadline and QR decoding follow-up (#738)
+
+Candidate: local code/test snapshot `ef2ebf1b1637e32633998159a21b5bd3d19bac7c` (tree `1b13231566a401f66a2cb5004020f988dc44574b`) on `4a93af26`. The snapshot excludes this evidence note and was not published. **Combined release evidence is incomplete:** the separate language/menu/catalog follow-up [#739](https://github.com/Alhiefikri/telegram-bot/issues/739) is not in this candidate.
+
+- The invoice clock now closes payment instructions without changing the Order status. Chromium checks the last fractional second, heading/badge, removal of QR and payable amount, unchanged saved deadline, and one live-region update in `id`, `ms`, and `en`. A later automatic status response can replace the deadline view with the verified cancelled state. The guest journey also verifies that the real status handler, with a synthetic provider success, replaces the deadline view with paid content and preserves signed reopening and Recovery Key access. The cart invoice reopens after the saved deadline. QR Manual has no automatic check or upload, asks the buyer to wait for staff confirmation if already paid, and renders the same deadline view when the still-pending invoice is reopened.
+- The corrected responsive regression checks that the provider-not-ready panel has neither a QR nor any rupiah amount, gives safe instructions, and exposes retry and help. It then runs the paid, expired, and cancelled cases at 320, 390, 768, and 1280 pixels wide.
+- ZBar 0.23.93 decoded the 214-character non-payment fixture **byte-for-byte** (ignoring ZBar’s output newline) from Chromium element screenshots, not the input PNG. Both 1366×768 and 390×844 passed in light and dark. Each measured a 222×222 CSS px image in a 240×240 CSS px frame, with a 240×241 PNG capture after raster rounding. QR, `Rp35.016`, and the deadline all fit in the initial viewport at those sizes. At 320×568 with the root font size doubled, the status control and invoice details action could each be scrolled fully into view without horizontal overflow in either theme.
+
+From `src/`, with dependencies, Chromium, and `zbarimg` installed, run against the disposable browser server / SQLite fixtures:
+
+```sh
+mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs
+export APP_KEY="base64:$(openssl rand -base64 32)"
+npm run build
+php vendor/phpunit/phpunit/phpunit --filter 'Storefront|ProductWaitlist|Bsc.*Checkout'
+STOREFRONT_QR_DECODE=1 npx playwright test tests/Browser/storefront-home-catalog.spec.js --workers=1 --output=test-results/issue-738-storefront
+npx playwright test tests/Browser/admin-dashboard-responsive.spec.js -g 'prioritizes invoice content|polls active invoices|keeps QRIS retry|reloads invoice when QRIS' --workers=1 --output=test-results/issue-738-admin
+node --test tests/JavaScript/{checkout-review,family-quick-buy,storefront-components,mobile-menu}.test.js
+vendor/bin/pint --test lang/{en,id,ms}/storefront_funnel.php
+```
+
+Results: Vite build passed; PHPUnit **428 passed / 5 skipped / 7,063 assertions**; Chromium **37 storefront + 4 focused invoice cases passed**, including all four decodes; **26 JavaScript tests** and targeted Pint passed.
+
+Safe snapshots in `src/test-results/issue-738-storefront/`: `synthetic-qr.png` and `qr-decode.json` in each decode case, and `deadline-notice.png` in each clock case. These are element-only captures, with no signed URLs, Recovery Keys, or credentials. The browser suite intercepts the store’s static Manual QR for its screenshots. Do not share raw failure logs/traces or artifacts containing private invoice details.
+
+These checks do not certify live QRIS, other payload densities or scanner devices, screen reader speech, PostgreSQL concurrency, or browser/OS zoom. The live-region assertion counts DOM updates; the large-text check uses Chromium’s root font size. Context7 CLI returned `fetch failed`; the [official Playwright clock guide](https://playwright.dev/docs/clock) documents the clock controls used in the tests.
+
 ## Operator gate, cutover and rollback
+
+**nginx/CDN gate: OPEN.** No authorized edge was accessed or verified for #738. Only the operator can close this gate after verifying the shared HTML bypass and locale isolation.
 
 1. Obtain operator approval. Before sending traffic to the candidate, apply the [locale cache gate](runbook-storefront-locale.md#operator-gate-before-cutover): bypass shared lookup/serve (including stale fallback) and purge old storefront HTML. Verify on an authorized edge with separate language profiles; stop if isolation cannot be established.
 2. Stage exactly one release’s application code, Blade views, Vite manifest and hashed assets together. Make new hashed assets available before serving HTML that references them; retain the previous asset set during cutover/rollback. Verify legacy static index artifacts are absent using the existing entrypoint behavior. Switch code and manifest together, with compiled views from that same release.

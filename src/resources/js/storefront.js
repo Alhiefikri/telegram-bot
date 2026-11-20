@@ -455,6 +455,53 @@ function initSupportFunnelEvents() {
     });
 }
 
+function renderQrisInvoice(panel, state, orderStatus) {
+  if (!panel) return;
+
+  const current = panel.dataset.qrisDisplay;
+  // The browser clock can close payment instructions, not decide the order outcome.
+  if (state === "deadline" && current !== "active") return;
+
+  panel.dataset.qrisDisplay = state;
+  panel.querySelectorAll("[data-qris-active-only]").forEach((element) => {
+    element.hidden = true;
+  });
+  const countdown = panel.querySelector("[data-payment-countdown]");
+  if (countdown) countdown.hidden = true;
+
+  const notice = panel.querySelector("[data-qris-deadline-notice]");
+  if (notice) notice.hidden = state !== "deadline";
+  const status = panel.querySelector("[data-shop-payment-status]");
+  status
+    ?.querySelector("[data-payment-status-followup]")
+    ?.classList.remove("hidden");
+  const checkButton = status?.querySelector("[data-qris-deadline-label]");
+  if (state === "deadline" && checkButton) {
+    checkButton.textContent = checkButton.dataset.qrisDeadlineLabel;
+  }
+
+  const hero = panel
+    .closest(".invoice-main")
+    ?.querySelector("[data-qris-hero-copy]");
+  if (!hero) return;
+  const copy = JSON.parse(hero.dataset.qrisHeroCopy);
+  const headlineState =
+    state === "terminal" && ["cancelled", "expired"].includes(orderStatus)
+      ? orderStatus
+      : state;
+  const [headline, badge, summary] = copy[headlineState];
+  hero.querySelector("[data-invoice-headline]").textContent = headline;
+  hero.querySelector("[data-invoice-badge]").textContent = badge;
+  hero.querySelector("[data-invoice-summary]").textContent = summary;
+
+  if (state === "deadline") {
+    panel.querySelector("[data-qris-deadline-announcement]").textContent =
+      `${headline}. ${notice.textContent.trim()}`;
+  } else {
+    hero.dataset.invoiceState = state;
+  }
+}
+
 function initPaymentCountdowns() {
   const countdowns = document.querySelectorAll("[data-payment-countdown]");
 
@@ -473,28 +520,23 @@ function initPaymentCountdowns() {
     );
     let interval = null;
     let announcedExpired = false;
+    const qrisPanel = countdown.closest("[data-qris-display]");
 
     if (!value || !Number.isFinite(deadline)) {
       return;
     }
 
     const render = () => {
-      const remainingSeconds = Math.max(
-        0,
-        Math.floor((deadline - Date.now()) / 1000)
-      );
+      if (qrisPanel && qrisPanel.dataset.qrisDisplay !== "active") return false;
 
-      if (remainingSeconds <= 0) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        if (qrisPanel) {
+          renderQrisInvoice(qrisPanel, "deadline");
+          return false;
+        }
         value.textContent = "00:00:00";
         countdown.setAttribute("data-countdown-expired", "true");
-        const panel = countdown.closest(".invoice-qris-panel");
-        panel?.querySelector("[data-invoice-qris]")?.setAttribute("hidden", "");
-        panel
-          ?.querySelector("[data-invoice-qris-instruction]")
-          ?.setAttribute("hidden", "");
-        panel
-          ?.querySelector("[data-invoice-qris-expired]")
-          ?.removeAttribute("hidden");
         if (state) {
           state.textContent =
             countdown.getAttribute("data-countdown-expired-title") || "";
@@ -509,6 +551,7 @@ function initPaymentCountdowns() {
         return false;
       }
 
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
       const hours = Math.floor(remainingSeconds / 3600);
       const minutes = Math.floor((remainingSeconds % 3600) / 60);
       const seconds = remainingSeconds % 60;
@@ -605,6 +648,7 @@ function initShopPaymentStatus() {
     const redirectUrl = container.getAttribute("data-redirect-url");
     const paymentKind = container.getAttribute("data-payment-kind") || "qris";
     const isBinance = paymentKind === "binance";
+    const qrisPanel = container.closest("[data-qris-display]");
     const title = container.querySelector("[data-payment-status-title]");
     const message = container.querySelector("[data-payment-status-message]");
     const announcement = container.querySelector(
@@ -716,6 +760,7 @@ function initShopPaymentStatus() {
       pollAttempts < maxAttempts && Date.now() - autoStartedAt < maxDurationMs;
 
     const setStatus = (titleText, messageText) => {
+      container.removeAttribute("data-qris-initial-status");
       if (title) {
         title.textContent = titleText;
       }
@@ -736,10 +781,12 @@ function initShopPaymentStatus() {
       button.setAttribute("aria-busy", busy ? "true" : "false");
     };
 
-    setStatus(
-      title?.textContent?.trim() || copy.pending_title,
-      message?.textContent?.trim() || copy.pending_message
-    );
+    if (!qrisPanel) {
+      setStatus(
+        title?.textContent?.trim() || copy.pending_title,
+        message?.textContent?.trim() || copy.pending_message
+      );
+    }
     setBusy(false);
 
     const stopAutoPolling = () => {
@@ -891,6 +938,7 @@ function initShopPaymentStatus() {
         }
 
         if (data.is_paid === true) {
+          renderQrisInvoice(qrisPanel, "paid");
           setStatus(copy.paid_title, data.message || copy.paid_message);
           markTerminal();
           window.location.href =
@@ -905,8 +953,12 @@ function initShopPaymentStatus() {
             data.is_terminal !== true)
         ) {
           setStatus(
-            copy.qris_ready_title,
-            data.message || copy.qris_ready_message
+            qrisPanel?.dataset.qrisDisplay === "deadline"
+              ? copy.loading_title
+              : copy.qris_ready_title,
+            qrisPanel?.dataset.qrisDisplay === "deadline"
+              ? copy.loading_message
+              : data.message || copy.qris_ready_message
           );
           markTerminal();
           window.location.href =
@@ -965,17 +1017,9 @@ function initShopPaymentStatus() {
           ) ||
           terminalStatuses.has(String(data.order_status || "").toLowerCase())
         ) {
+          renderQrisInvoice(qrisPanel, "terminal", data.order_status);
           setStatus(copy.terminal_title, data.message || copy.terminal_message);
           markTerminal();
-          if (paymentKind === "qris") {
-            const panel = container.closest(".invoice-qris-panel");
-            panel
-              ?.querySelector("[data-invoice-qris]")
-              ?.setAttribute("hidden", "");
-            panel
-              ?.querySelector("[data-invoice-qris-instruction]")
-              ?.setAttribute("hidden", "");
-          }
           button.hidden = true;
           followup?.classList.remove("hidden");
           if (isBinance && data.is_terminal === true) {

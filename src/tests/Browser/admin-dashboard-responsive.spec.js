@@ -2781,10 +2781,9 @@ test("prioritizes invoice content by state without mobile overflow", async ({
     await expect(
       page.getByRole("heading", { name: "Provider belum memberi nominal" })
     ).toBeVisible();
-    await expect(
-      page.getByLabel("Pembayaran QRIS").getByText("Rp45.000", { exact: true })
-    ).toBeVisible();
-    await expect(page.getByText("Menunggu provider")).toBeVisible();
+    const qrisPanel = page.getByLabel("Pembayaran QRIS");
+    await expect(qrisPanel.getByText(/Rp\s*\d/)).toHaveCount(0);
+    await expect(qrisPanel.getByText("Menunggu provider")).toBeVisible();
     await expect(
       page
         .locator("[data-shop-payment-status]")
