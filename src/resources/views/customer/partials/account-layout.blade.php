@@ -30,7 +30,6 @@
                         <summary>Menu toko</summary>
                         <div class="account-site-menu-links">
                             <a href="{{ route('storefront.home') }}#kategori">Kategori</a>
-                            <a href="{{ route('storefront.home') }}#trending">Trending</a>
                             <a href="{{ route('storefront.home') }}#cara-beli">Cara beli</a>
                             <a href="{{ route('storefront.order-access.create') }}">Akses pesanan</a>
                             <a href="{{ route('storefront.guides.index') }}">Panduan</a>

@@ -79,6 +79,32 @@ final class CatalogBrowse
         return $this->browse($this->coerceQuery($query), public: true);
     }
 
+    /** @return list<CatalogBrowseEntry> */
+    public function publicEntriesForPlanFilter(): array
+    {
+        // The picker must include every public Family, independent of search or page.
+        return $this->browse(new CatalogBrowseQuery, public: true, unpaginated: true)->entries;
+    }
+
+    /** @return list<CatalogProductReadModel> */
+    public function matchingPlans(CatalogBrowseEntry $entry, string $search): array
+    {
+        $family = $entry->family;
+        if ($family === null) {
+            return $entry->product !== null && $this->matchesProduct($entry->product, $search)
+                ? [$entry->product]
+                : [];
+        }
+
+        // A Family name/slug/description match makes every public Plan relevant.
+        if ($search === '' || $this->contains($family->name, $search)
+            || $this->contains($family->slug, $search) || $this->contains($family->description, $search)) {
+            return $family->members;
+        }
+
+        return array_values(array_filter($family->members, fn (CatalogProductReadModel $plan): bool => $this->matchesProduct($plan, $search)));
+    }
+
     public function browsePublicFamilies(CatalogBrowseQuery|string|null $query = null): CatalogBrowseResult
     {
         return $this->browse($this->coerceQuery($query), public: true, familiesOnly: true);
@@ -220,7 +246,7 @@ final class CatalogBrowse
         })->all();
     }
 
-    private function browse(CatalogBrowseQuery $query, bool $public, bool $familiesOnly = false): CatalogBrowseResult
+    private function browse(CatalogBrowseQuery $query, bool $public, bool $familiesOnly = false, bool $unpaginated = false): CatalogBrowseResult
     {
         $query = CatalogBrowseQuery::fromValues(
             search: $query->search,
@@ -301,9 +327,10 @@ final class CatalogBrowse
         }
 
         $total = $entries->count();
-        $lastPage = max(1, (int) ceil($total / $query->perPage));
+        $perPage = $unpaginated ? max(1, $total) : $query->perPage;
+        $lastPage = max(1, (int) ceil($total / $perPage));
         $currentPage = min(max(1, $query->page), $lastPage);
-        $pageEntries = $entries->forPage($currentPage, $query->perPage)->values()->all();
+        $pageEntries = $entries->forPage($currentPage, $perPage)->values()->all();
         $pageFamilies = array_values(array_filter(array_map(
             static fn (CatalogBrowseEntry $entry): ?CatalogFamilyReadModel => $entry->family,
             $pageEntries,
@@ -319,9 +346,9 @@ final class CatalogBrowse
                 currentPage: $currentPage,
                 lastPage: $lastPage,
                 total: $total,
-                perPage: $query->perPage,
-                from: $total === 0 ? null : (($currentPage - 1) * $query->perPage) + 1,
-                to: $total === 0 ? null : min($total, $currentPage * $query->perPage),
+                perPage: $perPage,
+                from: $total === 0 ? null : (($currentPage - 1) * $perPage) + 1,
+                to: $total === 0 ? null : min($total, $currentPage * $perPage),
             ),
             families: $pageFamilies,
             standaloneProducts: $pageStandalone,

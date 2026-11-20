@@ -1,6 +1,6 @@
 # Storefront search contract
 
-Issue: #172, bound storefront search cache and query cost.
+Issues: #172, bound storefront search cache and query cost; #734, catalog-first homepage.
 
 ## Input normalization
 
@@ -18,11 +18,13 @@ The storefront search input renders `maxlength="80"`, but the server-side limit 
 
 The unfiltered homepage remains full-page cached for 30 minutes and keeps its atomic lock stampede protection. Product and category mutations still invalidate it by bumping the storefront response cache version and removing the static homepage file.
 
-Search requests are deliberately not stored in the full-page response cache. Equivalent query strings normalize to the same query behavior, but each search result page renders live from the capped catalog query. This prevents arbitrary public values from creating an unbounded set of large HTML cache entries.
+Homepage requests containing query parameters bypass both reads and writes of the HTML cache. Successful variants are canonical to `/`, marked `noindex, follow`, and return `Cache-Control: private, no-store` without CDN or surrogate cache directives. The origin nginx config sends `/` to PHP with its query string, not to a static HTML file. Any separate edge cache must forward the query and not serve a cached `/` for these variants; production edge verification is outside this change.
 
 ## Query policy
 
-Search uses Laravel 13's database-agnostic case-insensitive `whereLike` / `orWhereLike` query builder clauses, verified against the current Laravel 13 query builder documentation. The product set remains bounded to active, public products, preserves storefront ordering, and returns at most 24 products.
+The homepage renders `GET /?family=<slug>&q=<query>` using the same bulk `CatalogBrowse` public projection as `/shop`. It filters to a public Family, then intersects the search with its Plans; a match on Family name/slug/description includes all its public Plans. Unknown and private slugs share a generic fallback without echoing the supplied slug. The Family picker is complete, including Families outside the first results page. Standalone Products participate under “Semua produk”. Plan rows paginate at 24 (`page`), without SQL per Family. Filter and search reset the page independently and retain the other filter.
+
+The [Laravel 13 request reference](https://laravel.com/docs/13.x/requests#retrieving-input-from-the-query-string) confirms that `Request::query()` retrieves only the query bag. The query-plan fixture below is historical SQL benchmark guidance, not a description of the homepage's current in-memory projection search.
 
 The current strategy intentionally avoids adding a PostgreSQL index before there is evidence it is needed. Because the query is a contains search over `name` and `description`, ordinary B-tree indexes are not expected to help once the active public catalog grows.
 

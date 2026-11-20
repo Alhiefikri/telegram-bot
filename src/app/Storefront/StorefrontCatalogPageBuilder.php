@@ -36,9 +36,59 @@ class StorefrontCatalogPageBuilder
     /**
      * @return array<string, mixed>
      */
-    public function homeViewData(StorefrontCatalogQuery|string|null $query): array
+    public function homeViewData(string $search, ?string $family, int $page, bool $isVariant): array
     {
-        return $this->home($query)->viewData() + $this->bannerViewData();
+        $entries = collect($this->catalog->publicEntriesForPlanFilter());
+        $families = $entries->pluck('family')->filter()->keyBy('slug');
+        $selectedFamily = $family === null ? null : $families->get($family);
+        $familyUnavailable = $family !== null && $selectedFamily === null;
+        $family = $selectedFamily?->slug;
+
+        $results = $entries
+            ->when($family !== null, fn (Collection $entries) => $entries->filter(fn (CatalogBrowseEntry $entry) => $entry->family?->slug === $family))
+            ->flatMap(fn (CatalogBrowseEntry $entry) => $this->catalog->matchingPlans($entry, $search));
+        $perPage = StorefrontCatalogQuery::PRODUCTS_PER_PAGE;
+        $page = min($page, max(1, (int) ceil($results->count() / $perPage)));
+        $returnUrl = $this->urls->homeCatalogUrl($search, $family, $page);
+        $maintenance = $this->maintenance->current();
+
+        return [
+            'storefront' => $this->storefront,
+            'brand' => $this->storefront->brand(),
+            'copy' => config('storefront'),
+            'metadata' => $this->seo->home(url('/'), isVariant: $isVariant),
+            'homeUrl' => route('storefront.home'),
+            'shopUrl' => route('storefront.shop.index'),
+            'supportContext' => $this->storefront->generalSupportContext(),
+            'checkoutMaintenance' => $maintenance,
+            'families' => $families->map(fn (CatalogFamilyReadModel $option): array => [
+                'slug' => $option->slug,
+                'name' => $option->name,
+                'url' => $this->urls->homeCatalogUrl($search, $option->slug),
+            ]),
+            'family' => $selectedFamily,
+            'familyUnavailable' => $familyUnavailable,
+            'familyPageUrl' => $family === null ? null : $this->urls->familyUrl($family, $returnUrl.'#products'),
+            'search' => $search,
+            'searchMaxLength' => StorefrontCatalogSearch::MAX_LENGTH,
+            'resetFamilyUrl' => $this->urls->homeCatalogUrl($search),
+            'resetSearchUrl' => $this->urls->homeCatalogUrl('', $family),
+            'plans' => $results->forPage($page, $perPage)->map(function (CatalogProductReadModel $plan) use ($returnUrl): array {
+                $planReturnUrl = $returnUrl === route('storefront.home')
+                    ? $this->urls->catalogUrl($plan->id)
+                    : $returnUrl.'#product-'.$plan->id;
+
+                return [
+                    'name' => $plan->label,
+                    'familyName' => $plan->familyName,
+                    'presentation' => $this->catalogPresenter->present($plan),
+                    'productUrl' => $this->urls->productUrlForId($plan->id, $planReturnUrl),
+                    'checkoutUrl' => $this->urls->checkoutProductUrlForId($plan->id, $planReturnUrl),
+                ];
+            }),
+            'previousUrl' => $page > 1 ? $this->urls->homeCatalogUrl($search, $family, $page - 1).'#products' : null,
+            'nextUrl' => $results->count() > $page * $perPage ? $this->urls->homeCatalogUrl($search, $family, $page + 1).'#products' : null,
+        ];
     }
 
     /**
@@ -86,7 +136,7 @@ class StorefrontCatalogPageBuilder
             : url('/');
         $metadata = $isShop
             ? $this->seo->catalog($query, $canonicalUrl)
-            : $this->seo->home($canonicalUrl, hasSearch: $query->search !== '');
+            : $this->seo->home($canonicalUrl, isVariant: $query->search !== '');
 
         return new StorefrontCatalogPage(
             context: $context,
