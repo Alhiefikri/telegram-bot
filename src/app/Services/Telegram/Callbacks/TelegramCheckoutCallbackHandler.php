@@ -59,6 +59,7 @@ use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\Telegram\TelegramOutboundResponseValidator;
 use App\Services\Telegram\TelegramPaymentProofIntake;
+use App\Services\Telegram\TelegramStarsCheckout;
 use App\Services\Telegram\TelegramUiIcons;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtFunding\CustomerUsdtFundingGate;
@@ -89,6 +90,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
         private TelegramOutboundEffectDispatcher $dispatcher,
         private TelegramHtmlCaption $captions,
         private TelegramUiIcons $uiIcons,
+        private TelegramStarsCheckout $stars,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -104,6 +106,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
     public function supports(TelegramCallbackContext $context): bool
     {
         return $context->data === 'checkout'
+            || preg_match('/\Astars:(open|confirm|back):[a-f0-9]{24}\z/D', $context->data) === 1
             || $context->data === 'checkout:current'
             || $context->data === 'checkout:balance'
             || preg_match('/^checkout:retry:[a-f0-9]{32}$/', $context->data) === 1
@@ -119,6 +122,18 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     public function handle(TelegramCallbackContext $context): bool
     {
+        if (preg_match('/\Astars:(open|confirm|back):([a-f0-9]{24})\z/D', $context->data, $matches) === 1) {
+            $this->stars->handle(
+                $context, $matches[1], $matches[2],
+                fn (int $messageId, ?int $productId, string $revision): string => $productId === null
+                    ? $this->checkoutIntentKey($context->customer, $context->chatId, $messageId, 'checkout:choice')
+                    : $this->detailCheckoutIntentKey($context->customer, $context->chatId, $messageId, $productId, $revision),
+                fn (string $key, callable $callback) => $this->withCheckoutIntentLock($context, $key, $callback),
+            );
+
+            return true;
+        }
+
         if (preg_match('/^proof:(order|topup):([0-9a-fA-F-]+)$/', $context->data, $matches) === 1) {
             app(TelegramPaymentProofIntake::class)->choose($context, $matches[1], $matches[2]);
 
@@ -904,11 +919,19 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             ]];
         }
 
+        $starsButton = $context->isPrivate() ? $this->stars->offer($context->customer, $context->chatId, $cart, bin2hex(random_bytes(8))) : null;
+        if ($starsButton !== null) {
+            $buttons[] = [$starsButton];
+        }
         $this->bot->answerCallbackQuery($context->callbackQueryId);
         $paymentMethodMessage = $this->captions->html(implode("\n", $summaryLines), 4096)
             ."\n\n"
             .$this->captions->blockquote($this->locale->qrisCrossBorderSupport($context->customer));
-        $this->bot->sendMessage($context->chatId, $paymentMethodMessage, ['inline_keyboard' => $buttons], ['parse_mode' => 'HTML']);
+        $response = $this->bot->sendMessage($context->chatId, $paymentMethodMessage, ['inline_keyboard' => $buttons], ['parse_mode' => 'HTML']);
+        $messageId = data_get($response, 'result.message_id');
+        if ($starsButton !== null && ($response['ok'] ?? false) === true && is_int($messageId)) {
+            $this->stars->bindOffer($context->customer, $starsButton, $messageId);
+        }
     }
 
     private function checkout(TelegramCallbackContext $context, string|bool $rail = 'qris', bool $answerCallback = true, ?string $checkoutKey = null, ?BalanceCheckoutRequest $balanceRequest = null, bool $recovering = false, bool $manualAlternative = false): void

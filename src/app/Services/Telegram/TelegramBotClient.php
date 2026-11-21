@@ -175,24 +175,22 @@ class TelegramBotClient
         array $replyMarkup = [],
         ?int $messageId = null,
         array $options = [],
-    ): void {
+    ): array {
         if ($messageId === null || $messageId < 1) {
-            $this->sendMessage($chatId, $text, $replyMarkup, $options);
-
-            return;
+            return $this->sendMessage($chatId, $text, $replyMarkup, $options);
         }
 
         try {
-            $this->editMessageText($chatId, $messageId, $text, $replyMarkup, $options);
+            return $this->editMessageText($chatId, $messageId, $text, $replyMarkup, $options);
         } catch (TelegramApiException $exception) {
             if ($exception->isMessageNotModified()) {
-                return;
+                return ['ok' => true, 'result' => ['message_id' => $messageId]];
             }
             if (! $exception->isDefiniteEditFailure()) {
                 throw $exception;
             }
 
-            $this->sendMessage($chatId, $text, $replyMarkup, $options);
+            return $this->sendMessage($chatId, $text, $replyMarkup, $options);
         }
     }
 
@@ -275,7 +273,7 @@ class TelegramBotClient
                             $operation['reply_markup'] ?? [],
                             $options,
                         );
-                        $payload = $this->withoutCustomEmojiWhenUnavailable($payload, $scope);
+                        $payload = $this->wirePayload($this->withoutCustomEmojiWhenUnavailable($payload, $scope));
                         $request->post(
                             $this->requests->url('sendMessage'),
                             $payload,
@@ -296,7 +294,7 @@ class TelegramBotClient
                         $operation['reply_markup'] ?? [],
                         $options,
                     );
-                    $payload = $this->withoutCustomEmojiWhenUnavailable($payload, $scope);
+                    $payload = $this->wirePayload($this->withoutCustomEmojiWhenUnavailable($payload, $scope));
                     $request->attach('photo', $operation['photo_contents'], $operation['filename'])
                         ->post($this->requests->url('sendPhoto'), $payload);
                 }
@@ -756,7 +754,16 @@ class TelegramBotClient
             $request = $request->attach($attachment['field'], $attachment['contents'], $attachment['filename']);
         }
 
-        return $request->post($this->requests->url($method), $payload)->throw()->json();
+        return $request->post($this->requests->url($method), $this->wirePayload($payload))->throw()->json();
+    }
+
+    private function wirePayload(array $payload): array
+    {
+        if (is_array($payload['reply_markup'] ?? null) || is_string($payload['reply_markup'] ?? null)) {
+            $payload['reply_markup'] = $this->customEmoji->stripFallbackMetadata($payload['reply_markup']);
+        }
+
+        return $payload;
     }
 
     /**

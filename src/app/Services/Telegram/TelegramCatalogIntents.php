@@ -12,9 +12,11 @@ use App\Catalog\CatalogIcon;
 use App\Catalog\CatalogProductReadModel;
 use App\Catalog\CatalogProjectionPayload;
 use App\Catalog\LocalizedProductCopy;
+use App\Enums\TelegramNavigationRenderOutcome;
 use App\Enums\TelegramNavigationScreen;
 use App\Models\Customer;
 use App\Models\Product;
+use App\Models\TelegramNavigationRoot;
 use App\Services\Admin\ProductImageOptimizer;
 use App\Services\Catalog\CatalogBrowse;
 use App\Services\Catalog\CatalogFamilyIconResolver;
@@ -52,6 +54,7 @@ class TelegramCatalogIntents
         private TelegramUiIcons $uiIcons,
         private TelegramProductContent $content,
         private CustomerUsdtFundingGate $usdtFundingGate,
+        private TelegramStarsCheckout $stars,
     ) {}
 
     public function sendCategoryCatalog(
@@ -495,6 +498,7 @@ class TelegramCatalogIntents
             && $quote->usdtSubtotal !== null
             && $this->checkout->binanceRailSelectable();
         $keyboard = [];
+        $starsButton = null;
 
         if ($selectionCanPay) {
             $productId = (int) $product->getKey();
@@ -556,6 +560,10 @@ class TelegramCatalogIntents
                         ]),
                         'callback_data' => 'detail:pay:binance:'.$productId.':'.$token,
                     ]];
+                }
+                $starsButton = $this->stars->offer($customer, $chatId, $product, $token, $quantity);
+                if ($starsButton !== null) {
+                    $keyboard[] = [$starsButton];
                 }
             }
             $keyboard[] = [[
@@ -700,7 +708,10 @@ class TelegramCatalogIntents
             $lines[] = '';
             $lines[] = $this->captions->blockquote($this->locale->qrisCrossBorderSupport($customer));
         }
-        $this->sendProductMessage($customer, $chatId, $product, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId);
+        $sentId = $this->sendProductMessage($customer, $chatId, $product, implode("\n", $lines), ['inline_keyboard' => $keyboard], $messageId);
+        if ($starsButton !== null) {
+            $this->stars->bindOffer($customer, $starsButton, $sentId);
+        }
     }
 
     /**
@@ -735,7 +746,7 @@ class TelegramCatalogIntents
      * @param  array<string, mixed>  $keyboard
      * @param  array<string, mixed>  $options
      */
-    private function sendProductMessage(Customer $customer, string $chatId, Product $product, string $text, array $keyboard, ?int $messageId = null, array $options = ['parse_mode' => 'HTML']): void
+    private function sendProductMessage(Customer $customer, string $chatId, Product $product, string $text, array $keyboard, ?int $messageId = null, array $options = ['parse_mode' => 'HTML']): ?int
     {
         $telegramImagePath = $product->telegram_image_path ?? $product->family?->telegram_image_path;
         $photoUrl = $this->images->telegramUrl($telegramImagePath);
@@ -744,7 +755,7 @@ class TelegramCatalogIntents
                 ? $this->roots->currentForChat($customer, $chatId)
                 : $this->roots->match($customer, $chatId, $messageId);
             if ($root?->screen === TelegramNavigationScreen::Product) {
-                $this->roots->render($root, $chatId, new TelegramNavigationSurface(
+                $outcome = $this->roots->render($root, $chatId, new TelegramNavigationSurface(
                     TelegramNavigationScreen::Product,
                     $this->locale->code($customer),
                     $text,
@@ -752,12 +763,10 @@ class TelegramCatalogIntents
                     $options,
                 ));
 
-                return;
+                return $this->renderedMessageId($root, $customer, $chatId, $outcome);
             }
 
-            $this->sendCatalogMessage($customer, $chatId, $text, $keyboard, $messageId, $options);
-
-            return;
+            return $this->sendCatalogMessage($customer, $chatId, $text, $keyboard, $messageId, $options);
         }
 
         $surface = new TelegramNavigationSurface(
@@ -773,9 +782,7 @@ class TelegramCatalogIntents
             : $this->roots->match($customer, $chatId, $messageId);
 
         if ($root !== null) {
-            $this->roots->render($root, $chatId, $surface);
-
-            return;
+            return $this->renderedMessageId($root, $customer, $chatId, $this->roots->render($root, $chatId, $surface));
         }
 
         if ((string) $customer->telegram_id !== $chatId) {
@@ -785,10 +792,10 @@ class TelegramCatalogIntents
                 $this->bot->sendMessage($chatId, $text, $keyboard, $options);
             }
 
-            return;
+            return null;
         }
 
-        $this->roots->establishProduct($customer, $chatId, $surface);
+        return $this->roots->establishProduct($customer, $chatId, $surface)->message_id;
     }
 
     public function handleCustomQuantityInput(Customer $customer, string $chatId, string $text): void
@@ -1133,7 +1140,7 @@ class TelegramCatalogIntents
         bool $establishFreshRoot = false,
         bool $removeLegacyReplyKeyboard = false,
         bool $refresh = false,
-    ): void {
+    ): ?int {
         $root = $messageId === null
             ? $this->roots->currentForChat($customer, $chatId)
             : $this->roots->match($customer, $chatId, $messageId);
@@ -1141,7 +1148,7 @@ class TelegramCatalogIntents
         if ($establishFreshRoot
             && $messageId === null
             && ($root !== null || $removeLegacyReplyKeyboard)) {
-            $this->roots->establish(
+            return $this->roots->establish(
                 $customer,
                 $chatId,
                 new TelegramNavigationSurface(
@@ -1152,13 +1159,11 @@ class TelegramCatalogIntents
                     $options,
                 ),
                 removeLegacyReplyKeyboard: $removeLegacyReplyKeyboard,
-            );
-
-            return;
+            )->message_id;
         }
 
         if ($root !== null) {
-            $this->roots->render($root, $chatId, new TelegramNavigationSurface(
+            $outcome = $this->roots->render($root, $chatId, new TelegramNavigationSurface(
                 TelegramNavigationScreen::Catalog,
                 $this->locale->code($customer),
                 $text,
@@ -1166,26 +1171,38 @@ class TelegramCatalogIntents
                 $options,
             ), refresh: $refresh);
 
-            return;
+            return $this->renderedMessageId($root, $customer, $chatId, $outcome);
         }
         if ($refresh && $messageId !== null) {
             $this->bot->deleteMessage($chatId, $messageId);
             if ((string) $customer->telegram_id === $chatId) {
-                $this->roots->establishText($customer, $chatId, new TelegramNavigationSurface(
+                return $this->roots->establishText($customer, $chatId, new TelegramNavigationSurface(
                     TelegramNavigationScreen::Catalog,
                     $this->locale->code($customer),
                     $text,
                     $replyMarkup,
                     $options,
-                ));
+                ))->message_id;
             } else {
                 $this->bot->sendMessage($chatId, $text, $replyMarkup, $options);
             }
 
-            return;
+            return null;
         }
 
-        $this->bot->editMessageTextOrSend($chatId, $text, $replyMarkup, $messageId, $options);
+        $response = $this->bot->editMessageTextOrSend($chatId, $text, $replyMarkup, $messageId, $options);
+        $id = data_get($response, 'result.message_id');
+
+        return ($response['ok'] ?? false) === true && is_int($id) && $id > 0 ? $id : null;
+    }
+
+    private function renderedMessageId(TelegramNavigationRoot $root, Customer $customer, string $chatId, TelegramNavigationRenderOutcome $outcome): ?int
+    {
+        return match ($outcome) {
+            TelegramNavigationRenderOutcome::Applied, TelegramNavigationRenderOutcome::Unchanged => $root->message_id,
+            TelegramNavigationRenderOutcome::Replaced => $this->roots->currentForChat($customer, $chatId)?->message_id,
+            default => null,
+        };
     }
 
     /**

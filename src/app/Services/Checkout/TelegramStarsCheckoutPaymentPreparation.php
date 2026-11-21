@@ -37,6 +37,8 @@ final readonly class TelegramStarsCheckoutPaymentPreparation implements Checkout
     /** Read-only preview for an existing Cart or a direct Product selection. */
     public function preview(Cart|Product $selection, TelegramStarsConfirmation $confirmation, ?int $quantity = null): TelegramStarsCheckoutQuote
     {
+        $policy = $this->policies->current();
+        $this->assertIssuanceEnabled($policy);
         $buyer = Customer::query()->find($confirmation->customerId);
         if ($buyer === null || ! $confirmation->matchesCustomer($buyer)) {
             throw new InvalidCheckout('Telegram Stars buyer is unavailable.');
@@ -57,13 +59,13 @@ final readonly class TelegramStarsCheckoutPaymentPreparation implements Checkout
         } catch (InvalidArgumentException $e) {
             throw new InvalidCheckout('Telegram Stars pricing is unavailable.', previous: $e);
         }
-        $policy = $this->policies->current();
         $totalXtr = $this->amount($pricing, $policy);
         $this->assertLocalCredentials($products, $pricing, $confirmation->customerId);
 
         return new TelegramStarsCheckoutQuote(
             $confirmation, $cart?->getKey(), $this->fingerprint($pricing, $cart === null ? null : $items),
             $policy, $pricing->idrTotal(), $totalXtr, now()->toImmutable()->addMinutes(5),
+            $this->retailLines($pricing),
         );
     }
 
@@ -113,14 +115,19 @@ final readonly class TelegramStarsCheckoutPaymentPreparation implements Checkout
 
     private function amount(CheckoutPricingSnapshot $pricing, StarsPricingPolicy $policy): int
     {
-        if (! $policy->issuanceEnabled) {
-            throw new CheckoutPaymentUnavailable('Telegram Stars issuance is disabled.', reason: 'issuance_disabled');
-        }
+        $this->assertIssuanceEnabled($policy);
 
         try {
             return $this->calculator->quote($pricing->idrTotal(), $policy);
         } catch (DomainException $e) {
             throw new InvalidCheckout($e->getMessage(), previous: $e);
+        }
+    }
+
+    private function assertIssuanceEnabled(StarsPricingPolicy $policy): void
+    {
+        if (! $policy->issuanceEnabled) {
+            throw new CheckoutPaymentUnavailable('Telegram Stars issuance is disabled.', reason: 'issuance_disabled');
         }
     }
 

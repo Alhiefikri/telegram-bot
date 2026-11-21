@@ -3,8 +3,10 @@
 namespace App\Services\Telegram;
 
 use App\Enums\CredentialAccessMethod;
+use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Services\Credentials\CredentialDelivery;
 use App\Services\Credentials\CredentialDeliveryAccount;
 use App\Services\Credentials\CredentialDeliveryPresentation;
@@ -84,11 +86,12 @@ final class TelegramPaidOrderTxtExporter
 
     private function contents(Order $order, CredentialDelivery $delivery): string
     {
+        $stars = $order->payments->first(fn (Payment $payment): bool => $payment->isTelegramStars() && $payment->status === PaymentStatus::Paid);
         $header = [
             'LHIE STORE',
             'Order : '.$this->displayLine($this->orderReference($order), 'Order reference'),
             'Items : '.$this->totalQuantity($order),
-            'Invoice : '.url($this->invoiceUrls->show($order)),
+            ...($stars === null ? ['Invoice : '.url($this->invoiceUrls->show($order))] : [TelegramStarsCustomerInvoice::tender($stars)]),
             $this->translations->get('receipt.save_details', $this->locale->code($order->customer)),
         ];
 

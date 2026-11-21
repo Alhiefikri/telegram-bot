@@ -137,6 +137,42 @@ through Context7 and the official [SuccessfulPayment](https://core.telegram.org/
 [getStarTransactions](https://core.telegram.org/bots/api#getstartransactions)
 definitions.
 
+## Telegram Stars customer checkout (#745)
+
+`TelegramStarsCheckout` adds a private payment option in Product Detail and
+Cart checkout only when the existing DB issuance gate and local-stock preview
+allow it. The blue button uses the `payment.stars` slot in the bot's existing
+Ikon Menu capture flow. A missing icon uses `⭐` by default; if Telegram rejects
+a captured custom icon, the retry uses the slot's Unicode fallback.
+
+The preview is a separate message: Back removes only that preview and leaves
+the original payment choices and canonical navigation intact. The server binds
+opaque offer and consent callbacks to their acknowledged messages, Customer,
+Product revision or Cart snapshot, and versioned terms. A changed policy or
+Cart quote requires new consent; an old Product revision is rejected. Confirm
+uses the original prompt's checkout key and stores the accepted terms version
+and timestamp on the Order. A Stars direct purchase does not touch the active
+Cart. No provider call is part of accepting a quote or reserving stock.
+
+From `/status` or monthly history, Order Details can recover a pending Stars
+invoice. When the current bot has an acknowledged message, Order Details replies
+to that original native invoice; it never forwards or sends another invoice.
+An unacknowledged or ambiguous delivery shows status and support guidance
+instead. Low-balance copy points to Telegram's own purchase prompt or Settings
+→ My Stars and back to the original active invoice. Receipts and expiry notices
+show Telegram Stars and XTR, not the catalog IDR basis; the PNG omits per-item
+prices for Stars because conversion rounds only the order total.
+
+Verification: `TelegramStarsCheckoutUxTest` covers callback payloads, ID/MS/EN,
+fallback, stale revisions, consent replay, and pending/paid/expired order
+presentation with fake Telegram responses. Context7 was used for the
+[button fields](https://core.telegram.org/bots/api#inlinekeyboardbutton) and
+[native invoice](https://core.telegram.org/bots/api#sendinvoice); recovery
+uses [reply parameters](https://core.telegram.org/bots/api/types/replyparameters.md).
+Actual client presentation, return-to-invoice behavior and the low-balance
+purchase prompt still need a separate Telegram test-bot check. No public
+activation is part of this change.
+
 ## Sakurupiah checkout recovery (#677)
 
 Issue #678 supersedes #677's ordinary terminal-payment polling: the

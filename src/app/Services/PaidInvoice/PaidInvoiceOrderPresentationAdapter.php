@@ -43,7 +43,7 @@ final class PaidInvoiceOrderPresentationAdapter
             paidAt: $this->paidAt($payment),
             paymentMethod: $this->paymentMethod($payment).($order->api_order_claim_id !== null ? ' · API' : ''),
             currency: $currency,
-            itemCurrency: $currency === 'USDT'
+            itemCurrency: in_array($currency, ['USDT', 'XTR'], true)
                 ? $currency
                 : strtoupper(self::safeText((string) ($order->currency ?: $currency), 12) ?: $currency),
             items: $this->snapshotItems($order, $currency),
@@ -85,8 +85,6 @@ final class PaidInvoiceOrderPresentationAdapter
             throw new InvalidArgumentException('Paid invoice Order Items are not available.');
         }
 
-        $useUsdtSnapshot = $currency === 'USDT';
-
         return $items
             ->filter(static fn ($item): bool => $item instanceof OrderItem)
             ->values()
@@ -98,12 +96,18 @@ final class PaidInvoiceOrderPresentationAdapter
                 'quantity_price_tier_minimum' => $item->quantity_price_tier_minimum === null
                     ? null
                     : max(0, (int) $item->quantity_price_tier_minimum),
-                'unit_price' => $useUsdtSnapshot
-                    ? ($item->usdt_unit_price === null ? null : max(0, (int) $item->usdt_unit_price))
-                    : max(0, (int) $item->unit_price),
-                'subtotal' => $useUsdtSnapshot
-                    ? ($item->usdt_subtotal === null ? null : max(0, (int) $item->usdt_subtotal))
-                    : max(0, (int) $item->subtotal),
+                // Stars are rounded once per Order; no per-item XTR breakdown
+                // exists, and retail IDR is not an amount the buyer paid.
+                'unit_price' => match ($currency) {
+                    'XTR' => null,
+                    'USDT' => $item->usdt_unit_price === null ? null : max(0, (int) $item->usdt_unit_price),
+                    default => max(0, (int) $item->unit_price),
+                },
+                'subtotal' => match ($currency) {
+                    'XTR' => null,
+                    'USDT' => $item->usdt_subtotal === null ? null : max(0, (int) $item->usdt_subtotal),
+                    default => max(0, (int) $item->subtotal),
+                },
             ])
             ->all();
     }

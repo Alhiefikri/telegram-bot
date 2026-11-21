@@ -152,6 +152,9 @@ class TelegramReceiptNotifier
                 $payment = $this->canonicalPaidPayment($order);
                 $summary = $this->combineReceiptBlocks([
                     $blocks[0],
+                    ...($payment?->isTelegramStars() ? [new TelegramMessageUnit(
+                        $this->locale->translate($customer, 'receipt.payment_method', ['method' => 'Telegram Stars']),
+                    )] : []),
                     new TelegramMessageUnit($this->locale->translate($customer, 'receipt.total_quantity', [
                         'quantity' => $order->orderItems->sum(fn ($item): int => max(0, (int) $item->quantity)),
                     ])),
@@ -396,10 +399,12 @@ class TelegramReceiptNotifier
             return $this->renderStructuredReceipt($customer, $order, $delivery, $guides);
         }
 
+        $stars = $this->starsReceiptTender($order);
         $lines = [
             $this->locale->translate($customer, 'receipt.title'),
             '━━━━━━━━━━━━━━',
             $this->locale->translate($customer, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            ...($stars === null ? [] : [$stars]),
             '',
             $this->locale->translate($customer, 'receipt.products'),
         ];
@@ -567,10 +572,12 @@ class TelegramReceiptNotifier
         CredentialDelivery $delivery,
         array $guides,
     ): array {
+        $stars = $this->starsReceiptTender($order);
         $headerLines = [
             $this->locale->translate($customer, 'receipt.title'),
             '━━━━━━━━━━━━━━',
             $this->locale->translate($customer, 'payment.invoice', ['invoice' => $order->invoice_number]),
+            ...($stars === null ? [] : [$stars]),
             '',
             $this->locale->translate($customer, 'receipt.products'),
         ];
@@ -913,6 +920,14 @@ class TelegramReceiptNotifier
         }
 
         return $lines;
+    }
+
+    private function starsReceiptTender(Order $order): ?string
+    {
+        $order->loadMissing('payments');
+        $payment = $this->canonicalPaidPayment($order);
+
+        return $payment?->isTelegramStars() ? TelegramStarsCustomerInvoice::tender($payment) : null;
     }
 
     private function canonicalPaidPayment(Order $order): ?Payment

@@ -134,7 +134,7 @@ class TelegramIconCallbackHandler implements TelegramCallbackHandler
 
     private function handleMenuIcon(TelegramCallbackContext $context, int $iconId, bool $clear): bool
     {
-        $icon = TelegramUiIcon::query()->find($iconId);
+        $icon = TelegramUiIcon::query()->buttonSlots()->find($iconId);
         if (! $icon instanceof TelegramUiIcon) {
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'catalog.product_icon.expired'));
 
