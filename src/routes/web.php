@@ -43,6 +43,7 @@ use App\Http\Controllers\Admin\AdminProductVisibilityController;
 use App\Http\Controllers\Admin\AdminProductWorkspaceController;
 use App\Http\Controllers\Admin\AdminSakurupiahChannelController;
 use App\Http\Controllers\Admin\AdminSalesProofRetryController;
+use App\Http\Controllers\Admin\AdminStarsPricingPolicyController;
 use App\Http\Controllers\Admin\AdminStoreBalanceFundingPolicyController;
 use App\Http\Controllers\Admin\AdminStoreBalanceTopUpCompensationController;
 use App\Http\Controllers\Admin\AdminStoreChannelController;
@@ -248,6 +249,11 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('receivers/{receiver}/deactivate', [AdminBscReceiverController::class, 'deactivate'])->name('receivers.deactivate');
             });
             Route::post('checkout-maintenance', AdminCheckoutMaintenanceController::class)->name('checkout-maintenance.update');
+            Route::prefix('stars-pricing')->name('stars-pricing.')->controller(AdminStarsPricingPolicyController::class)->group(function (): void {
+                Route::get('/', 'show')->name('show');
+                Route::post('preview', 'preview')->name('preview');
+                Route::post('/', 'update')->name('update');
+            });
             Route::post('customer-api-availability', AdminCustomerApiAvailabilityController::class)
                 ->middleware('admin.customer-api-owner')
                 ->name('customer-api-availability.update');

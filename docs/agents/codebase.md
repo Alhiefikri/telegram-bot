@@ -13,6 +13,28 @@ Sebelum mengubah behavior:
 
 Dokumen ini menjelaskan _mengapa_ file-file utama saling berhubungan. Source code tetap menjadi sumber kebenaran untuk detail method dan schema.
 
+## Telegram Stars pricing (#741)
+
+**Keuangan → Harga Telegram Stars** is Owner-only. `StarsPricingPolicyManager`
+owns the versioned singleton and writes allowlisted old/new values to `AuditLogger`
+inside the same transaction. The migration seeds 13,000 micro-USD per Star,
+no exchange rate or reserve, and issuance off. Preview is read-only and can
+evaluate unsaved values even when issuance is off; saving never creates an invoice,
+Order, or Payment.
+
+Use `StarsQuoteCalculator::quote()` for the final, already-priced retail IDR
+total (after quantity tiers and without rail fees). It uses exact integer
+arithmetic and rounds up once; it rejects amounts outside 1–10,000 XTR rather
+than clamping. The upper bound is a conservative application limit, not a
+verified Telegram limit for one-time invoices. Checkout binding, revalidation
+under the policy lock, and enforcement of the issuance flag belong to #742 and
+later tickets. No supplier rate or ENV participates.
+
+Verification entry points: `StarsQuoteCalculatorTest` and `StarsPricingPolicyTest`.
+The locking/transaction and form request patterns were verified through Context7
+against Laravel 13 [queries](https://github.com/laravel/docs/blob/13.x/queries.md)
+and [validation](https://github.com/laravel/docs/blob/13.x/validation.md).
+
 ## Sakurupiah checkout recovery (#677)
 
 Issue #678 supersedes #677's ordinary terminal-payment polling: the

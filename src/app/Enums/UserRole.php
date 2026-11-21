@@ -87,6 +87,11 @@ enum UserRole: string
         return $this === self::Owner;
     }
 
+    public function canManageStarsPricing(): bool
+    {
+        return $this === self::Owner;
+    }
+
     public function canBroadcast(): bool
     {
         return in_array($this, [self::Owner, self::Admin], true);
