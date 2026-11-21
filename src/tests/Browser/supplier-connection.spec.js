@@ -257,6 +257,50 @@ test("supplier creation confirms password without losing the unsaved API key", a
   expect(await page.locator("body").innerText()).not.toContain(replacement);
 });
 
+test("supplier margins can be edited and reviewed inline on mobile", async ({
+  page,
+}) => {
+  run([path.join(directory, "fixtures/supplier-connection.php"), "margins"]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(environment.APP_URL + "/admin/login");
+  await page.locator('[name="email"]').fill("supplier-browser@example.test");
+  await page.locator('[name="password"]').fill("synthetic-browser-password");
+  await page.getByRole("button", { name: "Masuk Dashboard" }).click();
+  await page.waitForURL(environment.APP_URL + "/admin");
+  await page.goto(environment.APP_URL + "/admin?tab=suppliers");
+  await page
+    .getByRole("link", { name: "Margin Supplier", exact: true })
+    .last()
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Margin Supplier" })
+  ).toBeVisible();
+  const first = page.getByRole("row").filter({ hasText: "Margin Browser B" });
+  const second = page.getByRole("row").filter({ hasText: "Margin Browser C" });
+  await expect(page.getByText("Harga otomatis", { exact: true })).toBeVisible();
+  await first.getByRole("button", { name: "Pakai saran" }).click();
+  await expect(first.getByRole("textbox")).toHaveValue("20500");
+  await expect(
+    first.getByText("Selisih pada supplier acuan: +Rp2.299")
+  ).toBeVisible();
+  await second.getByRole("textbox").fill("22000");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true);
+  await page.getByRole("button", { name: "Tinjau & Simpan" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Tinjau 2 perubahan harga" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Konfirmasi & Simpan" }).click();
+  await expect(
+    page.getByText("2 harga jual IDR berhasil disimpan.")
+  ).toBeVisible();
+  await expect(first.getByText("Rp20.500", { exact: true })).toBeVisible();
+  await expect(second.getByText("Rp22.000", { exact: true })).toBeVisible();
+});
+
 function supplierState(keys) {
   return JSON.parse(
     run(

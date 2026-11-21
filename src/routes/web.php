@@ -52,6 +52,7 @@ use App\Http\Controllers\Admin\AdminStorefrontBannersController;
 use App\Http\Controllers\Admin\AdminStorefrontPlaceholderController;
 use App\Http\Controllers\Admin\AdminSupplierController;
 use App\Http\Controllers\Admin\AdminSupplierInvoiceRecoveryController;
+use App\Http\Controllers\Admin\AdminSupplierMarginController;
 use App\Http\Controllers\Admin\AdminSupportSettingsController;
 use App\Http\Controllers\Admin\AdminTelegramOutboundEffectController;
 use App\Http\Controllers\Admin\AdminTelegramWelcomeBannerController;
@@ -285,6 +286,9 @@ Route::middleware('admin.no-cache')->group(function (): void {
             Route::post('telegram-welcome-banner', AdminTelegramWelcomeBannerController::class)->name('telegram-welcome-banner.update');
             Route::post('broadcast', AdminBroadcastController::class)->name('broadcast.store');
             Route::prefix('suppliers')->name('suppliers.')->group(function (): void {
+                Route::get('margins', [AdminSupplierMarginController::class, 'index'])->name('margins.index');
+                Route::post('margins/review', [AdminSupplierMarginController::class, 'review'])->middleware('throttle:20,1')->name('margins.review');
+                Route::post('margins/save', [AdminSupplierMarginController::class, 'save'])->middleware('throttle:10,1')->name('margins.save');
                 Route::post('currency-rates', [AdminSupplierController::class, 'currencyRates'])->name('currency-rates.update');
                 Route::post('/', [AdminSupplierController::class, 'store'])->name('store');
                 Route::patch('{supplier}', [AdminSupplierController::class, 'update'])->name('update');
