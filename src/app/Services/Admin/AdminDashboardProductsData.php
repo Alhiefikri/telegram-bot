@@ -22,6 +22,7 @@ use App\Storefront\StorefrontProductPlaceholder;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Gate;
 use Throwable;
 
 final class AdminDashboardProductsData
@@ -33,6 +34,7 @@ final class AdminDashboardProductsData
         private readonly StorefrontBanners $banners,
         private readonly SupplierAvailability $supplierAvailability,
         private readonly AdminPaidStockHistory $paidHistory,
+        private readonly AdminOrderOperations $orders,
     ) {}
 
     /**
@@ -684,6 +686,9 @@ final class AdminDashboardProductsData
             'update_url' => $editable ? route('admin.products.stock-items.update', ['product' => $product, 'stockItem' => $stockItem]) : null,
             'delete_url' => $editable ? route('admin.products.stock-items.destroy', ['product' => $product, 'stockItem' => $stockItem]) : null,
             'cancel_release_url' => $status === 'DIPESAN' && $order ? route('admin.orders.cancel-release', $order) : null,
+            'approve_manual_qris_url' => $status === 'DIPESAN' && $order
+                && Gate::allows('completeManual', $order) && $this->orders->canApprovePendingManualQris($order)
+                ? route('admin.orders.approve-manual-qris', $order) : null,
         ];
     }
 

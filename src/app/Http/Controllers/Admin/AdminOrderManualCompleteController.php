@@ -8,6 +8,7 @@ use App\Services\Admin\AdminOrderOperations;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use InvalidArgumentException;
 
 class AdminOrderManualCompleteController extends Controller
 {
@@ -30,5 +31,20 @@ class AdminOrderManualCompleteController extends Controller
         return redirect()
             ->route('admin.orders.show', $completed)
             ->with('status', 'Pembayaran disetujui dan stok sedang dikirim ke buyer.');
+    }
+
+    public function approveQris(Request $request, Order $order, AdminOrderOperations $orders): RedirectResponse
+    {
+        Gate::authorize('completeManual', $order);
+
+        try {
+            $completed = $orders->approvePendingManualQris($order, $request->attributes->get('adminUser'), $request->ip());
+        } catch (InvalidArgumentException $exception) {
+            return back()->withErrors(['order' => $exception->getMessage()]);
+        }
+
+        return redirect()
+            ->route('admin.orders.show', $completed)
+            ->with('status', 'Pembayaran QRIS Manual disetujui. Pesanan diproses untuk pengiriman.');
     }
 }

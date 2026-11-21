@@ -579,6 +579,7 @@
   "payment.manual.exact_amount": "• Nominal wajib sama persis: :amount",
   "payment.manual.deadline_guidance": "Kalau belum bayar/kirim bukti sampai batas waktu ini, order otomatis expired dan stok kembali.",
   "payment.manual.proof_prompt": "Setelah bayar, balas pesan ini dengan foto screenshot bukti pembayaran.",
+  "payment.manual.optional_proof_prompt": "Jika pembayaran belum dikonfirmasi, balas pesan ini dengan foto bukti pembayaran.",
   "payment.manual.proof_title": "📸 Kirim bukti pembayaran",
   "payment.manual.proof_unavailable": "Order ini sudah diproses atau tidak lagi menunggu pembayaran.",
   "payment.manual.help": "Kalau kesusahan, chat admin @:username.",

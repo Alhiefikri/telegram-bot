@@ -11,6 +11,7 @@ use App\Jobs\SendAdminOrderPendingNotification;
 use App\Jobs\SendBinanceCheckoutInstructions;
 use App\Jobs\SendManualCheckoutNotifications;
 use App\Jobs\SendPakasirCheckoutInstructions;
+use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\CheckoutMaintenanceSetting;
@@ -515,7 +516,45 @@ class CartCheckoutTest extends TelegramBotTestSupport
             && (string) ($request['chat_id'] ?? '') === '999'
             && str_contains((string) ($request['text'] ?? ''), 'Metode: Binance Pay')
             && str_contains((string) ($request['text'] ?? ''), 'Total: 2.5 USDT')
-            && ! str_contains((string) ($request['text'] ?? ''), 'Total: Rp30.000'));
+            && ! str_contains((string) ($request['text'] ?? ''), 'Total: Rp30.000')
+            && data_get($request['reply_markup'], 'inline_keyboard.1.0.callback_data') === null);
+    }
+
+    public function test_telegram_admin_can_confirm_manual_qris_from_the_pending_notice_without_proof(): void
+    {
+        $this->fakeTelegramHttp([
+            'https://api.telegram.org/*/editMessageReplyMarkup' => Http::response(['ok' => true, 'result' => ['message_id' => 123457]]),
+        ]);
+        ManualPaymentSetting::create(['payment_mode' => 'manual', 'admin_telegram_chat_id' => '999', 'is_active' => true]);
+        config()->set('services.telegram.admin_user_id', '999');
+        $admin = Customer::factory()->create(['telegram_id' => 999]);
+        $buyer = Customer::factory()->create(['telegram_id' => 12345]);
+        $product = Product::factory()->create(['stock' => 5]);
+        $cart = app(CartService::class)->activeCartFor($buyer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        $payment = $order->payments()->sole();
+
+        (new SendAdminOrderPendingNotification($order->id))->handle(app(TelegramOutboundEffectService::class));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/sendMessage')
+            && (string) ($request['chat_id'] ?? '') === '999'
+            && data_get($request['reply_markup'], 'inline_keyboard.1.0.callback_data') === 'admin:qris-approve:'.$order->id);
+
+        $this->postTelegramWebhook($this->callbackUpdate(8001, 'qris-denied', 'admin:qris-confirm:'.$order->id, [], 12345, 'private', 123457))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(8002, 'qris-wrong-message', 'admin:qris-confirm:'.$order->id, ['id' => 999], 999, 'private', 42))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(8003, 'qris-approve', 'admin:qris-approve:'.$order->id, ['id' => 999], 999, 'private', 123457))->assertOk();
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/editMessageReplyMarkup')
+            && data_get($request['reply_markup'], 'inline_keyboard.1.0.callback_data') === 'admin:qris-confirm:'.$order->id);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+
+        $this->postTelegramWebhook($this->callbackUpdate(8004, 'qris-confirm', 'admin:qris-confirm:'.$order->id, ['id' => 999], 999, 'private', 123457))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(8005, 'qris-repeat', 'admin:qris-confirm:'.$order->id, ['id' => 999], 999, 'private', 123457))->assertOk();
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertNull($payment->fresh()->payment_proof_submitted_at);
+        $this->assertSame(4, $product->fresh()->stock);
+        $audit = AuditLog::query()->where('action', 'order.manual_completed')->where('subject_id', $order->id)->sole();
+        $this->assertSame('telegram_admin', $audit->new_values['approval_source']);
+        $this->assertSame($admin->id, $audit->new_values['telegram_admin_customer_id']);
     }
 
     public function test_manual_checkout_notification_retry_does_not_resend_customer_photo(): void

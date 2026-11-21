@@ -4,18 +4,23 @@ namespace App\Services\Telegram\Callbacks;
 
 use App\Enums\ManualStoreBalanceTopUpDecision;
 use App\Enums\TelegramOutboundEffectState;
+use App\Models\Order;
 use App\Models\Payment;
 use App\Models\StoreBalanceTopUp;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Admin\AdminOrderOperations;
 use App\Services\StoreBalance\TopUp\ManualStoreBalanceTopUpConfirmationService;
 use App\Services\Telegram\StoreBalanceTopUpOutbound;
 use App\Services\Telegram\TelegramAdminAccess;
+use App\Services\Telegram\TelegramAdminOrderNotifier;
 use App\Services\Telegram\TelegramBotClient;
 use App\Services\Telegram\TelegramCallbackContext;
 use App\Services\Telegram\TelegramCallbackHandler;
 use App\Services\Telegram\TelegramCallbackStage;
 use App\Services\Telegram\TelegramManualPaymentIntents;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Throwable;
 
 class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
@@ -24,12 +29,16 @@ class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
 
     private const TOP_UP_PATTERN = '/^admin:(topup-approve|topup-reject):([1-9][0-9]{0,18})$/';
 
+    private const QRIS_PATTERN = '/^admin:qris-(approve|confirm|back):([0-9a-f-]{36})$/';
+
     public function __construct(
         private TelegramManualPaymentIntents $manualPayments,
         private ManualStoreBalanceTopUpConfirmationService $manualTopUps,
         private StoreBalanceTopUpOutbound $topUpOutbound,
         private TelegramAdminAccess $adminAccess,
         private TelegramBotClient $bot,
+        private AdminOrderOperations $orders,
+        private TelegramAdminOrderNotifier $orderNotifier,
     ) {}
 
     public function stage(): TelegramCallbackStage
@@ -45,11 +54,18 @@ class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
     public function supports(TelegramCallbackContext $context): bool
     {
         return preg_match(self::PAYMENT_PATTERN, $context->data) === 1
-            || preg_match(self::TOP_UP_PATTERN, $context->data) === 1;
+            || preg_match(self::TOP_UP_PATTERN, $context->data) === 1
+            || preg_match(self::QRIS_PATTERN, $context->data) === 1;
     }
 
     public function handle(TelegramCallbackContext $context): bool
     {
+        if (preg_match(self::QRIS_PATTERN, $context->data, $matches) === 1) {
+            $this->handlePendingQris($context, $matches[1], $matches[2]);
+
+            return true;
+        }
+
         if (preg_match(self::TOP_UP_PATTERN, $context->data, $matches) === 1) {
             $this->handleManualTopUp($context, $matches[1], $matches[2]);
 
@@ -90,6 +106,46 @@ class TelegramAdminPaymentCallbackHandler implements TelegramCallbackHandler
         }
 
         return true;
+    }
+
+    private function handlePendingQris(TelegramCallbackContext $context, string $action, string $orderId): void
+    {
+        if (! $context->isPrivate() || ! $this->adminAccess->isAdmin($context->customer, $context->chatId)) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, 'Hanya admin yang dapat menyetujui pembayaran.');
+
+            return;
+        }
+
+        $order = Str::isUuid($orderId) ? Order::find($orderId) : null;
+        if ($order === null || ! $this->orders->canApprovePendingManualQris($order)
+            || $context->messageId === null
+            || ! TelegramOutboundEffect::query()
+                ->where('source_type', Order::class)->where('source_id', $orderId)
+                ->where('effect_type', TelegramOutboundEffectService::TYPE_ADMIN_PENDING)
+                ->where('state', TelegramOutboundEffectState::Sent->value)
+                ->where('telegram_chat_id', $context->chatId)
+                ->where('telegram_message_id', (string) $context->messageId)->exists()) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, 'Notifikasi tidak cocok atau order sudah tidak bisa disetujui.');
+
+            return;
+        }
+
+        if ($action !== 'confirm') {
+            $this->bot->answerCallbackQuery($context->callbackQueryId);
+            $this->bot->editMessageReplyMarkup($context->chatId, $context->messageId, $this->orderNotifier->dashboardReplyMarkup($order, $action === 'approve'));
+
+            return;
+        }
+
+        try {
+            $this->orders->approvePendingManualQris($order, telegramAdminCustomerId: $context->customer->id);
+        } catch (InvalidArgumentException $exception) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $exception->getMessage());
+
+            return;
+        }
+
+        $this->bot->answerCallbackQuery($context->callbackQueryId, 'Pembayaran disetujui. Pesanan diproses untuk pengiriman.');
     }
 
     private function handleManualTopUp(TelegramCallbackContext $context, string $action, string $topUpId): void

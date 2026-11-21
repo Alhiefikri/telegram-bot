@@ -197,6 +197,76 @@ class AdminOrderPaymentOperationsTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['user_id' => $admin->id, 'action' => 'order.manual_completed', 'subject_id' => (string) $order->id]);
     }
 
+    public function test_admin_can_approve_pending_manual_qris_without_proof_only_once(): void
+    {
+        Queue::fake();
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $support = User::factory()->create(['role' => UserRole::Support]);
+        $customer = Customer::factory()->create(['telegram_id' => null]);
+        $product = Product::factory()->create(['stock' => 5, 'reserved_stock' => 0]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 2);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        $payment = $order->payments()->sole();
+        $detail = route('admin.orders.show', $order);
+        $approve = route('admin.orders.approve-manual-qris', $order);
+
+        $this->actingAs($support)->post($approve)->assertForbidden();
+        $this->actingAs($admin)->get($detail)->assertOk()
+            ->assertSee($approve)
+            ->assertSee(route('admin.orders.cancel-release', $order));
+        $this->post($approve)->assertRedirect($detail);
+        $this->from($detail)->post($approve)->assertRedirect($detail)->assertSessionHasErrors('order');
+        $this->get($detail)->assertOk()->assertDontSee($approve);
+
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertNull($payment->fresh()->payment_proof_submitted_at);
+        $this->assertSame(3, $product->fresh()->stock);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $audit = AuditLog::query()->where('action', 'order.manual_completed')->where('subject_id', $order->id)->sole();
+        $this->assertSame($admin->id, $audit->user_id);
+        $this->assertSame('admin_dashboard', $audit->new_values['approval_source']);
+        $this->assertFalse($audit->new_values['buyer_attachment_received']);
+    }
+
+    public function test_manual_qris_approval_rejects_expired_orders_and_other_payment_methods(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        foreach ([
+            ['manual', 'QR_MANUAL', now()->subSecond(), now()->addMinute()],
+            ['manual', 'QR_MANUAL', now()->addMinute(), now()->subSecond()],
+            ['manual', 'BINANCE_PAY_ID', now()->addMinute(), now()->addMinute()],
+            ['wijayapay', 'QR_MANUAL', now()->addMinute(), now()->addMinute()],
+        ] as [$provider, $method, $orderDeadline, $paymentDeadline]) {
+            $order = Order::factory()->create(['expires_at' => $orderDeadline]);
+            $payment = Payment::factory()->create([
+                'order_id' => $order->id, 'provider' => $provider, 'method' => $method,
+                'status' => PaymentStatus::Pending, 'expired_at' => $paymentDeadline,
+            ]);
+            $approve = route('admin.orders.approve-manual-qris', $order);
+            $this->actingAs($admin)->get(route('admin.orders.show', $order))->assertOk()->assertDontSee($approve);
+            $this->post($approve)->assertSessionHasErrors('order');
+            $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        }
+    }
+
+    public function test_manual_qris_approval_does_not_bypass_proof_for_gateway_fallback(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $order = Order::factory()->create(['expires_at' => now()->addMinute()]);
+        $original = Payment::factory()->for($order)->create(['provider' => 'klikqris', 'manual_alternative_at' => now()]);
+        $manual = Payment::factory()->for($order)->create([
+            'provider' => 'manual', 'method' => 'QR_MANUAL', 'manual_alternative_for_payment_id' => $original->id,
+        ]);
+        $approve = route('admin.orders.approve-manual-qris', $order);
+
+        $this->actingAs($admin)->get(route('admin.orders.show', $order))->assertOk()->assertDontSee($approve);
+        $this->post($approve)->assertSessionHasErrors('order');
+        $this->assertSame(PaymentStatus::Pending, $manual->fresh()->status);
+        $this->assertNull($manual->fresh()->payment_proof_submitted_at);
+    }
+
     public function test_admin_dashboard_can_reject_a_pending_binance_payment_and_release_stock(): void
     {
         Queue::fake();

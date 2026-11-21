@@ -596,10 +596,17 @@ class AdminDashboardStockFlowsTest extends TestCase
         $admin = User::factory()->create(['role' => UserRole::Admin]);
         $product = Product::factory()->create(['stock' => 1, 'reserved_stock' => 1]);
         $order = Order::factory()->create(['order_status' => OrderStatus::PendingPayment, 'payment_status' => PaymentStatus::Pending]);
-        $order->payments()->create(['provider' => 'manual', 'merchant_ref' => 'MR-CANCEL', 'method' => 'manual', 'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Pending]);
+        $order->payments()->create(['provider' => 'manual', 'merchant_ref' => 'MR-CANCEL', 'method' => 'QR_MANUAL', 'amount' => 10000, 'currency' => 'IDR', 'status' => PaymentStatus::Pending]);
         $orderItem = OrderItem::factory()->create(['order_id' => $order->id, 'product_id' => $product->id, 'quantity' => 1]);
         InventoryMovement::create(['product_id' => $product->id, 'order_id' => $order->id, 'type' => InventoryMovementType::Reservation, 'quantity' => 1, 'notes' => 'Order reservation', 'created_at' => now()]);
         ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $orderItem->id, 'secret' => 'release@example.test|pass']);
+
+        $this->actingAs($admin)->getJson(route('admin.products.stock-items.index', $product))
+            ->assertOk()
+            ->assertJsonFragment([
+                'approve_manual_qris_url' => route('admin.orders.approve-manual-qris', $order),
+                'cancel_release_url' => route('admin.orders.cancel-release', $order),
+            ]);
 
         $this->actingAs($admin)
             ->from(route('admin.orders.show', $order))

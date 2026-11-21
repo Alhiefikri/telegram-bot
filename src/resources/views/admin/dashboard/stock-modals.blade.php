@@ -459,6 +459,10 @@
                                                             <input type="hidden" name="_method" value="DELETE">
                                                             <x-admin-dashboard.button type="submit" variant="destructive" size="icon" x-bind:disabled="manageStockDeleting" aria-label="Hapus akun stok">🗑️</x-admin-dashboard.button>
                                                         </form>
+                                                        <form method="POST" x-bind:action="item.approve_manual_qris_url" x-show="item.approve_manual_qris_url" x-on:submit="if (manageStockDeleting || ! confirm('Pastikan dana sudah masuk dan nominalnya cocok dengan invoice. Setujui pembayaran dan proses pengiriman seluruh pesanan?')) $event.preventDefault()">
+                                                            @csrf
+                                                            <x-admin-dashboard.button type="submit" variant="primary" size="sm" x-bind:disabled="manageStockDeleting">Setujui pembayaran</x-admin-dashboard.button>
+                                                        </form>
                                                         <form method="POST" x-bind:action="item.cancel_release_url" x-show="item.cancel_release_url" x-on:submit="if (manageStockDeleting || ! confirm('Batalkan order dan lepas stok ini?')) $event.preventDefault()">
                                                             @csrf
                                                             <x-admin-dashboard.button type="submit" variant="warning" size="icon" x-bind:disabled="manageStockDeleting" aria-label="Batalkan order dan lepas stok ini">↩</x-admin-dashboard.button>

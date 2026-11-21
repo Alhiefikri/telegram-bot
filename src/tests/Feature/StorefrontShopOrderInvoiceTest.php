@@ -141,7 +141,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
             ->assertDontSee('Pakasir');
     }
 
-    public function test_manual_qris_requires_proof_to_admin_and_never_offers_an_expired_qr(): void
+    public function test_manual_qris_explains_admin_review_and_never_offers_an_expired_qr(): void
     {
         config()->set('services.support.whatsapp_number', '6281234567890');
         [$order, $payment] = $this->pendingNativeQrisOrder(88000, null, null, 'manual-unused');
@@ -155,7 +155,7 @@ class StorefrontShopOrderInvoiceTest extends TestCase
         $this->get($url)->assertOk()
             ->assertSee('Rp88.000')
             ->assertSee('/qr-lhie.jpg', false)
-            ->assertSee('Kirim nomor invoice dan bukti bayar ke admin.')
+            ->assertSee('Jika belum dikonfirmasi, kirim nomor invoice dan bukti bayar ke admin.')
             ->assertSee('WhatsApp Support')
             ->assertDontSee('Rp99.000')
             ->assertDontSee('data-shop-payment-status', false)
