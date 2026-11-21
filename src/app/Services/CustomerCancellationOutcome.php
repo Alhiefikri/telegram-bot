@@ -7,5 +7,6 @@ enum CustomerCancellationOutcome
     case Cancelled;
     case Paid;
     case VerificationUnavailable;
+    case PaymentVerifying;
     case NotCancellable;
 }

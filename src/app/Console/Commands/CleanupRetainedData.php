@@ -40,6 +40,7 @@ class CleanupRetainedData extends Command
             ? $connection->selectOne("SELECT current_setting('statement_timeout') AS statement_timeout, current_setting('lock_timeout') AS lock_timeout")
             : null;
         $query = TelegramUpdate::query()
+            ->whereNull('stars_event')
             ->where('created_at', '<', $cutoff)
             ->where('processed_at', '<', $cutoff)
             ->whereNull('processing_started_at')

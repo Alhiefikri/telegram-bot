@@ -4,18 +4,27 @@ namespace App\Services\Telegram;
 
 use App\Jobs\ProcessTelegramUpdate;
 use App\Models\TelegramUpdate;
+use App\Services\TelegramStars\TelegramStarsPreCheckout;
 use App\Support\DogfoodTiming;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
+use Throwable;
 
 class TelegramWebhookIngress
 {
-    public function __construct(private readonly TelegramUpdateShapeValidator $updateShapes) {}
+    public function __construct(
+        private readonly TelegramUpdateShapeValidator $updateShapes,
+        private readonly TelegramStarsPreCheckout $stars,
+    ) {}
 
     public function receive(Request $request): TelegramWebhookIngressResult
     {
         $startedAt = DogfoodTiming::now();
+        $starsDeadline = $startedAt + TelegramStarsPreCheckout::RESPONSE_BUDGET_NS;
         $secret = (string) config('services.telegram.webhook_secret');
 
         if ($secret === '' && ! app()->environment(['local', 'testing'])) {
@@ -28,6 +37,23 @@ class TelegramWebhookIngress
 
         $validated = $request->validate(['update_id' => ['required', 'integer', 'min:1']]);
         $payload = $request->all();
+
+        $starsKind = TelegramStarsUpdate::kind($payload);
+        if ($starsKind !== null) {
+            if ($secret === '') {
+                return new TelegramWebhookIngressResult(['message' => 'Forbidden'], 403);
+            }
+
+            // Financial identifiers are opaque: never compare or store values
+            // rewritten by request trimming or merged with query parameters.
+            $raw = json_decode($request->getContent(), true);
+            $financial = is_array($raw) ? TelegramStarsUpdate::minimize($raw, $starsKind) : null;
+            if ($financial === null || ($financial['update_id'] ?? null) !== (int) $validated['update_id']) {
+                return new TelegramWebhookIngressResult(['message' => 'Unsupported update type'], 422);
+            }
+
+            return $this->receiveStars($financial, $starsKind, $starsDeadline, $startedAt);
+        }
 
         if (! $this->updateShapes->supports($payload)) {
             return new TelegramWebhookIngressResult(['message' => 'Unsupported update type'], 422);
@@ -68,6 +94,91 @@ class TelegramWebhookIngress
         ]);
 
         return new TelegramWebhookIngressResult($callbackResponse ?? ['ok' => true]);
+    }
+
+    private function receiveStars(array $payload, string $kind, int $deadline, int $startedAt): TelegramWebhookIngressResult
+    {
+        $isPreCheckout = $kind === TelegramStarsUpdate::PRE_CHECKOUT;
+        $approved = false;
+        try {
+            $approved = DB::transaction(function () use ($payload, $kind, $deadline, $isPreCheckout): bool {
+                if ($isPreCheckout && DB::getDriverName() === 'pgsql') {
+                    DB::statement("SET LOCAL lock_timeout = '250ms'");
+                    DB::statement("SET LOCAL statement_timeout = '400ms'");
+                }
+
+                $queryHash = $isPreCheckout ? hash('sha256', $payload[$kind]['id']) : null;
+                $inserted = DB::table('telegram_updates')->insertOrIgnore([
+                    'update_id' => $payload['update_id'],
+                    'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
+                    'stars_event' => $kind,
+                    'stars_query_hash' => $queryHash,
+                    'created_at' => now(),
+                ]);
+
+                // Success/refund are durable but intentionally held for T4/T6.
+                // They must not be marked processed by the chat worker.
+                if (! $isPreCheckout) {
+                    if ($inserted !== 1 && ! TelegramUpdate::where('update_id', $payload['update_id'])->where('stars_event', $kind)->exists()) {
+                        throw new RuntimeException('Financial update ID is already occupied.');
+                    }
+
+                    return false;
+                }
+
+                if ($inserted !== 1) {
+                    $original = TelegramUpdate::where('update_id', $payload['update_id'])->first()
+                        ?? TelegramUpdate::where('stars_query_hash', $queryHash)->first();
+
+                    return $original?->stars_event === $kind && (bool) $original->stars_approved
+                        && (TelegramStarsUpdate::minimize($original->payload, $kind)[$kind] ?? null) === $payload[$kind]
+                        && $this->stars->approve($payload[$kind], $deadline, replayOnly: true);
+                }
+
+                try {
+                    // A lock timeout rolls back the approval savepoint, not the
+                    // inbox row. Once a denial is returned this query stays denied.
+                    $approved = DB::transaction(fn () => $this->stars->approve($payload[$kind], $deadline, replayOnly: false));
+                } catch (QueryException $error) {
+                    $state = (string) ($error->errorInfo[0] ?? $error->getCode());
+                    if (! in_array($state, ['55P03', '57014'], true)) {
+                        throw $error;
+                    }
+                    $approved = false;
+                    Log::warning('telegram.stars_pre_checkout_busy', ['sqlstate' => $state]);
+                }
+                DB::table('telegram_updates')->where('update_id', $payload['update_id'])->update([
+                    'stars_approved' => $approved,
+                    'processed_at' => now(),
+                ]);
+
+                return $approved;
+            });
+        } catch (Throwable $error) {
+            Log::warning('telegram.stars_ingress_unavailable', ['kind' => $kind, 'error_class' => $error::class]);
+            if (! $isPreCheckout) {
+                return new TelegramWebhookIngressResult(['message' => 'Payment inbox unavailable'], 503);
+            }
+        }
+
+        if (! $isPreCheckout) {
+            return new TelegramWebhookIngressResult(['ok' => true]);
+        }
+
+        $approved = $approved && hrtime(true) < $deadline;
+        DogfoodTiming::log('dogfood.telegram.stars_pre_checkout', [
+            'approved' => $approved,
+            'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
+        ]);
+
+        // Telegram executes this Bot API method from the webhook response.
+        // No second network round trip or queue is needed; its ACK is not observable.
+        return new TelegramWebhookIngressResult([
+            'method' => 'answerPreCheckoutQuery',
+            'pre_checkout_query_id' => $payload[$kind]['id'],
+            'ok' => $approved,
+            ...($approved ? [] : ['error_message' => 'Invoice is not available for payment. Return to the bot for help.']),
+        ]);
     }
 
     private function minimizedPayload(array $payload): array

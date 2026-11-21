@@ -55,15 +55,49 @@ lifecycle releases reservations on cancellation or after the 15-minute deadline.
 detail with the Order and reservation. Order and Order Items retain the retail
 IDR basis (not cash); the detail retains rate, version, retail lines, XTR,
 private buyer/chat, reference, epoch deadline and opaque payload. PostgreSQL
-guards the immutable detail and Payment identity. Preparation emits no Telegram
-effect; legacy manual settlement, refunds and QRIS fallback cannot act on this
-target. No public rail selection or Telegram transport is added here.
+guards the immutable detail and Payment identity. Legacy manual settlement,
+refunds and QRIS fallback cannot act on this target.
 
 Verification: `TelegramStarsCheckoutTest` and
 `TelegramStarsCheckoutPostgresConcurrencyTest`. Lock and migration patterns
 were verified through Context7 against Laravel 13
 [queries](https://github.com/laravel/docs/blob/13.x/queries.md) and
 [migrations](https://github.com/laravel/docs/blob/13.x/migrations.md).
+
+## Telegram Stars transport (#743)
+
+Checkout commits one `checkout.telegram_stars_invoice` effect with the Order
+and stock reservation, then queues it only after commit. `telegram:recover-outbound`
+rediscovers lost wakeups. `TelegramStarsInvoiceOutbound` checks the pending
+target and issuance flag before claiming; `sendInvoice` runs outside locks
+and never edits the navigation message. Positive ACKs persist the message ID.
+Timeout, malformed ACK, and abandoned send leases are `unknown`, not
+automatic retries. Manual Delivery Review can record a known message ID or
+explicitly resend the latest ambiguous effect using the same Payment and payload.
+
+`TelegramWebhookIngress` requires the webhook secret for all financial updates,
+including in local/test. Pre-checkout answers via the webhook response itself
+(`answerPreCheckoutQuery`), independent of Telegram chat locks and queues.
+Telegram does not acknowledge that embedded method to the app. The financial
+inbox deduplicates by update ID and pre-checkout query hash. The fast path takes
+Order → Payment locks, validates the exact buyer/snapshot, invoice ACK and
+live local reservation, and persists one approval per Payment. Replays of a
+matching positive decision are bounded by the answer window, never renew the
+120-second inventory grace, and never settle. New approvals pause with
+issuance. The same Order → Payment locks protect lifecycle expiry and all
+cancellations until grace ends.
+
+Successful and refunded payment events are minimized and durably retained
+before ACK, even when issuance is paused. They are not consumed by the chat
+worker or its recovery/retention scans. `telegram_updates.stars_event` and
+`processed_at IS NULL` identify held evidence for the T4/T6 financial consumers.
+No settlement, refund, or public checkout route is enabled by this transport.
+
+Verification: `TelegramStarsWebhookTest` and
+`TelegramStarsTransportPostgresConcurrencyTest`. Telegram behavior was checked
+through Context7 and the official [sendInvoice](https://core.telegram.org/bots/api#sendinvoice)
+and [webhook reply](https://core.telegram.org/bots/api#making-requests-when-getting-updates)
+contracts. Fixture timing does not qualify live Telegram delivery.
 
 ## Sakurupiah checkout recovery (#677)
 

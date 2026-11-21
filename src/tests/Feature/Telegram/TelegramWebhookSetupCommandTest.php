@@ -23,7 +23,7 @@ class TelegramWebhookSetupCommandTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://api.telegram.org/botbot-token/setWebhook'
             && $request['url'] === 'https://store.example.com/api/webhook/telegram'
             && $request['secret_token'] === 'webhook-secret'
-            && $request['allowed_updates'] === ['message', 'callback_query']);
+            && $request['allowed_updates'] === ['message', 'callback_query', 'pre_checkout_query']);
     }
 
     public function test_it_skips_when_app_url_is_not_public_https(): void

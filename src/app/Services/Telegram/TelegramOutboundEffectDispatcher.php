@@ -29,6 +29,7 @@ use App\Jobs\SendTelegramBroadcastBatch;
 use App\Jobs\SendTelegramReceipt;
 use App\Jobs\SendTelegramReceiptActionPanel;
 use App\Jobs\SendTelegramReceiptTxt;
+use App\Jobs\SendTelegramStarsInvoice;
 use App\Jobs\SendUsdtTopUpReceipt;
 use App\Jobs\SendWijayaPayCheckoutInstructions;
 use App\Models\ProductPriceChangeNotificationRecipient;
@@ -68,6 +69,7 @@ final class TelegramOutboundEffectDispatcher
             TelegramOutboundEffectType::BalanceOperationsAlert->value => SendBalanceOperationsAlert::dispatch((string) $effect->id),
             TelegramOutboundEffectType::UsdtTopUpReceipt->value,
             TelegramOutboundEffectType::UsdtRefundReceipt->value => SendUsdtTopUpReceipt::dispatch((string) $effect->id),
+            TelegramOutboundEffectType::TelegramStarsInvoice->value => SendTelegramStarsInvoice::dispatch((string) $effect->id),
             TelegramOutboundEffectType::ManualCheckoutInstructions->value => SendManualCheckoutNotifications::dispatch(
                 (string) $effect->source_id,
                 $jobEnqueuedAt,

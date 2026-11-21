@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Exceptions\TelegramStarsPaymentVerifying;
 use App\Jobs\ReconcileCustomerCancellationPayment;
 use App\Models\Order;
 use App\Models\Payment;
@@ -54,6 +55,8 @@ final readonly class CustomerPendingOrderCancellation
 
         try {
             $result = $this->orders->applyPendingCancellation($order, requireNoPaymentProof: true);
+        } catch (TelegramStarsPaymentVerifying) {
+            return CustomerCancellationOutcome::PaymentVerifying;
         } catch (InvalidOrderTransition) {
             return CustomerCancellationOutcome::NotCancellable;
         }

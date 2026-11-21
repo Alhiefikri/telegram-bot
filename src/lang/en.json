@@ -530,6 +530,7 @@
   "payment.cancel.not_found": "Order not found or can no longer be cancelled.\n\nCheck the latest status with /status.",
   "payment.cancel.verification_unavailable": "Payment status cannot be verified yet.",
   "payment.cancel.verification_unavailable_detail": "Payment status cannot be verified yet. Your order was not cancelled; please try again shortly.",
+  "payment.cancel.stars_verifying": "Your Telegram Stars payment is being verified. The order was not cancelled.",
   "payment.cancel.paid": "Payment has already been received.",
   "payment.cancel.paid_detail": "Payment has already been received, so this order cannot be cancelled.\n\nCheck the latest status with /status.",
   "payment.cancel.processed": "This order can no longer be cancelled.",
