@@ -192,10 +192,10 @@
                 </x-admin-dashboard.notice>
             @endif
 
-            @if ($canCompleteManual || $canRejectManual)
+            @if ($canApproveManualQris || $canCompleteManual || $canRejectManual || $canCancelRelease)
                 <div class="mt-5 flex flex-wrap gap-3">
-                    @if ($canCompleteManual)
-                        <form method="POST" action="{{ route('admin.orders.complete-manual', $order) }}" onsubmit="return confirm('Setujui pembayaran ini dan kirim stok ke buyer? Pastikan transaksi sudah dicek.');">
+                    @if ($canApproveManualQris || $canCompleteManual)
+                        <form method="POST" action="{{ route($canApproveManualQris ? 'admin.orders.approve-manual-qris' : 'admin.orders.complete-manual', $order) }}" onsubmit="return confirm('Pastikan dana sudah masuk dan nominalnya cocok dengan invoice. Setujui pembayaran dan proses pengiriman?');">
                             @csrf
                             <x-admin-dashboard.button type="submit" variant="primary">Setujui pembayaran &amp; kirim stok</x-admin-dashboard.button>
                         </form>
@@ -207,14 +207,14 @@
                             <x-admin-dashboard.button type="submit" variant="warning">Tolak pembayaran &amp; lepas stok</x-admin-dashboard.button>
                         </form>
                     @endif
-                </div>
-            @endif
 
-            @if ($canCancelRelease && ! $canRejectManual)
-                <form method="POST" action="{{ route('admin.orders.cancel-release', $order) }}" class="mt-5" onsubmit="return confirm('Batalkan order dan lepas stok?')">
-                    @csrf
-                    <x-admin-dashboard.button type="submit" variant="warning">Batalkan & lepas stok</x-admin-dashboard.button>
-                </form>
+                    @if ($canCancelRelease && ! $canRejectManual)
+                        <form method="POST" action="{{ route('admin.orders.cancel-release', $order) }}" onsubmit="return confirm('Batalkan order dan lepas stok?')">
+                            @csrf
+                            <x-admin-dashboard.button type="submit" variant="warning">Batalkan &amp; lepas stok</x-admin-dashboard.button>
+                        </form>
+                    @endif
+                </div>
             @endif
         </x-admin-dashboard.card>
 

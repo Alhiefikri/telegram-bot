@@ -2,9 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
-use App\Enums\PaymentStatus;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\ManualFulfillmentReview;
@@ -136,7 +134,8 @@ class AdminOrderDetailController extends Controller
             'hasPendingSupplierPurchase' => $hasPendingSupplierPurchase,
             'paymentLabels' => $order->payments->map(fn ($payment): string => $payment->payment_method_label.' · '.$payment->status->value.' · '.($payment->paid_at?->format('d M Y H:i') ?? 'belum paid'))->all(),
             'paymentAttention' => $salesData->paymentAttention($order),
-            'canCancelRelease' => $order->order_status === OrderStatus::PendingPayment && $order->payment_status === PaymentStatus::Pending,
+            'canCancelRelease' => Gate::forUser($user)->allows('cancelPending', $order) && $operations->canCancelPendingOrder($order),
+            'canApproveManualQris' => Gate::forUser($user)->allows('completeManual', $order) && $operations->canApprovePendingManualQris($order),
             'canCompleteManual' => $hasMismatchEvidence && Gate::forUser($user)->allows('completeManual', $order) && $operations->canCompleteManualOrder($order),
             'canRejectManual' => $hasMismatchEvidence && Gate::forUser($user)->allows('cancelPending', $order) && $operations->canCancelPendingOrder($order),
             'binanceReview' => $hasMismatchEvidence ? [

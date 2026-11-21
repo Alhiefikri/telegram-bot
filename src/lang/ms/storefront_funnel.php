@@ -459,7 +459,7 @@ return [
     'cannot_pay' => 'Tidak boleh dibayar',
     'old_qr_warning' => 'Jangan bayar menggunakan kod QR lama. Jika sudah membayar, hubungi bantuan dengan nombor invois dan bukti bayaran.',
     'auto_qris_instruction' => 'Imbas QRIS dan bayar jumlah pada invois. Selepas membayar, semak status di halaman ini.',
-    'manual_qris_instruction' => 'Imbas QRIS dan bayar jumlah pada invois. Hantar nombor invois dan bukti bayaran kepada admin.',
+    'manual_qris_instruction' => 'Imbas QRIS dan bayar jumlah pada invois. Admin akan menyemak bayaran. Jika belum disahkan, hantar nombor invois dan bukti bayaran kepada admin.',
     'do_not_pay_again' => 'Jika sudah membayar, jangan bayar sekali lagi. Hubungi bantuan dengan nombor invois dan bukti bayaran.',
     'pending_orders_limit' => 'Anda masih mempunyai 2 pembelian yang menunggu bayaran. Bayar atau batalkan invois terdahulu sebelum membuat pembelian lain. Pembelian ini belum dibuat.',
     'pending_network_limit' => 'Rangkaian ini mempunyai terlalu banyak pembelian yang menunggu bayaran. Bayar atau batalkan invois anda, atau cuba lagi kemudian. Pembelian ini belum dibuat.',

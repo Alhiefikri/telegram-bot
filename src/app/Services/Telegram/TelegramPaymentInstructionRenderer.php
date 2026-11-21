@@ -34,6 +34,10 @@ class TelegramPaymentInstructionRenderer
      */
     public function manual(Order $order, array $paymentOption, string $supportUsername, string $locale = 'id'): TelegramPaymentInstruction
     {
+        $order->loadMissing('payments');
+        $proofPrompt = $order->payments->contains(fn (Payment $payment): bool => $payment->manual_alternative_for_payment_id !== null)
+            ? 'payment.manual.proof_prompt'
+            : 'payment.manual.optional_proof_prompt';
         $formattedTotal = 'Rp '.number_format($order->total_amount, 0, ',', '.');
         $lines = [
             $this->text($locale, 'payment.checkout_created'),
@@ -42,7 +46,7 @@ class TelegramPaymentInstructionRenderer
             $this->text($locale, 'payment.pay_via', ['method' => $paymentOption['label']]),
             '',
             $this->text($locale, 'payment.manual.scan_qr_short'),
-            $this->text($locale, 'payment.manual.proof_prompt'),
+            $this->text($locale, $proofPrompt),
             $this->text($locale, 'payment.manual_alternative.manual_notice'),
         ];
         if ($order->expires_at) {

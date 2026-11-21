@@ -8,6 +8,7 @@ use App\Exceptions\TelegramOutboundPreSendException;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Admin\AdminOrderOperations;
 use App\Support\DogfoodTiming;
 use App\Support\Money;
 use Illuminate\Support\Facades\Log;
@@ -20,6 +21,7 @@ class TelegramAdminOrderNotifier
         private readonly TelegramAdminAccess $adminAccess,
         private readonly TelegramUiIcons $uiIcons,
         private readonly TelegramProductNameRenderer $productNames,
+        private readonly AdminOrderOperations $orders,
     ) {}
 
     /**
@@ -194,7 +196,9 @@ class TelegramAdminOrderNotifier
         }
 
         $lines[] = '';
-        $lines[] = 'Cek dashboard untuk follow up pembeli ini.';
+        $lines[] = $this->orders->canApprovePendingManualQris($order)
+            ? 'Jika dana sudah masuk dan nominal cocok dengan invoice, admin bisa menyetujui tanpa menunggu bukti dari pembeli.'
+            : 'Cek dashboard untuk follow up pembeli ini.';
 
         return implode("\n", $lines);
     }
@@ -319,13 +323,20 @@ class TelegramAdminOrderNotifier
         return $date->copy()->timezone((string) config('app.timezone'))->format('d M Y, H:i');
     }
 
-    private function dashboardReplyMarkup(Order $order): array
+    public function dashboardReplyMarkup(Order $order, bool $confirmingQris = false): array
     {
-        return [
-            'inline_keyboard' => [[
-                ['text' => 'Buka Dashboard', 'url' => route('admin.orders.show', $order)],
-            ]],
-        ];
+        $rows = [[['text' => 'Buka Dashboard', 'url' => route('admin.orders.show', $order), 'style' => 'primary']]];
+
+        if ($this->orders->canApprovePendingManualQris($order)) {
+            $rows[] = $confirmingQris ? [
+                [...$this->uiIcons->apply('message.success', '✅ Dana masuk, setujui'), 'callback_data' => 'admin:qris-confirm:'.$order->id, 'style' => 'primary'],
+                ['text' => 'Kembali', 'callback_data' => 'admin:qris-back:'.$order->id, 'style' => 'primary'],
+            ] : [
+                [...$this->uiIcons->apply('message.success', '✅ Setujui pembayaran'), 'callback_data' => 'admin:qris-approve:'.$order->id, 'style' => 'primary'],
+            ];
+        }
+
+        return ['inline_keyboard' => $rows];
     }
 
     private function truncateMessage(string $message): string

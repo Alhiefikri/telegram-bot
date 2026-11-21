@@ -327,6 +327,7 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::post('{order}/reject-manual', AdminOrderManualRejectController::class)->name('reject-manual');
                 Route::post('{order}/sales-proof/retry', AdminSalesProofRetryController::class)->name('sales-proof.retry');
                 Route::post('{order}/cancel-release', AdminOrderCancelReleaseController::class)->name('cancel-release');
+                Route::post('{order}/approve-manual-qris', [AdminOrderManualCompleteController::class, 'approveQris'])->name('approve-manual-qris');
                 Route::post('{order}/credential-email', AdminOrderCredentialMailResendController::class)->name('credential-email');
             });
 

@@ -459,7 +459,7 @@ return [
     'cannot_pay' => 'Cannot be paid',
     'old_qr_warning' => 'Do not pay using the old QR code. If you already paid, contact support with the invoice number and proof of payment.',
     'auto_qris_instruction' => 'Scan the QRIS code and pay the invoice total. After paying, check the status on this page.',
-    'manual_qris_instruction' => 'Scan the QRIS code and pay the invoice total. Send your invoice number and proof of payment to support.',
+    'manual_qris_instruction' => 'Scan the QRIS code and pay the invoice total. An admin will check the payment. If it has not been confirmed, send your invoice number and proof of payment to support.',
     'do_not_pay_again' => 'If you already paid, do not pay again. Contact support with your invoice number and proof of payment.',
     'pending_orders_limit' => 'You have 2 purchases awaiting payment. Pay or cancel the earlier invoices before making another purchase. This purchase was not created.',
     'pending_network_limit' => 'This network has too many purchases awaiting payment. Pay or cancel your invoices, or try again later. This purchase was not created.',

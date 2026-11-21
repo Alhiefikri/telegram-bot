@@ -14,6 +14,7 @@ use App\Services\OrderCredentialMailService;
 use App\Services\OrderLifecycle;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class AdminOrderOperations
@@ -48,6 +49,47 @@ class AdminOrderOperations
             && $order->payments->contains(fn ($payment): bool => $payment->status === PaymentStatus::Pending);
     }
 
+    public function canApprovePendingManualQris(Order $order): bool
+    {
+        $order->loadMissing('payments');
+        $payment = $order->payments->first();
+
+        return $order->payments->count() === 1
+            && $order->order_status === OrderStatus::PendingPayment
+            && $order->payment_status === PaymentStatus::Pending
+            && $payment?->provider === 'manual'
+            && $payment->method === 'QR_MANUAL'
+            && $payment->status === PaymentStatus::Pending
+            && $payment->manual_alternative_at === null
+            && $payment->manual_alternative_for_payment_id === null
+            && ($order->expires_at === null || $order->expires_at->isFuture())
+            && ($payment->expired_at === null || $payment->expired_at->isFuture());
+    }
+
+    public function approvePendingManualQris(Order $order, ?User $user = null, ?string $ip = null, ?int $telegramAdminCustomerId = null): Order
+    {
+        $completed = DB::transaction(function () use ($order, $user, $ip, $telegramAdminCustomerId): ?Order {
+            $locked = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $locked->setRelation('payments', $locked->payments()->orderBy('id')->lockForUpdate()->get());
+
+            if (! $this->canApprovePendingManualQris($locked)) {
+                throw new InvalidArgumentException('Order QRIS Manual sudah diproses, kedaluwarsa, atau tidak bisa disetujui.');
+            }
+
+            if ($this->manualReceiptHeld($locked)) {
+                return null;
+            }
+
+            return $this->applyManualCompletion($locked, $user, $ip, [
+                'approval_source' => $telegramAdminCustomerId === null ? 'admin_dashboard' : 'telegram_admin',
+                'telegram_admin_customer_id' => $telegramAdminCustomerId,
+                'buyer_attachment_received' => $locked->payments->first()->payment_proof_submitted_at !== null,
+            ]);
+        }, 5);
+
+        return $completed ?? throw new InvalidArgumentException('Pembayaran ini ditahan untuk ditinjau dan belum bisa disetujui.');
+    }
+
     public function hasPendingBinanceMismatch(Order $order): bool
     {
         $order->loadMissing('payments');
@@ -77,24 +119,34 @@ class AdminOrderOperations
 
     public function completeManualOrder(Order $order, ?User $user = null, ?string $ip = null): Order
     {
-        $order->loadMissing('payments');
-        $payment = $order->payments->first();
-
-        if ($payment !== null
-            && $payment->provider === 'manual'
-            && $payment->status === PaymentStatus::Pending
-            && trim((string) $payment->merchant_ref) !== ''
-            && $this->receipts->claimOwnerAttestation($payment)->isHeld()) {
+        if ($this->manualReceiptHeld($order)) {
             throw new InvalidArgumentException('This manual payment receipt is held for review and cannot be completed.');
         }
 
+        return $this->applyManualCompletion($order, $user, $ip);
+    }
+
+    private function manualReceiptHeld(Order $order): bool
+    {
+        $order->loadMissing('payments');
+        $payment = $order->payments->first();
+
+        return $payment !== null
+            && $payment->provider === 'manual'
+            && $payment->status === PaymentStatus::Pending
+            && trim((string) $payment->merchant_ref) !== ''
+            && $this->receipts->claimOwnerAttestation($payment)->isHeld();
+    }
+
+    private function applyManualCompletion(Order $order, ?User $user, ?string $ip, array $auditContext = []): Order
+    {
         try {
             $completedOrder = $this->orders->applyManualCompletion($order)->order;
         } catch (InvalidOrderTransition $exception) {
             throw new InvalidArgumentException($exception->getMessage(), previous: $exception);
         }
 
-        $this->audit->log('order.manual_completed', $completedOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => OrderStatus::Completed->value, 'payment_status' => PaymentStatus::Paid->value], $user, $ip);
+        $this->audit->log('order.manual_completed', $completedOrder, ['order_status' => OrderStatus::PendingPayment->value, 'payment_status' => PaymentStatus::Pending->value], ['order_status' => $completedOrder->order_status->value, 'payment_status' => $completedOrder->payment_status->value] + $auditContext, $user, $ip);
 
         return $completedOrder->fresh(['payments']);
     }

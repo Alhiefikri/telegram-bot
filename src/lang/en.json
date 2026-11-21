@@ -578,6 +578,7 @@
   "payment.manual.proof_title": "📸 Send payment proof",
   "payment.manual.proof_unavailable": "This order has already been processed or is no longer awaiting payment.",
   "payment.manual.proof_prompt": "After paying, reply to this message with a screenshot photo.",
+  "payment.manual.optional_proof_prompt": "If payment has not been confirmed, reply to this message with a photo of your payment proof.",
   "payment.manual.help": "Need help? Chat admin @:username.",
   "payment.pakasir.fallback.title": "⚠️ QRIS checkout redirected",
   "payment.pakasir.fallback.explanation": "The direct QRIS code could not be created automatically. The order is still awaiting payment and the stock remains reserved.",

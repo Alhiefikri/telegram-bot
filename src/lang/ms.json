@@ -576,6 +576,7 @@
   "payment.manual.exact_amount": "• Jumlah mesti sama tepat: :amount",
   "payment.manual.deadline_guidance": "Jika bayaran atau bukti bayaran belum dihantar sebelum tarikh ini, pesanan tamat tempoh secara automatik dan stok dilepaskan.",
   "payment.manual.proof_prompt": "Selepas bayar, balas mesej ini dengan foto tangkapan skrin bukti bayaran.",
+  "payment.manual.optional_proof_prompt": "Jika bayaran belum disahkan, balas mesej ini dengan foto bukti bayaran.",
   "payment.manual.help": "Perlukan bantuan? Hubungi admin @:username.",
   "payment.manual.proof_title": "📸 Hantar bukti bayaran",
   "payment.manual.proof_unavailable": "Pesanan ini sudah diproses atau tidak lagi menunggu bayaran.",
