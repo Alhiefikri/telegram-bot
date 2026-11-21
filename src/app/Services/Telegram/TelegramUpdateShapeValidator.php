@@ -17,6 +17,10 @@ class TelegramUpdateShapeValidator
 
     public function supportedType(array $payload): ?string
     {
+        if (($kind = TelegramStarsUpdate::kind($payload)) !== null) {
+            return TelegramStarsUpdate::minimize($payload, $kind) !== null ? $kind : null;
+        }
+
         $hasMessage = array_key_exists(self::TYPE_MESSAGE, $payload);
         $hasCallbackQuery = array_key_exists(self::TYPE_CALLBACK_QUERY, $payload);
 

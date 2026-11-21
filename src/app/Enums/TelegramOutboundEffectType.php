@@ -11,6 +11,7 @@ enum TelegramOutboundEffectType: string
     case PakasirCheckoutInstructions = 'checkout.pakasir_payment_instructions';
     case BinanceCheckoutInstructions = 'checkout.binance_payment_instructions';
     case BscCheckoutInstructions = 'checkout.bsc_payment_instructions';
+    case TelegramStarsInvoice = 'checkout.telegram_stars_invoice';
     case BalanceTopUpInstructions = 'balance.top_up_instructions';
     case BalanceTopUpReceipt = 'balance.top_up_receipt';
     case BalanceTopUpPaymentProof = 'admin.balance_top_up_payment_proof';

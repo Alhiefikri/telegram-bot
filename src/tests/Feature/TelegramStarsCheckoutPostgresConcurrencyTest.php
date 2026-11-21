@@ -92,6 +92,6 @@ final class TelegramStarsCheckoutPostgresConcurrencyTest extends TestCase
         $this->assertSame(1, InventoryMovement::where('type', InventoryMovementType::Reservation)->count());
         $this->assertSame(0, InventoryMovement::where('type', InventoryMovementType::Sale)->count());
         $this->assertDatabaseEmpty('supplier_fulfillments');
-        $this->assertDatabaseEmpty('telegram_outbound_effects');
+        $this->assertDatabaseCount('telegram_outbound_effects', 1);
     }
 }

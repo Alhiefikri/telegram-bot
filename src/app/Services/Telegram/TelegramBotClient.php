@@ -2,7 +2,9 @@
 
 namespace App\Services\Telegram;
 
+use App\Exceptions\TelegramAmbiguousResponseException;
 use App\Exceptions\TelegramApiException;
+use App\Models\PaymentTelegramStarsDetail;
 use App\Support\DogfoodTiming;
 use GuzzleHttp\TransferStats;
 use Illuminate\Http\Client\ConnectionException;
@@ -67,6 +69,30 @@ class TelegramBotClient
             wrapFailures: false,
             customEmojiScope: $customEmojiScope,
         ));
+    }
+
+    public function sendStarsInvoice(PaymentTelegramStarsDetail $target): array
+    {
+        $response = $this->timed('sendInvoice', fn () => $this->requests->request()->withoutRedirecting()
+            ->post($this->requests->url('sendInvoice'), [
+                'chat_id' => $target->chat_id,
+                'title' => 'Telegram Stars',
+                'description' => 'Order '.$target->merchant_ref.' · '.$target->total_xtr.' XTR',
+                'payload' => $target->invoice_payload,
+                'provider_token' => '',
+                'currency' => 'XTR',
+                'prices' => [['label' => 'Telegram Stars', 'amount' => $target->total_xtr]],
+                'start_parameter' => 'stars-invoice',
+            ])->throw());
+
+        $body = $response->json();
+        if (! $response->successful() || ! is_array($body) || ($body['ok'] ?? null) !== true
+            || data_get($body, 'result.chat.id') !== $target->chat_id
+            || data_get($body, 'result.chat.type') !== 'private') {
+            throw new TelegramAmbiguousResponseException('Telegram Stars invoice');
+        }
+
+        return $body;
     }
 
     public function editMessageText(int|string $chatId, int $messageId, string $text, array $replyMarkup = [], array $options = []): array

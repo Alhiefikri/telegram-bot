@@ -128,6 +128,12 @@ class TelegramOrderCallbackHandler implements TelegramCallbackHandler
         }
 
         $outcome = $this->cancellation->cancel($order);
+        if ($outcome === CustomerCancellationOutcome::PaymentVerifying) {
+            $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'payment.cancel.stars_verifying'));
+
+            return;
+        }
+
         if ($outcome === CustomerCancellationOutcome::VerificationUnavailable) {
             $this->bot->answerCallbackQuery($context->callbackQueryId, $this->locale->translate($context->customer, 'payment.cancel.verification_unavailable'));
             $this->bot->sendMessage($context->chatId, $this->locale->translate($context->customer, 'payment.cancel.verification_unavailable_detail'));

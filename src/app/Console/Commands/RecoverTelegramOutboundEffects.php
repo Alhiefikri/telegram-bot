@@ -112,6 +112,7 @@ class RecoverTelegramOutboundEffects extends Command
                     TelegramOutboundEffectType::BalanceOperationsAlert->value,
                     TelegramOutboundEffectType::OwnerCompensationNotification->value,
                     TelegramOutboundEffectType::UsdtRefundReceipt->value,
+                    TelegramOutboundEffectType::TelegramStarsInvoice->value,
                     TelegramOutboundEffectService::TYPE_MANUAL_CHECKOUT,
                     TelegramOutboundEffectService::TYPE_KLIKQRIS_CHECKOUT,
                     TelegramOutboundEffectService::TYPE_SAKURUPIAH_CHECKOUT,

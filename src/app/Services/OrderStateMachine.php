@@ -6,6 +6,7 @@ use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Exceptions\TelegramStarsPaymentVerifying;
 use App\Jobs\DeleteAdminPendingOrderNotification;
 use App\Jobs\DeleteBuyerCheckoutMessages;
 use App\Jobs\SendAdminOrderExpiredNotification;
@@ -26,6 +27,7 @@ use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\SalesProofEligibility;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\TelegramStars\TelegramStarsPreCheckout;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtOrderRefundService;
 use App\Support\DogfoodTiming;
@@ -591,6 +593,14 @@ class OrderStateMachine implements OrderLifecycle
                 payment: $payments->first(),
                 newlyApplied: false,
             );
+        }
+
+        if ($payments->contains(TelegramStarsPreCheckout::graceIsActive(...))) {
+            if ($orderStatus === OrderStatus::Cancelled) {
+                throw new TelegramStarsPaymentVerifying;
+            }
+
+            return new OrderLifecycleResult(order: null, payment: $payments->first(), newlyApplied: false);
         }
 
         $this->inventory->releaseOrderReservations($order);

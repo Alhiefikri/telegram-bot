@@ -38,6 +38,7 @@ use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\Pricing\ResellerPricingContext;
 use App\Services\StoreBalance\StoreBalanceLedger;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\UsdtBalance\UsdtMicroAmount;
@@ -48,7 +49,9 @@ use App\Support\PaymentProvider;
 use DateTimeInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
+use Throwable;
 
 class OrderCheckoutService
 {
@@ -436,7 +439,17 @@ class OrderCheckoutService
                 'order:'.$order->getKey().':usdt:debit',
             );
             $this->lifecycle->applyPaymentPaid($payment);
-        } elseif (! $isStars) {
+        } elseif ($isStars) {
+            $effect = $this->outboundEffects->recordTelegramStarsInvoice($payment->telegramStarsDetail);
+            DB::afterCommit(static function () use ($effect): void {
+                try {
+                    app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
+                } catch (Throwable $error) {
+                    // The committed intent is discoverable by outbound recovery.
+                    Log::warning('telegram.stars_invoice_wakeup_failed', ['error_class' => $error::class]);
+                }
+            });
+        } else {
             $this->outboundEffects->recordCheckoutInstructions($order, $payment, $lockedCart->customer);
             $this->outboundEffects->recordAdminOrderPendingNotification($order);
         }

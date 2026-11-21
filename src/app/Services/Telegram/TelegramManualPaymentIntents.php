@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Exceptions\TelegramOutboundPreSendException;
+use App\Exceptions\TelegramStarsPaymentVerifying;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
@@ -396,7 +397,13 @@ class TelegramManualPaymentIntents
             return;
         }
 
-        $cancelled = $this->adminOrders->cancelPendingOrder($order);
+        try {
+            $cancelled = $this->adminOrders->cancelPendingOrder($order);
+        } catch (TelegramStarsPaymentVerifying $exception) {
+            $this->bot->sendMessage($chatId, $exception->getMessage());
+
+            return;
+        }
         $this->bot->sendMessage($chatId, $this->uiIcons->renderLegacyIcons("✅ Order dibatalkan\n━━━━━━━━━━━━━━\nInvoice ").$cancelled->invoice_number.' dibatalkan dan stok sudah dilepas kembali.');
     }
 

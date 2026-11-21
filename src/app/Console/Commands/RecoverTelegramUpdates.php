@@ -17,6 +17,7 @@ class RecoverTelegramUpdates extends Command
         $dispatched = 0;
 
         TelegramUpdate::query()
+            ->whereNull('stars_event')
             ->whereNull('processed_at')
             ->whereNull('terminal_failed_at')
             ->where(fn ($query) => $query

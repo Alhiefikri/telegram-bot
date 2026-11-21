@@ -49,7 +49,7 @@ class SetTelegramWebhook extends Command
             $response = $requests->request()->post($requests->url('setWebhook'), [
                 'url' => $webhookUrl,
                 'secret_token' => $secret,
-                'allowed_updates' => ['message', 'callback_query'],
+                'allowed_updates' => ['message', 'callback_query', 'pre_checkout_query'],
             ]);
         } catch (ConnectionException) {
             $this->error('Telegram webhook setup failed: request failed');

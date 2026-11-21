@@ -18,7 +18,7 @@ class CleanupRetainedData extends Command
         $chunk = max(1, (int) $this->option('chunk'));
         $cutoff = now()->subDays(max(1, (int) config('services.data_retention_days', 90)));
 
-        $telegram = $this->deleteInChunks(TelegramUpdate::query()->whereNotNull('processed_at')->where('created_at', '<', $cutoff), $chunk);
+        $telegram = $this->deleteInChunks(TelegramUpdate::query()->whereNull('stars_event')->whereNotNull('processed_at')->where('created_at', '<', $cutoff), $chunk);
         $payment = $this->deleteInChunks(PaymentEvent::query()->where('received_at', '<', $cutoff), $chunk);
         $audit = $this->deleteInChunks(AuditLog::query()->where('created_at', '<', $cutoff), $chunk);
 

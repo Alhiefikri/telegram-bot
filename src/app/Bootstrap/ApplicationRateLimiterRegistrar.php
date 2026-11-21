@@ -27,6 +27,12 @@ class ApplicationRateLimiterRegistrar
             }
 
             $payload = $request->all();
+            if (array_key_exists('pre_checkout_query', $payload)) {
+                $actor = Arr::get($payload, 'pre_checkout_query.from.id');
+
+                return Limit::perMinute($limit)->by('telegram:webhook:pre-checkout:'.(is_int($actor) && $actor > 0 ? $actor : ($request->ip() ?: 'unknown')));
+            }
+
             $identity = Arr::get($payload, 'message.from.id')
                 ?? Arr::get($payload, 'callback_query.from.id')
                 ?? Arr::get($payload, 'message.chat.id')

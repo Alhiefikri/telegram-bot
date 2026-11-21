@@ -5,6 +5,7 @@ namespace App\Services\Admin;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidOrderTransition;
+use App\Exceptions\TelegramStarsPaymentVerifying;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\AuditLogger;
@@ -63,6 +64,8 @@ class AdminOrderOperations
     {
         try {
             $cancelledOrder = $this->orders->applyPendingCancellation($order)->order;
+        } catch (TelegramStarsPaymentVerifying $exception) {
+            throw $exception;
         } catch (InvalidOrderTransition $exception) {
             throw new InvalidArgumentException($exception->getMessage(), previous: $exception);
         }

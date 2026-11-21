@@ -20,6 +20,10 @@ class TelegramUpdateProcessor
 
     public function process(TelegramUpdate $update): void
     {
+        if ($update->stars_event !== null || TelegramStarsUpdate::kind($update->payload) !== null) {
+            return;
+        }
+
         $this->callbackAckState->reset();
         $this->replayGuard->processOnce($update, fn (TelegramUpdate $claimedUpdate) => $this->route($claimedUpdate));
     }

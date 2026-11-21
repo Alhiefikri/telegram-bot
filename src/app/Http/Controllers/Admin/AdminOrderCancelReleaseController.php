@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\TelegramStarsPaymentVerifying;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\Admin\AdminOrderOperations;
@@ -26,7 +27,15 @@ class AdminOrderCancelReleaseController extends Controller
             return back()->withErrors(['order' => 'Order sudah diproses atau tidak bisa dibatalkan.']);
         }
 
-        $cancelled = $orders->cancelPendingOrder($order, $user, $request->ip());
+        try {
+            $cancelled = $orders->cancelPendingOrder($order, $user, $request->ip());
+        } catch (TelegramStarsPaymentVerifying $exception) {
+            $message = $exception->getMessage();
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message, 'errors' => ['order' => [$message]]], 422)
+                : back()->withErrors(['order' => $message]);
+        }
         if ($request->expectsJson()) {
             return response()->json(['message' => 'Order dibatalkan dan stok dilepas.'])->header('Cache-Control', 'no-store, private');
         }

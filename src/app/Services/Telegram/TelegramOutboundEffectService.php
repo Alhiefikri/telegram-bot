@@ -20,6 +20,7 @@ use App\Models\CustomerUsdtTopUp;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentTelegramStarsDetail;
 use App\Models\ProductPriceChangeEvent;
 use App\Models\ProductPriceChangeNotificationRecipient;
 use App\Models\SalesProofPost;
@@ -678,6 +679,21 @@ class TelegramOutboundEffectService
             'locale' => $locale, 'template_version' => 'usdt-top-up-receipt-v1',
             'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
             'outcome_metadata' => ['delivery_context' => 'usdt_top_up_receipt', 'message' => $message],
+        ]);
+    }
+
+    public function recordTelegramStarsInvoice(PaymentTelegramStarsDetail $target): TelegramOutboundEffect
+    {
+        $key = 'telegram-stars:'.$target->payment_id.':invoice:v1';
+
+        return TelegramOutboundEffect::firstOrCreate(['effect_key' => $key], [
+            'effect_group_key' => $key, 'sequence' => 1,
+            'effect_type' => TelegramOutboundEffectType::TelegramStarsInvoice->value,
+            'source_type' => Payment::class, 'source_id' => $target->payment_id,
+            'target_type' => 'customer', 'telegram_chat_id' => (string) $target->chat_id,
+            'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE, 'telegram_method' => 'sendInvoice',
+            'template_version' => 'telegram-stars-invoice-v1',
+            'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
         ]);
     }
 
@@ -2278,6 +2294,10 @@ class TelegramOutboundEffectService
                 ->orderByDesc('sequence')
                 ->lockForUpdate()
                 ->first();
+            if ($locked->effect_type === TelegramOutboundEffectType::TelegramStarsInvoice->value
+                && $latest?->id !== $locked->id) {
+                throw new InvalidArgumentException('Review the latest Stars invoice delivery before requesting another resend.');
+            }
             $sequence = max((int) $locked->sequence, (int) ($latest?->sequence ?? 0)) + 1;
             $effectKey = $groupKey.':resend:v'.$sequence;
 
@@ -3140,7 +3160,8 @@ class TelegramOutboundEffectService
                 ->join('orders', 'orders.id', '=', 'payments.order_id')
                 ->value('orders.invoice_number');
             if (is_string($invoice) && $invoice !== '') {
-                return 'Payment proof '.$invoice;
+                return ($effect->effect_type === TelegramOutboundEffectType::TelegramStarsInvoice->value
+                    ? 'Telegram Stars invoice ' : 'Payment proof ').$invoice;
             }
         }
         if ($effect->source_type === StoreBalanceCompensation::class) {

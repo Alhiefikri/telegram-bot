@@ -10,6 +10,7 @@ use App\Exceptions\CheckoutPaymentUnavailable;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\InvalidOrderTransition;
+use App\Jobs\SendTelegramStarsInvoice;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Order;
@@ -102,10 +103,11 @@ final class TelegramStarsCheckoutTest extends TestCase
         $this->assertSame($order->id, $replay->id);
         $this->assertSame($target->invoice_payload, $replay->payments->sole()->telegramStarsDetail->invoice_payload);
         $this->assertSame(1, Order::count());
-        $this->assertDatabaseEmpty('telegram_outbound_effects');
+        $this->assertDatabaseCount('telegram_outbound_effects', 1);
+        $this->assertDatabaseHas('telegram_outbound_effects', ['effect_type' => 'checkout.telegram_stars_invoice', 'source_id' => $payment->id]);
         $this->assertNull($effects->recordAdminOrderExpiredNotification($order->fresh(), '123456'));
         Http::assertNothingSent();
-        Queue::assertNothingPushed();
+        Queue::assertPushed(SendTelegramStarsInvoice::class, 1);
     }
 
     public function test_cart_is_all_local_and_cannot_switch_to_manual_or_settle_without_evidence(): void

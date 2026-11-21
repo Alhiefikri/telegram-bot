@@ -530,6 +530,7 @@
   "payment.cancel.not_found": "Pesanan tidak ditemukan atau sudah tidak bisa dibatalkan.\n\nCek status terbaru lewat /status.",
   "payment.cancel.verification_unavailable": "Status pembayaran belum dapat diverifikasi.",
   "payment.cancel.verification_unavailable_detail": "Status pembayaran belum dapat diverifikasi. Pesanan tidak dibatalkan; coba lagi sebentar.",
+  "payment.cancel.stars_verifying": "Pembayaran Telegram Stars sedang diverifikasi. Pesanan tidak dibatalkan.",
   "payment.cancel.paid": "Pembayaran sudah diterima.",
   "payment.cancel.paid_detail": "Pembayaran sudah diterima, jadi pesanan tidak bisa dibatalkan.\n\nCek status terbaru lewat /status.",
   "payment.cancel.processed": "Pesanan sudah tidak bisa dibatalkan.",
