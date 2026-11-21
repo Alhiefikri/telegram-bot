@@ -328,6 +328,7 @@ final class AdminDashboardData
                 'label' => 'Keuangan',
                 'items' => $this->visibleNavigationItems([
                     $this->navigationItem('balance-settings', 'Saldo & top-up', 'settings', route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']), visible: $canManagePaymentSettings),
+                    $this->navigationItem('stars-pricing', 'Harga Telegram Stars', 'settings', route('admin.stars-pricing.show'), visible: $user->role?->canManageStarsPricing() === true),
                     $this->navigationItem('balance-reports', 'Laporan saldo', 'report', route('admin.store-balance.reports.index'), visible: $canReconcilePayments),
                     $this->navigationItem('balance-adjustments', 'Kelola saldo', 'adjustment', route('admin.store-balance.adjustments.index'), visible: $canCompensateStoreBalance && $this->balanceAdjustmentDashboardReadiness->isReady()),
                     $this->navigationItem('usdt-review', 'Review deposit USDT', 'shield', route('admin.store-balance.usdt-review.index'), visible: $canCompensateStoreBalance),
