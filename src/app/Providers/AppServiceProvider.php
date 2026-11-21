@@ -33,6 +33,7 @@ use App\Services\Checkout\KlikQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\ManualQrisCheckoutPaymentPreparation;
 use App\Services\Checkout\SakurupiahCheckoutPaymentPreparation;
 use App\Services\Checkout\StoreBalanceCheckoutPaymentPreparation;
+use App\Services\Checkout\TelegramStarsCheckoutPaymentPreparation;
 use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
 use App\Services\Checkout\WijayaPayCheckoutPaymentPreparation;
 use App\Services\Customer\CustomerAccountOverviewReader;
@@ -178,6 +179,7 @@ class AppServiceProvider extends ServiceProvider
                 WijayaPayCheckoutPaymentPreparation::IDENTITY => $app->make(WijayaPayCheckoutPaymentPreparation::class),
                 StoreBalanceCheckoutPaymentPreparation::IDENTITY => $app->make(StoreBalanceCheckoutPaymentPreparation::class),
                 UsdtBalanceCheckoutPaymentPreparation::IDENTITY => $app->make(UsdtBalanceCheckoutPaymentPreparation::class),
+                TelegramStarsCheckoutPaymentPreparation::IDENTITY => $app->make(TelegramStarsCheckoutPaymentPreparation::class),
             ]);
         });
         $this->app->bind(TelegramBotClient::class, $this->telegramBotClientClass());

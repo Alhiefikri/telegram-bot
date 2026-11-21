@@ -103,7 +103,7 @@ final class MissingFulfillmentRefundService
             $refund = OrderRefund::query()->whereKey($initial->id)->lockForUpdate()->firstOrFail();
             $f = SupplierFulfillment::findOrFail($refund->supplier_fulfillment_id);
             $identity = hash('sha256', $payment->provider.'|'.$currency.'|'.$reference);
-            if ($refund->amount !== $amount || $refund->currency !== $currency || in_array($payment->provider, ['store_balance', 'usdt_balance'], true)
+            if ($payment->isTelegramStars() || $refund->amount !== $amount || $refund->currency !== $currency || in_array($payment->provider, ['store_balance', 'usdt_balance'], true)
                 || $refund->warranty_claim_id !== null || $f->order_id !== $order->id) {
                 throw new InvalidOrderTransition('Transfer evidence does not match the missing-unit entitlement.');
             }
@@ -141,6 +141,9 @@ final class MissingFulfillmentRefundService
 
     public static function entitlement(SupplierFulfillment $f, string $currency): int
     {
+        if ($currency === 'XTR') {
+            throw new InvalidOrderTransition('Telegram Stars does not support supplier or partial refunds.');
+        }
         $item = $f->orderItem;
         $total = $currency === 'USDT' ? $item->usdt_subtotal : $item->subtotal;
         $acquired = self::acquired($f);

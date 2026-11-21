@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
 use App\Support\DogfoodTiming;
+use App\Support\Money;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -295,6 +296,9 @@ class TelegramAdminOrderNotifier
     {
         if ($payment?->currency === 'USDT') {
             return rtrim(rtrim(number_format($payment->amount / 1_000_000, 6, '.', ''), '0'), '.').' USDT';
+        }
+        if ($payment?->currency === 'XTR') {
+            return Money::xtr($payment->amount);
         }
 
         return $this->rupiah($order->total_amount);

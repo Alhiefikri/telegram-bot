@@ -20,4 +20,9 @@ final class Money
     {
         return UsdtMicroAmount::formatUnits(max(0, (int) $microAmount)).' USDT';
     }
+
+    public static function xtr(int $amount): string
+    {
+        return $amount.' XTR';
+    }
 }

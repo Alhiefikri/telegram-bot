@@ -110,6 +110,9 @@ final class PaidInvoiceOrderPresentationAdapter
 
     private function paymentSubtotal(Payment $payment, string $currency): ?int
     {
+        if ($currency === 'XTR') {
+            return $payment->amount;
+        }
         if ($currency !== 'USDT') {
             return null;
         }
@@ -124,7 +127,7 @@ final class PaidInvoiceOrderPresentationAdapter
 
     private function totalPaid(Payment $payment, Order $order, string $currency): int
     {
-        if ($currency === 'USDT') {
+        if (in_array($currency, ['USDT', 'XTR'], true)) {
             return max(0, (int) $payment->amount);
         }
 

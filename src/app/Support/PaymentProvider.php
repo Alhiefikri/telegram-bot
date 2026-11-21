@@ -18,6 +18,8 @@ final class PaymentProvider
 
     public const USDT_BALANCE = 'usdt_balance';
 
+    public const TELEGRAM_STARS = 'telegram_stars';
+
     /** @return list<string> */
     public static function allowed(): array
     {
@@ -27,7 +29,7 @@ final class PaymentProvider
     /** @return list<string> */
     public static function known(): array
     {
-        return [self::MANUAL, self::PAKASIR, self::KLIKQRIS, self::SAKURUPIAH, self::WIJAYAPAY, self::STORE_BALANCE, self::USDT_BALANCE];
+        return [self::MANUAL, self::PAKASIR, self::KLIKQRIS, self::SAKURUPIAH, self::WIJAYAPAY, self::STORE_BALANCE, self::USDT_BALANCE, self::TELEGRAM_STARS];
     }
 
     public static function normalize(mixed $provider): string
@@ -46,6 +48,7 @@ final class PaymentProvider
             self::WIJAYAPAY => 'WijayaPay',
             self::STORE_BALANCE => 'Store Balance',
             self::USDT_BALANCE => 'Customer USDT Balance',
+            self::TELEGRAM_STARS => 'Telegram Stars',
             default => 'Manual',
         };
     }

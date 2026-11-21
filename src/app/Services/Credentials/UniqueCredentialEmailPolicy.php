@@ -41,10 +41,15 @@ final class UniqueCredentialEmailPolicy
     /** @return list<array{email: string, invoice_number: string, order_id: string}> */
     public function history(OrderItem $item): array
     {
-        $customerId = $item->order()->value('customer_id');
+        return $this->historyFor((int) $item->order()->value('customer_id'), (int) $item->product_id);
+    }
+
+    /** @return list<array{email: string, invoice_number: string, order_id: string}> */
+    private function historyFor(int $customerId, int $productId): array
+    {
         $history = [];
         foreach (ProductStockItem::query()
-            ->where('product_id', $item->product_id)
+            ->where('product_id', $productId)
             ->whereHas('orderItem.order', fn ($query) => $query->where('customer_id', $customerId))
             ->with('orderItem.order:id,invoice_number')
             ->lazyById(100) as $stock) {
@@ -84,13 +89,24 @@ final class UniqueCredentialEmailPolicy
     /** @return list<ProductStockItem> */
     public function selectAvailable(OrderItem $item, int $quantity): array
     {
+        return $this->availableFor((int) $item->order()->value('customer_id'), (int) $item->product_id, $quantity);
+    }
+
+    public function canAllocate(int $customerId, int $productId, int $quantity): bool
+    {
+        return count($this->availableFor($customerId, $productId, $quantity)) === $quantity;
+    }
+
+    /** @return list<ProductStockItem> */
+    private function availableFor(int $customerId, int $productId, int $quantity): array
+    {
         try {
-            $seen = array_fill_keys(array_column($this->history($item), 'email'), true);
+            $seen = array_fill_keys(array_column($this->historyFor($customerId, $productId), 'email'), true);
         } catch (ValidationException) {
             return [];
         }
         $selected = [];
-        foreach (ProductStockItem::query()->where('product_id', $item->product_id)
+        foreach (ProductStockItem::query()->where('product_id', $productId)
             ->localCatalogStock()->whereNull('order_item_id')->whereNull('retired_at')
             ->orderBy('id')->lazyById(100) as $stock) {
             $email = $this->email($stock);

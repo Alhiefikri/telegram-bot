@@ -138,7 +138,9 @@ class TelegramOrderIntents
             ->where('created_at', '>=', $month)
             ->where('created_at', '<', $month->copy()->addMonth())
             ->where('payment_status', PaymentStatus::Paid)
-            ->selectRaw("COUNT(*) as paid_count, COALESCE(SUM(CASE WHEN currency = 'IDR' THEN total_amount ELSE 0 END), 0) as paid_total")
+            ->selectRaw("COUNT(*) as paid_count, COALESCE(SUM(CASE WHEN currency = 'IDR' AND NOT EXISTS (
+                SELECT 1 FROM payments WHERE payments.order_id = orders.id AND payments.provider = ?
+            ) THEN total_amount ELSE 0 END), 0) as paid_total", [PaymentProvider::TELEGRAM_STARS])
             ->first();
 
         $currencyTotals = app(PaymentReceiptReport::class)->customerTransactionTotals((int) $customer->id, $month, $month->copy()->addMonth());
@@ -146,15 +148,18 @@ class TelegramOrderIntents
         return $this->locale->translate($customer, 'order.status.month_totals', [
             'count' => (int) $totals->paid_count,
             'amount' => $this->locale->idr((int) $totals->paid_total)
-                .($currencyTotals['USDT'] > 0 ? ' / '.Money::usdt($currencyTotals['USDT']) : ''),
+                .($currencyTotals['USDT'] > 0 ? ' / '.Money::usdt($currencyTotals['USDT']) : '')
+                .(isset($currencyTotals['XTR']) ? ' / '.Money::xtr($currencyTotals['XTR']) : ''),
         ]);
     }
 
     private function orderAmount(Customer $customer, Order $order, ?Payment $payment): string
     {
-        return strtoupper((string) $payment?->currency) === 'USDT'
-            ? Money::usdt((int) $payment->amount)
-            : $this->locale->idr((int) $order->total_amount);
+        return match (strtoupper((string) $payment?->currency)) {
+            'USDT' => Money::usdt((int) $payment->amount),
+            'XTR' => Money::xtr((int) $payment->amount),
+            default => $this->locale->idr((int) $order->total_amount),
+        };
     }
 
     public function monthFromCallback(string $data): ?Carbon

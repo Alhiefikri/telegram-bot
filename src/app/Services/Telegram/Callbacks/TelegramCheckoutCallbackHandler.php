@@ -1333,7 +1333,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
 
     private function dispatchCheckoutInstructions(Order $order, Payment $payment): void
     {
-        if (in_array($payment->provider, [PaymentProvider::STORE_BALANCE, PaymentProvider::USDT_BALANCE], true)) {
+        if (in_array($payment->provider, [PaymentProvider::STORE_BALANCE, PaymentProvider::USDT_BALANCE, PaymentProvider::TELEGRAM_STARS], true)) {
             return;
         }
 
@@ -1391,6 +1391,7 @@ class TelegramCheckoutCallbackHandler implements TelegramCallbackHandler
             CheckoutPostCreationBehavior::WijayaPayInstructions,
             CheckoutPostCreationBehavior::StoreBalancePaid,
             CheckoutPostCreationBehavior::UsdtBalancePaid => null,
+            CheckoutPostCreationBehavior::TelegramStarsPrepared => throw new InvalidCheckout('Telegram Stars requires a confirmed private quote.'),
         };
     }
 

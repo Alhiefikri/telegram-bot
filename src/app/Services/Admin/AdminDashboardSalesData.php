@@ -261,6 +261,9 @@ final class AdminDashboardSalesData
         if ($this->receiptReport->currency($payment) === 'USDT') {
             return ['label' => Money::usdt($amount), 'amount' => $amount];
         }
+        if ($this->receiptReport->currency($payment) === 'XTR') {
+            return ['label' => Money::xtr($amount), 'amount' => $amount];
+        }
 
         return ['label' => Money::idr($amount), 'amount' => $amount];
     }

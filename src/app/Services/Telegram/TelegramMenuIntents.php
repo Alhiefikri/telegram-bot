@@ -1224,11 +1224,12 @@ class TelegramMenuIntents
     }
 
     /**
-     * @param  array{IDR: int, USDT: int}  $totals
+     * @param  array{IDR: int, USDT: int, XTR?: int}  $totals
      */
     private function formatTransactionTotals(array $totals): string
     {
-        return $this->locale->idr($totals['IDR']).' / '.Money::usdt($totals['USDT']);
+        return $this->locale->idr($totals['IDR']).' / '.Money::usdt($totals['USDT'])
+            .(isset($totals['XTR']) ? ' / '.Money::xtr($totals['XTR']) : '');
     }
 
     public function sendAccountSummary(Customer $customer, string $chatId): void

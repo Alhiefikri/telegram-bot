@@ -949,6 +949,10 @@ class TelegramOutboundEffectService
 
     public function recordAdminOrderPendingNotification(Order $order, ?string $chatId = null): ?TelegramOutboundEffect
     {
+        if ($this->hasStarsPayment($order)) {
+            return null;
+        }
+
         return $this->recordAdminOrderNotification(
             order: $order,
             effectType: self::TYPE_ADMIN_PENDING,
@@ -1014,6 +1018,10 @@ class TelegramOutboundEffectService
 
     public function recordAdminOrderExpiredNotification(Order $order, ?string $chatId = null): ?TelegramOutboundEffect
     {
+        if ($this->hasStarsPayment($order)) {
+            return null;
+        }
+
         return $this->recordAdminOrderNotification(
             order: $order,
             effectType: self::TYPE_ADMIN_EXPIRED,
@@ -1021,6 +1029,11 @@ class TelegramOutboundEffectService
             legacySentColumn: 'admin_expired_order_notified_at',
             chatId: $chatId,
         );
+    }
+
+    private function hasStarsPayment(Order $order): bool
+    {
+        return $order->payments()->where('provider', PaymentProvider::TELEGRAM_STARS)->exists();
     }
 
     /**

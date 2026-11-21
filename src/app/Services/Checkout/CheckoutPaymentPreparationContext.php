@@ -3,6 +3,7 @@
 namespace App\Services\Checkout;
 
 use App\Models\Cart;
+use App\Models\Customer;
 use App\Models\ManualPaymentSetting;
 use Illuminate\Support\Collection;
 
@@ -19,5 +20,7 @@ final readonly class CheckoutPaymentPreparationContext
         public ?ManualPaymentSetting $lockedSetting,
         public CheckoutPaymentPreflight $preflight,
         public CheckoutPricingSnapshot $pricing,
+        public ?CheckoutPaymentIntent $intent = null,
+        public ?Customer $lockedCustomer = null,
     ) {}
 }

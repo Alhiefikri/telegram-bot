@@ -15,6 +15,7 @@ use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
 use App\Services\PaidInvoice\PaidInvoiceRenderer;
 use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Support\Money;
 
 class TelegramReceiptNotifier
 {
@@ -937,6 +938,10 @@ class TelegramReceiptNotifier
 
         if ($currency === 'USDT') {
             return UsdtMicroAmount::formatUnits((int) ($payment?->amount ?? 0)).' USDT';
+        }
+
+        if ($currency === 'XTR') {
+            return Money::xtr((int) $payment->amount);
         }
 
         if ($currency === 'IDR') {

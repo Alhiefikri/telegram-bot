@@ -35,6 +35,36 @@ The locking/transaction and form request patterns were verified through Context7
 against Laravel 13 [queries](https://github.com/laravel/docs/blob/13.x/queries.md)
 and [validation](https://github.com/laravel/docs/blob/13.x/validation.md).
 
+## Telegram Stars checkout preparation (#742)
+
+`TelegramStarsCheckoutPaymentPreparation::preview()` produces a five-minute
+server-side quote for a Product selection or active Cart. Pass it with freshly
+resolved private Telegram buyer/chat and server session revision as a
+`TelegramStarsCheckoutIntent`; callback data is not quote authority. Direct
+checkout uses `OrderCheckoutService::checkoutTelegramStarsDirect()` and an
+isolated Cart, so it never edits or consumes the buyer's normal Cart.
+
+Checkout keeps the Customer → Cart → Product lock order and reads the pricing
+policy under a shared transaction lock against Owner edits. Changed quotes
+require reconfirmation; matching checkout-key replays reuse the recorded target
+even after expiry, cancellation, or a pause. No supplier sources, numeric-only
+stock, or deferred local credentials are eligible. The ordinary inventory
+lifecycle releases reservations on cancellation or after the 15-minute deadline.
+
+`CheckoutPaymentPlanWriter` commits the pending XTR Payment and immutable Stars
+detail with the Order and reservation. Order and Order Items retain the retail
+IDR basis (not cash); the detail retains rate, version, retail lines, XTR,
+private buyer/chat, reference, epoch deadline and opaque payload. PostgreSQL
+guards the immutable detail and Payment identity. Preparation emits no Telegram
+effect; legacy manual settlement, refunds and QRIS fallback cannot act on this
+target. No public rail selection or Telegram transport is added here.
+
+Verification: `TelegramStarsCheckoutTest` and
+`TelegramStarsCheckoutPostgresConcurrencyTest`. Lock and migration patterns
+were verified through Context7 against Laravel 13
+[queries](https://github.com/laravel/docs/blob/13.x/queries.md) and
+[migrations](https://github.com/laravel/docs/blob/13.x/migrations.md).
+
 ## Sakurupiah checkout recovery (#677)
 
 Issue #678 supersedes #677's ordinary terminal-payment polling: the

@@ -8,6 +8,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStockItem;
 use App\Services\Credentials\UniqueCredentialEmailPolicy;
+use Illuminate\Support\Facades\DB;
 
 class ProductCredentialAllocator
 {
@@ -19,7 +20,8 @@ class ProductCredentialAllocator
         if ($orderItem->unique_credential_email || $product->unique_credential_email) {
             $policy = app(UniqueCredentialEmailPolicy::class);
             // Every allocation path shares the Product lock, including manual delivery.
-            Product::withTrashed()->whereKey($product->id)->lockForUpdate()->firstOrFail();
+            Product::withTrashed()->whereKey($product->id)
+                ->lock(DB::getDriverName() === 'pgsql' ? 'for no key update' : true)->firstOrFail();
             $missing = max(0, $quantity - $orderItem->stockItems()->whereNull('retired_at')->count());
             if ($missing === 0) {
                 return;
