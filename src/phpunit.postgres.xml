@@ -62,6 +62,7 @@
             <file>tests/Feature/BscUsdtRailPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SupplierClientTest.php</file>
             <file>tests/Feature/SupplierAdminTest.php</file>
+            <file>tests/Feature/AdminSupplierMarginPostgresConcurrencyTest.php</file>
             <file>tests/Feature/SupplierAvailabilityTest.php</file>
             <file>tests/Feature/SupplierPricingClarityTest.php</file>
             <file>tests/Feature/SupplierCurrencyRateAdminTest.php</file>

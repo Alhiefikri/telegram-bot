@@ -7,6 +7,7 @@
         </div>
         <div class="grid gap-4 p-5 sm:p-6">
             <nav class="flex flex-wrap gap-3" aria-label="Operasional supplier">
+                <x-admin-dashboard.button :href="route('admin.suppliers.margins.index')" variant="primary" size="sm">Margin Supplier</x-admin-dashboard.button>
                 <x-admin-dashboard.button :href="route('admin.suppliers.purchases')" variant="primary" size="sm">Monitor pembelian / pemulihan <span aria-hidden="true">↗</span></x-admin-dashboard.button>
                 <x-admin-dashboard.button :href="route('password.confirm')" variant="neutral" size="sm">Konfirmasi password</x-admin-dashboard.button>
             </nav>

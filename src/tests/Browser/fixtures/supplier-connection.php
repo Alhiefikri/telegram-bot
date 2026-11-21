@@ -1,8 +1,12 @@
 <?php
 
 use App\Enums\UserRole;
+use App\Models\Product;
+use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
+use App\Models\SupplierCatalogItem;
 use App\Models\SupplierCurrencyRate;
+use App\Models\SupplierPricePolicy;
 use App\Models\User;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Artisan;
@@ -22,6 +26,24 @@ if (($argv[1] ?? null) === 'prepare') {
         throw new RuntimeException('Disposable supplier connection migrations failed.');
     }
     echo '{"prepared":true}';
+    exit;
+}
+if (($argv[1] ?? null) === 'margins') {
+    $supplier = Supplier::forceCreate([
+        'name' => 'Supplier Margin Browser', 'provider' => 'nastele', 'api_key' => 'synthetic-margin-browser-key',
+        'currency' => 'VND', 'currency_confirmed' => true, 'exchange_rate_idr' => '0.650001', 'is_active' => true,
+        'balance_micros' => 900_000_000_000, 'synced_at' => now(), 'sync_expires_at' => now()->addMinutes(8),
+    ]);
+    foreach (['A' => ['fixed', 11_000], 'B' => ['manual', 18_500], 'C' => ['manual', 20_000]] as $label => [$mode, $price]) {
+        $product = Product::factory()->create(['name' => 'Margin Browser '.$label, 'price_amount' => $price, 'stock' => 0, 'is_active' => true]);
+        $item = SupplierCatalogItem::forceCreate([
+            'supplier_id' => $supplier->id, 'external_id' => $label, 'name' => 'Private SKU',
+            'currency' => 'VND', 'unit_price_micros' => 28_000_000_000, 'stock' => 10,
+            'orderable' => true, 'requires_input' => false, 'synced_at' => now(),
+        ]);
+        ProductSupplierSource::create(['product_id' => $product->id, 'supplier_catalog_item_id' => $item->id, 'priority' => 10, 'is_active' => true]);
+        SupplierPricePolicy::create(['product_id' => $product->id, 'mode' => $mode, 'minimum_profit_idr' => 0, 'rounding_idr' => 1]);
+    }
     exit;
 }
 if (($argv[1] ?? null) === 'state') {

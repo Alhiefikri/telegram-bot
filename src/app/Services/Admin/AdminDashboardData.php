@@ -319,7 +319,10 @@ final class AdminDashboardData
             [
                 'id' => 'operations',
                 'label' => 'Operasional',
-                'items' => $this->visibleNavigationItems([$tabItems['penjualan'], $tabItems['produk'], $tabItems['suppliers']]),
+                'items' => $this->visibleNavigationItems([
+                    $tabItems['penjualan'], $tabItems['produk'], $tabItems['suppliers'],
+                    $this->navigationItem('supplier-margins', 'Margin Supplier', 'chart', route('admin.suppliers.margins.index'), visible: $canManageStoreOperations),
+                ]),
             ],
             [
                 'id' => 'finance',

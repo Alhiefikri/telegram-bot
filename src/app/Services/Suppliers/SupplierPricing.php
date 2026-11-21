@@ -80,6 +80,23 @@ final class SupplierPricing
 
     public function isEligible(Product $product, Supplier $supplier, SupplierCatalogItem $item, SupplierPricePolicy $policy, int $quantity, int $retailSubtotal): bool
     {
+        if ($policy->product_id !== $product->id) {
+            return false;
+        }
+        try {
+            $cost = $this->acquirableCostMicros($supplier, $item, $quantity);
+
+            return $cost !== null
+                && $retailSubtotal >= $this->multiply((int) $policy->minimum_profit_idr, $quantity)
+                && SupplierMoney::costIdr($cost, $supplier->exchange_rate_idr) <= $this->maximumCostIdr($policy, $retailSubtotal, $quantity);
+        } catch (InvalidArgumentException) {
+            return false;
+        }
+    }
+
+    /** Can buy from this snapshot before applying the retail profit guard. */
+    public function acquirableCostMicros(Supplier $supplier, SupplierCatalogItem $item, int $quantity): ?int
+    {
         $provider = SupplierProvider::tryFrom($supplier->provider);
         if ($provider === null || $quantity < 1 || $quantity > $provider->maxOrderQuantity() || ! $supplier->is_active || ! $supplier->currency_confirmed
             || ! SupplierExchangeRate::isStorable($supplier->currency, $supplier->exchange_rate_idr)
@@ -89,18 +106,15 @@ final class SupplierPricing
             || ($item->currency !== null && $item->currency !== $supplier->currency)
             || ! $item->orderable || $item->requires_input || $item->stock === null
             || $quantity > max(0, $item->stock - $item->reserved_quantity)
-            || $supplier->balance_micros === null || $policy->product_id !== $product->id) {
-            return false;
+            || $supplier->balance_micros === null) {
+            return null;
         }
         try {
             $cost = $this->costMicros($item, $quantity);
 
-            return $cost !== null
-                && $retailSubtotal >= $this->multiply((int) $policy->minimum_profit_idr, $quantity)
-                && $cost <= max(0, $supplier->balance_micros - $supplier->reserved_balance_micros)
-                && SupplierMoney::costIdr($cost, $supplier->exchange_rate_idr) <= $this->maximumCostIdr($policy, $retailSubtotal, $quantity);
+            return $cost !== null && $cost <= max(0, $supplier->balance_micros - $supplier->reserved_balance_micros) ? $cost : null;
         } catch (InvalidArgumentException) {
-            return false;
+            return null;
         }
     }
 
