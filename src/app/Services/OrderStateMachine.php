@@ -75,6 +75,27 @@ class OrderStateMachine implements OrderLifecycle
         }, 5);
     }
 
+    public function applyClaimedStarsPayment(Payment $payment, int $inboxId): OrderLifecycleResult
+    {
+        if (DB::transactionLevel() === 0) {
+            throw new InvalidOrderTransition('Stars payment requires an active settlement transaction.');
+        }
+
+        return $this->withLockedOrderPayments($payment->order_id, function (Order $order, Collection $payments) use ($payment, $inboxId): OrderLifecycleResult {
+            $locked = $payments->firstWhere('id', $payment->id);
+            $claim = DB::table('telegram_stars_settlements as settlement')
+                ->join('telegram_updates as inbox', 'inbox.id', '=', 'settlement.telegram_update_id')
+                ->where('settlement.payment_id', $payment->id)->where('inbox.id', $inboxId)
+                ->where('inbox.stars_event', 'successful_payment')->whereNull('inbox.processed_at')->first(['settlement.late']);
+            $isLate = in_array($order->order_status, [OrderStatus::Expired, OrderStatus::Cancelled], true);
+            if (! $locked?->isTelegramStars() || $claim === null || (bool) $claim->late !== $isLate) {
+                throw new InvalidOrderTransition('Stars payment has no current settlement claim.');
+            }
+
+            return $this->applyPaidTransition($locked, $order);
+        });
+    }
+
     public function completeManualOrder(Order $order): Order
     {
         return $this->applyManualCompletion($order)->order;
@@ -525,7 +546,7 @@ class OrderStateMachine implements OrderLifecycle
                 'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
             ],
         );
-        if ($this->needsLocalCredentialReview($order) || $order->orderItems()->where('manual_unlimited', true)->exists()) {
+        if ($payment->isTelegramStars() || $this->needsLocalCredentialReview($order) || $order->orderItems()->where('manual_unlimited', true)->exists()) {
             $this->dispatchManualReviewNotice($review);
         }
 

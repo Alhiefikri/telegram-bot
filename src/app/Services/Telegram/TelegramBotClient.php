@@ -95,6 +95,25 @@ class TelegramBotClient
         return $body;
     }
 
+    /** @return list<mixed> */
+    public function getStarTransactions(int $offset, int $limit): array
+    {
+        if ($offset < 0 || $limit < 1 || $limit > 100) {
+            throw new \InvalidArgumentException('Invalid Stars transaction page.');
+        }
+
+        $response = $this->timed('getStarTransactions', fn () => $this->requests->request()->withoutRedirecting()
+            ->post($this->requests->url('getStarTransactions'), ['offset' => $offset, 'limit' => $limit]));
+        $body = $response->json();
+        $rows = data_get($body, 'result.transactions');
+        if (! $response->successful() || ($body['ok'] ?? null) !== true
+            || ! is_array($rows) || ! array_is_list($rows) || count($rows) > $limit) {
+            throw new TelegramAmbiguousResponseException('Telegram Stars transaction history');
+        }
+
+        return $rows;
+    }
+
     public function editMessageText(int|string $chatId, int $messageId, string $text, array $replyMarkup = [], array $options = []): array
     {
         $payload = array_merge([

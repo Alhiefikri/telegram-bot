@@ -2,13 +2,10 @@
 
 namespace App\Services\TelegramStars;
 
-use App\Enums\InventoryMovementType;
 use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentTelegramStarsDetail;
-use App\Models\ProductStockItem;
-use App\Services\InventoryLedger;
 use Illuminate\Support\Facades\DB;
 
 final readonly class TelegramStarsPreCheckout
@@ -19,13 +16,13 @@ final readonly class TelegramStarsPreCheckout
 
     public function __construct(
         private StarsPricingPolicyManager $policy,
-        private InventoryLedger $inventory,
+        private TelegramStarsReservation $reservations,
     ) {}
 
     /** The ingress owns the transaction; lock Order → Payment → inventory, as on release. */
-    public function approve(array $query, int $deadline, bool $replayOnly): bool
+    public function approve(array $query, int $deadline, ?string $namespace, bool $replayOnly): bool
     {
-        if ($query['currency'] !== 'XTR') {
+        if ($query['currency'] !== 'XTR' || $namespace === null) {
             return false;
         }
 
@@ -38,21 +35,21 @@ final readonly class TelegramStarsPreCheckout
         $order = $orderId === null ? null : Order::whereKey($orderId)->lockForUpdate()->first();
         $payment = $order === null ? null : Payment::whereKey($target->payment_id)->lockForUpdate()->first();
         if ($payment === null || ! TelegramStarsInvoiceTarget::isPending($target, $order, $payment)
-            || ! TelegramStarsInvoiceOutbound::hasAcknowledgedInvoice($target)) {
+            || ! TelegramStarsInvoiceOutbound::hasAcknowledgedInvoice($target, $namespace)) {
             return false;
         }
 
         $hash = hash('sha256', $query['id']);
         $claim = DB::table('telegram_stars_approvals')->where('payment_id', $payment->id)->first();
         if ($claim !== null) {
-            return hash_equals($claim->query_hash, $hash)
+            return $claim->bot_namespace === $namespace && hash_equals($claim->query_hash, $hash)
                 && now()->getTimestamp() < (int) $claim->approved_at_epoch + 10
                 && hrtime(true) < $deadline;
         }
 
         if ($replayOnly || $target->deadline_epoch <= now()->getTimestamp()
             || ! $this->policy->lockForCheckout()->issuanceEnabled
-            || ! $this->hasReservation($order)
+            || ! $this->reservations->matches($order)
             || hrtime(true) >= $deadline) {
             return false;
         }
@@ -63,6 +60,7 @@ final readonly class TelegramStarsPreCheckout
             'payment_id' => $payment->id,
             'query_hash' => $hash,
             'approved_at_epoch' => $now,
+            'bot_namespace' => $namespace,
         ]) === 1;
     }
 
@@ -72,28 +70,5 @@ final readonly class TelegramStarsPreCheckout
         return $payment->isTelegramStars() && $payment->status === PaymentStatus::Pending
             && DB::table('telegram_stars_approvals')->where('payment_id', $payment->id)
                 ->where('approved_at_epoch', '>', now()->getTimestamp() - self::GRACE_SECONDS)->exists();
-    }
-
-    private function hasReservation(Order $order): bool
-    {
-        [$items, $movements, $products] = $this->inventory->orderInventoryState($order);
-        $credentialCounts = ProductStockItem::query()->localCatalogStock()->whereNull('retired_at')
-            ->whereIn('order_item_id', $items->modelKeys())
-            ->selectRaw('order_item_id, product_id, count(*) as quantity')
-            ->groupBy('order_item_id', 'product_id')->get()->groupBy('order_item_id');
-
-        return $items->isNotEmpty() && $items->every(function ($item) use ($movements, $products, $credentialCounts): bool {
-            $product = $products->get($item->product_id);
-            $proof = $movements->where('product_id', $item->product_id);
-            $credentials = $credentialCounts->get($item->id);
-
-            return $product !== null && $item->quantity > 0 && $item->supplier_quantity === 0
-                && $item->localStockQuantity() === $item->quantity
-                && $product->stock >= $item->quantity && $product->reserved_stock >= $item->quantity
-                && $proof->count() === 1 && $proof->first()->type === InventoryMovementType::Reservation
-                && $proof->first()->quantity === $item->quantity
-                && $credentials?->count() === 1 && (int) $credentials->first()->product_id === $item->product_id
-                && (int) $credentials->first()->quantity === $item->quantity;
-        });
     }
 }

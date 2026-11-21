@@ -25,11 +25,12 @@ final readonly class TelegramStarsInvoiceOutbound
         private TelegramBotClient $bot,
     ) {}
 
-    public static function hasAcknowledgedInvoice(PaymentTelegramStarsDetail $target): bool
+    public static function hasAcknowledgedInvoice(PaymentTelegramStarsDetail $target, ?string $namespace = null): bool
     {
         return TelegramOutboundEffect::where('effect_type', TelegramOutboundEffectType::TelegramStarsInvoice->value)
             ->where('source_type', Payment::class)->where('source_id', $target->payment_id)
             ->where('telegram_chat_id', (string) $target->chat_id)
+            ->when($namespace !== null, fn ($query) => $query->where('outcome_metadata->stars_bot_namespace', $namespace))
             ->where('state', TelegramOutboundEffectState::Sent->value)->whereNotNull('telegram_message_id')->exists();
     }
 
@@ -46,13 +47,15 @@ final readonly class TelegramStarsInvoiceOutbound
             return;
         }
 
-        [$claimed, $target] = DB::transaction(function () use ($effect): array {
+        $namespace = TelegramStarsChargeIdentity::configuredNamespace();
+        [$claimed, $target] = DB::transaction(function () use ($effect, $namespace): array {
             $orderId = Payment::whereKey($effect->source_id)->value('order_id');
             $order = $orderId === null ? null : Order::whereKey($orderId)->lockForUpdate()->first();
             $payment = $order === null ? null : Payment::whereKey($effect->source_id)->lockForUpdate()->first();
             $target = $payment?->telegramStarsDetail;
             $eligible = $target !== null && TelegramStarsInvoiceTarget::isPending($target, $order, $payment)
                 && $target->deadline_epoch > now()->getTimestamp()
+                && $namespace !== null && ($effect->outcome_metadata['stars_bot_namespace'] ?? null) === $namespace
                 && (string) $target->chat_id === (string) $effect->telegram_chat_id
                 && ! self::hasAcknowledgedInvoice($target);
 

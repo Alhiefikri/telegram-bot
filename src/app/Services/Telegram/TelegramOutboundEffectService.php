@@ -36,6 +36,7 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Credentials\CredentialDeliveryEligibility;
 use App\Services\Suppliers\SupplierFulfillmentService;
+use App\Services\TelegramStars\TelegramStarsChargeIdentity;
 use App\Services\UsdtBalance\UsdtMicroAmount;
 use App\Services\UsdtTopUps\UsdtTopUpStatusReader;
 use App\Support\PaymentProvider;
@@ -693,6 +694,7 @@ class TelegramOutboundEffectService
             'target_type' => 'customer', 'telegram_chat_id' => (string) $target->chat_id,
             'queue' => TelegramOutboundEffect::CHECKOUT_QUEUE, 'telegram_method' => 'sendInvoice',
             'template_version' => 'telegram-stars-invoice-v1',
+            'outcome_metadata' => ['stars_bot_namespace' => TelegramStarsChargeIdentity::configuredNamespace()],
             'state' => TelegramOutboundEffectState::Pending->value, 'attempts' => 0, 'next_attempt_at' => now(),
         ]);
     }
@@ -2327,6 +2329,8 @@ class TelegramOutboundEffectService
                     'delivery_context' => 'explicit_resend',
                     'duplicate_risk_acknowledged' => true,
                     'supersedes_effect_id' => (string) $locked->getKey(),
+                    ...($locked->effect_type === TelegramOutboundEffectType::TelegramStarsInvoice->value
+                        ? ['stars_bot_namespace' => $locked->outcome_metadata['stars_bot_namespace'] ?? null] : []),
                     ...(in_array($locked->effect_type, [TelegramOutboundEffectType::UsdtTopUpReceipt->value, TelegramOutboundEffectType::UsdtRefundReceipt->value], true)
                         ? ['message' => $locked->outcome_metadata['message'] ?? null] : []),
                     ...($locked->effect_type === TelegramOutboundEffectType::SupplierManualTakeoverNotice->value
