@@ -227,8 +227,11 @@ class TelegramOrderIntents
         if ($month !== null) {
             $ordersQuery->where('created_at', '>=', $month)->where('created_at', '<', $month->copy()->addMonth());
         } else {
-            $ordersQuery->where('payment_status', PaymentStatus::Paid)
-                ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed]);
+            $ordersQuery->where(fn ($query) => $query
+                ->where(fn ($paid) => $paid->where('payment_status', PaymentStatus::Paid)
+                    ->whereIn('order_status', [OrderStatus::Processing, OrderStatus::Completed]))
+                ->orWhere(fn ($refunded) => $refunded->where('payment_status', PaymentStatus::Refunded)
+                    ->whereHas('payments', fn ($payment) => $payment->where('provider', PaymentProvider::TELEGRAM_STARS))));
         }
         $title = $month === null ? $this->locale->translate($customer, 'order.history.title')
             : $this->locale->translate($customer, 'order.status.month_title', ['month' => $this->monthLabel($customer, $month)])."\n".$this->monthlySpending($customer, $month);
@@ -291,7 +294,7 @@ class TelegramOrderIntents
             $keyboard[] = [[
                 'text' => ($month === null ? '' : $order->created_at->format('d/m').' · ').$this->locale->translate($customer, 'order.history.item_button', [
                     'invoice' => $order->invoice_number,
-                    'status' => $this->historyButtonStatus($customer, $order).($month === null ? '' : ' / '.$this->locale->paymentStatus($customer, $order->payment_status)),
+                    'status' => $this->historyButtonStatus($customer, $order).($month === null || ($starsPayment !== null && $order->payment_status === PaymentStatus::Refunded) ? '' : ' / '.$this->locale->paymentStatus($customer, $order->payment_status)),
                 ]).($starsPayment === null ? '' : ' · '.TelegramStarsCustomerInvoice::tender($starsPayment)),
                 'callback_data' => 'order:'.$order->invoice_number,
             ]];
@@ -362,6 +365,9 @@ class TelegramOrderIntents
 
     private function historyButtonStatus(Customer $customer, Order $order): string
     {
+        if ($order->payment_status === PaymentStatus::Refunded && $order->payments->isNotEmpty()) {
+            return $this->locale->paymentStatus($customer, PaymentStatus::Refunded);
+        }
         if ($this->manualDeliveryPending($order)) {
             return $this->locale->orderStatus($customer, OrderStatus::Processing);
         }
@@ -562,6 +568,9 @@ class TelegramOrderIntents
             );
         }
         if ($paymentStatus === PaymentStatus::Refunded) {
+            if ($payment?->isTelegramStars()) {
+                return $this->locale->translate($customer, 'stars.refunded', ['total' => $payment->amount]);
+            }
             if ($payment?->provider === PaymentProvider::USDT_BALANCE) {
                 return $this->locale->translate($customer, 'order.guidance.usdt_balance_refunded', [
                     'amount' => UsdtMicroAmount::fromUnits($payment->amount)->decimal(),

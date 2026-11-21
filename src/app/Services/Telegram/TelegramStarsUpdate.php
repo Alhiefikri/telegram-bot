@@ -68,6 +68,7 @@ final class TelegramStarsUpdate
         return $base + ['message' => [
             'message_id' => $messageId,
             'chat' => ['id' => $chat, 'type' => $chatType],
+            ...($kind === self::REFUND && is_int($message['date'] ?? null) && $message['date'] > 0 ? ['date' => $message['date']] : []),
             ...($actor === null ? [] : ['from' => ['id' => $actor]]),
             $kind => [
                 'currency' => $event['currency'], 'total_amount' => $event['total_amount'],

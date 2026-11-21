@@ -185,6 +185,38 @@ class OrderStateMachine implements OrderLifecycle
         }, 5);
     }
 
+    public function applyConfirmedStarsRefund(Payment $payment): void
+    {
+        if (DB::transactionLevel() === 0) {
+            throw new InvalidOrderTransition('Stars refund requires a confirmation transaction.');
+        }
+
+        $this->withLockedOrderPayments($payment->order_id, function (Order $order, Collection $payments) use ($payment): void {
+            $locked = $payments->firstWhere('id', $payment->id);
+            $claim = DB::table('telegram_stars_refunds as refund')
+                ->join('telegram_stars_settlements as settlement', 'settlement.external_money_receipt_id', '=', 'refund.external_money_receipt_id')
+                ->where('refund.payment_id', $payment->id)->whereColumn('settlement.payment_id', 'refund.payment_id')
+                ->where('refund.state', 'confirmed')->whereNotNull('refund.confirmed_at')->first(['refund.actor_user_id', 'refund.reason', 'refund.requested_at', 'refund.confirmation_source']);
+            if ($payments->count() !== 1 || ! $locked?->isTelegramStars() || $claim === null
+                || $locked->status !== PaymentStatus::Paid || $order->payment_status !== PaymentStatus::Paid) {
+                throw new InvalidOrderTransition('Stars refund has no applicable confirmation.');
+            }
+
+            // Payment is reversed, not the fulfillment history. Never recycle
+            // delivered credentials or touch internal balance ledgers here.
+            $locked->update(['status' => PaymentStatus::Refunded]);
+            $order->update(['payment_status' => PaymentStatus::Refunded]);
+            ManualFulfillmentReview::where('payment_id', $payment->id)->where('currency', 'XTR')->open()->update([
+                'state' => ManualFulfillmentReview::STATE_REFUNDED,
+                'resolution_reason' => $claim->reason,
+                'actor_user_id' => $claim->actor_user_id,
+                'refund_requested_at' => $claim->requested_at,
+                'refund_provider_result' => $claim->confirmation_source,
+                'resolved_at' => now(),
+            ]);
+        });
+    }
+
     public function markPaymentRefunded(Payment $payment): Order
     {
         return $this->applyPaymentRefunded($payment)->order;

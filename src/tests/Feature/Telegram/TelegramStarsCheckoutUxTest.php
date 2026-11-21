@@ -55,6 +55,24 @@ final class TelegramStarsCheckoutUxTest extends TelegramBotTestSupport
         }]);
     }
 
+    public function test_paysupport_only_shows_payment_guidance_in_the_buyers_private_chat(): void
+    {
+        $buyer = $this->buyer();
+        config(['services.telegram.admin_contact_url' => 'https://t.me/fixture_support']);
+        DB::table('stars_pricing_policies')->update(['issuance_enabled' => false]);
+        $this->starsWebhook($this->messageUpdate(8001, '/paysupport@TestStoreBot SECRET-ORDER', ['id' => $buyer->telegram_id]))->assertOk();
+        $private = $this->last('sendMessage');
+        $this->assertStringContainsString('Telegram Stars payment support', $private['text']);
+        $this->assertStringNotContainsString('SECRET-ORDER', $private['text']);
+        $this->assertSame('https://t.me/fixture_support', $this->buttons($private)[0]['url']);
+        $this->starsWebhook($this->messageUpdate(8002, '/paysupport SECRET-ORDER', ['id' => $buyer->telegram_id], -555, 'group'))->assertOk();
+        $group = $this->last('sendMessage');
+        $this->assertStringNotContainsString('SECRET-ORDER', $group['text']);
+        $this->assertStringNotContainsString('Telegram Stars payment support', $group['text']);
+        $this->assertSame([], $this->buttons($group));
+        $this->assertDatabaseEmpty('orders');
+    }
+
     #[DataProvider('locales')]
     public function test_direct_review_is_localized_and_does_not_create_an_order_without_consent(string $locale, string $pay, string $terms): void
     {

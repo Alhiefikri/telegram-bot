@@ -42,6 +42,7 @@ use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
 use App\Services\Telegram\SalesProofEligibility;
 use App\Services\Telegram\TelegramOutboundEffectDispatcher;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Services\TelegramStars\TelegramStarsRefunds;
 use App\Services\UsdtBalance\CustomerUsdtBalanceLedger;
 use App\Services\Warranty\RemainderRefundService;
 use Illuminate\Support\Facades\DB;
@@ -78,6 +79,9 @@ class ManualFulfillmentResolutionService
             if ($locked->state !== ManualFulfillmentReview::STATE_PENDING) {
                 return $locked;
             }
+            if ($action === 'fulfill') {
+                $this->assertNoStarsRefund(Order::findOrFail($initial->order_id), $initialPayment->refresh());
+            }
 
             return match ($action) {
                 'fulfill' => $this->fulfill($locked, $actor, $reason, $ip),
@@ -112,6 +116,7 @@ class ManualFulfillmentResolutionService
                 return $locked;
             }
             $payment = Payment::query()->findOrFail($locked->payment_id);
+            $this->assertNoStarsRefund($order, $payment);
             if ($locked->state !== ManualFulfillmentReview::STATE_PENDING
                 || $order->payment_status !== PaymentStatus::Paid
                 || $payment->status !== PaymentStatus::Paid
@@ -474,6 +479,13 @@ class ManualFulfillmentResolutionService
             ExternalMoneyReceiptReservation::LEGACY_TYPE_PAYMENT,
             (string) $payment->getKey(),
         );
+    }
+
+    private function assertNoStarsRefund(Order $order, Payment $payment): void
+    {
+        if ($payment->isTelegramStars() && app(TelegramStarsRefunds::class)->blocksManualDelivery($order, $payment)) {
+            throw new InvalidOrderTransition('Telegram Stars refund or missing receipt requires review before fulfillment.');
+        }
     }
 
     private function refund(ManualFulfillmentReview $review, User $actor, string $reason, ?string $reference, ?string $result, ?string $ip): ManualFulfillmentReview

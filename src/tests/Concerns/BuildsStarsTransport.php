@@ -76,4 +76,14 @@ trait BuildsStarsTransport
     {
         return $this->postJson('/api/webhook/telegram', $payload, ['X-Telegram-Bot-Api-Secret-Token' => $secret]);
     }
+
+    private function starsRefund(PaymentTelegramStarsDetail $target, int $id, array $overrides = []): array
+    {
+        $payload = $this->starsSuccess($target, $id, $overrides);
+        $payload['message']['date'] = now()->timestamp;
+        $payload['message']['refunded_payment'] = $payload['message']['successful_payment'];
+        unset($payload['message']['successful_payment'], $payload['message']['from']);
+
+        return $payload;
+    }
 }

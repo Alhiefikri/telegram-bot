@@ -95,6 +95,19 @@ class TelegramBotClient
         return $body;
     }
 
+    public function refundStarPayment(int $buyer, string $charge): void
+    {
+        $response = $this->timed('refundStarPayment', fn () => $this->requests->request()->withoutRedirecting()
+            ->post($this->requests->url('refundStarPayment'), [
+                'user_id' => $buyer,
+                'telegram_payment_charge_id' => $charge,
+            ]));
+        $body = $response->json();
+        if (! $response->successful() || ($body['ok'] ?? null) !== true || ($body['result'] ?? null) !== true) {
+            throw new TelegramAmbiguousResponseException('Telegram Stars refund');
+        }
+    }
+
     /** @return list<mixed> */
     public function getStarTransactions(int $offset, int $limit): array
     {

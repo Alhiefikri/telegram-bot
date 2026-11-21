@@ -18,6 +18,9 @@ interface OrderLifecycle
 
     public function applyPaymentRefunded(Payment $payment): OrderLifecycleResult;
 
+    /** Apply a confirmed original Stars refund in the current refund transaction. */
+    public function applyConfirmedStarsRefund(Payment $payment): void;
+
     public function applyPaymentExpired(Payment $payment): OrderLifecycleResult;
 
     public function applyPendingExpiry(Order $order): OrderLifecycleResult;

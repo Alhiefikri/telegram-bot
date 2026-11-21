@@ -951,6 +951,18 @@ class TelegramMenuIntents
         ], true);
     }
 
+    public function sendStarsPaymentSupport(Customer $customer, string $chatId): void
+    {
+        $url = $this->supportContact->resolve()['url'];
+        $this->bot->sendMessage($chatId, $this->locale->translate($customer, 'stars.support'), $url === '' ? [] : [
+            'inline_keyboard' => [[[
+                'text' => $this->locale->translate($customer, 'support.contact'),
+                'url' => $url,
+                'style' => 'primary',
+            ]]],
+        ]);
+    }
+
     public function supportSurface(Customer $customer): TelegramNavigationSurface
     {
         $adminContactUrl = $this->supportContact->resolve()['url'];

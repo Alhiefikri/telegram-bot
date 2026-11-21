@@ -327,6 +327,7 @@ final class AdminDashboardData
                 'items' => $this->visibleNavigationItems([
                     $this->navigationItem('balance-settings', 'Saldo & top-up', 'wallet', route('admin.dashboard', ['tab' => 'settings', 'section' => 'saldo']), visible: $canManagePaymentSettings),
                     $this->navigationItem('stars-pricing', 'Harga Telegram Stars', 'settings', route('admin.stars-pricing.show'), visible: $user->role?->canManageStarsPricing() === true),
+                    $this->navigationItem('stars-refunds', 'Refund Telegram Stars', 'settings', route('admin.stars-refunds.index'), visible: $user->role?->canRefundStars() === true),
                 ]),
             ],
             [

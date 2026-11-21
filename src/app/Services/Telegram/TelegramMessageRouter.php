@@ -51,6 +51,15 @@ class TelegramMessageRouter
         $text = preg_replace('/^\\/payment(?:@[A-Za-z0-9_]+)?(?:\\s+|$)/u', '/payment ', $text) ?? $text;
         $text = trim($text);
         $isPrivateChat = $this->chatPrivacy->isPrivate($chatType);
+        if (preg_match('/\A\/paysupport(?:@[A-Za-z0-9_]+)?(?:\s|$)/D', $text) === 1) {
+            if ($isPrivateChat && $chatId === (string) $customer->telegram_id) {
+                $this->menu->sendStarsPaymentSupport($customer, $chatId);
+            } else {
+                $this->chatPrivacy->denyMessage($customer, $chatId);
+            }
+
+            return;
+        }
         if (! $isPrivateChat && $this->isPrivateOnlyCommand($text)) {
             $this->session->forgetWithLock($customer);
             $this->chatPrivacy->denyMessage($customer, $chatId);

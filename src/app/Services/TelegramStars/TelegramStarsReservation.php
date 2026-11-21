@@ -15,7 +15,7 @@ final readonly class TelegramStarsReservation
     public function matches(Order $order): bool
     {
         [$items, $movements, $products] = $this->inventory->orderInventoryState($order);
-        $credentialCounts = ProductStockItem::query()->localCatalogStock()->whereNull('retired_at')
+        $credentialCounts = ProductStockItem::query()->whereNull('supplier_purchase_id')->whereNull('retired_at')
             ->whereIn('order_item_id', $items->modelKeys())
             ->selectRaw('order_item_id, product_id, count(*) as quantity')
             ->groupBy('order_item_id', 'product_id')->get()->groupBy('order_item_id');

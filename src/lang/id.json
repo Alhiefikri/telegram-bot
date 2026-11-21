@@ -280,6 +280,8 @@
   "balance.topup.payment_proof.reject": "❌ Tolak",
   "balance.topup.rejected": "Top-up ini ditolak admin. Hubungi Support bila Anda sudah membayar.",
   "support.message": "💬 Support\nAda kendala order, pembayaran, atau login akun?\n\nKirim detail masalah kamu di sini. Kalau soal pesanan, sertakan invoice biar lebih cepat dicek.",
+  "stars.support": "Bantuan pembayaran Telegram Stars\nHubungi Support toko secara privat dengan nomor invoice dan ringkasan kendala. Telegram Support tidak menangani transaksi toko. Jangan kirim password, OTP, atau data pembayaran di grup.",
+  "stars.refunded": "Refund :total XTR telah dikonfirmasi ke pembayaran Telegram Stars asli.",
   "support.contact": "💬 Hubungi Admin",
   "account.title": "👤 Akun Saya",
   "account.name": "Nama: ",

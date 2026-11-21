@@ -130,7 +130,7 @@ class TelegramWebhookIngress
                             || ($original->stars_namespace !== null && $original->stars_namespace !== $namespace)))) {
                         throw new RuntimeException('Financial update ID is already occupied.');
                     }
-                    if ($inserted === 1 && $kind === TelegramStarsUpdate::SUCCESS) {
+                    if ($inserted === 1) {
                         $settlementWakeup = $original->id;
                     }
 

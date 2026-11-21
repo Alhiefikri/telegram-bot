@@ -280,6 +280,8 @@
   "balance.topup.payment_proof.reject": "❌ Reject",
   "balance.topup.rejected": "An admin rejected this top-up. Contact Support if you already paid.",
   "support.message": "💬 Support\nNeed help with an order, payment, or account login?\n\nSend the details here. Include the invoice number for order-related help.",
+  "stars.support": "Telegram Stars payment support\nContact store Support privately with your invoice number and a brief description. Telegram Support cannot help with store purchases. Never share passwords, OTPs or payment details in a group.",
+  "stars.refunded": "A refund of :total XTR to the original Telegram Stars payment has been confirmed.",
   "support.contact": "💬 Chat with Admin",
   "account.title": "👤 My Account",
   "account.name": "Name: ",

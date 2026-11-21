@@ -109,6 +109,7 @@ Schedule::command('orders:recover-local-completion --limit=100')->everyTenMinute
 Schedule::command('orders:recover-credential-mails --limit=100 --since-hours=72')->everyMinute()->withoutOverlapping(2)->runInBackground();
 Schedule::command('telegram:recover-updates --queue=default')->everyMinute()->withoutOverlapping()->runInBackground();
 Schedule::command('telegram:recover-stars-payments')->everyMinute()->withoutOverlapping(5)->runInBackground();
+Schedule::command('telegram:report-stars-operations --alert')->everyFiveMinutes()->withoutOverlapping()->runInBackground();
 Schedule::command('telegram:forward-payment-proofs --chunk=100')->everyMinute()->withoutOverlapping()->runInBackground();
 Schedule::command('waitlist:reconcile --chunk=100')->everyMinute()->withoutOverlapping()->runInBackground();
 // Health episodes and outbound effects are PostgreSQL-durable. One existing

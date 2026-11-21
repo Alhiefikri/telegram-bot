@@ -44,6 +44,7 @@ use App\Http\Controllers\Admin\AdminProductWorkspaceController;
 use App\Http\Controllers\Admin\AdminSakurupiahChannelController;
 use App\Http\Controllers\Admin\AdminSalesProofRetryController;
 use App\Http\Controllers\Admin\AdminStarsPricingPolicyController;
+use App\Http\Controllers\Admin\AdminStarsRefundController;
 use App\Http\Controllers\Admin\AdminStoreBalanceFundingPolicyController;
 use App\Http\Controllers\Admin\AdminStoreBalanceTopUpCompensationController;
 use App\Http\Controllers\Admin\AdminStoreChannelController;
@@ -253,6 +254,11 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::get('/', 'show')->name('show');
                 Route::post('preview', 'preview')->name('preview');
                 Route::post('/', 'update')->name('update');
+            });
+            Route::prefix('stars-refunds')->name('stars-refunds.')->controller(AdminStarsRefundController::class)->group(function (): void {
+                Route::get('/', 'index')->name('index');
+                Route::get('{payment}', 'show')->whereUuid('payment')->name('show');
+                Route::post('{payment}', 'store')->whereUuid('payment')->middleware('throttle:6,1')->name('store');
             });
             Route::post('customer-api-availability', AdminCustomerApiAvailabilityController::class)
                 ->middleware('admin.customer-api-owner')

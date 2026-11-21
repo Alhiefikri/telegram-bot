@@ -14,9 +14,9 @@ final readonly class TelegramStarsHistoryReport
 
     public const MAX_PAGES = 5;
 
-    public function __construct(private TelegramBotClient $bot) {}
+    public function __construct(private TelegramBotClient $bot, private TelegramStarsRefunds $refunds) {}
 
-    public function scan(int $offset, int $pages): array
+    public function scan(int $offset, int $pages, bool $reconcileRefunds = false): array
     {
         if (DB::transactionLevel() !== 0 || $pages < 1 || $pages > self::MAX_PAGES
             || $offset < 0 || $offset > PHP_INT_MAX - $pages * self::PAGE_SIZE) {
@@ -29,7 +29,7 @@ final readonly class TelegramStarsHistoryReport
         for ($page = 0; $page < $pages; $page++) {
             $rows = $this->bot->getStarTransactions($offset, self::PAGE_SIZE);
             foreach ($rows as $index => $row) {
-                $reason = $this->finding($row, $namespace);
+                $reason = $this->finding($row, $namespace, $reconcileRefunds);
                 if ($reason !== null) {
                     // No bot token, payload, actor, or charge ID in the report.
                     $findings[] = ['offset' => $offset + $index, 'reason' => $reason];
@@ -45,7 +45,7 @@ final readonly class TelegramStarsHistoryReport
         return ['scanned' => $rowsScanned, 'next_offset' => $offset, 'findings' => $findings];
     }
 
-    private function finding(mixed $row, string $namespace): ?string
+    private function finding(mixed $row, string $namespace, bool $reconcileRefunds): ?string
     {
         if (! is_array($row) || array_key_exists('source', $row) === array_key_exists('receiver', $row)) {
             return 'ambiguous_direction';
@@ -65,11 +65,16 @@ final readonly class TelegramStarsHistoryReport
             : null;
 
         if (! $incoming) {
-            // Refund and original payment may share an ID. A debit is
-            // never a matched credit or a refund confirmation in this lane.
-            return ($partner['transaction_type'] ?? null) === 'invoice_payment'
-                || ($identity !== null && DB::table('external_money_receipts')->where('canonical_key', $identity->canonicalKey())->exists())
-                ? 'outgoing_invoice_review' : null;
+            $invoice = ($partner['transaction_type'] ?? null) === 'invoice_payment'
+                || ($identity !== null && DB::table('external_money_receipts')->where('canonical_key', $identity->canonicalKey())->exists());
+            if (! $invoice) {
+                return null;
+            }
+            if ($reconcileRefunds && $identity !== null) {
+                return $this->refunds->reconcileOutgoing($namespace, $row);
+            }
+
+            return 'outgoing_invoice_review';
         }
         if (! is_string($partner['transaction_type'] ?? null)) {
             return 'incomplete_evidence';

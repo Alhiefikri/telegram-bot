@@ -280,6 +280,8 @@
   "balance.topup.payment_proof.reject": "❌ Tolak",
   "balance.topup.rejected": "Tambah baki ini ditolak oleh admin. Hubungi Sokongan jika anda sudah membayar.",
   "support.message": "💬 Sokongan\nAda masalah dengan pesanan, bayaran atau log masuk akaun?\n\nHantar butiran masalah anda di sini. Jika berkaitan pesanan, sertakan nombor invois supaya kami boleh semak dengan lebih cepat.",
+  "stars.support": "Bantuan pembayaran Telegram Stars\nHubungi Sokongan kedai secara peribadi dengan nombor invois dan ringkasan masalah. Sokongan Telegram tidak mengendalikan transaksi kedai. Jangan kongsi kata laluan, OTP atau butiran pembayaran dalam kumpulan.",
+  "stars.refunded": "Bayaran balik :total XTR telah disahkan kepada pembayaran Telegram Stars asal.",
   "support.contact": "💬 Hubungi Admin",
   "account.title": "👤 Akaun Saya",
   "account.name": "Nama: ",

@@ -8,9 +8,9 @@ use Throwable;
 
 final class ReportTelegramStarsHistory extends Command
 {
-    protected $signature = 'telegram:report-stars-history {--offset=0} {--pages=1}';
+    protected $signature = 'telegram:report-stars-history {--offset=0} {--pages=1} {--reconcile-refunds : Confirm only existing refund claims from matching outgoing evidence}';
 
-    protected $description = 'Read-only bounded Stars history comparison for payment review; never settles or refunds.';
+    protected $description = 'Compare bounded Stars history; optionally reconcile refunds without sending payments or refunds.';
 
     public function handle(TelegramStarsHistoryReport $history): int
     {
@@ -22,10 +22,10 @@ final class ReportTelegramStarsHistory extends Command
             return self::INVALID;
         }
         try {
-            $report = $history->scan($offset, $pages);
+            $report = $history->scan($offset, $pages, (bool) $this->option('reconcile-refunds'));
         } catch (Throwable) {
             // Transport errors may contain a token-bearing URL.
-            $this->error('Telegram Stars history is unavailable; no conclusions are safe.');
+            $this->error('Stars history scan did not complete; earlier reconciliations may already be committed.');
 
             return self::FAILURE;
         }
