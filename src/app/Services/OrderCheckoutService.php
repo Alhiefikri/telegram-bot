@@ -73,13 +73,13 @@ class OrderCheckoutService
         private readonly SupplierFulfillmentService $supplierFulfillment,
     ) {}
 
-    public function checkoutTelegramStarsDirect(Product $product, int $quantity, TelegramStarsCheckoutIntent $intent): Order
+    public function checkoutTelegramStarsDirect(Product $product, int $quantity, TelegramStarsCheckoutIntent $intent, ?string $termsVersion = null, ?DateTimeInterface $termsAcceptedAt = null): Order
     {
         if ($intent->quote->cartId !== null || $quantity < 1) {
             throw new InvalidCheckout('Direct Telegram Stars checkout requires a single Product selection.');
         }
 
-        return DB::transaction(function () use ($product, $quantity, $intent): Order {
+        return DB::transaction(function () use ($product, $quantity, $intent, $termsVersion, $termsAcceptedAt): Order {
             $customer = $this->lockStarsCustomer($intent);
             $key = $intent->confirmation->checkoutKey;
             if (($existing = Order::query()->where('checkout_key', $key)->first()) !== null) {
@@ -97,7 +97,7 @@ class OrderCheckoutService
             ]);
             $cart->cartItems()->create(['product_id' => $product->id, 'quantity' => $quantity]);
 
-            return $this->checkout($cart, $intent, checkoutKey: $key);
+            return $this->checkout($cart, $intent, checkoutKey: $key, termsVersion: $termsVersion, termsAcceptedAt: $termsAcceptedAt);
         }, 5);
     }
 

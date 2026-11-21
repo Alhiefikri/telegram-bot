@@ -254,10 +254,12 @@ final class TelegramStarsCheckoutTest extends TestCase
         $this->assertSame(['XTR' => 50], $report->netReceiptsByCurrency($report->canonicalPaidPayments()));
         $this->assertSame(['IDR' => 0, 'USDT' => 0, 'XTR' => 50], $report->customerTransactionTotals($buyer->id));
         $presentation = app(PaidInvoiceOrderPresentationAdapter::class)->present($order->fresh());
-        $this->assertSame(['Telegram Stars', 'XTR', 'IDR', 50, 50], [
+        $this->assertSame(['Telegram Stars', 'XTR', 'XTR', 50, 50], [
             $presentation->paymentMethod, $presentation->currency, $presentation->itemCurrency,
             $presentation->subtotal(), $presentation->totalPaid,
         ]);
+        $this->assertNull($presentation->items[0]['unit_price']);
+        $this->assertNull($presentation->items[0]['subtotal']);
     }
 
     private function assertNoCheckout(): void

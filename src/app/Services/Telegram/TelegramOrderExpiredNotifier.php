@@ -35,6 +35,10 @@ class TelegramOrderExpiredNotifier
                 || $this->hasActiveClaim($locked->telegram_expired_order_notification_started_at)) {
                 return null;
             }
+            if ($locked->payments()->where('provider', PaymentProvider::TELEGRAM_STARS)
+                ->where('status', '!=', PaymentStatus::Expired)->exists()) {
+                return null;
+            }
 
             $locked->forceFill(['telegram_expired_order_notification_started_at' => now()])->save();
 
@@ -51,12 +55,24 @@ class TelegramOrderExpiredNotifier
 
         $order = $claimed;
 
+        $starsPayment = $order->payments->first(fn (Payment $payment): bool => $payment->isTelegramStars());
         $binancePayment = $order->payments->first(fn (Payment $payment): bool => $payment->provider === PaymentProvider::MANUAL
             && $payment->method === 'BINANCE_PAY_ID'
             && $payment->status === PaymentStatus::Expired
             && filled($payment->binance_order_id));
 
-        if ($binancePayment !== null) {
+        if ($starsPayment !== null) {
+            $lines = [
+                $this->locale->translate($order->customer, 'payment.expired.title'),
+                $this->locale->translate($order->customer, 'payment.invoice', ['invoice' => $order->invoice_number]),
+                TelegramStarsCustomerInvoice::tender($starsPayment),
+                $this->locale->translate($order->customer, 'stars.invoice_expired'),
+            ];
+            $replyMarkup = ['inline_keyboard' => [[[
+                'text' => $this->locale->translate($order->customer, 'order.status.detail_button'),
+                'callback_data' => 'order:'.$order->invoice_number,
+            ]]]];
+        } elseif ($binancePayment !== null) {
             $lines = [
                 $this->locale->translate($order->customer, 'payment.expired.binance_title'),
                 '━━━━━━━━━━━━━━',

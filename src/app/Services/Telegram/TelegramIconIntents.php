@@ -197,7 +197,7 @@ class TelegramIconIntents
     public function showMenuIcons(Customer $customer, string $chatId, ?int $messageId = null): void
     {
         $buttons = [];
-        foreach (TelegramUiIcon::query()->where('key', 'like', 'menu.%')->catalogOrder()->get() as $icon) {
+        foreach (TelegramUiIcon::query()->buttonSlots()->catalogOrder()->get() as $icon) {
             $buttons[] = [$this->slotButton(
                 $customer,
                 $icon->label,
@@ -427,7 +427,7 @@ class TelegramIconIntents
         if (in_array($pending['kind'], [TelegramIconCaptureSession::KIND_MENU, TelegramIconCaptureSession::KIND_MESSAGE], true)) {
             $icon = TelegramUiIcon::query()
                 ->when($pending['kind'] === TelegramIconCaptureSession::KIND_MESSAGE, static fn ($query) => $query->where('key', 'like', 'message.%'))
-                ->when($pending['kind'] === TelegramIconCaptureSession::KIND_MENU, static fn ($query) => $query->where('key', 'like', 'menu.%'))
+                ->when($pending['kind'] === TelegramIconCaptureSession::KIND_MENU, static fn ($query) => $query->buttonSlots())
                 ->find($pending['target_id']);
             if (! $icon instanceof TelegramUiIcon) {
                 return null;

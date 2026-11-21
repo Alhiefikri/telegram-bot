@@ -94,6 +94,12 @@ class CustomEmojiCapability
      */
     private function stripIconFields(array|object $markup): array|object
     {
+        if (is_array($markup) && isset($markup['text'], $markup['icon_custom_emoji_id'], $markup['_icon_fallback'])) {
+            $markup['text'] = trim($markup['_icon_fallback'].' '.$markup['text']);
+        } elseif (is_object($markup) && isset($markup->text, $markup->icon_custom_emoji_id, $markup->_icon_fallback)) {
+            $markup->text = trim($markup->_icon_fallback.' '.$markup->text);
+        }
+
         foreach ($markup as $key => $value) {
             if ($key === 'icon_custom_emoji_id') {
                 if (is_object($markup)) {
@@ -112,6 +118,28 @@ class CustomEmojiCapability
                 } else {
                     $markup[$key] = $cleaned;
                 }
+            }
+        }
+
+        return $markup;
+    }
+
+    /** Strip local-only button metadata before making any Bot API request. */
+    public function stripFallbackMetadata(array|string $markup): array|string
+    {
+        if (is_string($markup)) {
+            if (! str_contains($markup, '"_icon_fallback"')) {
+                return $markup;
+            }
+            $decoded = json_decode($markup, true);
+
+            return is_array($decoded) ? json_encode($this->stripFallbackMetadata($decoded), JSON_THROW_ON_ERROR) : $markup;
+        }
+
+        unset($markup['_icon_fallback']);
+        foreach ($markup as &$value) {
+            if (is_array($value)) {
+                $value = $this->stripFallbackMetadata($value);
             }
         }
 

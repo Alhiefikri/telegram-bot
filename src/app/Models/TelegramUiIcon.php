@@ -37,6 +37,11 @@ class TelegramUiIcon extends Model
         return $query->orderBy('sort_order')->orderBy('label')->orderBy('id');
     }
 
+    public function scopeButtonSlots(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $slots) => $slots->where('key', 'like', 'menu.%')->orWhere('key', 'payment.stars'));
+    }
+
     public function hasCustomEmoji(): bool
     {
         return trim((string) $this->custom_emoji_id) !== '';

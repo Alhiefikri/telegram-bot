@@ -214,9 +214,9 @@ class TelegramUiIcons
      * Build the text and optional icon field of one navigation button, ready to
      * spread into a button definition.
      *
-     * @return array{text: string}|array{text: string, icon_custom_emoji_id: string}
+     * @return array{text: string, icon_custom_emoji_id?: string, _icon_fallback?: string}
      */
-    public function apply(string $key, string $label, string $scope = CustomEmojiCapability::SCOPE_MESSAGES): array
+    public function apply(string $key, string $label, string $scope = CustomEmojiCapability::SCOPE_MESSAGES, bool $preserveFallbackOnRejection = false): array
     {
         $icon = $this->icon($key);
         if (! $icon instanceof TelegramUiIcon) {
@@ -232,6 +232,7 @@ class TelegramUiIcons
         return [
             'text' => $text,
             'icon_custom_emoji_id' => $id,
+            ...($preserveFallbackOnRejection ? ['_icon_fallback' => $icon->fallback_emoji] : []),
         ];
     }
 

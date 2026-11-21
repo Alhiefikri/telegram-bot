@@ -58,6 +58,7 @@ class TelegramOrderIntents
         private TelegramMessageChunker $messageChunker,
         private TelegramProductNameRenderer $productNames,
         private StorefrontInvoiceUrl $invoiceUrls,
+        private TelegramStarsCustomerInvoice $starsInvoice,
     ) {}
 
     public function sendLatestOrderStatus(Customer $customer, string $chatId): void
@@ -71,6 +72,9 @@ class TelegramOrderIntents
         $previousMonth = $month->copy()->subMonth();
         $lines = [$this->locale->translate($customer, 'order.status.title'), ''];
         $keyboard = [];
+        if ($order?->payments->first()?->isTelegramStars() && $chatId !== (string) $customer->telegram_id) {
+            return;
+        }
         if ($order) {
             $payment = $order->payments->first();
             $paymentStatus = $payment?->status ?? $order->payment_status;
@@ -92,7 +96,8 @@ class TelegramOrderIntents
             $deadline = $payment?->expired_at ?? $order->expires_at;
             if ($order->order_status === OrderStatus::PendingPayment && $paymentStatus === PaymentStatus::Pending && $deadline) {
                 $lines[] = $this->locale->translate($customer, 'order.detail.deadline', ['date' => $this->locale->formatDate($customer, $deadline)]);
-                if ($deadline->isFuture() && $order->created_at->copy()->addDays(max(1, (int) config('services.storefront.invoice_url_ttl_days', 7)))->isFuture()) {
+                if (! $payment?->isTelegramStars() && $deadline->isFuture()
+                    && $order->created_at->copy()->addDays(max(1, (int) config('services.storefront.invoice_url_ttl_days', 7)))->isFuture()) {
                     $keyboard[] = [[
                         'text' => $this->locale->translate($customer, 'order.status.pay_button'),
                         'url' => url($this->invoiceUrls->show($order)),
@@ -105,6 +110,20 @@ class TelegramOrderIntents
             ]];
         } else {
             $lines[] = $this->locale->translate($customer, 'order.status.empty');
+        }
+        if ($chatId === (string) $customer->telegram_id) {
+            $pending = $customer->orders()->where('order_status', OrderStatus::PendingPayment)
+                ->where('payment_status', PaymentStatus::Pending)
+                ->whereHas('payments', fn ($query) => $query->where('provider', PaymentProvider::TELEGRAM_STARS))
+                ->when($order !== null, fn ($query) => $query->whereKeyNot($order->id))
+                ->with(['payments' => fn ($query) => $query->where('provider', PaymentProvider::TELEGRAM_STARS)])
+                ->latest()->limit(5)->get();
+            foreach ($pending as $pendingOrder) {
+                $keyboard[] = [[
+                    'text' => $pendingOrder->invoice_number.' · '.TelegramStarsCustomerInvoice::tender($pendingOrder->payments->first()),
+                    'callback_data' => 'order:'.$pendingOrder->invoice_number,
+                ]];
+            }
         }
         $lines[] = '';
         $lines[] = $this->locale->translate($customer, 'order.status.summary');
@@ -144,12 +163,20 @@ class TelegramOrderIntents
             ->first();
 
         $currencyTotals = app(PaymentReceiptReport::class)->customerTransactionTotals((int) $customer->id, $month, $month->copy()->addMonth());
+        $amounts = [];
+        if ((int) $totals->paid_total > 0 || ! isset($currencyTotals['XTR'])) {
+            $amounts[] = $this->locale->idr((int) $totals->paid_total);
+        }
+        if ($currencyTotals['USDT'] > 0) {
+            $amounts[] = Money::usdt($currencyTotals['USDT']);
+        }
+        if (isset($currencyTotals['XTR'])) {
+            $amounts[] = Money::xtr($currencyTotals['XTR']);
+        }
 
         return $this->locale->translate($customer, 'order.status.month_totals', [
             'count' => (int) $totals->paid_count,
-            'amount' => $this->locale->idr((int) $totals->paid_total)
-                .($currencyTotals['USDT'] > 0 ? ' / '.Money::usdt($currencyTotals['USDT']) : '')
-                .(isset($currencyTotals['XTR']) ? ' / '.Money::xtr($currencyTotals['XTR']) : ''),
+            'amount' => implode(' / ', $amounts),
         ]);
     }
 
@@ -157,7 +184,7 @@ class TelegramOrderIntents
     {
         return match (strtoupper((string) $payment?->currency)) {
             'USDT' => Money::usdt((int) $payment->amount),
-            'XTR' => Money::xtr((int) $payment->amount),
+            'XTR' => TelegramStarsCustomerInvoice::tender($payment),
             default => $this->locale->idr((int) $order->total_amount),
         };
     }
@@ -191,6 +218,8 @@ class TelegramOrderIntents
                 'created_at',
                 'telegram_receipt_sent_at',
             ])
+            ->with(['payments' => fn ($query) => $query->select('id', 'order_id', 'amount')
+                ->where('provider', PaymentProvider::TELEGRAM_STARS)])
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
@@ -257,11 +286,12 @@ class TelegramOrderIntents
 
         $keyboard = [];
         foreach ($orders as $order) {
+            $starsPayment = $order->payments->first();
             $keyboard[] = [[
                 'text' => ($month === null ? '' : $order->created_at->format('d/m').' · ').$this->locale->translate($customer, 'order.history.item_button', [
                     'invoice' => $order->invoice_number,
                     'status' => $this->historyButtonStatus($customer, $order).($month === null ? '' : ' / '.$this->locale->paymentStatus($customer, $order->payment_status)),
-                ]),
+                ]).($starsPayment === null ? '' : ' · '.TelegramStarsCustomerInvoice::tender($starsPayment)),
                 'callback_data' => 'order:'.$order->invoice_number,
             ]];
         }
@@ -356,6 +386,9 @@ class TelegramOrderIntents
         }
 
         $payment = $order->payments->first();
+        if ($payment?->isTelegramStars() && $chatId !== (string) $customer->telegram_id) {
+            return;
+        }
         $sakurupiahWasPayable = $this->isSakurupiahPayable($payment);
         $wijayapayWasPayable = $this->isWijayaPayPayable($payment);
         $refreshNotice = $this->refreshProviderPaymentStatus($customer, $order, $payment);
@@ -427,6 +460,10 @@ class TelegramOrderIntents
             $lines[] = '';
             $lines[] = $refreshNotice;
         }
+        $starsPending = $payment?->isTelegramStars() && $order->order_status === OrderStatus::PendingPayment
+            && $paymentStatus === PaymentStatus::Pending ? $this->starsInvoice->pending($customer, $order, $payment) : null;
+        $instruction = $starsPending === null ? $this->orderInstruction($customer, $order, $payment)
+            : $this->locale->translate($customer, $starsPending['key']);
         $delivery = $this->credentialPresentation->forCustomer($customer, $order, $payment);
         if (! $delivery->isEmpty()) {
             $lines[] = '';
@@ -439,21 +476,29 @@ class TelegramOrderIntents
                     'order.detail.otp_button',
                     'order.detail.delivery_note',
                 ),
-                new TelegramMessageUnit($this->orderInstruction($customer, $order, $payment)),
+                new TelegramMessageUnit($instruction),
             ];
         } else {
             $lines[] = '';
-            $lines[] = $this->orderInstruction($customer, $order, $payment);
+            $lines[] = $instruction;
             $units = $this->unitsFromLines($lines);
         }
 
         $lastResponse = null;
-        foreach ($units as $unit) {
+        foreach ($units as $index => $unit) {
+            $isLast = $index === array_key_last($units);
+            $markup = $unit->replyMarkup();
+            if ($isLast && $starsPending !== null) {
+                $markup = ['inline_keyboard' => [[[
+                    'text' => $this->locale->translate($customer, 'stars.refresh'),
+                    'callback_data' => 'order:'.$order->invoice_number,
+                ]]]];
+            }
             $lastResponse = $this->bot->sendMessage(
                 $chatId,
                 $unit->text(),
-                $unit->replyMarkup(),
-                $unit->options(),
+                $markup,
+                $unit->options() + ($isLast ? ($starsPending['options'] ?? []) : []),
             );
         }
         if ($sakurupiahPresentationRecovered) {
@@ -538,6 +583,10 @@ class TelegramOrderIntents
             return $this->locale->translate($customer, 'order.guidance.expired');
         }
         if ($orderStatus === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending) {
+            if ($payment?->isTelegramStars()) {
+                return $this->locale->translate($customer, 'stars.status_pending');
+            }
+
             return $this->locale->translate($customer, 'order.guidance.pending');
         }
         if ($orderStatus === OrderStatus::Processing) {
