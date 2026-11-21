@@ -25,6 +25,7 @@
                     @endforeach
                 </div>
             </section>
+            @include('storefront.partials.purchase-flow')
         </main>
 
 @endsection

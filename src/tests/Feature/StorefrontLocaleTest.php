@@ -35,7 +35,8 @@ class StorefrontLocaleTest extends TestCase
             'en' => ['Buy digital products in three steps.', 'Check out as a guest', '2 Plans', '1 available', 'View plan details'],
         ] as $locale => [$guide, $step, $count, $available, $detail]) {
             $this->withCookie(self::COOKIE, $locale);
-            $this->get('/')->assertOk()->assertSee($guide)->assertSee($step);
+            $this->get('/')->assertOk()->assertSee(route('storefront.guides.index'), false)->assertDontSee($guide);
+            $this->get(route('storefront.guides.index'))->assertOk()->assertSee($guide)->assertSee($step);
             $this->get('/shop')->assertOk()->assertSee($count)->assertSee($available)->assertSee('Merchant Family');
             $this->get(route('storefront.product-families.show', $family->slug))->assertOk()
                 ->assertSee($count)->assertSee($available)->assertSee($detail)
