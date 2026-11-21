@@ -3,7 +3,9 @@
 namespace App\Services\Telegram;
 
 use App\Jobs\ProcessTelegramUpdate;
+use App\Jobs\SettleTelegramStarsUpdate;
 use App\Models\TelegramUpdate;
+use App\Services\TelegramStars\TelegramStarsChargeIdentity;
 use App\Services\TelegramStars\TelegramStarsPreCheckout;
 use App\Support\DogfoodTiming;
 use Illuminate\Database\QueryException;
@@ -99,9 +101,11 @@ class TelegramWebhookIngress
     private function receiveStars(array $payload, string $kind, int $deadline, int $startedAt): TelegramWebhookIngressResult
     {
         $isPreCheckout = $kind === TelegramStarsUpdate::PRE_CHECKOUT;
+        $namespace = TelegramStarsChargeIdentity::configuredNamespace();
+        $settlementWakeup = null;
         $approved = false;
         try {
-            $approved = DB::transaction(function () use ($payload, $kind, $deadline, $isPreCheckout): bool {
+            $approved = DB::transaction(function () use ($payload, $kind, $deadline, $isPreCheckout, $namespace, &$settlementWakeup): bool {
                 if ($isPreCheckout && DB::getDriverName() === 'pgsql') {
                     DB::statement("SET LOCAL lock_timeout = '250ms'");
                     DB::statement("SET LOCAL statement_timeout = '400ms'");
@@ -113,14 +117,21 @@ class TelegramWebhookIngress
                     'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
                     'stars_event' => $kind,
                     'stars_query_hash' => $queryHash,
+                    'stars_namespace' => $namespace,
+                    'stars_charge_hash' => $isPreCheckout ? null : TelegramStarsChargeIdentity::hash($payload['message'][$kind]['telegram_payment_charge_id']),
                     'created_at' => now(),
                 ]);
 
-                // Success/refund are durable but intentionally held for T4/T6.
-                // They must not be marked processed by the chat worker.
+                // Financial events are never handed to the chat worker.
                 if (! $isPreCheckout) {
-                    if ($inserted !== 1 && ! TelegramUpdate::where('update_id', $payload['update_id'])->where('stars_event', $kind)->exists()) {
+                    $original = TelegramUpdate::where('update_id', $payload['update_id'])->first();
+                    if ($original?->stars_event !== $kind || ($inserted !== 1
+                        && (TelegramStarsUpdate::minimize($original->payload, $kind) !== $payload
+                            || ($original->stars_namespace !== null && $original->stars_namespace !== $namespace)))) {
                         throw new RuntimeException('Financial update ID is already occupied.');
+                    }
+                    if ($inserted === 1 && $kind === TelegramStarsUpdate::SUCCESS) {
+                        $settlementWakeup = $original->id;
                     }
 
                     return false;
@@ -131,14 +142,15 @@ class TelegramWebhookIngress
                         ?? TelegramUpdate::where('stars_query_hash', $queryHash)->first();
 
                     return $original?->stars_event === $kind && (bool) $original->stars_approved
+                        && $original->stars_namespace === $namespace
                         && (TelegramStarsUpdate::minimize($original->payload, $kind)[$kind] ?? null) === $payload[$kind]
-                        && $this->stars->approve($payload[$kind], $deadline, replayOnly: true);
+                        && $this->stars->approve($payload[$kind], $deadline, $namespace, replayOnly: true);
                 }
 
                 try {
                     // A lock timeout rolls back the approval savepoint, not the
                     // inbox row. Once a denial is returned this query stays denied.
-                    $approved = DB::transaction(fn () => $this->stars->approve($payload[$kind], $deadline, replayOnly: false));
+                    $approved = DB::transaction(fn () => $this->stars->approve($payload[$kind], $deadline, $namespace, replayOnly: false));
                 } catch (QueryException $error) {
                     $state = (string) ($error->errorInfo[0] ?? $error->getCode());
                     if (! in_array($state, ['55P03', '57014'], true)) {
@@ -162,6 +174,21 @@ class TelegramWebhookIngress
         }
 
         if (! $isPreCheckout) {
+            if ($settlementWakeup !== null) {
+                $wake = static function () use ($settlementWakeup): void {
+                    try {
+                        SettleTelegramStarsUpdate::dispatch($settlementWakeup)->afterCommit();
+                    } catch (Throwable $error) {
+                        Log::warning('telegram.stars_settlement_wakeup_failed', ['error_class' => $error::class]);
+                    }
+                };
+                if (app()->environment('testing')) {
+                    $wake();
+                } else {
+                    app()->terminating($wake);
+                }
+            }
+
             return new TelegramWebhookIngressResult(['ok' => true]);
         }
 

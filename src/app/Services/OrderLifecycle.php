@@ -9,6 +9,9 @@ interface OrderLifecycle
 {
     public function applyPaymentPaid(Payment $payment): OrderLifecycleResult;
 
+    /** Apply an authenticated Stars receipt claimed in the current inbox transaction. */
+    public function applyClaimedStarsPayment(Payment $payment, int $inboxId): OrderLifecycleResult;
+
     public function applyManualCompletion(Order $order): OrderLifecycleResult;
 
     public function applyManualRejection(Order $order): OrderLifecycleResult;

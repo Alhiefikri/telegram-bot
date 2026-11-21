@@ -90,14 +90,52 @@ cancellations until grace ends.
 Successful and refunded payment events are minimized and durably retained
 before ACK, even when issuance is paused. They are not consumed by the chat
 worker or its recovery/retention scans. `telegram_updates.stars_event` and
-`processed_at IS NULL` identify held evidence for the T4/T6 financial consumers.
-No settlement, refund, or public checkout route is enabled by this transport.
+`processed_at IS NULL` identify pending evidence for the separate financial
+consumers. This transport does not enable public checkout.
 
 Verification: `TelegramStarsWebhookTest` and
 `TelegramStarsTransportPostgresConcurrencyTest`. Telegram behavior was checked
 through Context7 and the official [sendInvoice](https://core.telegram.org/bots/api#sendinvoice)
 and [webhook reply](https://core.telegram.org/bots/api#making-requests-when-getting-updates)
 contracts. Fixture timing does not qualify live Telegram delivery.
+
+## Telegram Stars settlement (#744)
+
+`TelegramStarsSettlement` consumes only authenticated `successful_payment`
+inbox entries. The private buyer/chat, acknowledged invoice, durable approval,
+and exact immutable XTR amount must agree. The stable bot ID and application
+environment scope invoice effects, approvals and charge identity; a token
+rotation for the same bot does not change the namespace. Legacy financial
+evidence without that namespace is held for review, not inferred from today's
+configuration. Before changing bot IDs or environments, keep journal access
+for old invoices and reconcile any unresolved evidence.
+
+The inbox → Order → Payment transaction claims the external receipt and commits
+one `telegram_stars_settlements` row per Payment, lifecycle state, inventory and
+outbound obligations. No Telegram calls occur under locks. A matching replay
+repeats none of these effects. Verified additional charges are reserved for
+review, never spent on another Order. Mismatches and ambiguous charges go to
+`telegram_stars_payment_reviews`, with the retained inbox as evidence. Exact
+money on an expired or cancelled Order is recorded as Paid with a Late Payment
+review, without a sale or automatic credential delivery. No internal balance
+changes.
+
+`telegram:recover-stars-payments` runs every minute and can process the durable
+inbox without its queue wakeup, even with issuance paused. Existing outbound
+recovery owns notices and receipt materialization. The operator-only CLI
+`telegram:report-stars-history --offset=0 --pages=1` checks up to five pages of
+100 transactions, reports sanitized findings and a next offset, and never
+settles or refunds. Offset pagination is not a consistent provider snapshot;
+re-run overlapping ranges if new transactions arrive during a review. A debit
+can share the original credit ID and is never counted as an incoming payment.
+Refund processing and customer payment instructions are separate tickets.
+
+Verification: `TelegramStarsSettlementTest` and
+`TelegramStarsSettlementPostgresConcurrencyTest`. API contracts were checked
+through Context7 and the official [SuccessfulPayment](https://core.telegram.org/bots/api#successfulpayment),
+[StarTransaction](https://core.telegram.org/bots/api#startransaction), and
+[getStarTransactions](https://core.telegram.org/bots/api#getstartransactions)
+definitions.
 
 ## Sakurupiah checkout recovery (#677)
 

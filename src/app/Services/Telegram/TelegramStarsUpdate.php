@@ -2,8 +2,6 @@
 
 namespace App\Services\Telegram;
 
-use Illuminate\Support\Arr;
-
 final class TelegramStarsUpdate
 {
     public const PRE_CHECKOUT = 'pre_checkout_query';
@@ -71,7 +69,13 @@ final class TelegramStarsUpdate
             'message_id' => $messageId,
             'chat' => ['id' => $chat, 'type' => $chatType],
             ...($actor === null ? [] : ['from' => ['id' => $actor]]),
-            $kind => Arr::only($event, ['currency', 'total_amount', 'invoice_payload', 'telegram_payment_charge_id']),
+            $kind => [
+                'currency' => $event['currency'], 'total_amount' => $event['total_amount'],
+                'invoice_payload' => $event['invoice_payload'], 'telegram_payment_charge_id' => $event['telegram_payment_charge_id'],
+            ]
+                + ($kind === self::SUCCESS && array_intersect_key($event, array_flip([
+                    'is_recurring', 'is_first_recurring', 'subscription_expiration_date',
+                ])) !== [] ? ['is_recurring' => true] : []),
         ]];
     }
 
