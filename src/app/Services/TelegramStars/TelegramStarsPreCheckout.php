@@ -43,11 +43,10 @@ final readonly class TelegramStarsPreCheckout
         $claim = DB::table('telegram_stars_approvals')->where('payment_id', $payment->id)->first();
         if ($claim !== null) {
             return $claim->bot_namespace === $namespace && hash_equals($claim->query_hash, $hash)
-                && now()->getTimestamp() < (int) $claim->approved_at_epoch + 10
-                && hrtime(true) < $deadline;
+                && now()->getTimestamp() < (int) $claim->approved_at_epoch + 10;
         }
 
-        if ($replayOnly || $target->deadline_epoch <= now()->getTimestamp()
+        if ($replayOnly || ! TelegramStarsAdmission::permitsNewPayments() || $target->deadline_epoch <= now()->getTimestamp()
             || ! $this->policy->lockForCheckout()->issuanceEnabled
             || ! $this->reservations->matches($order)
             || hrtime(true) >= $deadline) {

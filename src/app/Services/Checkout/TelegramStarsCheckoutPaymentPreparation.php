@@ -18,6 +18,7 @@ use App\Services\Pricing\ProductQuantityPricing;
 use App\Services\TelegramStars\StarsPricingPolicy;
 use App\Services\TelegramStars\StarsPricingPolicyManager;
 use App\Services\TelegramStars\StarsQuoteCalculator;
+use App\Services\TelegramStars\TelegramStarsAdmission;
 use App\Support\PaymentProvider;
 use DomainException;
 use Illuminate\Support\Collection;
@@ -126,7 +127,7 @@ final readonly class TelegramStarsCheckoutPaymentPreparation implements Checkout
 
     private function assertIssuanceEnabled(StarsPricingPolicy $policy): void
     {
-        if (! $policy->issuanceEnabled) {
+        if (! TelegramStarsAdmission::permitsNewPayments() || ! $policy->issuanceEnabled) {
             throw new CheckoutPaymentUnavailable('Telegram Stars issuance is disabled.', reason: 'issuance_disabled');
         }
     }

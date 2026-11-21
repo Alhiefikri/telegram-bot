@@ -28,6 +28,8 @@ final readonly class TelegramStarsCheckout
 {
     private const TERMS_VERSION = 'telegram-stars-v1';
 
+    private const CALLBACK_TTL_MINUTES = 15;
+
     public function __construct(
         private TelegramStarsCheckoutPaymentPreparation $preparation,
         private TelegramIntentSession $selection,
@@ -64,7 +66,7 @@ final readonly class TelegramStarsCheckout
         ];
 
         try {
-            if (! Cache::put($this->key($customer, $nonce), $state, $quote->expiresAt)) {
+            if (! Cache::put($this->key($customer, $nonce), $state, now()->addMinutes(self::CALLBACK_TTL_MINUTES))) {
                 return null;
             }
         } catch (Throwable $exception) {
@@ -86,7 +88,7 @@ final readonly class TelegramStarsCheckout
             $state = Cache::get($key);
             if (is_array($state)) {
                 $state['origin'] = $messageId;
-                Cache::put($key, $state, max(0, $state['expires_at'] - now()->timestamp));
+                Cache::put($key, $state, now()->addMinutes(self::CALLBACK_TTL_MINUTES));
             }
         } catch (Throwable $exception) {
             Log::warning('telegram.stars_checkout_cache_unavailable', ['error_class' => $exception::class]);
@@ -151,7 +153,7 @@ final readonly class TelegramStarsCheckout
 
             // Rotate the consent callback when the terms or quote change. An
             // in-flight click on the old price can never accept the new one.
-            $this->sendReview($context, $key, $current, $result['quote'], $action, $result['changed']);
+            $this->sendReview($context, $key, $current, $result['quote'], $action, $result['notice']);
         });
     }
 
@@ -180,9 +182,12 @@ final readonly class TelegramStarsCheckout
         $confirmation = $this->confirmation($customer, $context->chatId, $state['revision'], $attempt);
         try {
             $quote = $this->preparation->preview($source, $confirmation, $quantity);
+            if ($state['expires_at'] <= now()->timestamp) {
+                return ['quote' => $quote, 'notice' => 'stars.quote_expired'];
+            }
             $changed = $state['snapshot'] !== $this->snapshot($quote);
             if ($action === 'open' || $changed) {
-                return ['quote' => $quote, 'changed' => $changed];
+                return ['quote' => $quote, 'notice' => $changed ? 'stars.changed' : null];
             }
 
             // Re-reading the price is not a renewal of the consent window.
@@ -197,7 +202,7 @@ final readonly class TelegramStarsCheckout
         } catch (CheckoutPaymentUnavailable $exception) {
             if ($exception->reason === 'snapshot_changed') {
                 try {
-                    return ['quote' => $this->preparation->preview($source, $confirmation, $quantity), 'changed' => true];
+                    return ['quote' => $this->preparation->preview($source, $confirmation, $quantity), 'notice' => 'stars.changed'];
                 } catch (CheckoutPaymentUnavailable|InvalidCheckout|InsufficientStock) {
                     return 'stars.unavailable';
                 }
@@ -209,7 +214,7 @@ final readonly class TelegramStarsCheckout
         }
     }
 
-    private function sendReview(TelegramCallbackContext $context, string $oldKey, array $state, TelegramStarsCheckoutQuote $quote, string $action, bool $changed): void
+    private function sendReview(TelegramCallbackContext $context, string $oldKey, array $state, TelegramStarsCheckoutQuote $quote, string $action, ?string $notice): void
     {
         $customer = $context->customer;
         $nonce = bin2hex(random_bytes(12));
@@ -225,8 +230,8 @@ final readonly class TelegramStarsCheckout
             $lines[] = $this->locale->translate($customer, 'order.status.more_items', ['count' => count($quote->retailLines) - 20]);
         }
         $lines[] = '';
-        if ($changed) {
-            $lines[] = $this->locale->translate($customer, 'stars.changed');
+        if ($notice !== null) {
+            $lines[] = $this->locale->translate($customer, $notice);
         }
         $lines[] = 'Telegram Stars · '.Money::xtr($quote->totalXtr);
         $lines[] = $this->locale->translate($customer, 'stars.terms');
@@ -242,7 +247,7 @@ final readonly class TelegramStarsCheckout
             $state['review'] = $id;
             $state['snapshot'] = $this->snapshot($quote);
             $state['expires_at'] = $quote->expiresAt->timestamp;
-            Cache::put($this->key($customer, $nonce), $state, $quote->expiresAt);
+            Cache::put($this->key($customer, $nonce), $state, now()->addMinutes(self::CALLBACK_TTL_MINUTES));
         }
     }
 

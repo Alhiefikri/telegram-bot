@@ -509,6 +509,7 @@
   "stars.accept": "Agree · continue to :amount Stars invoice",
   "stars.back": "Back to payment options",
   "stars.refresh": "Check invoice status",
+  "stars.quote_expired": "Your quote expired. Review the new quote and confirm again.",
   "stars.terms": "Terms: This is a one-time purchase from your personal Telegram Stars balance. The product is delivered in this private chat after payment is verified. Pay only while the invoice is active. For help, use /support and share your order number, not your password.",
   "stars.stale": "This selection is no longer valid. Reopen Product Details or Cart checkout.",
   "stars.changed": "The order details or price changed. Review the new quote and confirm again.",

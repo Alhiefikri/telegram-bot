@@ -78,14 +78,16 @@ class OrderCheckoutService
         if ($intent->quote->cartId !== null || $quantity < 1) {
             throw new InvalidCheckout('Direct Telegram Stars checkout requires a single Product selection.');
         }
+        $this->assertTermsSnapshot($termsVersion, $termsAcceptedAt);
+        $preflight = $this->runPreflight($intent);
 
-        return DB::transaction(function () use ($product, $quantity, $intent, $termsVersion, $termsAcceptedAt): Order {
+        return $this->retryCheckout(function () use ($product, $quantity, $intent, $termsVersion, $termsAcceptedAt, $preflight): Order {
             $customer = $this->lockStarsCustomer($intent);
             $key = $intent->confirmation->checkoutKey;
             if (($existing = Order::query()->where('checkout_key', $key)->first()) !== null) {
                 $this->assertCheckoutRailCanBeReused($existing, $intent);
 
-                return $existing->load(['orderItems', 'payments']);
+                return $existing;
             }
 
             // Direct purchases must not amend or consume the buyer's active Cart.
@@ -97,8 +99,8 @@ class OrderCheckoutService
             ]);
             $cart->cartItems()->create(['product_id' => $product->id, 'quantity' => $quantity]);
 
-            return $this->checkout($cart, $intent, checkoutKey: $key, termsVersion: $termsVersion, termsAcceptedAt: $termsAcceptedAt);
-        }, 5);
+            return $this->checkoutOnce($cart, $intent, $key, $preflight, $termsVersion, $termsAcceptedAt);
+        });
     }
 
     public function checkout(
@@ -124,26 +126,39 @@ class OrderCheckoutService
             throw new InvalidCheckout('Telegram Stars requires a private retail checkout key.');
         }
         $this->assertStoreBalanceEligibility($cart, $paymentIntent);
-        if (($termsVersion === null) !== ($termsAcceptedAt === null)) {
-            throw new InvalidCheckout('Checkout terms snapshot is incomplete.');
-        }
+        $this->assertTermsSnapshot($termsVersion, $termsAcceptedAt);
         if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::PAKASIR) {
             throw new InvalidCheckout('Pakasir sudah dipensiunkan untuk checkout baru.');
         }
-        $paymentPreparation = $this->paymentPreparations->for($paymentIntent);
-        $preflight = $paymentPreparation->preflight(new CheckoutPaymentPreflightContext(
+        $preflight = $this->runPreflight($paymentIntent);
+
+        return $this->retryCheckout(
+            fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext, $balanceRequest, $apiOrderClaimId, $storefrontAdmission),
+        );
+    }
+
+    private function assertTermsSnapshot(?string $termsVersion, ?DateTimeInterface $termsAcceptedAt): void
+    {
+        if (($termsVersion === null) !== ($termsAcceptedAt === null)) {
+            throw new InvalidCheckout('Checkout terms snapshot is incomplete.');
+        }
+    }
+
+    private function runPreflight(CheckoutPaymentIntent $paymentIntent): CheckoutPaymentPreflight
+    {
+        return $this->paymentPreparations->for($paymentIntent)->preflight(new CheckoutPaymentPreflightContext(
             currentSetting: $paymentIntent instanceof TelegramStarsCheckoutIntent ? null : ManualPaymentSetting::current(),
             requestedProvider: $paymentIntent->provider(),
             requestedMethod: $paymentIntent->method(),
         ));
+    }
 
-        $order = null;
+    /** @param callable(): Order $checkout */
+    private function retryCheckout(callable $checkout): Order
+    {
         for ($i = 0; $i < 5; $i++) {
             try {
-                $order = DB::transaction(
-                    fn () => $this->checkoutOnce($cart, $paymentIntent, $checkoutKey, $preflight, $termsVersion, $termsAcceptedAt, $resellerContext, $balanceRequest, $apiOrderClaimId, $storefrontAdmission),
-                    5,
-                );
+                $order = DB::transaction($checkout, 5);
 
                 return $order->fresh(['orderItems', 'payments']);
             } catch (QueryException $e) {

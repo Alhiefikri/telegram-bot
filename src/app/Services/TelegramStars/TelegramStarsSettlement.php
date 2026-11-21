@@ -6,11 +6,13 @@ use App\Enums\ExternalMoneyReceiptClaimOutcome;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\ExternalMoneyReceipt;
+use App\Models\ExternalMoneyReceiptReservation;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentTelegramStarsDetail;
 use App\Models\TelegramUpdate;
-use App\Services\MoneyReceipts\ExternalMoneyReceiptClaims;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
+use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\MoneyReceipts\MoneyReceiptTarget;
 use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
 use App\Services\OrderLifecycle;
@@ -24,7 +26,7 @@ use Throwable;
 final readonly class TelegramStarsSettlement
 {
     public function __construct(
-        private ExternalMoneyReceiptClaims $receipts,
+        private ExternalMoneyReceiptWriter $receipts,
         private OrderLifecycle $lifecycle,
         private TelegramStarsReservation $reservations,
     ) {}
@@ -131,7 +133,12 @@ final readonly class TelegramStarsSettlement
             target: MoneyReceiptTarget::orderPayment((string) $order->id),
             evidence: ['source' => 'telegram_stars_webhook', 'inbox_id' => $inbox->id],
         );
-        $outcome = $this->receipts->claim($receipt);
+        $outcome = $this->receipts->claim(
+            $receipt,
+            ExternalMoneyReceiptReservations::SOURCE_RUNTIME,
+            ExternalMoneyReceiptReservation::LEGACY_TYPE_PAYMENT,
+            (string) $payment->id,
+        );
         if ($outcome->isHeld()) {
             $this->review($inbox, 'receipt_conflict', $payment);
 

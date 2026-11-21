@@ -23,7 +23,9 @@
                     @endif
                 </p>
                 <p>Diminta {{ $charge['claim']->requested_at }} oleh Owner #{{ $charge['claim']->actor_user_id }}: {{ $charge['claim']->reason }}</p>
-                @if ($charge['claim']->state !== 'confirmed')
+                @if ($charge['reversal_attribution_unknown'])
+                    <p>Telegram mencatat pengembalian Stars, tetapi belum bisa dipastikan apakah berasal dari refund Owner atau reversal eksternal. Jangan kirim ulang; tinjau bukti sebelum menutup kasus.</p>
+                @elseif ($charge['claim']->state !== 'confirmed')
                     <p>Jangan kirim ulang. Rekonsiliasi bukti refund Telegram; pesanan belum dicatat sebagai direfund.</p>
                 @endif
             @elseif ($charge['eligible'])

@@ -59,7 +59,7 @@ final readonly class TelegramStarsInvoiceOutbound
                 && (string) $target->chat_id === (string) $effect->telegram_chat_id
                 && ! self::hasAcknowledgedInvoice($target);
 
-            if ($eligible && ! $this->policy->lockForCheckout()->issuanceEnabled) {
+            if ($eligible && (! TelegramStarsAdmission::permitsNewPayments() || ! $this->policy->lockForCheckout()->issuanceEnabled)) {
                 return [null, null];
             }
 

@@ -29,7 +29,7 @@
             <h2 class="text-lg font-semibold text-admin-ink">Kebijakan harga global</h2>
             <p class="mt-1 text-sm text-admin-muted">
                 Versi tersimpan: {{ $policy->version }} · Izin penerbitan: {{ $policy->issuanceEnabled ? 'Aktif' : 'Nonaktif' }}.
-                Checkout publik belum tersedia, apa pun nilai izin ini.
+                Izin ini hanya membuka checkout di lingkungan uji Telegram yang terisolasi. Checkout publik tetap tertutup sampai ada cutover terpisah.
             </p>
             <p class="mt-2 text-sm text-admin-muted">
                 Gunakan total retail IDR, tanpa biaya metode bayar. Reward hanya acuan; bukan jaminan pendapatan. Cadangan 100 bp = 1%.

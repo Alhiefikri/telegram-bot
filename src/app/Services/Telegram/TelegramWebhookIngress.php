@@ -168,9 +168,10 @@ class TelegramWebhookIngress
             });
         } catch (Throwable $error) {
             Log::warning('telegram.stars_ingress_unavailable', ['kind' => $kind, 'error_class' => $error::class]);
-            if (! $isPreCheckout) {
-                return new TelegramWebhookIngressResult(['message' => 'Payment inbox unavailable'], 503);
-            }
+
+            // A lost commit acknowledgement is ambiguous. Let Telegram retry
+            // rather than answering no and later replaying a committed yes.
+            return new TelegramWebhookIngressResult(['message' => 'Payment inbox unavailable'], 503);
         }
 
         if (! $isPreCheckout) {
@@ -192,9 +193,11 @@ class TelegramWebhookIngress
             return new TelegramWebhookIngressResult(['ok' => true]);
         }
 
-        $approved = $approved && hrtime(true) < $deadline;
+        // The application budget limits new claims; it cannot reverse a
+        // decision after commit. Send the same answer we durably recorded.
         DogfoodTiming::log('dogfood.telegram.stars_pre_checkout', [
             'approved' => $approved,
+            'over_budget' => hrtime(true) >= $deadline,
             'duration_ms' => DogfoodTiming::elapsedMs($startedAt),
         ]);
 

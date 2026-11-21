@@ -3,6 +3,7 @@
 namespace App\Services\TelegramStars;
 
 use App\Services\MoneyReceipts\MoneyReceiptIdentity;
+use App\Services\Telegram\TelegramBotApiRequestFactory;
 
 final class TelegramStarsChargeIdentity
 {
@@ -15,7 +16,9 @@ final class TelegramStarsChargeIdentity
             return null;
         }
 
-        return hash('sha256', app()->environment()."\0".$parts[1]);
+        $network = TelegramBotApiRequestFactory::usesTestNetwork() ? "\0telegram-test" : '';
+
+        return hash('sha256', app()->environment()."\0".$parts[1].$network);
     }
 
     public static function hash(string $charge): string

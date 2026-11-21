@@ -46,6 +46,8 @@ final readonly class TelegramStarsRefunds
             'buyer' => $charge->buyer,
             'total' => $charge->total,
             'claim' => $claim,
+            'reversal_attribution_unknown' => $claim !== null && $claim->state !== 'confirmed'
+                && DB::table('telegram_stars_refund_reviews')->where('payment_id', $payment->id)->where('reason', 'reversal_attribution_unknown')->exists(),
             'eligible' => $claim === null && $this->eligible($order, $payment, $charge),
         ];
     }
@@ -102,7 +104,7 @@ final readonly class TelegramStarsRefunds
         // before/after sending is indistinguishable, so never replay the write.
         try {
             $this->bot->refundStarPayment($charge->buyer, $charge->chargeId);
-            $this->locked($payment, fn (Order $order, Payment $locked) => $this->confirm($locked, $charge, 'ack'));
+            $this->locked($payment, fn (Order $order, Payment $locked) => $this->confirmFromAck($locked, $charge));
         } catch (Throwable $error) {
             Log::warning('telegram.stars_refund_uncertain', ['payment_id' => $payment->id, 'error_class' => $error::class]);
             try {
@@ -180,7 +182,7 @@ final readonly class TelegramStarsRefunds
         }
 
         return $this->locked(Payment::findOrFail($paymentId), function (Order $order, Payment $payment) use (
-            $namespace, $hash, $payload, $buyer, $total, $date, $inboxId, $source, $evidence
+            $namespace, $hash, $payload, $buyer, $total, $date, $inboxId, $evidence
         ): ?string {
             $charge = TelegramStarsOriginalCharge::forPayment($order, $payment);
             if ($charge === null || $charge->namespace !== $namespace || TelegramStarsChargeIdentity::hash($charge->chargeId) !== $hash
@@ -197,22 +199,27 @@ final readonly class TelegramStarsRefunds
                 return $this->review($payment, 'refund_evidence_date_missing', $evidence, $inboxId);
             }
 
-            $this->confirm($payment, $charge, $source, $inboxId);
+            // Matching evidence proves a reversal, not that refundStarPayment
+            // caused it. Even a pending claim may not have been sent yet.
+            if ($claim->state === 'confirmed') {
+                return null;
+            }
+            $this->claim($payment)->where('state', 'pending')->update(['state' => 'review']);
 
-            return null;
+            return $this->review($payment, 'reversal_attribution_unknown', $evidence, $inboxId);
         });
     }
 
-    private function confirm(Payment $payment, TelegramStarsOriginalCharge $charge, string $source, ?int $inboxId = null): void
+    private function confirmFromAck(Payment $payment, TelegramStarsOriginalCharge $charge): void
     {
         $updated = $this->claim($payment)->where('external_money_receipt_id', $charge->receiptId)
             ->whereIn('state', ['pending', 'review'])->update([
-                'state' => 'confirmed', 'confirmed_at' => now(), 'confirmation_source' => $source, 'telegram_update_id' => $inboxId,
+                'state' => 'confirmed', 'confirmed_at' => now(), 'confirmation_source' => 'ack',
             ]);
         if ($updated === 1) {
             $this->lifecycle->applyConfirmedStarsRefund($payment);
             $this->audit->logWithResolvedContext('telegram_stars.refund.confirmed', $payment, null, [
-                'receipt_id' => $charge->receiptId, 'total_xtr' => $charge->total, 'source' => $source,
+                'receipt_id' => $charge->receiptId, 'total_xtr' => $charge->total, 'source' => 'ack',
             ]);
         }
     }

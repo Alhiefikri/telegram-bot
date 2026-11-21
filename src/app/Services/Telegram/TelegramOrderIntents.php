@@ -521,7 +521,15 @@ class TelegramOrderIntents
                 $markup = ['inline_keyboard' => [[[
                     'text' => $this->locale->translate($customer, 'stars.refresh'),
                     'callback_data' => 'order:'.$order->invoice_number,
+                    'style' => 'primary',
                 ]]]];
+                if (in_array($starsPending['key'], ['stars.invoice_pending', 'stars.invoice_ready', 'stars.invoice_paused'], true)) {
+                    $markup['inline_keyboard'][] = [[
+                        'text' => $this->locale->translate($customer, 'payment.action.cancel'),
+                        'callback_data' => 'buyer:cancel-pending:'.$order->id,
+                        'style' => 'primary',
+                    ]];
+                }
             }
             $lastResponse = $this->bot->sendMessage(
                 $chatId,

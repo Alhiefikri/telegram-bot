@@ -27,8 +27,16 @@ class TelegramBotApiRequestFactory
 
     public function url(string $method): string
     {
-        return rtrim((string) config('services.telegram.api_base_url', 'https://api.telegram.org'), '/')
-            .'/bot'.config('services.telegram.token').'/'.$method;
+        $base = self::usesTestNetwork()
+            ? 'https://api.telegram.org'
+            : rtrim((string) config('services.telegram.api_base_url', 'https://api.telegram.org'), '/');
+
+        return $base.'/bot'.config('services.telegram.token').(self::usesTestNetwork() ? '/test/' : '/').$method;
+    }
+
+    public static function usesTestNetwork(): bool
+    {
+        return app()->environment('local', 'testing') && config('services.telegram.test_network') === true;
     }
 
     public function fileUrl(string $filePath): string
@@ -62,7 +70,7 @@ class TelegramBotApiRequestFactory
             }
         }
 
-        return rtrim($base, '/').'/file/bot'.$token.'/'.$filePath;
+        return rtrim($base, '/').'/file/bot'.$token.(self::usesTestNetwork() ? '/test/' : '/').$filePath;
     }
 
     public function transportException(string $operation, ConnectionException $exception): RuntimeException

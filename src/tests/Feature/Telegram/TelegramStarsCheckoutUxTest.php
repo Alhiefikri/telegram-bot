@@ -4,6 +4,7 @@ namespace Tests\Feature\Telegram;
 
 use App\Enums\CartOrigin;
 use App\Enums\CartStatus;
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\TelegramOutboundEffectState;
 use App\Jobs\ProcessTelegramUpdate;
@@ -14,9 +15,7 @@ use App\Models\Product;
 use App\Models\TelegramNavigationRoot;
 use App\Models\TelegramOutboundEffect;
 use App\Models\TelegramUiIcon;
-use App\Services\OrderLifecycle;
 use App\Services\PaidInvoice\PaidInvoiceOrderPresentationAdapter;
-use App\Services\Telegram\TelegramOrderExpiredNotifier;
 use App\Services\Telegram\TelegramOrderIntents;
 use App\Services\Telegram\TelegramPaidOrderTxtExporter;
 use App\Services\Telegram\TelegramReceiptNotifier;
@@ -65,6 +64,12 @@ final class TelegramStarsCheckoutUxTest extends TelegramBotTestSupport
         $this->assertStringContainsString('Telegram Stars payment support', $private['text']);
         $this->assertStringNotContainsString('SECRET-ORDER', $private['text']);
         $this->assertSame('https://t.me/fixture_support', $this->buttons($private)[0]['url']);
+        $this->starsWebhook($this->messageUpdate(8003, '/start', [], $buyer->telegram_id))->assertOk();
+        $root = TelegramNavigationRoot::query()->sole();
+        $this->starsWebhook($this->messageUpdate(8004, '/paysupport', [], $buyer->telegram_id))->assertOk();
+        $edit = $this->last('editMessageCaption');
+        $this->assertSame($root->message_id, $edit['message_id']);
+        $this->assertStringContainsString('Telegram Stars payment support', $edit['caption']);
         $this->starsWebhook($this->messageUpdate(8002, '/paysupport SECRET-ORDER', ['id' => $buyer->telegram_id], -555, 'group'))->assertOk();
         $group = $this->last('sendMessage');
         $this->assertStringNotContainsString('SECRET-ORDER', $group['text']);
@@ -268,11 +273,60 @@ final class TelegramStarsCheckoutUxTest extends TelegramBotTestSupport
         $this->tap($order->customer, 'order:'.$order->invoice_number, 400);
         $this->assertStringContainsString('has expired', $this->last('sendMessage')['text']);
         $this->assertArrayNotHasKey('reply_parameters', $this->last('sendMessage'));
-        $this->assertTrue(app(OrderLifecycle::class)->applyPendingExpiry($order)->newlyApplied);
-        app(TelegramOrderExpiredNotifier::class)->send($order->fresh());
+        $this->artisan('orders:expire-pending')->assertSuccessful();
         $notice = $this->last('sendMessage');
         $this->assertStringContainsString('Telegram Stars · 50 XTR', $notice['text']);
         $this->assertStringNotContainsString('Rp', $notice['text']);
+        $this->assertNotNull($order->fresh()->telegram_expired_order_notified_at);
+        $count = Http::recorded()->count();
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+        $this->assertCount($count, Http::recorded());
+    }
+
+    public function test_expired_offer_and_consent_refresh_without_creating_an_order(): void
+    {
+        $buyer = $this->buyer();
+        [$offer, $origin] = $this->openProduct($buyer, $this->starsProduct());
+        $this->travel(6)->minutes();
+        $this->tap($buyer, $offer['callback_data'], $origin);
+        $first = $this->last('sendMessage');
+        $firstId = $this->outgoing;
+        $this->assertStringContainsString('quote expired', $first['text']);
+        $confirm = $this->button($first, 'stars:confirm:')['callback_data'];
+
+        $this->travel(6)->minutes();
+        $this->tap($buyer, $confirm, $firstId);
+        $refresh = $this->last('editMessageText');
+        $this->assertStringContainsString('quote expired', $refresh['text']);
+        $newConfirm = $this->button($refresh, 'stars:confirm:')['callback_data'];
+        $this->assertNotSame($confirm, $newConfirm);
+        $this->tap($buyer, $confirm, $firstId);
+        $this->assertDatabaseEmpty('orders');
+        $this->assertDatabaseEmpty('inventory_movements');
+        $this->tap($buyer, $newConfirm, $firstId);
+        $this->assertDatabaseCount('orders', 1);
+    }
+
+    public function test_phased_cancellation_is_visible_before_approval_and_held_during_verification(): void
+    {
+        $order = $this->starsOrder();
+        $buyer = $order->customer;
+        $detail = 'order:'.$order->invoice_number;
+        $this->acknowledgeStarsInvoiceFixture();
+        $this->tap($buyer, $detail, 400);
+        $cancel = $this->button($this->last('sendMessage'), 'buyer:cancel-pending:')['callback_data'];
+        $this->starsWebhook($this->starsQuery($order->payments->sole()->telegramStarsDetail))->assertJsonPath('ok', true);
+        $this->tap($buyer, $detail, 400);
+        $this->assertNull($this->button($this->last('sendMessage'), 'buyer:cancel-pending:'));
+        $this->tap($buyer, $cancel, 400);
+        $this->assertSame(PaymentStatus::Pending, $order->fresh()->payment_status);
+
+        $unpaid = $this->starsOrder('unpaid-cancel');
+        $this->tap($unpaid->customer, 'order:'.$unpaid->invoice_number, 400);
+        $cancel = $this->button($this->last('sendMessage'), 'buyer:cancel-pending:')['callback_data'];
+        $this->tap($unpaid->customer, $cancel, 400);
+        $this->assertSame(OrderStatus::Cancelled, $unpaid->fresh()->order_status);
+        $this->assertDatabaseHas('inventory_movements', ['order_id' => $unpaid->id, 'type' => 'release']);
     }
 
     public function test_ineligible_cart_and_product_do_not_offer_stars_or_hide_qris(): void

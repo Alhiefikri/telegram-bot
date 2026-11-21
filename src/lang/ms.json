@@ -509,6 +509,7 @@
   "stars.accept": "Setuju · terus ke invois :amount Stars",
   "stars.back": "Kembali ke pilihan bayaran",
   "stars.refresh": "Semak status invois",
+  "stars.quote_expired": "Tawaran sudah tamat tempoh. Semak tawaran baharu dan sahkan sekali lagi.",
   "stars.terms": "Terma: Pembelian ini dibayar sekali daripada baki Telegram Stars peribadi. Produk dihantar ke sembang peribadi ini selepas bayaran disahkan. Bayar hanya invois yang masih aktif. Jika ada masalah, hubungi sokongan melalui /support dan sertakan nombor pesanan, bukan kata laluan.",
   "stars.stale": "Pilihan ini tidak lagi sah. Buka semula Butiran Produk atau daftar keluar Troli.",
   "stars.changed": "Butiran atau harga telah berubah. Semak tawaran terkini dan sahkan semula.",

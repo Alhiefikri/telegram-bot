@@ -156,6 +156,27 @@ final class TelegramStarsSettlementTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_charge_conflict_is_held_in_the_shared_receipt_review(): void
+    {
+        $first = $this->starsOrder()->payments->sole()->telegramStarsDetail;
+        $secondOrder = $this->starsOrder('second-target');
+        $second = $secondOrder->payments->sole()->telegramStarsDetail;
+        $this->acknowledgeStarsInvoiceFixture($first);
+        $this->acknowledgeStarsInvoiceFixture($second);
+        $this->starsWebhook($this->starsQuery($first))->assertJsonPath('ok', true);
+        $this->starsWebhook($this->starsQuery($second, 102))->assertJsonPath('ok', true);
+
+        $this->consume($this->starsSuccess($first, 201));
+        $this->consume($this->starsSuccess($second, 202));
+
+        $this->assertSame(PaymentStatus::Pending, $secondOrder->fresh()->payment_status);
+        $this->assertDatabaseHas('telegram_stars_payment_reviews', ['payment_id' => $second->payment_id, 'reason' => 'receipt_conflict']);
+        $this->assertDatabaseHas('external_money_receipt_reservations', [
+            'provider' => 'telegram_stars', 'legacy_id' => $second->payment_id, 'reason' => 'registry_conflict',
+        ]);
+        $this->assertDatabaseCount('telegram_stars_settlements', 1);
+    }
+
     private function consume(array $payload): void
     {
         $this->starsWebhook($payload)->assertOk();

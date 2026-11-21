@@ -13,7 +13,6 @@ use App\Models\ManualFulfillmentReview;
 use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
-use App\Services\Telegram\TelegramOrderIntents;
 use App\Services\TelegramStars\TelegramStarsInvoiceOutbound;
 use App\Services\TelegramStars\TelegramStarsOperations;
 use App\Services\TelegramStars\TelegramStarsRefunds;
@@ -74,7 +73,7 @@ final class TelegramStarsRefundPostgresConcurrencyTest extends TestCase
         $this->assertDatabaseEmpty('customer_usdt_balance_entries');
     }
 
-    public function test_timeout_and_mismatched_direction_remain_paid_until_matching_outgoing_history(): void
+    public function test_matching_outgoing_history_after_timeout_does_not_attribute_a_reversal_to_the_owner(): void
     {
         [$payment, $owner, $receipt] = $this->paid();
         $target = $payment->telegramStarsDetail;
@@ -104,12 +103,13 @@ final class TelegramStarsRefundPostgresConcurrencyTest extends TestCase
             ->expectsOutputToContain('ambiguous_direction')->assertFailed();
         $this->assertDatabaseHas('telegram_stars_refund_reviews', ['reason' => 'refund_evidence_mismatch']);
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
-        $this->artisan('telegram:report-stars-history', ['--reconcile-refunds' => true])->assertSuccessful();
-        $this->assertDatabaseHas('telegram_stars_refunds', ['state' => 'confirmed', 'confirmation_source' => 'history']);
-        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->artisan('telegram:report-stars-history', ['--reconcile-refunds' => true])
+            ->expectsOutputToContain('reversal_attribution_unknown')->assertFailed();
+        $this->assertDatabaseHas('telegram_stars_refunds', ['state' => 'review', 'confirmation_source' => null]);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $counts = app(TelegramStarsOperations::class)->counts();
-        $this->assertEquals($target->total_xtr, $counts['confirmed_refunded_xtr']);
-        $this->assertSame(0, $counts['unresolved_refunds']);
+        $this->assertEquals(0, $counts['confirmed_refunded_xtr']);
+        $this->assertSame(1, $counts['unresolved_refunds']);
     }
 
     public function test_owner_preview_confirmation_and_lost_webhook_wakeup_during_pause(): void
@@ -134,7 +134,7 @@ final class TelegramStarsRefundPostgresConcurrencyTest extends TestCase
         $this->get($preview)->assertOk()->assertSee((string) $target->telegram_user_id)
             ->assertSee($target->total_xtr.' XTR')->assertDontSee('fixture-charge')->assertDontSee($target->invoice_payload);
         $this->post($action, ['password' => 'wrong'] + $form)->assertSessionHasErrors('password');
-        Http::assertNothingSent();
+        Http::assertNotSent(fn (Request $request): bool => str_ends_with($request->url(), '/refundStarPayment'));
         Http::fake(['*/refundStarPayment' => Http::response(['ok' => true, 'result' => 'true'])]); // Not a valid ACK.
         $this->post($action, $form)->assertRedirect($preview)->assertSessionHasNoErrors();
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
@@ -153,14 +153,13 @@ final class TelegramStarsRefundPostgresConcurrencyTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->artisan('telegram:recover-stars-payments')->assertSuccessful(); // Simulate a lost queue wake-up.
         $this->artisan('telegram:recover-stars-payments')->expectsOutputToContain('examined=0')->assertSuccessful();
-        $this->assertDatabaseHas('telegram_stars_refunds', ['state' => 'confirmed', 'confirmation_source' => 'webhook']);
-        $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        $this->assertDatabaseHas('telegram_stars_refunds', ['state' => 'review', 'confirmation_source' => null]);
+        $this->assertDatabaseHas('telegram_stars_refund_reviews', ['payment_id' => $payment->id, 'reason' => 'reversal_attribution_unknown']);
+        $this->get($preview)->assertOk()->assertSee('belum bisa dipastikan apakah berasal dari refund Owner');
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
-        $this->assertDatabaseHas('manual_fulfillment_reviews', ['payment_id' => $payment->id, 'state' => ManualFulfillmentReview::STATE_REFUNDED]);
+        $this->assertDatabaseHas('manual_fulfillment_reviews', ['payment_id' => $payment->id, 'state' => ManualFulfillmentReview::STATE_PENDING]);
         $this->assertDatabaseMissing('inventory_movements', ['type' => 'sale']);
-        $history = app(TelegramOrderIntents::class)->orderHistorySurface($order->customer);
-        $this->assertStringContainsString($target->total_xtr.' XTR', $history->keyboard['inline_keyboard'][0][0]['text']);
-        $this->assertStringContainsString($target->total_xtr.' XTR', app(TelegramOrderIntents::class)->orderInstruction($order->customer, $order->fresh(), $payment->fresh()));
         Http::assertSentCount(1);
     }
 
@@ -198,6 +197,7 @@ final class TelegramStarsRefundPostgresConcurrencyTest extends TestCase
         $this->acknowledgeStarsInvoiceFixture($unsent->telegramStarsDetail);
         $this->starsWebhook($this->starsQuery($unsent->telegramStarsDetail, 102))->assertJsonPath('ok', false);
         if ($late) {
+            Http::fake(['*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 702]])]);
             $this->travelTo($order->expires_at->copy()->addSecond());
             $this->artisan('orders:expire-pending')->assertSuccessful();
         }

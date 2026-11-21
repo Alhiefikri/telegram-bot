@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\TelegramOutboundEffect;
 use App\Services\TelegramStars\StarsPricingPolicyManager;
+use App\Services\TelegramStars\TelegramStarsAdmission;
 use App\Services\TelegramStars\TelegramStarsChargeIdentity;
 use App\Services\TelegramStars\TelegramStarsInvoiceTarget;
 use App\Services\TelegramStars\TelegramStarsPreCheckout;
@@ -41,7 +42,7 @@ final readonly class TelegramStarsCustomerInvoice
         if ($target->deadline_epoch <= now()->timestamp) {
             return ['key' => 'stars.invoice_expired'];
         }
-        if (! $this->policies->current()->issuanceEnabled) {
+        if (! TelegramStarsAdmission::permitsNewPayments() || ! $this->policies->current()->issuanceEnabled) {
             return ['key' => 'stars.invoice_paused'];
         }
 

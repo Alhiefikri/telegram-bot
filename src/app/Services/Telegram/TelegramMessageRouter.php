@@ -53,7 +53,7 @@ class TelegramMessageRouter
         $isPrivateChat = $this->chatPrivacy->isPrivate($chatType);
         if (preg_match('/\A\/paysupport(?:@[A-Za-z0-9_]+)?(?:\s|$)/D', $text) === 1) {
             if ($isPrivateChat && $chatId === (string) $customer->telegram_id) {
-                $this->menu->sendStarsPaymentSupport($customer, $chatId);
+                $this->navigation->presentOrSend($customer, $chatId, $this->menu->supportSurface($customer, paymentSupport: true));
             } else {
                 $this->chatPrivacy->denyMessage($customer, $chatId);
             }

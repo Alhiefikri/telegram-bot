@@ -8,7 +8,7 @@ use Throwable;
 
 final class ReportTelegramStarsHistory extends Command
 {
-    protected $signature = 'telegram:report-stars-history {--offset=0} {--pages=1} {--reconcile-refunds : Confirm only existing refund claims from matching outgoing evidence}';
+    protected $signature = 'telegram:report-stars-history {--offset=0} {--pages=1} {--reconcile-refunds : Record matching outgoing reversals for review without confirming an Owner refund}';
 
     protected $description = 'Compare bounded Stars history; optionally reconcile refunds without sending payments or refunds.';
 

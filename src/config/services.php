@@ -418,6 +418,7 @@ return [
         'token' => env('TELEGRAM_BOT_TOKEN'),
         'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
         'api_base_url' => 'https://api.telegram.org',
+        'test_network' => false, // Opt in only in an isolated local Telegram test-bot config.
         'http_timeout_seconds' => 10.0,
         'http_connect_timeout_seconds' => 3.0,
         'webhook_fast_callback_ack' => true,

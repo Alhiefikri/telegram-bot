@@ -10,8 +10,11 @@ use App\Models\TelegramUpdate;
 use App\Services\CustomerCancellationOutcome;
 use App\Services\CustomerPendingOrderCancellation;
 use App\Services\OrderLifecycle;
+use App\Services\Telegram\TelegramBotApiRequestFactory;
 use App\Services\Telegram\TelegramChatInteractionLock;
+use App\Services\Telegram\TelegramStarsCheckout;
 use App\Services\Telegram\TelegramUpdateProcessor;
+use App\Services\TelegramStars\TelegramStarsAdmission;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -103,6 +106,43 @@ final class TelegramStarsWebhookTest extends TestCase
         $this->assertDatabaseEmpty('telegram_stars_approvals');
     }
 
+    public function test_release_boundary_only_allows_the_isolated_test_network_outside_fixtures(): void
+    {
+        $buyer = Customer::factory()->create();
+        $product = $this->starsProduct();
+        $offers = app(TelegramStarsCheckout::class);
+        $this->app->instance('env', 'production');
+        config(['services.telegram.test_network' => true]);
+        $this->assertFalse(TelegramStarsAdmission::permitsNewPayments());
+        $this->assertNull($offers->offer($buyer, (string) $buyer->telegram_id, $product, 'revision', 1));
+        $requests = app(TelegramBotApiRequestFactory::class);
+        $this->assertSame('https://api.telegram.org/bot123456:fixture-token/sendInvoice', $requests->url('sendInvoice'));
+
+        $this->app->instance('env', 'local');
+        config(['services.telegram.test_network' => false]);
+        $this->assertFalse(TelegramStarsAdmission::permitsNewPayments());
+        config(['services.telegram.test_network' => true]);
+        $this->assertTrue(TelegramStarsAdmission::permitsNewPayments());
+        $this->assertSame('https://api.telegram.org/bot123456:fixture-token/test/sendInvoice', $requests->url('sendInvoice'));
+        $this->assertNotNull($offers->offer($buyer, (string) $buyer->telegram_id, $product, 'revision', 1));
+    }
+
+    public function test_approval_persisted_just_before_a_slow_commit_is_not_returned_as_a_denial(): void
+    {
+        $target = $this->starsOrder()->payments->sole()->telegramStarsDetail;
+        $this->acknowledgeStarsInvoiceFixture();
+        DB::listen(static function ($event): void {
+            if (str_starts_with($event->sql, 'update "telegram_updates" set "stars_approved"')) {
+                usleep(1_750_000);
+            }
+        });
+
+        $query = $this->starsQuery($target);
+        $this->webhook($query)->assertOk()->assertJsonPath('ok', true);
+        $this->assertDatabaseHas('telegram_updates', ['update_id' => 101, 'stars_approved' => true]);
+        $this->webhook($query)->assertOk()->assertJsonPath('ok', true);
+    }
+
     public function test_success_and_refund_are_deduplicated_and_minimized_while_paused_without_entering_chat_processing(): void
     {
         DB::table('stars_pricing_policies')->update(['issuance_enabled' => false]);
@@ -139,6 +179,8 @@ final class TelegramStarsWebhookTest extends TestCase
         }
         DB::statement("CREATE TEMP TRIGGER stars_inbox_offline BEFORE INSERT ON telegram_updates BEGIN SELECT RAISE(ABORT, 'inbox unavailable'); END");
         try {
+            $target = $this->starsOrder()->payments->sole()->telegramStarsDetail;
+            $this->webhook($this->starsQuery($target))->assertServiceUnavailable();
             $this->webhook(['update_id' => 500, 'message' => [
                 'message_id' => 1, 'from' => ['id' => 44], 'chat' => ['id' => 44, 'type' => 'private'],
                 'successful_payment' => ['currency' => 'XTR', 'total_amount' => 50, 'invoice_payload' => 'opaque', 'telegram_payment_charge_id' => 'tg-charge'],

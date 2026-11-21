@@ -93,6 +93,7 @@ final class TelegramStarsCheckoutTest extends TestCase
         $this->assertNotContains('telegram_stars', CheckoutPaymentIntents::supportedPaymentRails());
 
         DB::table('stars_pricing_policies')->update(['issuance_enabled' => false, 'idr_per_usd' => 30_000, 'version' => 2]);
+        Http::fake(['*/sendMessage' => Http::response(['ok' => true, 'result' => ['message_id' => 701]])]);
         $this->travel(16)->minutes();
         $this->artisan('orders:expire-pending')->assertSuccessful();
         $this->assertSame(OrderStatus::Expired, $order->fresh()->order_status);
@@ -106,7 +107,7 @@ final class TelegramStarsCheckoutTest extends TestCase
         $this->assertDatabaseCount('telegram_outbound_effects', 1);
         $this->assertDatabaseHas('telegram_outbound_effects', ['effect_type' => 'checkout.telegram_stars_invoice', 'source_id' => $payment->id]);
         $this->assertNull($effects->recordAdminOrderExpiredNotification($order->fresh(), '123456'));
-        Http::assertNothingSent();
+        Http::assertSentCount(1);
         Queue::assertPushed(SendTelegramStarsInvoice::class, 1);
     }
 

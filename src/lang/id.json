@@ -509,6 +509,7 @@
   "stars.accept": "Setuju · lanjut ke invoice :amount Stars",
   "stars.back": "Kembali ke pilihan pembayaran",
   "stars.refresh": "Periksa status invoice",
+  "stars.quote_expired": "Penawaran sudah kedaluwarsa. Periksa penawaran terbaru dan konfirmasi lagi.",
   "stars.terms": "Ketentuan: Pembelian ini sekali bayar dari saldo Telegram Stars pribadi. Produk dikirim ke chat privat ini setelah pembayaran terverifikasi. Bayar hanya invoice yang masih aktif. Jika ada masalah, hubungi bantuan lewat /support dan sertakan nomor pesanan, bukan kata sandi.",
   "stars.stale": "Pilihan ini sudah tidak berlaku. Buka kembali Detail Produk atau checkout Keranjang.",
   "stars.changed": "Rincian atau harga berubah. Periksa penawaran terbaru dan konfirmasi lagi.",
