@@ -12,4 +12,5 @@ enum CheckoutPostCreationBehavior
     case WijayaPayInstructions;
     case StoreBalancePaid;
     case UsdtBalancePaid;
+    case TelegramStarsPrepared;
 }

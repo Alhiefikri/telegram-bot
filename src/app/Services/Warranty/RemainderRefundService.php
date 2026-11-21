@@ -32,6 +32,9 @@ final class RemainderRefundService
         if (in_array(strtolower(trim((string) $payment->provider)), ['store_balance', 'usdt_balance'], true)) {
             throw new InvalidOrderTransition('Internal balance refunds never register an external remainder.');
         }
+        if ($payment->isTelegramStars()) {
+            throw new InvalidOrderTransition('Telegram Stars refunds cannot be recorded as an external transfer.');
+        }
 
         $refunds = OrderRefund::query()->where('payment_id', $payment->id)->orderBy('id')->lockForUpdate()->get();
         if ($refunds->isEmpty()) {

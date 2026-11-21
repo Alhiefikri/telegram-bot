@@ -34,7 +34,7 @@ final class TelegramStoreStatsReport
      * Read one customer's successful paid transaction totals without loading
      * the customer's payment history into memory.
      *
-     * @return array{IDR: int, USDT: int}
+     * @return array{IDR: int, USDT: int, XTR?: int}
      */
     public function customerTransactionTotals(Customer $customer): array
     {

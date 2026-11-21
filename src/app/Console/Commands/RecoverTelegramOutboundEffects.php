@@ -206,6 +206,9 @@ class RecoverTelegramOutboundEffects extends Command
             $operations['recover_order_lifecycle_effects'] = function () use ($pages, $pageLimit, $outboundEffects, $dispatcher, &$dispatched): void {
                 $orderDiscoveryQuery = Order::query()
                     ->with(['customer', 'payments'])
+                    ->where(fn ($query) => $query
+                        ->where('payment_status', 'paid')
+                        ->orWhereDoesntHave('payments', fn ($payments) => $payments->where('provider', PaymentProvider::TELEGRAM_STARS)))
                     ->where(function ($orders): void {
                         $orders
                             ->where(function ($checkout): void {

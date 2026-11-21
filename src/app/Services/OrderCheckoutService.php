@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Enums\BalancePaymentPreference;
+use App\Enums\CartOrigin;
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\CheckoutPaymentUnavailable;
+use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Models\BalanceRestoreGate;
 use App\Models\Cart;
@@ -15,6 +17,7 @@ use App\Models\CustomerUsdtFundingPolicy;
 use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Product;
 use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\Checkout\BalanceCheckoutRequest;
 use App\Services\Checkout\CheckoutPaymentIntent;
@@ -28,6 +31,7 @@ use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\Checkout\CheckoutPricingSnapshot;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
+use App\Services\Checkout\TelegramStarsCheckoutIntent;
 use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\Pricing\ProductQuantityPricing;
@@ -66,6 +70,34 @@ class OrderCheckoutService
         private readonly SupplierFulfillmentService $supplierFulfillment,
     ) {}
 
+    public function checkoutTelegramStarsDirect(Product $product, int $quantity, TelegramStarsCheckoutIntent $intent): Order
+    {
+        if ($intent->quote->cartId !== null || $quantity < 1) {
+            throw new InvalidCheckout('Direct Telegram Stars checkout requires a single Product selection.');
+        }
+
+        return DB::transaction(function () use ($product, $quantity, $intent): Order {
+            $customer = $this->lockStarsCustomer($intent);
+            $key = $intent->confirmation->checkoutKey;
+            if (($existing = Order::query()->where('checkout_key', $key)->first()) !== null) {
+                $this->assertCheckoutRailCanBeReused($existing, $intent);
+
+                return $existing->load(['orderItems', 'payments']);
+            }
+
+            // Direct purchases must not amend or consume the buyer's active Cart.
+            $cart = Cart::create([
+                'customer_id' => $customer->id,
+                'origin' => CartOrigin::TelegramDirect,
+                'status' => CartStatus::Active,
+                'expires_at' => now()->addHour(),
+            ]);
+            $cart->cartItems()->create(['product_id' => $product->id, 'quantity' => $quantity]);
+
+            return $this->checkout($cart, $intent, checkoutKey: $key);
+        }, 5);
+    }
+
     public function checkout(
         Cart $cart,
         ?CheckoutPaymentIntent $paymentIntent = null,
@@ -83,6 +115,11 @@ class OrderCheckoutService
         $paymentIntent ??= $balanceRequest !== null
             ? CheckoutPaymentIntents::storeBalance()
             : $this->providerResolver->resolve()->paymentIntent;
+        if ($paymentIntent instanceof TelegramStarsCheckoutIntent
+            && ($checkoutKey !== $paymentIntent->confirmation->checkoutKey || $apiOrderClaimId !== null
+                || $storefrontAdmission !== null || $resellerContext !== null)) {
+            throw new InvalidCheckout('Telegram Stars requires a private retail checkout key.');
+        }
         $this->assertStoreBalanceEligibility($cart, $paymentIntent);
         if (($termsVersion === null) !== ($termsAcceptedAt === null)) {
             throw new InvalidCheckout('Checkout terms snapshot is incomplete.');
@@ -92,7 +129,7 @@ class OrderCheckoutService
         }
         $paymentPreparation = $this->paymentPreparations->for($paymentIntent);
         $preflight = $paymentPreparation->preflight(new CheckoutPaymentPreflightContext(
-            currentSetting: ManualPaymentSetting::current(),
+            currentSetting: $paymentIntent instanceof TelegramStarsCheckoutIntent ? null : ManualPaymentSetting::current(),
             requestedProvider: $paymentIntent->provider(),
             requestedMethod: $paymentIntent->method(),
         ));
@@ -137,6 +174,12 @@ class OrderCheckoutService
             }
         }
 
+        $starsCustomer = null;
+        if ($paymentIntent instanceof TelegramStarsCheckoutIntent) {
+            // Customer → Cart → Product → policy; pin the private identity for the whole transaction.
+            $starsCustomer = $this->lockStarsCustomer($paymentIntent);
+        }
+
         if ($checkoutKey !== null && ($existing = Order::query()->where('checkout_key', $checkoutKey)->first()) !== null) {
             $this->assertCheckoutCustomer($existing, $cart);
             $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
@@ -153,12 +196,18 @@ class OrderCheckoutService
         }
 
         $lockedCart = Cart::whereKey($cart->id)->lockForUpdate()->firstOrFail();
+        if ($lockedCart->origin === CartOrigin::TelegramDirect && $starsCustomer === null) {
+            throw new InvalidCheckout('This Cart is reserved for Telegram Stars direct checkout.');
+        }
 
         if ($lockedCart->status === CartStatus::CheckedOut) {
             $existing = Order::where('cart_id', $lockedCart->id)->latest('id')->first();
             if ($existing?->order_status === OrderStatus::Cancelled) {
                 $lockedCart->update(['status' => CartStatus::Active]);
             } elseif ($existing) {
+                if ($starsCustomer !== null) {
+                    throw new InvalidCheckout('The Cart already has a checkout under another key.');
+                }
                 $this->assertCheckoutCustomer($existing, $lockedCart);
                 $this->assertCheckoutRailCanBeReused($existing, $paymentIntent);
 
@@ -217,18 +266,20 @@ class OrderCheckoutService
         }
 
         $products = $this->inventory->lockedCheckoutProducts($items);
-        $this->supplierFulfillment->lockCheckoutResources($products);
+        if ($starsCustomer === null) {
+            $this->supplierFulfillment->lockCheckoutResources($products);
+        }
         $this->assertWebReservationBudget($lockedCart, $items, $products);
 
         // Provider switch mutations and checkout creation share this lock so a
         // selected intent is persisted atomically with its order and payment.
-        $lockedSetting = ManualPaymentSetting::query()
+        $lockedSetting = $starsCustomer !== null ? null : ManualPaymentSetting::query()
             ->where('is_active', true)
             ->oldest('id')
             ->lockForUpdate()
             ->first();
 
-        if ($lockedSetting === null) {
+        if ($lockedSetting === null && $starsCustomer === null) {
             $lockedSetting = ManualPaymentSetting::query()
                 ->oldest('id')
                 ->lockForUpdate()
@@ -272,9 +323,12 @@ class OrderCheckoutService
             lockedSetting: $activeSetting,
             preflight: $preflight,
             pricing: $pricing,
+            intent: $paymentIntent,
+            lockedCustomer: $starsCustomer,
         ));
         $isStoreBalance = $paymentPlan->postCreationBehavior() === CheckoutPostCreationBehavior::StoreBalancePaid;
         $isUsdtBalance = $paymentPlan->postCreationBehavior() === CheckoutPostCreationBehavior::UsdtBalancePaid;
+        $isStars = $paymentPlan->postCreationBehavior() === CheckoutPostCreationBehavior::TelegramStarsPrepared;
         if ($isUsdtBalance) {
             if ($paymentPlan->provider() !== PaymentProvider::USDT_BALANCE
                 || $paymentPlan->method() !== UsdtBalanceCheckoutPaymentPreparation::METHOD
@@ -321,7 +375,9 @@ class OrderCheckoutService
             $usdtUnitPrice = $isUsdtPayment ? $quote->effectiveUsdtUnitAmount : null;
             $usdtSubtotal = $isUsdtPayment ? $quote->usdtSubtotal : null;
             $productIcon = $productIcons[(int) $product->getKey()] ?? $this->familyIcons->forProduct($product);
-            $localQuantity = $product->manual_unlimited ? $item->quantity : min($item->quantity, $product->localAvailableStock());
+            $localQuantity = $isStars || $product->manual_unlimited
+                ? $item->quantity
+                : min($item->quantity, $product->localAvailableStock());
             $supplierQuantity = $item->quantity - $localQuantity;
             $orderItem = OrderItem::create([
                 'order_id' => $order->id,
@@ -347,7 +403,10 @@ class OrderCheckoutService
                 'subtotal' => $quote->idrSubtotal,
                 'usdt_subtotal' => $usdtSubtotal,
             ]);
-            $this->credentials->allocate($orderItem, $product, $localQuantity, allowDeferred: true);
+            $this->credentials->allocate($orderItem, $product, $localQuantity, allowDeferred: ! $isStars);
+            if ($isStars && $orderItem->stockItems()->whereNull('supplier_purchase_id')->whereNull('retired_at')->count() !== $item->quantity) {
+                throw new InsufficientStock('Telegram Stars requires full local credential stock.');
+            }
             if ($supplierQuantity > 0) {
                 $this->supplierFulfillment->reserve($orderItem, $product, $supplierQuantity, $quote->idrSubtotal);
             }
@@ -377,7 +436,7 @@ class OrderCheckoutService
                 'order:'.$order->getKey().':usdt:debit',
             );
             $this->lifecycle->applyPaymentPaid($payment);
-        } else {
+        } elseif (! $isStars) {
             $this->outboundEffects->recordCheckoutInstructions($order, $payment, $lockedCart->customer);
             $this->outboundEffects->recordAdminOrderPendingNotification($order);
         }
@@ -408,6 +467,17 @@ class OrderCheckoutService
         }
     }
 
+    private function lockStarsCustomer(TelegramStarsCheckoutIntent $intent): Customer
+    {
+        $customer = Customer::query()->whereKey($intent->confirmation->customerId)
+            ->lock(DB::getDriverName() === 'pgsql' ? 'for no key update' : true)->first();
+        if ($customer === null || ! $intent->confirmation->matchesCustomer($customer)) {
+            throw new InvalidCheckout('Telegram Stars buyer is unavailable.');
+        }
+
+        return $customer;
+    }
+
     private function isUniqueViolation(QueryException $e): bool
     {
         return in_array((string) ($e->errorInfo[0] ?? ''), ['23000', '23505'], true) || str_contains(strtolower($e->getMessage()), 'unique');
@@ -416,6 +486,17 @@ class OrderCheckoutService
     private function assertCheckoutRailCanBeReused(Order $order, CheckoutPaymentIntent $paymentIntent): void
     {
         $existingMethod = $order->payments()->latest('created_at')->value('method');
+        if ($existingMethod === TelegramStarsCheckoutIntent::METHOD || $paymentIntent instanceof TelegramStarsCheckoutIntent) {
+            $target = $order->payments()->where('provider', PaymentProvider::TELEGRAM_STARS)->first()?->telegramStarsDetail;
+            if (! $paymentIntent instanceof TelegramStarsCheckoutIntent || $target === null
+                || (int) $order->customer_id !== $paymentIntent->confirmation->customerId
+                || $target->telegram_user_id !== $paymentIntent->confirmation->telegramUserId
+                || $target->chat_id !== $paymentIntent->confirmation->chatId) {
+                throw new InvalidCheckout('Checkout key does not match the Telegram Stars target.');
+            }
+
+            return;
+        }
         if ($existingMethod === null || $existingMethod === $paymentIntent->method()) {
             return;
         }

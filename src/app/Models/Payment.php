@@ -115,6 +115,16 @@ class Payment extends Model
         return $this->hasOne(PaymentBscDetail::class);
     }
 
+    public function telegramStarsDetail()
+    {
+        return $this->hasOne(PaymentTelegramStarsDetail::class);
+    }
+
+    public function isTelegramStars(): bool
+    {
+        return $this->providerName() === PaymentProvider::TELEGRAM_STARS;
+    }
+
     public function paymentBscDetail()
     {
         return $this->bscDetail();
@@ -140,6 +150,7 @@ class Payment extends Model
         return Attribute::make(
             get: fn (): string => match (true) {
                 $this->providerName() === PaymentProvider::PAKASIR => 'QRIS',
+                $this->isTelegramStars() => 'Telegram Stars',
                 default => $this->localPaymentMethodLabel(),
             },
         );

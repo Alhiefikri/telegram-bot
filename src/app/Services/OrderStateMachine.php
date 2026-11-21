@@ -64,6 +64,9 @@ class OrderStateMachine implements OrderLifecycle
                 if (! $lockedPayment) {
                     throw new InvalidOrderTransition('Payment is not attached to order.');
                 }
+                if ($lockedPayment->isTelegramStars()) {
+                    throw new InvalidOrderTransition('Telegram Stars settlement requires verified Telegram payment evidence.');
+                }
 
                 return $this->applyPaidTransition($lockedPayment, $order);
             });
@@ -174,6 +177,9 @@ class OrderStateMachine implements OrderLifecycle
                 $lockedPayment = $payments->firstWhere('id', $payment->id);
                 if (! $lockedPayment) {
                     throw new InvalidOrderTransition('Payment is not attached to order.');
+                }
+                if ($lockedPayment->isTelegramStars()) {
+                    throw new InvalidOrderTransition('Telegram Stars refunds require verified Telegram refund evidence.');
                 }
                 if ($lockedPayment->manual_alternative_at !== null) {
                     if (! in_array($lockedPayment->status, [PaymentStatus::Paid, PaymentStatus::Refunded], true)) {
@@ -603,24 +609,28 @@ class OrderStateMachine implements OrderLifecycle
             }
             $this->providerCancellationAttempts()->schedule($payment);
         }
+        $isStars = $payments->contains(fn (Payment $payment): bool => $payment->isTelegramStars());
         $order->update([
             'order_status' => $orderStatus,
             'payment_status' => $paymentStatus,
-            ...($orderStatus === OrderStatus::Cancelled ? ['checkout_key' => null] : []),
+            ...($orderStatus === OrderStatus::Cancelled && ! $isStars ? ['checkout_key' => null] : []),
         ]);
-        if ($orderStatus === OrderStatus::Expired) {
-            $this->recordGuestNotification($order, GuestOrderNotificationEvent::OrderExpired);
-        } elseif ($orderStatus === OrderStatus::Cancelled) {
-            $this->recordGuestNotification($order, GuestOrderNotificationEvent::OrderCancelled);
-        }
-        $this->dispatchAdminPendingNotificationDelete($order);
-        if ($orderStatus === OrderStatus::Cancelled) {
-            DeleteBuyerCheckoutMessages::dispatch((string) $order->id, now()->toISOString())
-                ->onQueue('notifications')
-                ->afterCommit();
-        }
-        if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {
-            $this->recordAndDispatchAdminOrderExpired($order);
+        // Preparation-only targets never had a customer invoice or an admin message.
+        if (! $isStars) {
+            if ($orderStatus === OrderStatus::Expired) {
+                $this->recordGuestNotification($order, GuestOrderNotificationEvent::OrderExpired);
+            } elseif ($orderStatus === OrderStatus::Cancelled) {
+                $this->recordGuestNotification($order, GuestOrderNotificationEvent::OrderCancelled);
+            }
+            $this->dispatchAdminPendingNotificationDelete($order);
+            if ($orderStatus === OrderStatus::Cancelled) {
+                DeleteBuyerCheckoutMessages::dispatch((string) $order->id, now()->toISOString())
+                    ->onQueue('notifications')
+                    ->afterCommit();
+            }
+            if ($orderStatus === OrderStatus::Expired && $paymentStatus === PaymentStatus::Expired) {
+                $this->recordAndDispatchAdminOrderExpired($order);
+            }
         }
 
         $released = $order->fresh(['payments']);

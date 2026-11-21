@@ -10,6 +10,7 @@ use App\Services\Checkout\PaymentPlan\KlikQrisCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\ManualQrisCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\SakurupiahCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\StoreBalanceCheckoutPaymentSnapshot;
+use App\Services\Checkout\PaymentPlan\TelegramStarsCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\UsdtBalanceCheckoutPaymentSnapshot;
 use App\Services\Checkout\PaymentPlan\WijayaPayCheckoutPaymentSnapshot;
 use Carbon\CarbonImmutable;
@@ -65,11 +66,17 @@ final readonly class CheckoutPaymentPlan
             CheckoutPaymentPreparationIdentity::key('manual', 'USDT_BEP20') => BscCheckoutPaymentSnapshot::class,
             CheckoutPaymentPreparationIdentity::key('store_balance', 'STORE_BALANCE') => StoreBalanceCheckoutPaymentSnapshot::class,
             CheckoutPaymentPreparationIdentity::key('usdt_balance', 'USDT_BALANCE') => UsdtBalanceCheckoutPaymentSnapshot::class,
+            TelegramStarsCheckoutPaymentPreparation::IDENTITY => TelegramStarsCheckoutPaymentSnapshot::class,
             default => null,
         };
 
         if ($expectedSnapshot === null || ! $this->railSnapshot instanceof $expectedSnapshot) {
             throw new InvalidArgumentException('Checkout payment plan has an invalid typed rail snapshot.');
+        }
+        if ($this->railSnapshot instanceof TelegramStarsCheckoutPaymentSnapshot
+            && ($orderCurrency !== 'IDR' || ! $this->orderExpiresAt->equalTo($this->paymentExpiresAt)
+                || $postCreationBehavior !== CheckoutPostCreationBehavior::TelegramStarsPrepared)) {
+            throw new InvalidArgumentException('Telegram Stars requires an IDR catalog basis and a common reservation deadline.');
         }
     }
 

@@ -9,6 +9,7 @@ use App\Services\Bsc\BscPaymentVerification;
 use App\Services\Bsc\BscVerificationOutcome;
 use App\Services\OrderLifecycle;
 use App\Services\Telegram\TelegramOrderExpiredNotifier;
+use App\Support\PaymentProvider;
 use Illuminate\Console\Command;
 use Throwable;
 
@@ -69,7 +70,9 @@ class ExpirePendingOrders extends Command
                         }
 
                         $expiredThisRun[] = (string) $result->order->id;
-                        $notifier->send($result->order);
+                        if (! $result->order->payments->contains(fn ($payment): bool => $payment->isTelegramStars())) {
+                            $notifier->send($result->order);
+                        }
                         $processed++;
                     } catch (Throwable $e) {
                         report($e);
@@ -82,6 +85,7 @@ class ExpirePendingOrders extends Command
         $cutoff = now()->subSeconds(max(60, (int) config('services.telegram.claim_lease_seconds', 600)));
         Order::query()
             ->where('order_status', OrderStatus::Expired)
+            ->whereDoesntHave('payments', fn ($query) => $query->where('provider', PaymentProvider::TELEGRAM_STARS))
             ->when($expiredThisRun !== [], fn ($query) => $query->whereNotIn('id', $expiredThisRun))
             ->whereNull('telegram_expired_order_notified_at')
             ->whereNull('telegram_expired_order_notification_failed_at')

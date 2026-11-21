@@ -483,6 +483,9 @@ class ManualFulfillmentResolutionService
             app(SupplierFulfillmentService::class)->assertRefundable($order);
         }
         $payment = Payment::query()->findOrFail($review->payment_id);
+        if ($payment->isTelegramStars()) {
+            throw new InvalidOrderTransition('Telegram Stars refunds require the original Telegram charge.');
+        }
         if (in_array($payment->provider, ['store_balance', 'usdt_balance'], true)) {
             $this->orders->applyPaymentRefunded($payment);
 

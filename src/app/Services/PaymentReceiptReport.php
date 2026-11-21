@@ -145,7 +145,7 @@ class PaymentReceiptReport
      * belong to store earnings. IDR and USDT are returned in their persisted
      * integer units (rupiah and micro-USDT).
      *
-     * @return array{IDR: int, USDT: int}
+     * @return array{IDR: int, USDT: int, XTR?: int}
      */
     public function customerTransactionTotals(int $customerId, ?Carbon $createdFrom = null, ?Carbon $createdUntil = null): array
     {
@@ -162,11 +162,13 @@ class PaymentReceiptReport
             ])
             ->selectRaw("COALESCE(SUM(CASE WHEN {$currency} = 'IDR' THEN {$amount} ELSE 0 END), 0) AS idr_total")
             ->selectRaw("COALESCE(SUM(CASE WHEN {$currency} = 'USDT' THEN {$amount} ELSE 0 END), 0) AS usdt_total")
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$currency} = 'XTR' THEN {$amount} ELSE 0 END), 0) AS xtr_total")
             ->first();
 
         return [
             'IDR' => (int) ($totals?->idr_total ?? 0),
             'USDT' => (int) ($totals?->usdt_total ?? 0),
+            ...($totals?->xtr_total > 0 ? ['XTR' => (int) $totals->xtr_total] : []),
         ];
     }
 

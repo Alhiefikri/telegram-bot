@@ -67,7 +67,7 @@ final class WarrantySettlementService
                 $claim->update(['customer_id' => $customer->id]);
                 $this->audit->log('warranty.guest_claim_linked', $claim, old: ['customer_id' => $oldCustomerId], new: ['customer_id' => $customer->id]);
             }
-            if ($payment === null || $order->payment_status !== PaymentStatus::Paid
+            if ($payment === null || $payment->isTelegramStars() || $order->payment_status !== PaymentStatus::Paid
                 || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)
                 || $claim->state !== 'approved' || $claim->verified_at === null
                 || $claim->settlement_state !== 'awaiting_choice' || ($stock->retired_at !== null && ! $switchingSafeReplacement)
@@ -123,7 +123,7 @@ final class WarrantySettlementService
             [$claim, $order, $unit, $stock] = $this->claims->lockForSettlement($initialClaim);
             $refund = OrderRefund::query()->whereKey($initial->id)->lockForUpdate()->firstOrFail();
             $payment = Payment::query()->whereKey($refund->payment_id)->firstOrFail();
-            if (in_array($payment->provider, ['store_balance', 'usdt_balance'], true) || $refund->amount !== $amount || $refund->currency !== $currency
+            if ($payment->isTelegramStars() || in_array($payment->provider, ['store_balance', 'usdt_balance'], true) || $refund->amount !== $amount || $refund->currency !== $currency
                 || $claim->settlement_choice !== 'refund' || $refund->order_id !== $order->id
                 || (int) $refund->supplier_account_unit_id !== (int) $unit->id) {
                 throw new InvalidOrderTransition('External refund does not match the registered entitlement.');

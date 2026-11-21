@@ -9,6 +9,7 @@ use App\Services\AuditLogger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use LogicException;
 use RuntimeException;
 
 final class StarsPricingPolicyManager
@@ -18,6 +19,15 @@ final class StarsPricingPolicyManager
     public function current(): StarsPricingPolicy
     {
         return $this->snapshot(StarsPricingPolicyRecord::query()->findOrFail(StarsPricingPolicyRecord::SINGLETON_ID));
+    }
+
+    public function lockForCheckout(): StarsPricingPolicy
+    {
+        if (DB::transactionLevel() === 0) {
+            throw new LogicException('Telegram Stars policy lock requires a checkout transaction.');
+        }
+
+        return $this->snapshot(StarsPricingPolicyRecord::query()->sharedLock()->findOrFail(StarsPricingPolicyRecord::SINGLETON_ID));
     }
 
     public function change(User $actor, StarsPricingPolicy $proposal, ?string $ip): bool
