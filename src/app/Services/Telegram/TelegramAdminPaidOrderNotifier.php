@@ -366,7 +366,7 @@ class TelegramAdminPaidOrderNotifier
         if ($fulfillments->isNotEmpty()) {
             $rows[] = [['text' => 'Tangani invoice', 'url' => route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]), 'style' => 'primary']];
         }
-        $rows[] = [['text' => 'Buka Dashboard', 'url' => route('admin.orders.show', $order)]];
+        $rows[] = [['text' => '🧾 Buka detail invoice', 'url' => route('admin.orders.show', $order), 'style' => 'primary']];
 
         return ['inline_keyboard' => $rows];
     }

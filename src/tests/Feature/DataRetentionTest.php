@@ -19,6 +19,25 @@ class DataRetentionTest extends TestCase
 {
     use RefreshDatabase;
 
+    #[DataProvider('retainedStarsEvents')]
+    public function test_regular_cleanup_does_not_delete_processed_stars_evidence(string $event): void
+    {
+        config()->set('services.data_retention_days', 30);
+        $old = now()->subDays(31);
+        $ordinary = TelegramUpdate::factory()->create(['processed_at' => $old, 'created_at' => $old]);
+        $stars = TelegramUpdate::factory()->create(['processed_at' => $old, 'created_at' => $old, 'stars_event' => $event]);
+
+        $this->artisan('ops:cleanup-retained-data --max-rows=1')->assertSuccessful();
+
+        $this->assertDatabaseMissing('telegram_updates', ['id' => $ordinary->id]);
+        $this->assertDatabaseHas('telegram_updates', ['id' => $stars->id, 'stars_event' => $event]);
+    }
+
+    public static function retainedStarsEvents(): array
+    {
+        return [['pre_checkout'], ['successful_payment'], ['refunded_payment']];
+    }
+
     public function test_cleanup_retained_data_preserves_payment_evidence_and_retention_boundaries(): void
     {
         $this->freezeTime();

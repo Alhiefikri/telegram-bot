@@ -121,17 +121,21 @@ test("does not rotate verified activity for reduced-motion users", async ({
   await expect(message).toHaveText(initialMessage ?? "");
 });
 
-test("only the shop catalog shows Admin-managed banner images", async ({
+test("the home and shop catalogs both show Admin-managed banner images", async ({
   page,
 }) => {
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-  await expect(page.locator(".storefront-banner-carousel")).toHaveCount(0);
+  await expect(page.locator(".storefront-banner-carousel")).toBeVisible();
+  const homeImages = await page
+    .locator(".storefront-banner-slide img")
+    .evaluateAll((images) => images.map((image) => image.getAttribute("src")));
   await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".storefront-banner-carousel")).toBeVisible();
   const shopImages = await page
     .locator(".storefront-banner-slide img")
     .evaluateAll((images) => images.map((image) => image.getAttribute("src")));
   expect(shopImages).toHaveLength(3);
+  expect(homeImages).toEqual(shopImages);
   expect(
     shopImages.every((src) =>
       src.endsWith("/assets/storefront-banner-test.svg")
@@ -354,6 +358,37 @@ test("keeps the neighbouring banner a narrow peek", async ({ page }) => {
     expect(geometry.peek).toBeGreaterThan(0);
     expect(geometry.peek / geometry.slide).toBeLessThanOrEqual(0.06);
   }
+});
+
+test("family navigation updates the catalog in place and supports Back", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    document.documentElement.dataset.navigationFixture = "original-document";
+  });
+  const family = page.locator(
+    '[data-catalog-sidebar] [data-catalog-link][href*="family=preview-family"]'
+  );
+  const fragment = page.waitForResponse(
+    (response) =>
+      response.url().includes("family=preview-family") &&
+      response.headers()["x-storefront-catalog"] === "1"
+  );
+  await family.click();
+  expect((await fragment).ok()).toBe(true);
+  await expect(family).toHaveAttribute("aria-current", "true");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-navigation-fixture",
+    "original-document"
+  );
+  await page.goBack();
+  await expect(family).not.toHaveAttribute("aria-current", "true");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-navigation-fixture",
+    "original-document"
+  );
 });
 
 test("family image stays contained and preview closes with Escape", async ({

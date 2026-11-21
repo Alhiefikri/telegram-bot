@@ -175,12 +175,16 @@ class StorefrontHomeCatalogTest extends TestCase
         $active = $maintenance->change(true, 'Fixture maintenance notice', $maintenance->current()->version, $actor, null);
         foreach (['/', '/', '/?family=maintenance-plans'] as $path) {
             $this->get($path)->assertOk()->assertSee('Fixture maintenance notice')
-                ->assertSee(__('storefront_funnel.view_details'))->assertSee($details, false)
+                ->assertSee('Lihat detail')->assertSee($details, false)
                 ->assertSee($waitlist, false)->assertSee('#waitlist', false)
                 ->assertDontSee($checkout, false)->assertDontSee('Beli sekarang');
         }
         $this->get($details)->assertOk()->assertSee('Ready Plan');
         $this->get($waitlist)->assertOk()->assertSee('Dapatkan kabar saat stok tersedia');
+        $this->get('/?family=maintenance-plans', ['X-Storefront-Catalog' => '1'])->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertSee('Fixture maintenance notice')->assertSee($details, false)
+            ->assertSee('#waitlist', false)->assertDontSee($checkout, false);
 
         $maintenance->change(false, null, $active->newState->version, $actor, null);
         foreach (['/', '/?family=maintenance-plans'] as $path) {

@@ -184,7 +184,7 @@
     .storefront-shell .storefront-banner-carousel {
       --sf-banner-frame: var(--sf-layout-width);
       --sf-banner-slide: min(
-        84rem,
+        100rem,
         calc(
           var(--sf-banner-frame) - 2 *
             (var(--sf-banner-peek) + var(--sf-banner-gap))
