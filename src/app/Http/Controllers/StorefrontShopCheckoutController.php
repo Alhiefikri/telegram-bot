@@ -51,6 +51,7 @@ class StorefrontShopCheckoutController extends Controller
                 $session,
                 authorizeNewCheckout: fn () => $challenge->verify($request),
                 visitorIp: $request->ip(),
+                customer: $request->user('customer'),
             );
         } catch (StorefrontCheckoutLimitReached $exception) {
             $events->checkoutSubmitted($product, null, [

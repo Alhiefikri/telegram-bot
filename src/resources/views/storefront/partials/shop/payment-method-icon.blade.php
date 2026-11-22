@@ -1,4 +1,11 @@
 @switch($method)
+    @case('store_balance')
+        <span aria-hidden="true" class="grid size-9 place-items-center rounded-lg bg-blue-100 text-blue-800">
+            <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                <path d="M20 8V6a2 2 0 0 0-2-2H6a3 3 0 0 0 0 6h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a3 3 0 0 1-3-3V7m19 6h-5a1.5 1.5 0 0 0 0 3h5" />
+            </svg>
+        </span>
+        @break
     @case('qris')
         <span aria-hidden="true" class="grid size-9 place-items-center rounded-lg bg-rose-100 text-rose-800">
             <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">

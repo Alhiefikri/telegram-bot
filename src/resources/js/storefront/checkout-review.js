@@ -294,7 +294,7 @@ export default function checkoutReview(initialConfig = {}) {
       }
 
       const isUsdt = this.$refs?.checkoutForm?.querySelector(
-        'input[name="payment_method"]:is(:checked, [type="hidden"]):not([value="qris"])'
+        'input[name="payment_method"]:is(:checked, [type="hidden"]):is([value="binance_pay_id"], [value="usdt_bep20"])'
       );
       const subtotal = isUsdt
         ? formatUsdt(quote.usdtSubtotal, copy.unavailable)

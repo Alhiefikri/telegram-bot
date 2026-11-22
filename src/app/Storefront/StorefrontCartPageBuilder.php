@@ -3,10 +3,14 @@
 namespace App\Storefront;
 
 use App\Models\Cart;
+use App\Models\Customer;
 use App\Models\Product;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\CheckoutMaintenance\CheckoutMaintenanceState;
 use App\Services\Pricing\ProductQuantityPricing;
+use App\Services\StoreBalance\StoreBalanceLedger;
+use App\Services\UsdtFunding\CustomerUsdtFundingGate;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Support\Collection;
 
@@ -20,6 +24,8 @@ final class StorefrontCartPageBuilder
         private readonly CheckoutMaintenance $maintenance,
         private readonly StorefrontSeo $seo,
         private readonly ProductQuantityPricing $pricing,
+        private readonly StoreBalanceLedger $balance,
+        private readonly CustomerUsdtFundingGate $fundingGate,
     ) {}
 
     /**
@@ -74,7 +80,7 @@ final class StorefrontCartPageBuilder
         ];
     }
 
-    public function checkoutReview(Session $session): ?StorefrontCheckoutReviewPresentation
+    public function checkoutReview(Session $session, ?Customer $customer = null): ?StorefrontCheckoutReviewPresentation
     {
         $cart = $this->guestCarts->current($session);
         if ($cart === null || $cart->cartItems->isEmpty()) {
@@ -84,22 +90,23 @@ final class StorefrontCartPageBuilder
         return $this->buildReview(new StorefrontCartCheckoutReviewSource(
             cart: $cart,
             snapshot: $this->guestCarts->snapshotToken($cart),
-        ));
+        ), $customer);
     }
 
     public function directCheckoutReview(
         Product $product,
         mixed $requestedQuantity = null,
         ?string $returnUrl = null,
+        ?Customer $customer = null,
     ): StorefrontCheckoutReviewPresentation {
         return $this->buildReview(new StorefrontDirectCheckoutReviewSource(
             product: $product,
             quantity: $this->normalizeQuantity($requestedQuantity, $product->availableStock()),
             returnUrl: $returnUrl,
-        ));
+        ), $customer);
     }
 
-    private function buildReview(StorefrontCheckoutReviewSource $source): StorefrontCheckoutReviewPresentation
+    private function buildReview(StorefrontCheckoutReviewSource $source, ?Customer $customer): StorefrontCheckoutReviewPresentation
     {
         $maintenance = $this->maintenance->current();
         $cart = $source instanceof StorefrontCartCheckoutReviewSource ? $source->cart : null;
@@ -115,15 +122,12 @@ final class StorefrontCartPageBuilder
                 maintenanceState: $maintenance,
                 observeExternalReadiness: false,
             )]);
-        $paymentOptions = $this->paymentOptions($items, $presentations, $maintenance);
+        $paymentOptions = $this->paymentOptions($items, $presentations, $maintenance, $customer);
         $hasConflicts = $items->contains(fn (StorefrontCartItemPresentation $item): bool => $item->hasConflict());
         $productPresentation = $presentations->first();
-        $directCanSubmit = $directProduct === null
-            || ($productPresentation instanceof StorefrontProductPresentation && $productPresentation->isBuyable);
         $canSubmit = ! $maintenance->active
             && ! $hasConflicts
-            && $paymentOptions !== []
-            && $directCanSubmit;
+            && $paymentOptions !== [];
         $metadata = $this->seo->privatePage(
             $directProduct === null
                 ? 'Review Checkout | '.$this->storefront->brand()
@@ -132,7 +136,7 @@ final class StorefrontCartPageBuilder
                 ? 'Tinjau keranjang Anda sebelum membuat order di '.$this->storefront->brand().'.'
                 : 'Tinjau '.$directProduct->name.' sebelum membuat order di '.$this->storefront->brand().'.',
         );
-        $unavailableNotice = $this->directUnavailableNotice(
+        $unavailableNotice = $canSubmit ? null : $this->directUnavailableNotice(
             $source,
             $items,
             $productPresentation,
@@ -281,6 +285,7 @@ final class StorefrontCartPageBuilder
         Collection $items,
         Collection $presentations,
         CheckoutMaintenanceState $maintenance,
+        ?Customer $customer = null,
     ): array {
         if ($items->isEmpty() || $maintenance->active || $items->contains(
             fn (StorefrontCartItemPresentation $item): bool => $item->hasConflict(),
@@ -309,6 +314,18 @@ final class StorefrontCartPageBuilder
                 'description' => $choice->description,
                 'provider' => $choice->provider,
             ];
+        }
+
+        if ($customer !== null && $items->sum(fn (StorefrontCartItemPresentation $item): int => $item->subtotal ?? 0) > 0) {
+            $balance = $this->balance->snapshot($customer);
+            if ($balance->isAvailable() && $balance->balance() > 0 && $this->fundingGate->spendingAvailability()->available) {
+                $options[] = [
+                    'value' => CheckoutPaymentIntents::RAIL_STORE_BALANCE,
+                    'label' => StorefrontLocale::text('wallet_label'),
+                    'description' => StorefrontLocale::text('wallet_description', ['balance' => $this->storefront->idr($balance->balance())]),
+                    'provider' => null,
+                ];
+            }
         }
 
         return $options;

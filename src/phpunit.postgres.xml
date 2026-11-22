@@ -15,6 +15,7 @@
             <file>tests/Feature/ProductResellerUsdtBasePriceConstraintTest.php</file>
             <file>tests/Feature/StorefrontProductCheckoutTest.php</file>
             <file>tests/Feature/StorefrontShopCheckoutTest.php</file>
+            <file>tests/Feature/StorefrontWalletCheckoutTest.php</file>
             <file>tests/Feature/StorefrontCheckoutChallengeTest.php</file>
             <file>tests/Feature/StorefrontCheckoutAdmissionTest.php</file>
             <file>tests/Feature/StorefrontCheckoutAdmissionPostgresConcurrencyTest.php</file>

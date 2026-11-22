@@ -4,6 +4,8 @@ namespace App\Storefront;
 
 use App\Exceptions\CheckoutPaymentAmountOutsideLimits;
 use App\Exceptions\CheckoutPaymentUnavailable;
+use App\Exceptions\CheckoutPriceChanged;
+use App\Exceptions\InsufficientCheckoutBalance;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCartState;
 use App\Exceptions\InvalidCheckout;
@@ -25,6 +27,8 @@ final class StorefrontCheckoutError extends InvalidCheckout
             $exception instanceof TelegramStockReserved => 'telegram_stock_reserved',
             $exception instanceof InsufficientStock => 'insufficient_stock',
             $exception instanceof InvalidCartState => 'cart_changed',
+            $exception instanceof CheckoutPriceChanged => 'wallet_price_changed',
+            $exception instanceof InsufficientCheckoutBalance => 'wallet_insufficient',
             $exception instanceof CheckoutPaymentAmountOutsideLimits => 'qris_amount_outside_limits',
             $exception instanceof CheckoutPaymentUnavailable => 'payment_unavailable',
             default => 'checkout_retry',

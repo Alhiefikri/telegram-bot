@@ -99,3 +99,14 @@ selection snapshot is descriptive; the actual Payment and original debit still
 authorize refunds. Historical financial currency is never relabeled.
 
 See [the current cross-flow lock graph and runtime evidence](../balance-a0-baseline.md#s03-atomic-dual-balance-checkout-620).
+
+## Web Storefront checkout
+
+Signed-in Customers can explicitly pay the full IDR total from their own
+Store Balance regardless of sign-in method. The web option never uses USDT,
+looks up an account via checkout contact details, or changes the bot Cart.
+Checkout binds the replay identity to the browser and Customer, uses an
+isolated `web_balance` Cart, and compares the displayed total with locked
+canonical pricing before the ledger debit. A successful cart checkout
+consumes the source web Cart in the same transaction. Guest checkout and
+external payment methods retain their existing paths.

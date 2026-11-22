@@ -59,7 +59,11 @@ class StorefrontShopCheckoutRequest extends FormRequest
             'email' => ['nullable', 'string', 'email:rfc', 'max:254'],
             'support_contact_channel' => $supportChannelRules,
             'support_contact_value' => $supportValueRules,
-            'payment_method' => ['nullable', Rule::in(CheckoutPaymentIntents::acceptedPaymentRails())],
+            'payment_method' => ['nullable', Rule::in([
+                ...CheckoutPaymentIntents::acceptedPaymentRails(),
+                CheckoutPaymentIntents::RAIL_STORE_BALANCE,
+            ])],
+            'wallet_expected_total' => ['exclude_unless:payment_method,store_balance', 'required', 'integer', 'min:1'],
             'cart_snapshot' => [
                 'nullable',
                 'string',
@@ -151,6 +155,7 @@ class StorefrontShopCheckoutRequest extends FormRequest
             'support_contact_value.regex' => StorefrontLocale::text('valid_sakurupiah_whatsapp'),
             'support_contact_value.*' => StorefrontLocale::text('contact_invalid'),
             'payment_method.*' => StorefrontLocale::text('available_payment_method'),
+            'wallet_expected_total.*' => StorefrontLocale::text('wallet_price_changed'),
             'cart_snapshot.required_without' => StorefrontLocale::text('cart_or_one_product'),
             'cart_snapshot.prohibits' => StorefrontLocale::text('cart_or_one_only'),
             'cart_snapshot.*' => StorefrontLocale::text('reopen_checkout'),

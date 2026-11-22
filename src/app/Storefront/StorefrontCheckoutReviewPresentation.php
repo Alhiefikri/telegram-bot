@@ -67,6 +67,7 @@ final readonly class StorefrontCheckoutReviewPresentation
                 'qris' => 'QRIS',
                 'binance_pay_id' => 'Binance Pay',
                 'usdt_bep20' => 'USDT BSC (BEP20)',
+                default => $option['label'],
             },
         ], $this->paymentOptions);
 

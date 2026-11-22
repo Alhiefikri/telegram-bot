@@ -72,6 +72,7 @@
                         'quantity' => 'checkout-quantity',
                         'buyer_name' => $checkoutCustomer ? 'checkout-customer-name' : 'checkout-buyer-name',
                         'payment_method' => 'checkout-payment-method',
+                        'wallet_expected_total' => 'checkout-payment-method',
                         'email' => 'checkout-email',
                         'support_contact_channel' => $paymentRequiresPhone ? 'checkout-sakurupiah-phone' : 'checkout-support-contact-channel',
                         'support_contact_value' => $paymentRequiresPhone ? 'checkout-sakurupiah-phone' : 'checkout-support-contact-value',
@@ -154,6 +155,9 @@
                     @if ($showFields)
                         @csrf
                         <input type="hidden" name="checkout_attempt" value="{{ old('checkout_attempt', (string) \Illuminate\Support\Str::uuid()) }}">
+                        @if (in_array('store_balance', array_column($checkoutPaymentOptions, 'value'), true))
+                            <input type="hidden" name="wallet_expected_total" value="{{ $checkoutQuantityQuoted ? $cartSubtotal : '' }}" @if ($checkoutSource === 'direct') x-bind:value="quote?.idrSubtotal ?? ''" @endif>
+                        @endif
                         @if ($checkoutSource === 'direct' && $checkoutProduct)
                             <input type="hidden" name="product_id" value="{{ $checkoutProduct->id }}">
                         @elseif ($checkoutSnapshot)
@@ -302,13 +306,13 @@
                             <dt>{{ __('storefront_funnel.product_subtotal') }}</dt>
                             <dd data-checkout-order-subtotal>
                                 <span class="checkout-idr" @if ($checkoutSource === 'direct' && $checkoutCanSubmit) x-text="subtotalIdr" @endif>{{ $checkoutQuantityQuoted ? $storefront->idr($cartSubtotal) : __('storefront_funnel.not_yet_available') }}</span>
-                                @if ($cartUsdtSubtotal !== null && collect($checkoutPaymentOptions)->contains(fn (array $option): bool => $option['value'] !== 'qris'))
+                                @if ($cartUsdtSubtotal !== null && array_intersect(['binance_pay_id', 'usdt_bep20'], array_column($checkoutPaymentOptions, 'value')))
                                     <span class="checkout-usdt" @if ($checkoutSource === 'direct' && $checkoutCanSubmit) x-text="subtotalUsdt" @endif>{{ $checkoutQuantityQuoted ? $storefront->usdt($cartUsdtSubtotal) : __('storefront_funnel.not_yet_available') }}</span>
                                 @endif
                             </dd>
                         </div>
                     </dl>
-                    <p class="-mt-2 text-sm text-[var(--sf-muted)]">{{ __('storefront_funnel.payable_on_invoice') }}</p>
+                    <p class="checkout-external-only -mt-2 text-sm text-[var(--sf-muted)]">{{ __('storefront_funnel.payable_on_invoice') }}</p>
 
                     @if ($showFields)
                         <label for="checkout-terms-accepted" class="flex min-h-11 items-start gap-2 py-1 text-sm font-semibold">
@@ -333,11 +337,12 @@
 
                         <button type="submit" data-checkout-submit class="checkout-submit min-h-12 w-full rounded-lg px-3 py-2 text-base font-bold" x-bind:disabled="submitting || @js(! $checkoutCanSubmit)" @if (! $checkoutCanSubmit) disabled aria-describedby="checkout-submit-disabled-help" @endif @if ($paymentHasSakurupiah && $paymentOptionCount > 1) formnovalidate x-bind:formnovalidate="false" @endif>
                             @forelse ($checkoutPaymentOptions as $option)
-                                <span class="checkout-rail-copy" data-rail="{{ $option['value'] }}">{{ __('storefront_funnel.create_invoice') }} {{ $option['label'] }}</span>
+                                <span class="checkout-rail-copy" data-rail="{{ $option['value'] }}">{{ $option['value'] === 'store_balance' ? __('storefront_funnel.wallet_pay') : __('storefront_funnel.create_invoice').' '.$option['label'] }}</span>
                             @empty
                                 {{ __('storefront_funnel.checkout_unavailable') }}
                             @endforelse
-                            <span x-cloak x-show="submitting">{{ __('storefront_funnel.creating_invoice') }}</span>
+                            <span class="checkout-external-only" x-cloak x-show="submitting">{{ __('storefront_funnel.creating_invoice') }}</span>
+                            <span class="checkout-wallet-processing" x-cloak x-show="submitting">{{ __('storefront_funnel.wallet_processing') }}</span>
                         </button>
                     @endif
                     </section>

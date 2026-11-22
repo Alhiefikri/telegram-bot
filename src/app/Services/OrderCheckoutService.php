@@ -8,6 +8,8 @@ use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\CheckoutPaymentUnavailable;
+use App\Exceptions\CheckoutPriceChanged;
+use App\Exceptions\InsufficientCheckoutBalance;
 use App\Exceptions\InsufficientStock;
 use App\Exceptions\InvalidCheckout;
 use App\Exceptions\TelegramStockReserved;
@@ -32,6 +34,7 @@ use App\Services\Checkout\CheckoutPostCreationBehavior;
 use App\Services\Checkout\CheckoutPricingSnapshot;
 use App\Services\Checkout\PaymentProviderResolver;
 use App\Services\Checkout\ProviderBoundCheckoutPaymentIntent;
+use App\Services\Checkout\StorefrontBalanceCheckoutIntent;
 use App\Services\Checkout\TelegramStarsCheckoutIntent;
 use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
@@ -72,6 +75,7 @@ class OrderCheckoutService
         private readonly CustomerUsdtFundingGate $usdtFundingGate,
         private readonly OrderLifecycle $lifecycle,
         private readonly SupplierFulfillmentService $supplierFulfillment,
+        private readonly GuestOrderNotificationService $guestOrderNotifications,
     ) {}
 
     public function checkoutTelegramStarsDirect(Product $product, int $quantity, TelegramStarsCheckoutIntent $intent, ?string $termsVersion = null, ?DateTimeInterface $termsAcceptedAt = null): Order
@@ -126,7 +130,15 @@ class OrderCheckoutService
                 || $storefrontAdmission !== null || $resellerContext !== null)) {
             throw new InvalidCheckout('Telegram Stars requires a private retail checkout key.');
         }
-        $this->assertStoreBalanceEligibility($cart, $paymentIntent);
+        if ($paymentIntent instanceof StorefrontBalanceCheckoutIntent) {
+            if ($storefrontAdmission === null || $checkoutKey === null || $resellerContext !== null
+                || $termsVersion === null || $apiOrderClaimId !== null || $cart->origin !== CartOrigin::StorefrontBalance
+                || (int) $cart->customer_id !== $paymentIntent->customerId) {
+                throw new InvalidCheckout('Storefront balance requires the signed-in buyer and a retail checkout identity.');
+            }
+        } else {
+            $this->assertStoreBalanceEligibility($cart, $paymentIntent);
+        }
         $this->assertTermsSnapshot($termsVersion, $termsAcceptedAt);
         if (strtolower(trim($paymentIntent->provider())) === PaymentProvider::PAKASIR) {
             throw new InvalidCheckout('Pakasir sudah dipensiunkan untuk checkout baru.');
@@ -189,6 +201,10 @@ class OrderCheckoutService
                 throw new InvalidCheckout('Guest checkout requires a replay identity.');
             }
             if (($existing = $storefrontAdmission->guard($checkoutKey)) !== null) {
+                if ($paymentIntent instanceof StorefrontBalanceCheckoutIntent && (int) $existing->customer_id !== $paymentIntent->customerId) {
+                    throw new InvalidCheckout('Checkout key belongs to another Customer.');
+                }
+
                 return $existing;
             }
         }
@@ -217,6 +233,9 @@ class OrderCheckoutService
         $lockedCart = Cart::whereKey($cart->id)->lockForUpdate()->firstOrFail();
         if ($lockedCart->origin === CartOrigin::TelegramDirect && $starsCustomer === null) {
             throw new InvalidCheckout('This Cart is reserved for Telegram Stars direct checkout.');
+        }
+        if ($lockedCart->origin === CartOrigin::StorefrontBalance && ! $paymentIntent instanceof StorefrontBalanceCheckoutIntent) {
+            throw new InvalidCheckout('This Cart is reserved for Storefront Balance checkout.');
         }
 
         if ($lockedCart->status === CartStatus::CheckedOut) {
@@ -248,7 +267,11 @@ class OrderCheckoutService
             if ($customer === null || (int) $customer->id !== (int) $lockedCart->customer_id) {
                 throw new InvalidCheckout('Checkout Customer changed.');
             }
-            if ($customer->telegram_id === null) {
+            if ($paymentIntent instanceof StorefrontBalanceCheckoutIntent) {
+                if ((int) $customer->id !== $paymentIntent->customerId) {
+                    throw new InvalidCheckout('Checkout Customer changed.');
+                }
+            } elseif ($customer->telegram_id === null) {
                 throw new InvalidCheckout('Balance checkout is available only for Telegram customers.');
             }
             $resolvedPreference = $balanceRequest === null
@@ -322,6 +345,14 @@ class OrderCheckoutService
         if ($balanceRequest !== null) {
             $paymentIntent = $balanceRequest->select($resolvedPreference, $pricing, $idrAccount?->balance, $usdtAccount?->balance_micro);
         }
+        if ($paymentIntent instanceof StorefrontBalanceCheckoutIntent) {
+            if ($pricing->idrTotal() !== $paymentIntent->expectedTotal) {
+                throw new CheckoutPriceChanged($pricing->idrTotal(), $pricing->usdtTotal());
+            }
+            if ($idrAccount->balance < $pricing->idrTotal()) {
+                throw new InsufficientCheckoutBalance('Insufficient Store Balance.');
+            }
+        }
         $paymentPreparation = $this->paymentPreparations->for($paymentIntent);
         $preflightContext = new CheckoutPaymentPreflightContext(
             currentSetting: $activeSetting,
@@ -382,6 +413,14 @@ class OrderCheckoutService
             ]]);
         }
         $order->save();
+        if ($paymentIntent instanceof StorefrontBalanceCheckoutIntent) {
+            $order->forceFill([
+                'support_contact_channel' => $paymentIntent->supportChannel,
+                'support_contact_value' => $paymentIntent->supportValue,
+            ])->save();
+            $this->guestOrderNotifications->capture($order, $paymentIntent->email);
+            $order->refresh();
+        }
 
         $payment = $this->paymentPlanWriter->persist($order, $paymentPlan);
 
@@ -540,7 +579,7 @@ class OrderCheckoutService
 
     private function assertWebReservationBudget(Cart $cart, $items, $products): void
     {
-        if ($cart->customer?->telegram_id !== null) {
+        if ($cart->origin !== CartOrigin::StorefrontBalance && $cart->customer?->telegram_id !== null) {
             return;
         }
 

@@ -22,7 +22,7 @@ class StorefrontShopCheckoutReviewController extends Controller
 
     public function __invoke(Request $request, StorefrontCartPageBuilder $pages): Response|RedirectResponse
     {
-        $review = $pages->checkoutReview($request->session());
+        $review = $pages->checkoutReview($request->session(), $request->user('customer'));
 
         if ($review === null) {
             return redirect()->route('storefront.shop.index');
@@ -56,6 +56,7 @@ class StorefrontShopCheckoutReviewController extends Controller
             $product,
             $restoredQuantity ?? $request->query('quantity'),
             $returnUrl,
+            $request->user('customer'),
         ), $restoredQuantity);
     }
 

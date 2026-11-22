@@ -2,10 +2,15 @@
 
 namespace App\Storefront;
 
+use App\Enums\CartOrigin;
+use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\CheckoutMaintenanceActive;
+use App\Exceptions\CustomerUsdtFundingUnavailable;
 use App\Exceptions\InsufficientStock;
+use App\Exceptions\InsufficientStoreBalance;
+use App\Exceptions\StoreBalanceProjectionMismatchException;
 use App\Jobs\SendAdminOrderPendingNotification;
 use App\Models\Cart;
 use App\Models\Customer;
@@ -19,6 +24,7 @@ use App\Services\Checkout\BinancePayCheckoutIntent;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\PaymentProviderResolver;
+use App\Services\Checkout\StorefrontBalanceCheckoutIntent;
 use App\Services\Checkout\UsdtBep20CheckoutIntent;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\GuestOrderNotificationService;
@@ -63,10 +69,15 @@ class StorefrontShopCheckout
         ?Session $session = null,
         ?Closure $authorizeNewCheckout = null,
         ?string $visitorIp = null,
+        ?Customer $customer = null,
     ): StorefrontShopCheckoutResult {
         $this->assertTermsAccepted($input);
         $termsVersion = $this->currentTermsVersion();
         $paymentRail = $this->paymentRail($input->paymentMethod);
+        if ($paymentRail === CheckoutPaymentIntents::RAIL_STORE_BALANCE
+            && ($customer === null || blank($sessionId) || $input->checkoutAttempt === null || ($input->walletExpectedTotal ?? 0) < 1)) {
+            throw new StorefrontCheckoutError('wallet_unavailable');
+        }
         if ($sessionId === null || trim($sessionId) === '') {
             $authorizeNewCheckout?->__invoke();
 
@@ -80,10 +91,98 @@ class StorefrontShopCheckout
 
         try {
             return Cache::lock('storefront:checkout:'.hash('sha256', $sessionId), 45)
-                ->block(5, fn (): StorefrontShopCheckoutResult => $this->startOnce($input, $sessionId, $termsVersion, $session, $paymentRail, $authorizeNewCheckout, $admission));
+                ->block(5, fn (): StorefrontShopCheckoutResult => $paymentRail === CheckoutPaymentIntents::RAIL_STORE_BALANCE
+                    ? $this->startWalletCheckout($input, $customer, $sessionId, $session, $termsVersion, $admission, $authorizeNewCheckout)
+                    : $this->startOnce($input, $sessionId, $termsVersion, $session, $paymentRail, $authorizeNewCheckout, $admission));
         } catch (LockTimeoutException $exception) {
             throw new StorefrontCheckoutError('checkout_locked', previous: $exception);
         }
+    }
+
+    private function startWalletCheckout(
+        StorefrontShopCheckoutInput $input,
+        Customer $customer,
+        string $sessionId,
+        Session $session,
+        string $termsVersion,
+        StorefrontCheckoutAdmission $admission,
+        ?Closure $authorizeNewCheckout,
+    ): StorefrontShopCheckoutResult {
+        $key = hash_hmac('sha256', json_encode([
+            'storefront-balance', $sessionId, $customer->id, $input->checkoutAttempt,
+            $input->productId, $input->productId === null ? $input->cartSnapshot : $input->quantity,
+        ], JSON_THROW_ON_ERROR), (string) config('app.key'));
+
+        if (($order = $admission->existing($key)) === null) {
+            $maintenance = $this->maintenance->current();
+            if ($maintenance->active) {
+                throw new CheckoutMaintenanceActive($maintenance);
+            }
+            $admission->assertCapacity();
+            $authorizeNewCheckout?->__invoke();
+            $source = $input->productId === null ? $this->guestCarts->current($session) : null;
+            $value = $this->supportContactValue($input->supportContactChannel, $input->supportContactValue);
+            $intent = new StorefrontBalanceCheckoutIntent(
+                (int) $customer->id, $input->walletExpectedTotal, $input->email,
+                $value === null ? null : $input->supportContactChannel, $value,
+            );
+
+            try {
+                $order = DB::transaction(function () use ($input, $customer, $termsVersion, $admission, $key, $source, $intent): Order {
+                    if (($existing = $admission->guard($key)) !== null) {
+                        return $existing;
+                    }
+
+                    Customer::query()->whereKey($customer->id)->sharedLock()->firstOrFail();
+                    $sourceCart = $source === null ? null : Cart::query()->lockForUpdate()->find($source->id);
+                    // Lock the source Cart before copying it so concurrent cart edits cannot be consumed.
+                    if ($input->productId === null && ($sourceCart === null || $sourceCart->status !== CartStatus::Active
+                        || ! $this->guestCarts->matchesSnapshot($sourceCart, $input->cartSnapshot)
+                        || $sourceCart->cartItems->isEmpty())) {
+                        throw new StorefrontCheckoutError('cart_changed');
+                    }
+
+                    $cart = Cart::query()->create([
+                        'customer_id' => $customer->id,
+                        'origin' => CartOrigin::StorefrontBalance,
+                        'status' => CartStatus::Active,
+                        'expires_at' => now()->addHour(),
+                    ]);
+
+                    if ($sourceCart === null) {
+                        $product = $this->product($input->productId);
+                        $cart->cartItems()->create(['product_id' => $product->id, 'quantity' => $input->quantity]);
+                    } else {
+                        $cart->cartItems()->createMany($sourceCart->cartItems->map(fn ($item): array => [
+                            'product_id' => $item->product_id,
+                            'quantity' => $item->quantity,
+                        ])->all());
+                    }
+
+                    $order = $this->orders->checkout(
+                        $cart, $intent, checkoutKey: $key, termsVersion: $termsVersion,
+                        termsAcceptedAt: now(), storefrontAdmission: $admission,
+                    );
+                    $sourceCart?->update(['status' => CartStatus::CheckedOut]);
+
+                    return $order;
+                }, 5);
+            } catch (InsufficientStoreBalance $exception) {
+                throw new StorefrontCheckoutError('wallet_insufficient', previous: $exception);
+            } catch (CustomerUsdtFundingUnavailable|StoreBalanceProjectionMismatchException $exception) {
+                throw new StorefrontCheckoutError('wallet_unavailable', previous: $exception);
+            }
+        }
+
+        if ((int) $order->customer_id !== (int) $customer->id) {
+            throw new StorefrontCheckoutError('wallet_unavailable');
+        }
+
+        return new StorefrontShopCheckoutResult(
+            redirectUrl: $this->invoiceUrls->show($order),
+            orderId: $order->getKey(),
+            recoveryKey: $this->issueRecoveryKeyIfMissing($order),
+        );
     }
 
     private function startOnce(
@@ -489,7 +588,12 @@ class StorefrontShopCheckout
     private function paymentRail(string $paymentMethod): string
     {
         $paymentRail = CheckoutPaymentIntents::normalizePaymentRail($paymentMethod);
-        if (! CheckoutPaymentIntents::isSupportedPaymentRail($paymentRail)) {
+        if (! in_array($paymentRail, [
+            CheckoutPaymentIntents::RAIL_QRIS,
+            CheckoutPaymentIntents::RAIL_BINANCE_PAY_ID,
+            CheckoutPaymentIntents::RAIL_USDT_BEP20,
+            CheckoutPaymentIntents::RAIL_STORE_BALANCE,
+        ], true)) {
             throw new StorefrontCheckoutError('payment_unavailable');
         }
 

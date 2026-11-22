@@ -1727,6 +1727,7 @@
   .checkout-step,
   .checkout-rail-copy,
   .checkout-usdt,
+  .checkout-wallet-processing,
   .checkout-whatsapp {
     display: none;
   }
@@ -1762,6 +1763,13 @@
     )
     [data-rail="usdt_bep20"],
   .checkout-review:has(
+      [name="payment_method"][value="store_balance"]:is(
+          :checked,
+          [type="hidden"]
+        )
+    )
+    :is([data-rail="store_balance"], .checkout-wallet-processing),
+  .checkout-review:has(
       [name="payment_method"][data-payment-provider="sakurupiah"]:is(
           :checked,
           [type="hidden"]
@@ -1772,9 +1780,19 @@
   }
 
   .checkout-review:has(
-      [name="payment_method"]:not([value="qris"]):is(:checked, [type="hidden"])
+      [name="payment_method"]:is(
+          [value="binance_pay_id"],
+          [value="usdt_bep20"]
+        ):is(:checked, [type="hidden"])
     )
     .checkout-idr,
+  .checkout-review:has(
+      [name="payment_method"][value="store_balance"]:is(
+          :checked,
+          [type="hidden"]
+        )
+    )
+    .checkout-external-only,
   .checkout-review:has(
       [name="payment_method"][data-payment-provider="sakurupiah"]:is(
           :checked,
@@ -1789,7 +1807,10 @@
   }
 
   .checkout-review:has(
-      [name="payment_method"]:not([value="qris"]):is(:checked, [type="hidden"])
+      [name="payment_method"]:is(
+          [value="binance_pay_id"],
+          [value="usdt_bep20"]
+        ):is(:checked, [type="hidden"])
     )
     .checkout-usdt {
     display: inline;
