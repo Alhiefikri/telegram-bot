@@ -6,13 +6,13 @@
 @endphp
 @if ($catalogLocaleSwitcher || in_array($localeReturnRoute, \App\Storefront\StorefrontLocaleReturn::POST_ROUTES, true))
     <details class="min-w-0 text-sm font-semibold" data-storefront-locale>
-        <summary class="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-1 rounded-lg px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)]">
+        <summary class="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-1 rounded-lg px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sf-accent)] [anchor-name:--storefront-locale-trigger]">
             {{ __('storefront_locale.label') }}
             <span class="font-bold">{{ strtoupper($activeLocale) }}</span>
             <span aria-hidden="true">▾</span>
         </summary>
-        {{-- Anchor to the primary nav, independently of the no-script navigation below it. --}}
-        <div data-storefront-locale-panel class="absolute end-2 top-full z-[60] w-[min(16rem,calc(100%-1rem))] rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] p-1 shadow-lg">
+        {{-- Place below the trigger even when other controls wrap to another row. --}}
+        <div data-storefront-locale-panel class="absolute end-2 top-full z-[60] w-[min(16rem,calc(100%-1rem))] rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] p-1 shadow-lg supports-[top:anchor(bottom)]:top-[anchor(bottom)] [position-anchor:--storefront-locale-trigger]">
             @if ($catalogLocaleSwitcher)
                 @foreach ($localeLabels as $locale => $label)
                     <a href="{{ route('storefront.locale.catalog', ['locale' => $locale, 'return' => $localeCatalogReturn], absolute: false) }}" lang="{{ $locale }}" hreflang="{{ $locale }}" @if ($locale === $activeLocale) aria-current="true" @endif class="flex min-h-[44px] items-center gap-2 rounded-md px-3 wrap-anywhere hover:bg-[var(--sf-surface-warm)]"><span>{{ $label }}</span> @if ($locale === $activeLocale)<span aria-hidden="true">✓</span>@endif</a>

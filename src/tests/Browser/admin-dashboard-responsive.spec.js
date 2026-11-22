@@ -1020,6 +1020,12 @@ test("customer checkout: switches home and signed invoice locale by keyboard wit
     const home = new URL(`${baseUrl}/?family=${family}&q=browser`);
     await page.goto(home.href, { waitUntil: "domcontentloaded" });
     await enlargeText();
+    // Extra height below the controls must not push the locale panel off-screen.
+    await page.evaluate(() => {
+      document.querySelector(
+        "[data-storefront-nav-frame]"
+      ).style.paddingBottom = "6rem";
+    });
     await expectOpenedLocalePanel(page);
     await page.screenshot({
       path: testInfo.outputPath("home-locale-open.png"),
