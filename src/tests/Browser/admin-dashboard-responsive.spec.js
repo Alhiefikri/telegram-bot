@@ -1334,6 +1334,7 @@ test("customer checkout: asserts deterministic catalog checkout invoice navigati
       flowStart,
       "home direct checkout"
     );
+    await cancelCurrentManualInvoice(page);
 
     await page.context().clearCookies();
     flowStart = flow.requests.length;
@@ -1363,6 +1364,7 @@ test("customer checkout: asserts deterministic catalog checkout invoice navigati
       flowStart,
       "Product detail checkout"
     );
+    await cancelCurrentManualInvoice(page);
 
     await page.context().clearCookies();
     flowStart = flow.requests.length;
@@ -1395,6 +1397,7 @@ test("customer checkout: asserts deterministic catalog checkout invoice navigati
       "Family checkout"
     );
     expectSingleCustomerCheckoutSubmission(flow, flowStart, "Family checkout");
+    await cancelCurrentManualInvoice(page);
 
     await page.context().clearCookies();
     flowStart = flow.requests.length;
@@ -7372,16 +7375,8 @@ async function navigateToCheckoutFromProductCard(page, productName) {
 
   await expect(card).toBeVisible();
   await expect(checkoutLink).toHaveCount(1);
-  await card.evaluate((element) =>
-    element.scrollIntoView({
-      block: "center",
-      inline: "nearest",
-      behavior: "instant",
-    })
-  );
-  await expect(card).toHaveCSS("transform", "none");
-  await expect(card).toHaveCSS("opacity", "1");
-  await checkoutLink.click({ force: true, noWaitAfter: true });
+  // Use normal actionability checks; a hovered catalog card intentionally moves.
+  await checkoutLink.click();
   await page.waitForLoadState("domcontentloaded");
   await expectStorefrontPageCheckout(page);
 }
