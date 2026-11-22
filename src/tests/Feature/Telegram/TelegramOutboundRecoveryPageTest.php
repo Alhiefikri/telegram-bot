@@ -5,12 +5,14 @@ namespace Tests\Feature\Telegram;
 use App\Enums\TelegramOutboundEffectState;
 use App\Enums\TelegramOutboundEffectType;
 use App\Models\TelegramOutboundEffect;
+use App\Services\Telegram\AdminOrderNotificationDeliveryPipeline;
 use App\Services\Telegram\TelegramOutboundEffectLedgerProtocol;
 use App\Services\Telegram\TelegramOutboundRecoveryPage;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
 class TelegramOutboundRecoveryPageTest extends TestCase
@@ -97,6 +99,34 @@ class TelegramOutboundRecoveryPageTest extends TestCase
         /** @var QueryExecuted $captured */
         $plan = json_decode(DB::selectOne('EXPLAIN (ANALYZE, FORMAT JSON) '.$captured->sql, $captured->bindings)->{'QUERY PLAN'}, true)[0]['Plan'];
         $this->assertLessThanOrEqual(75, $this->rowsRead($plan), 'A 25-row page must not read all 30,000 ready effects.');
+    }
+
+    #[Group('postgres-release')]
+    public function test_postgres_local_review_cleanup_uses_a_partial_index_for_empty_pages(): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('Requires actual PostgreSQL execution plans.');
+        }
+
+        DB::insert("INSERT INTO telegram_outbound_effects
+            (id, effect_key, effect_type, source_type, source_id, telegram_chat_id, telegram_method, state, attempts)
+            SELECT md5('cleanup-' || n)::uuid, 'cleanup-' || n, ?, 'fixture', n::text, '1', 'sendMessage', 'sent', 0
+            FROM generate_series(1, 20000) n", [TelegramOutboundEffectType::AdminOrderPaidNotification->value]);
+        DB::statement('ANALYZE telegram_outbound_effects');
+        DB::statement('SET LOCAL plan_cache_mode = force_generic_plan');
+
+        $captured = null;
+        DB::listen(function (QueryExecuted $event) use (&$captured): void {
+            if (str_contains($event->sql, 'local_review_cleanup_finished') && ! str_starts_with($event->sql, 'EXPLAIN')) {
+                $captured = $event;
+            }
+        });
+
+        $this->assertSame(0, app(AdminOrderNotificationDeliveryPipeline::class)->recoverLocalReviewCleanup(10));
+        $this->assertNotNull($captured);
+        /** @var QueryExecuted $captured */
+        $plan = DB::select('EXPLAIN (ANALYZE) '.$captured->sql, $captured->bindings);
+        $this->assertStringContainsString('telegram_outbound_effects_local_review_cleanup_idx', implode("\n", array_column($plan, 'QUERY PLAN')));
     }
 
     private function rowsRead(array $node): int
