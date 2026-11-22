@@ -49,6 +49,40 @@ class StorefrontHomeCatalogTest extends TestCase
         }
     }
 
+    public function test_bundled_family_icons_fill_empty_slots_without_overwriting_admin_icons(): void
+    {
+        $duolingo = ProductFamily::factory()->create(['slug' => 'duolingo']);
+        $chatgpt = ProductFamily::factory()->create([
+            'slug' => 'chatgpt',
+            'sidebar_icon_path' => 'product-family-icons/admin-chatgpt.webp',
+        ]);
+        $other = ProductFamily::factory()->create(['slug' => 'another-app', 'icon' => '🎨']);
+        foreach ([$duolingo, $chatgpt, $other] as $family) {
+            $this->plan('Test plan '.$family->slug, $family, 1);
+        }
+
+        $migration = require database_path('migrations/2026_11_22_000002_seed_storefront_family_filter_icons.php');
+        $migration->up();
+        $bundledIcon = '/storefront/family-icons/duolingo.webp';
+        $upload = 'product-family-icons/admin-chatgpt.webp';
+
+        $this->assertSame($bundledIcon, $duolingo->refresh()->sidebar_icon_path);
+        $this->assertFileExists(public_path(ltrim($bundledIcon, '/')));
+        $this->assertSame($upload, $chatgpt->refresh()->sidebar_icon_path);
+        $this->assertNull($other->refresh()->sidebar_icon_path);
+        $this->get('/?family=duolingo')
+            ->assertOk()
+            ->assertSee('src="'.$bundledIcon.'"', false)
+            ->assertSee('src="/storage/'.$upload.'"', false)
+            ->assertSee('🎨');
+
+        $duolingo->update(['slug' => 'super-duolingo']);
+        $migration->down();
+
+        $this->assertNull($duolingo->refresh()->sidebar_icon_path);
+        $this->assertSame($upload, $chatgpt->refresh()->sidebar_icon_path);
+    }
+
     public function test_family_and_search_intersect_without_limiting_the_family_picker(): void
     {
         $alpha = ProductFamily::factory()->create(['slug' => 'alpha', 'name' => 'Alpha Family']);

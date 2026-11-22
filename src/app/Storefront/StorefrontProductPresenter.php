@@ -94,6 +94,7 @@ class StorefrontProductPresenter
             : ($maintenanceState->active
                 ? StorefrontLocale::text('checkout_maintenance')
                 : ($isBuyable ? StorefrontLocale::text('buy_now') : $checkoutReadiness->label));
+        $product->loadMissing('family:id,image_path,icon,custom_emoji_id');
         // A variant without its own icon shows the family icon the catalog uses.
         $icon = $this->familyIcons->forProduct($product);
         $description = LocalizedProductCopy::text($product->getAttributes(), 'description', StorefrontLocale::code());
@@ -146,7 +147,8 @@ class StorefrontProductPresenter
 
     private function imageUrl(Product $product, ?string $icon = null): ?string
     {
-        $imageUrl = StorefrontProductPresentationNormalizer::publicStorageUrl($product->image_path);
+        $imageUrl = StorefrontProductPresentationNormalizer::publicStorageUrl($product->image_path)
+            ?? StorefrontProductPresentationNormalizer::publicStorageUrl($product->family?->image_path);
 
         return $imageUrl ?? $this->defaultProductImageUrl($icon);
     }

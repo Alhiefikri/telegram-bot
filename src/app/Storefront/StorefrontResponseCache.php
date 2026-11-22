@@ -22,7 +22,7 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 35;
+    private const DESIGN_VERSION = 36;
 
     public function __construct(
         private readonly StorefrontCatalogPageBuilder $catalogPages,

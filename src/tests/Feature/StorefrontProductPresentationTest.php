@@ -150,6 +150,26 @@ class StorefrontProductPresentationTest extends TestCase
         $this->assertNull($presentation->checkoutChoice('telegram_admin'));
     }
 
+    public function test_unavailable_product_detail_preserves_unicode_in_structured_data(): void
+    {
+        $product = $this->unavailableProduct([
+            'description' => "✅ Garansi login\u{0085}Baris kedua",
+        ]);
+
+        $response = $this->get(route('storefront.products.show', [
+            'product' => $product,
+            'from' => route('storefront.home').'#product-'.$product->id,
+        ]))
+            ->assertOk()
+            ->assertSee('id="product-waitlist-cta"', false);
+
+        preg_match('~<script type="application/ld\+json">(.*?)</script>~s', $response->getContent(), $matches);
+        $jsonLd = json_decode($matches[1], true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertSame('Product', $jsonLd['@type']);
+        $this->assertSame('✅ Garansi login', $jsonLd['description']);
+    }
+
     public function test_unavailable_product_keeps_stock_status_during_maintenance(): void
     {
         CheckoutMaintenanceSetting::query()->firstOrFail()->update([
@@ -350,6 +370,32 @@ class StorefrontProductPresentationTest extends TestCase
         ]);
 
         $this->assertSame('🤖', app(StorefrontProductPresenter::class)->present($override)->cover->icon, 'Ikon produk sendiri menang atas ikon family.');
+    }
+
+    public function test_product_detail_inherits_the_family_cover_unless_the_product_has_its_own(): void
+    {
+        $family = ProductFamily::factory()->create([
+            'icon' => '👋',
+            'image_path' => 'product-families/duolingo.webp',
+        ]);
+        $product = $this->availableProduct([
+            'product_family_id' => $family->id,
+            'image_path' => null,
+        ]);
+        $cover = '/storage/product-families/duolingo.webp';
+
+        $this->get(route('storefront.home'))->assertOk()->assertSee('src="'.$cover.'"', false);
+        $this->get(route('storefront.products.show', $product))
+            ->assertOk()
+            ->assertSee('src="'.$cover.'"', false)
+            ->assertSee('property="og:image" content="'.url($cover).'"', false);
+
+        $product->update(['image_path' => 'products/duolingo-plan.webp']);
+
+        $this->get(route('storefront.products.show', $product))
+            ->assertOk()
+            ->assertSee('src="/storage/products/duolingo-plan.webp"', false)
+            ->assertDontSee('src="'.$cover.'"', false);
     }
 
     public function test_product_icon_is_used_before_placeholder_when_no_custom_image_exists(): void

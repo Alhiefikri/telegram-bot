@@ -6,7 +6,8 @@ final class StorefrontProductPresentationNormalizer
 {
     public static function descriptionSnippet(string $description): string
     {
-        return collect(preg_split('/\R+/', trim($description)))
+        // In byte mode \R can match an individual byte inside a UTF-8 character.
+        return collect(preg_split('/\R+/u', trim($description)) ?: [])
             ->map(fn (string $line) => trim($line))
             ->filter()
             ->first() ?: 'Deskripsi produk segera dilengkapi.';
