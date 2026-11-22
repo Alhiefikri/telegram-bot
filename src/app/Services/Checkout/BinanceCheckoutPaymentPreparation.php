@@ -41,14 +41,21 @@ final readonly class BinanceCheckoutPaymentPreparation implements CheckoutPaymen
         }
 
         [$receiverType, $receiverValue] = $this->receiverSnapshot();
-        $mode = $this->verificationMode($setting);
+        $requiresOrderId = $context->intent instanceof BinancePayCheckoutIntent && $context->intent->requiresOrderId;
+        if ($requiresOrderId && ! $this->binance->configured()) {
+            throw new InvalidCheckout('Binance Pay is not ready.');
+        }
+
+        $mode = $requiresOrderId ? 'order_id' : $this->verificationMode($setting);
         $usdtAmount = $context->pricing->usdtTotal();
         if ($usdtAmount === null) {
             throw new InvalidCheckout('A cart item has no USDT price.');
         }
         $expiresAt = now()->addMinutes($setting->binancePaymentTtlMinutes());
 
-        $amount = $mode === 'amount_unique'
+        // Keep new website amounts distinct from pending legacy amount-only
+        // invoices to prevent those invoices from claiming the same transfer.
+        $amount = $requiresOrderId || $mode === 'amount_unique'
             ? $this->uniqueAmount->allocate($usdtAmount)
             : $usdtAmount;
 

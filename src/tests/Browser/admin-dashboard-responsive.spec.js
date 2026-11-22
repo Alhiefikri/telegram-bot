@@ -103,7 +103,16 @@ test("paid stock credentials can be copied and selected without becoming editabl
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
-  await page.locator("article").filter({ has: page.getByRole("heading", { name: "Browser Paid Invoice Product", exact: true }) }).getByRole("button", { name: "Lihat product", exact: true }).click();
+  await page
+    .locator("article")
+    .filter({
+      has: page.getByRole("heading", {
+        name: "Browser Paid Invoice Product",
+        exact: true,
+      }),
+    })
+    .getByRole("button", { name: "Lihat product", exact: true })
+    .click();
   const card = await getAdminProductCard(page, "Browser Paid Invoice Product");
   await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
   const modal = page.locator("#manage-stock-modal");
@@ -111,8 +120,16 @@ test("paid stock credentials can be copied and selected without becoming editabl
     name: "Salin kredensial",
     exact: true,
   });
-  const legacyCopy = modal.locator("article").filter({ hasText: "browser-paid@example.test|BrowserPaidSecret" }).getByRole("button", { name: "Salin kredensial", exact: true });
-  const structuredCopy = modal.locator("article").filter({ has: page.getByRole("textbox", { name: /Kredensial akun stok/ }) }).getByRole("button", { name: "Salin kredensial", exact: true });
+  const legacyCopy = modal
+    .locator("article")
+    .filter({ hasText: "browser-paid@example.test|BrowserPaidSecret" })
+    .getByRole("button", { name: "Salin kredensial", exact: true });
+  const structuredCopy = modal
+    .locator("article")
+    .filter({
+      has: page.getByRole("textbox", { name: /Kredensial akun stok/ }),
+    })
+    .getByRole("button", { name: "Salin kredensial", exact: true });
   await expect(copyButtons).toHaveCount(2);
   await expect(legacyCopy).toBeEnabled();
   await legacyCopy.click();
@@ -135,7 +152,11 @@ test("paid stock credentials can be copied and selected without becoming editabl
   await structuredCopy.focus();
   await page.keyboard.press("Enter");
   await expect
-    .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, "\n")))
+    .poll(() =>
+      page.evaluate(async () =>
+        (await navigator.clipboard.readText()).replace(/\r\n/g, "\n")
+      )
+    )
     .toBe(expected);
   await page.evaluate(() =>
     Object.defineProperty(navigator, "clipboard", {
@@ -197,8 +218,13 @@ test("paid stock credentials can be copied and selected without becoming editabl
   await expect(modal).toBeHidden();
 });
 
-test("PAID history paginates 25 accounts within 30 days without replacing ready stock", async ({ page }) => {
-  runArtisan(["tinker", "--execute", `
+test("PAID history paginates 25 accounts within 30 days without replacing ready stock", async ({
+  page,
+}) => {
+  runArtisan([
+    "tinker",
+    "--execute",
+    `
     $product = \\App\\Models\\Product::factory()->create(['name' => 'Audit Pagination Product', 'stock' => 1]);
     \\App\\Models\\ProductStockItem::create(['product_id' => $product->id, 'secret' => 'audit-ready@example.test|ready']);
     $order = \\App\\Models\\Order::factory()->create(['payment_status' => 'paid', 'order_status' => 'processing']);
@@ -211,35 +237,66 @@ test("PAID history paginates 25 accounts within 30 days without replacing ready 
     $oldItem = \\App\\Models\\OrderItem::factory()->create(['order_id' => $oldOrder->id, 'product_id' => $product->id]);
     \\App\\Models\\Payment::factory()->create(['order_id' => $oldOrder->id, 'status' => 'paid', 'paid_at' => now()->subDays(31)]);
     \\App\\Models\\ProductStockItem::create(['product_id' => $product->id, 'order_item_id' => $oldItem->id, 'secret' => 'audit-old@example.test|excluded']);
-  `]);
+  `,
+  ]);
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.goto(`${baseUrl}/admin?tab=produk`);
-  await page.locator("article").filter({ has: page.getByRole("heading", { name: "Audit Pagination Product", exact: true }) }).getByRole("button", { name: "Lihat product", exact: true }).click();
+  await page
+    .locator("article")
+    .filter({
+      has: page.getByRole("heading", {
+        name: "Audit Pagination Product",
+        exact: true,
+      }),
+    })
+    .getByRole("button", { name: "Lihat product", exact: true })
+    .click();
   const card = await getAdminProductCard(page, "Audit Pagination Product");
   await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
   const modal = page.locator("#manage-stock-modal");
-  const paid = modal.locator("section").filter({ has: page.getByRole("navigation", { name: "Halaman riwayat PAID" }) });
+  const paid = modal
+    .locator("section")
+    .filter({
+      has: page.getByRole("navigation", { name: "Halaman riwayat PAID" }),
+    });
   const next = paid.getByRole("button", { name: "Berikutnya", exact: true });
-  const previous = paid.getByRole("button", { name: "Sebelumnya", exact: true });
+  const previous = paid.getByRole("button", {
+    name: "Sebelumnya",
+    exact: true,
+  });
   await expect(paid.locator("article")).toHaveCount(25);
-  await expect(paid.locator("article").first()).toContainText("audit-26@example.test|paid");
+  await expect(paid.locator("article").first()).toContainText(
+    "audit-26@example.test|paid"
+  );
   await expect(previous).toBeDisabled();
   await expect(next).toBeEnabled();
   await next.click();
   await expect(paid.locator("article")).toHaveCount(1);
   await expect(paid).toContainText("audit-01@example.test|paid");
   await expect(next).toBeDisabled();
-  await expect(modal.getByText("audit-ready@example.test|ready", { exact: true })).toBeVisible();
-  await expect(modal.getByText("audit-old@example.test|excluded", { exact: true })).toHaveCount(0);
+  await expect(
+    modal.getByText("audit-ready@example.test|ready", { exact: true })
+  ).toBeVisible();
+  await expect(
+    modal.getByText("audit-old@example.test|excluded", { exact: true })
+  ).toHaveCount(0);
   await previous.click();
   await expect(paid.locator("article")).toHaveCount(25);
-  await expect(paid.locator("article").first()).toContainText("audit-26@example.test|paid");
+  await expect(paid.locator("article").first()).toContainText(
+    "audit-26@example.test|paid"
+  );
   await expect(previous).toBeDisabled();
-  await page.screenshot({ path: path.join(tmpdir(), "paid-pagination-mobile.png"), fullPage: true });
+  await page.screenshot({
+    path: path.join(tmpdir(), "paid-pagination-mobile.png"),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(next).toBeVisible();
-  await page.screenshot({ path: path.join(tmpdir(), "paid-pagination-desktop.png"), fullPage: true });
+  await page.screenshot({
+    path: path.join(tmpdir(), "paid-pagination-desktop.png"),
+    fullPage: true,
+  });
   await page.keyboard.press("Escape");
   await expect(modal).toBeHidden();
 });
@@ -349,8 +406,10 @@ test("admin balance adjustment previews the exact Customer and disables duplicat
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.getByRole("button", { name: "Buka navigasi admin" }).click();
-  await page.getByRole("dialog", { name: "Navigasi admin", exact: true })
-    .getByRole("link", { name: "Saldo & top-up", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Navigasi admin", exact: true })
+    .getByRole("link", { name: "Saldo & top-up", exact: true })
+    .click();
   await page.getByRole("link", { name: "Kelola saldo IDR & USDT" }).click();
 
   await expect(page).toHaveURL(/\/admin\/store-balance\/adjustments/);
@@ -411,8 +470,13 @@ test("admin balance adjustment previews the exact Customer and disables duplicat
   await expectNoDocumentOverflow(page);
 });
 
-test("finance hub and combined customer balances stay compact", async ({ page }, testInfo) => {
-  runArtisan(["tinker", "--execute", `
+test("finance hub and combined customer balances stay compact", async ({
+  page,
+}, testInfo) => {
+  runArtisan([
+    "tinker",
+    "--execute",
+    `
     $idr = \\App\\Models\\Customer::factory()->create(['first_name' => 'Browser IDR', 'telegram_id' => 880001]);
     $usdt = \\App\\Models\\Customer::factory()->create(['first_name' => 'Browser USDT', 'telegram_id' => 880002]);
     $zero = \\App\\Models\\Customer::factory()->create(['first_name' => 'Browser Zero', 'telegram_id' => 880003]);
@@ -430,14 +494,22 @@ test("finance hub and combined customer balances stay compact", async ({ page },
     \\Illuminate\\Support\\Facades\\DB::table('customer_balance_accounts')->insert([
       'customer_id' => $zero->id, 'balance' => 0, 'created_at' => now(), 'updated_at' => now(),
     ]);
-  `]);
+  `,
+  ]);
   await login(page);
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${baseUrl}/admin?tab=settings&section=saldo`);
-    await expect(page.getByRole("navigation", { name: "Tindakan saldo" }).getByRole("link", { name: "Laporan saldo" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Tindakan saldo" })
+        .getByRole("link", { name: "Laporan saldo" })
+    ).toBeVisible();
     await expectNoDocumentOverflow(page);
-    await page.getByRole("navigation", { name: "Tindakan saldo" }).getByRole("link", { name: "Laporan saldo" }).click();
+    await page
+      .getByRole("navigation", { name: "Tindakan saldo" })
+      .getByRole("link", { name: "Laporan saldo" })
+      .click();
     const results = page.getByRole("region", { name: "Hasil laporan saldo" });
     const idr = results.locator("article").filter({ hasText: "Browser IDR" });
     const usdt = results.locator("article").filter({ hasText: "Browser USDT" });
@@ -449,7 +521,9 @@ test("finance hub and combined customer balances stay compact", async ({ page },
     await expect(usdt).toContainText("2.5 USDT");
     await expect(results).not.toContainText("Browser Zero");
     await expectNoDocumentOverflow(page);
-    await results.screenshot({ path: testInfo.outputPath(`balances-${width}.png`) });
+    await results.screenshot({
+      path: testInfo.outputPath(`balances-${width}.png`),
+    });
   }
 });
 
@@ -599,7 +673,7 @@ test("customer checkout: opens the authenticated balance overview across mobile 
   await expectNoDocumentOverflow(page);
 });
 
-test("customer checkout: shows issue 732 review and invoice action above the fold", async ({
+test("customer checkout: shows the invoice action above the fold on desktop and reachable on mobile", async ({
   page,
 }, testInfo) => {
   for (const viewport of [
@@ -627,8 +701,16 @@ test("customer checkout: shows issue 732 review and invoice action above the fol
         scrollY: window.scrollY,
       }));
       expect(geometry.scrollY).toBe(0);
-      expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
-      await expect(subtotal).toBeInViewport({ ratio: 1 });
+      if (viewport.width >= 1024) {
+        expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
+        await expect(subtotal).toBeInViewport({ ratio: 1 });
+      } else {
+        await submit.scrollIntoViewIfNeeded();
+        await expect(submit).toBeInViewport({ ratio: 0.99 });
+        await page.evaluate(() =>
+          window.scrollTo({ top: 0, behavior: "instant" })
+        );
+      }
       await expectNoDocumentOverflow(page);
       console.log(viewport, theme, geometry);
       await page.screenshot({
@@ -752,45 +834,112 @@ test("customer checkout: shows required WhatsApp at 320px and 200% text", async 
   runArtisan([
     "tinker",
     "--execute",
-    `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['payment_mode' => 'sakurupiah', 'binance_pay_enabled' => true]);`,
+    `App\\Models\\ManualPaymentSetting::query()->firstOrFail()->update(['payment_mode' => 'sakurupiah', 'binance_pay_enabled' => true, 'bsc_payment_enabled' => true]);
+     App\\Models\\BscPaymentReceiver::factory()->verified()->active()->create();
+     App\\Models\\Product::query()->findOrFail(${invoiceFixtures.longProductCheckoutPath.split("/").pop()})->update(['image_path' => 'products/checkout-preview.webp']);`,
   ]);
+  await page.route("**/storage/products/checkout-preview.webp", (route) =>
+    route.fulfill({
+      path: path.resolve(appDir, "resources/images/lhie-store-logo.webp"),
+    })
+  );
   await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
     waitUntil: "domcontentloaded",
   });
   await expectStorefrontPageCheckout(page);
   await page.addStyleTag({ content: "html { font-size: 200%; }" });
-  const contact = page.locator("#checkout-contact-details");
-  const channel = page.getByLabel("Kanal kontak");
-  const number = page.getByLabel("Username Telegram atau nomor WhatsApp");
-  await expect(contact).toHaveJSProperty("open", true);
-  await expect(contact.getByText("WhatsApp wajib untuk QRIS")).toBeVisible();
+  const number = page.getByRole("textbox", { name: "Nomor WhatsApp" });
+  const phone = page.locator("#checkout-sakurupiah-phone");
+  await expect(number).toBeVisible();
+  await expect(page.getByText("WhatsApp wajib untuk QRIS")).toBeVisible();
   await expect(number).toHaveJSProperty("required", true);
-  await channel.selectOption("telegram");
-  await expect(channel).toHaveJSProperty(
-    "validationMessage",
-    "Pilih WhatsApp untuk metode pembayaran ini."
-  );
-  await channel.selectOption("whatsapp");
+  await number.fill("123");
+  expect(
+    await number.evaluate((element) => element.validity.patternMismatch)
+  ).toBe(true);
   await number.fill("+628123456789");
   await expect(number).toHaveJSProperty("validationMessage", "");
-  await expectOpenedLocalePanel(page);
-  await page.locator("[data-storefront-locale] summary").press("Enter");
+  const mobileDetails = await page
+    .locator("[data-checkout-details]")
+    .boundingBox();
+  const mobilePayment = await page
+    .locator("[data-checkout-payment]")
+    .boundingBox();
+  expect(mobilePayment.y).toBeGreaterThanOrEqual(
+    mobileDetails.y + mobileDetails.height
+  );
   await expectNoDocumentOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("required-whatsapp-320-text200.png"),
     fullPage: true,
   });
 
-  const methods = page.locator("#checkout-payment-disclosure summary");
-  await methods.press("Enter");
-  await page.getByRole("radio", { name: "Binance Pay" }).check();
-  await expect(number).toHaveJSProperty("required", false);
-  await expect(contact.getByText("WhatsApp wajib untuk QRIS")).toBeHidden();
-  await expect(
-    page.getByRole("button", { name: "Buat invoice Binance Pay" })
-  ).toBeVisible();
-  await methods.press("Enter");
+  for (const method of ["Binance Pay", "USDT BSC (BEP20)"]) {
+    await page.getByRole("radio", { name: method, exact: true }).check();
+    await expect(phone).toBeHidden();
+    await expect(phone).toBeDisabled();
+    await expect(page.locator("[data-checkout-order-subtotal]")).toHaveText(
+      "2.5 USDT",
+      { useInnerText: true }
+    );
+    await expect(
+      page.getByRole("button", { name: `Buat invoice ${method}` })
+    ).toBeVisible();
+  }
   await expectNoDocumentOverflow(page);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addStyleTag({ content: "html { font-size: 100%; }" });
+  await page.getByRole("radio", { name: "QRIS", exact: true }).check();
+  await expect(number).toHaveValue("+628123456789");
+  await expect(number).toHaveJSProperty("required", true);
+  const details = await page.locator("[data-checkout-details]").boundingBox();
+  const payment = await page.locator("[data-checkout-payment]").boundingBox();
+  expect(payment.x).toBeGreaterThanOrEqual(details.x + details.width);
+  expect(payment.y).toBe(details.y);
+  await expect
+    .poll(() =>
+      page
+        .locator("[data-checkout-details] img")
+        .evaluate((image) => image.naturalWidth)
+    )
+    .toBeGreaterThan(0);
+  await number.clear();
+  for (const [method, file] of [
+    ["QRIS", "qris"],
+    ["USDT BSC (BEP20)", "bsc"],
+    ["Binance Pay", "binance"],
+  ]) {
+    await page.getByRole("radio", { name: method, exact: true }).check();
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await page.screenshot({
+      path: testInfo.outputPath(`checkout-desktop-${file}.png`),
+      fullPage: true,
+    });
+  }
+  await page
+    .getByRole("textbox", { name: "Nama pembeli" })
+    .fill("Crypto Preview Buyer");
+  await page.locator("#checkout-terms-accepted").check();
+  await page.getByRole("button", { name: "Buat invoice Binance Pay" }).click();
+  await expect(page).toHaveURL(customerInvoiceUrlPattern);
+  await expect(
+    page.getByLabel("Order ID atau Transaction ID Binance Pay")
+  ).toBeVisible();
+  await expect(
+    page.getByText("kirim screenshot pembayaran ke bot Telegram", {
+      exact: false,
+    })
+  ).toHaveCount(0);
+  const paymentDetails = await page
+    .locator("[data-crypto-payment-details]")
+    .boundingBox();
+  const verification = await page
+    .locator("[data-crypto-verification]")
+    .boundingBox();
+  expect(verification.x).toBeGreaterThanOrEqual(
+    paymentDetails.x + paymentDetails.width
+  );
 
   runArtisan([
     "tinker",
@@ -800,7 +949,9 @@ test("customer checkout: shows required WhatsApp at 320px and 200% text", async 
       ['is_active' => true, 'version' => 1]
     );`,
   ]);
-  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.goto(`${baseUrl}${invoiceFixtures.longProductCheckoutPath}`, {
+    waitUntil: "domcontentloaded",
+  });
   await expect(page.getByText("Checkout sedang maintenance")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Buat invoice/ })).toHaveCount(
     0
@@ -844,9 +995,6 @@ test("customer checkout: reflows a long Cart at 320px and 200% text", async ({
   await expect(page.locator("[data-checkout-order-subtotal]")).toHaveText(
     "Rp80.000"
   );
-  await expectOpenedLocalePanel(page);
-  await page.screenshot({ path: testInfo.outputPath("cart-locale-open.png") });
-  await page.locator("[data-storefront-locale] summary").press("Enter");
   await expectStorefrontCheckoutResponsiveContract(page, viewport);
   await page.screenshot({
     path: testInfo.outputPath("cart-320-text200.png"),
@@ -875,7 +1023,9 @@ test("customer checkout: switches home and signed invoice locale by keyboard wit
     await page.goto(home.href, { waitUntil: "domcontentloaded" });
     await enlargeText();
     await expectOpenedLocalePanel(page);
-    await page.screenshot({ path: testInfo.outputPath("home-locale-open.png") });
+    await page.screenshot({
+      path: testInfo.outputPath("home-locale-open.png"),
+    });
     await page
       .locator("[data-storefront-locale-panel] [lang=en]")
       .press("Enter");
@@ -975,7 +1125,6 @@ test("customer checkout: switches payment copy and CTA without JavaScript", asyn
     ).toBeVisible();
     const subtotal = page.locator("[data-checkout-order-subtotal]");
     await expect(subtotal).toHaveText("Rp88.000", { useInnerText: true });
-    await page.locator("#checkout-payment-disclosure summary").press("Enter");
     await page.getByRole("radio", { name: "Binance Pay" }).check();
     await expect(subtotal).toHaveText("2.5 USDT", { useInnerText: true });
     await expect(
@@ -2078,12 +2227,8 @@ test("customer checkout: supports keyboard activation, disclosures, reduced moti
 
   try {
     await page.reload({ waitUntil: "domcontentloaded" });
-    const paymentDisclosure = page.locator("#checkout-payment-disclosure");
     const contactDisclosure = page.locator("#checkout-contact-details");
-    await expect(paymentDisclosure).not.toHaveAttribute("open", "");
     await expect(contactDisclosure).not.toHaveAttribute("open", "");
-    await paymentDisclosure.locator("summary").press("Enter");
-    await expect(paymentDisclosure).toHaveAttribute("open", "");
     await expect(
       page.getByRole("radio", { name: /Binance Pay/ })
     ).toBeVisible();
@@ -3450,7 +3595,9 @@ test("catalog placeholder upload stores a real image and rejects an invalid file
   await expectNoDocumentOverflow(page);
 });
 
-test("workspace returns to the same family and its product options", async ({ page }) => {
+test("workspace returns to the same family and its product options", async ({
+  page,
+}) => {
   await login(page);
 
   for (const width of [1280, 375]) {
@@ -3458,20 +3605,40 @@ test("workspace returns to the same family and its product options", async ({ pa
     await page.goto(`${baseUrl}/admin?tab=produk`);
     const group = page
       .locator('[id^="admin-product-family-group-"]')
-      .filter({ has: page.getByRole("heading", { name: "Browser QA Product Family", exact: true }) });
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Browser QA Product Family",
+          exact: true,
+        }),
+      });
     await group.getByRole("button", { name: "Lihat product" }).click();
-    const first = group.locator('article[id^="product-"]').filter({ hasText: "QA option" });
-    const second = group.locator('article[id^="product-"]').filter({ hasText: "QA secondary" });
+    const first = group
+      .locator('article[id^="product-"]')
+      .filter({ hasText: "QA option" });
+    const second = group
+      .locator('article[id^="product-"]')
+      .filter({ hasText: "QA secondary" });
     await expect(first).toBeVisible();
     await expect(second).toBeVisible();
     await first.getByRole("link", { name: /Kelola produk/ }).click();
-    await expect(page.getByRole("link", { name: "Langsung ke pengaturan produk" })).toBeVisible();
-    await page.getByRole("link", { name: "Kembali ke daftar produk family" }).click();
-    await expect(group.getByRole("button", { name: "Tutup daftar product" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Langsung ke pengaturan produk" })
+    ).toBeVisible();
+    await page
+      .getByRole("link", { name: "Kembali ke daftar produk family" })
+      .click();
+    await expect(
+      group.getByRole("button", { name: "Tutup daftar product" })
+    ).toBeVisible();
     await expect(first).toBeVisible();
     await expect(second).toBeVisible();
     await second.getByRole("link", { name: /Kelola produk/ }).click();
-    await expect(page.getByRole("heading", { name: "Browser QA Produk Family Secondary", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: "Browser QA Produk Family Secondary",
+        exact: true,
+      })
+    ).toBeVisible();
     await expectNoDocumentOverflow(page);
   }
 });
@@ -4267,7 +4434,12 @@ test("direct desktop tabs select one sidebar destination and preserve content an
     ["telegram-channel", "Store Channel", "admin-section-store-channel"],
     ["settings", "Pengaturan", "admin-section-settings"],
     ["funnel", "Funnel", "admin-section-funnel"],
-    ["balance-issues", "Kompensasi Top-up", "admin-section-balance-issues", "Saldo & top-up"],
+    [
+      "balance-issues",
+      "Kompensasi Top-up",
+      "admin-section-balance-issues",
+      "Saldo & top-up",
+    ],
   ];
   for (const [tab, label, anchor, navigationLabel = label] of tabs) {
     await page.goto(`${baseUrl}/admin?tab=${tab}`);
@@ -4319,7 +4491,11 @@ test("linked operational pages retain the shared shell and active destination", 
       "Monitor pembelian supplier",
       "Supplier",
     ],
-    ["/admin/store-balance/reports", "Laporan saldo Customer", "Saldo & top-up"],
+    [
+      "/admin/store-balance/reports",
+      "Laporan saldo Customer",
+      "Saldo & top-up",
+    ],
     [
       "/admin/store-balance/adjustments",
       "Kelola saldo Customer",
@@ -5986,15 +6162,25 @@ test("supplier picker filters and searches SKU and shows unit cost estimates", a
   await login(page);
   await page.goto(`${baseUrl}${invoiceFixtures.supplierProductPath}`);
   await page.locator("#workspace-trigger-supplier").click();
-  await page.getByRole("button", { name: "Tambah sumber supplier", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Tambah sumber supplier", exact: true });
+  await page
+    .getByRole("button", { name: "Tambah sumber supplier", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Tambah sumber supplier",
+    exact: true,
+  });
   const supplier = dialog.getByLabel("Supplier", { exact: true });
   const search = dialog.getByLabel("Cari nama produk, SKU, atau supplier");
   await expect(supplier.locator("option")).toHaveCount(2);
-  const supplierId = await supplier.locator("option").nth(1).getAttribute("value");
+  const supplierId = await supplier
+    .locator("option")
+    .nth(1)
+    .getAttribute("value");
   await supplier.selectOption(supplierId);
   await search.fill("BROWSER-PRIVATE-SKU");
-  const item = dialog.locator(".workspace-catalog-option").filter({ hasText: "Browser private catalog option" });
+  const item = dialog
+    .locator(".workspace-catalog-option")
+    .filter({ hasText: "Browser private catalog option" });
   await expect(item).toBeVisible();
   await expect(item).toContainText("Harga supplier: 1 USDT");
   await expect(item).toContainText("USD 1");
@@ -7694,6 +7880,9 @@ function appEnv() {
     KLIKQRIS_SANDBOX_MERCHANT_ID: "merchant-browser",
     KLIKQRIS_REPORTING_CACHE_SECONDS: "0",
     BINANCE_PAY_ID: "987654321",
+    BINANCE_API_KEY: "browser-only-binance-key",
+    BINANCE_API_SECRET: "browser-only-binance-secret",
+    BSC_RPC_URL: "https://browser-only-bsc.example.test",
   };
 }
 

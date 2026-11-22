@@ -538,9 +538,11 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringNotContainsString('LONG MERCHANDISING DESCRIPTION SHOULD STAY OUT OF REVIEW', $html);
     }
 
-    public function test_multiple_payment_choices_are_explicit_inside_a_closed_disclosure(): void
+    public function test_multiple_payment_choices_are_visible_in_the_payment_panel(): void
     {
         config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'test-only-key');
+        config()->set('services.binance.api_secret', 'test-only-secret');
         ManualPaymentSetting::current()->update([
             'binance_pay_enabled' => true,
         ]);
@@ -559,7 +561,9 @@ class StorefrontProductCheckoutTest extends TestCase
         $this->assertStringContainsString('type="radio" name="payment_method"', $html);
         $this->assertStringContainsString('value="binance_pay_id"', $html);
         $this->assertStringContainsString('Buat invoice Binance Pay', $html);
-        $this->assertSame(0, preg_match('/<details id="checkout-payment-disclosure"[^>]*\\bopen\\b/', $html));
+        $this->assertStringContainsString('id="checkout-payment-method"', $html);
+        $this->assertStringNotContainsString('checkout-payment-disclosure', $html);
+        $this->assertStringNotContainsString('id="checkout-sakurupiah-phone"', $html);
     }
 
     public function test_sakurupiah_review_marks_required_contact_controls_without_javascript(): void
@@ -603,9 +607,8 @@ class StorefrontProductCheckoutTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertSame(1, preg_match('/<details id="checkout-contact-details"[^>]*\bopen\b/', $html));
-        $this->assertMatchesRegularExpression('/<select[^>]+name="support_contact_channel"[^>]+\brequired\b/', $html);
-        $this->assertMatchesRegularExpression('/<input[^>]+name="support_contact_value"[^>]+\brequired\b/', $html);
+        $this->assertMatchesRegularExpression('/<input[^>]+id="checkout-sakurupiah-phone"[^>]+type="tel"[^>]+\brequired\b/', $html);
+        $this->assertDoesNotMatchRegularExpression('/<select[^>]+name="support_contact_channel"[^>]+\brequired\b/', $html);
         $this->assertStringContainsString('WhatsApp wajib untuk QRIS', $html);
         Http::assertNothingSent();
     }

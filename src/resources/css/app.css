@@ -1669,8 +1669,9 @@
     padding-inline: clamp(12px, 4vw, 24px);
   }
 
-  .checkout-review {
-    padding-inline: clamp(12px, 3vw, 16px);
+  .checkout-payment-option:has(:checked, [type="hidden"]) {
+    border-color: var(--checkout-focus);
+    background: var(--sf-paper);
   }
 
   .checkout-step {
@@ -1730,16 +1731,18 @@
     display: none;
   }
 
-  .js-enabled .checkout-step,
+  .js-enabled .checkout-step {
+    display: block;
+  }
+
   .checkout-review:has(
       [name="payment_method"][data-payment-provider="sakurupiah"]:is(
           :checked,
           [type="hidden"]
         )
     )
-    summary
-    .checkout-whatsapp {
-    display: block;
+    div.checkout-whatsapp {
+    display: grid;
   }
 
   /* Mirror the native checked rail even when Alpine is unavailable. */
@@ -1764,8 +1767,7 @@
           [type="hidden"]
         )
     )
-    p
-    .checkout-whatsapp {
+    span.checkout-whatsapp {
     display: inline;
   }
 

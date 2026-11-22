@@ -9,6 +9,7 @@ use App\Jobs\VerifyProviderPaymentStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Credentials\CredentialDeliveryPresentation;
 use App\Services\KlikQris\KlikQrisNativeQrisService;
 use App\Services\KlikQris\KlikQrisProviderReadiness;
@@ -97,6 +98,7 @@ class TelegramOrderIntents
             if ($order->order_status === OrderStatus::PendingPayment && $paymentStatus === PaymentStatus::Pending && $deadline) {
                 $lines[] = $this->locale->translate($customer, 'order.detail.deadline', ['date' => $this->locale->formatDate($customer, $deadline)]);
                 if (! $payment?->isTelegramStars() && $deadline->isFuture()
+                    && ! CheckoutPaymentIntents::isBinancePaymentMethod($payment?->method)
                     && $order->created_at->copy()->addDays(max(1, (int) config('services.storefront.invoice_url_ttl_days', 7)))->isFuture()) {
                     $keyboard[] = [[
                         'text' => $this->locale->translate($customer, 'order.status.pay_button'),
@@ -625,6 +627,9 @@ class TelegramOrderIntents
         if ($orderStatus === OrderStatus::PendingPayment || $paymentStatus === PaymentStatus::Pending) {
             if ($payment?->isTelegramStars()) {
                 return $this->locale->translate($customer, 'stars.status_pending');
+            }
+            if (CheckoutPaymentIntents::isBinancePaymentMethod($payment?->method)) {
+                return $this->locale->translate($customer, 'order.guidance.crypto_pending');
             }
 
             return $this->locale->translate($customer, 'order.guidance.pending');

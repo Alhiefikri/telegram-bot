@@ -52,7 +52,9 @@ class StorefrontShopCheckoutRequest extends FormRequest
                 'max:20',
                 'required_with:product_id',
             ],
-            'buyer_name' => ['required', 'string', 'min:2', 'max:40', 'regex:/^[A-Za-z0-9_ .-]+$/'],
+            'buyer_name' => $this->user('customer') === null
+                ? ['required', 'string', 'min:2', 'max:40', 'regex:/^[A-Za-z0-9_ .-]+$/']
+                : ['required', 'string', 'max:40'],
             'terms_accepted' => ['required', 'accepted'],
             'email' => ['nullable', 'string', 'email:rfc', 'max:254'],
             'support_contact_channel' => $supportChannelRules,
@@ -101,6 +103,9 @@ class StorefrontShopCheckoutRequest extends FormRequest
         ]);
         if (! is_string($input['checkout_attempt'] ?? null) || ! Str::isUuid($input['checkout_attempt'])) {
             unset($input['checkout_attempt']);
+        }
+        if ($this->user('customer') !== null) {
+            unset($input['buyer_name']);
         }
 
         return $input;
@@ -158,6 +163,16 @@ class StorefrontShopCheckoutRequest extends FormRequest
         $value = $this->input('support_contact_value');
         $buyerName = $this->input('buyer_name', $this->input('buyer_handle'));
         $email = $this->input('email');
+
+        if (($customer = $this->user('customer')) !== null) {
+            $name = trim((string) $customer->first_name);
+            $buyerName = mb_substr($name !== '' ? $name : StorefrontLocale::text('buyer_name'), 0, 40);
+        }
+
+        if ($this->exists('sakurupiah_phone') && $this->requiresSakurupiahPhone()) {
+            $channel = 'whatsapp';
+            $value = $this->input('sakurupiah_phone');
+        }
 
         $this->merge([
             'buyer_name' => is_string($buyerName) ? trim($buyerName) : $buyerName,

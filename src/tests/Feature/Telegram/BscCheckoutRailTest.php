@@ -29,11 +29,13 @@ use App\Services\Telegram\ReceiptDeliveryPipeline;
 use App\Services\Telegram\TelegramCheckoutIntents;
 use App\Services\Telegram\TelegramIntentSession;
 use App\Services\Telegram\TelegramOutboundEffectService;
+use App\Storefront\StorefrontCheckoutChallenge;
 use App\Support\PaymentProvider;
 use Brick\Math\BigInteger;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\BscTransferLogRpcStub;
+use Tests\Support\FakeStorefrontCheckoutChallenge;
 use Tests\Support\TelegramBotTestSupport;
 
 final class BscCheckoutRailTest extends TelegramBotTestSupport
@@ -145,6 +147,28 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), 'system detects the transfer automatically')
             && ! str_contains((string) json_encode($request->data()), 'Submit TX Hash')
             && str_contains((string) json_encode($request->data()), 'Check Payment Status'));
+    }
+
+    public function test_storefront_creates_a_bsc_invoice_without_phone_when_sakurupiah_is_selected(): void
+    {
+        $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
+        ManualPaymentSetting::current()->update(['payment_mode' => 'sakurupiah']);
+        Queue::fake();
+        $product = Product::factory()->create(['stock' => 4, 'reserved_stock' => 0, 'usdt_price_amount' => 2_500_000]);
+
+        $response = $this->post(route('storefront.shop.checkout'), [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'payment_method' => 'usdt_bep20',
+            'buyer_name' => 'BSC Buyer',
+            'checkout_attempt' => '73000000-0000-4000-8000-000000000001',
+            'terms_accepted' => true,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $payment = Payment::query()->sole();
+        $this->assertSame('USDT_BEP20', $payment->method);
+        $this->assertNull($payment->order->support_contact_value);
+        $this->get($response->headers->get('Location'))->assertOk()->assertSee('0x1111111111111111111111111111111111111111');
     }
 
     public function test_valid_bsc_transfer_claims_payment_and_delivers_product_receipt(): void

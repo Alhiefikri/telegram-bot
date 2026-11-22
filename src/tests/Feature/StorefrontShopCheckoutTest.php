@@ -43,6 +43,8 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->instance(StorefrontCheckoutChallenge::class, new FakeStorefrontCheckoutChallenge);
 
         config()->set('services.storefront.telegram_reservation_floor', 0);
+        config()->set('services.binance.api_key', 'test-only-key');
+        config()->set('services.binance.api_secret', 'test-only-secret');
     }
 
     public function test_guest_and_unlinked_customer_can_checkout_manual_unlimited_products(): void
@@ -195,19 +197,40 @@ class StorefrontShopCheckoutTest extends TestCase
         $product = $this->availableProduct(['stock' => 1]);
         Http::fake();
 
-        $this->from(route('storefront.home'))
-            ->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
+        foreach (['', 'not-a-phone'] as $phone) {
+            $this->post(route('storefront.shop.checkout'), [
+                'product_id' => $product->id,
                 'quantity' => 1,
                 'buyer_name' => 'buyer_test',
-                'payment_method' => 'qris', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => true, ])
-            ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
-            ->assertSessionHasErrors([
-                'support_contact_channel',
-                'support_contact_value',
-            ]);
+                'payment_method' => 'qris',
+                'sakurupiah_phone' => $phone,
+                'checkout_attempt' => '73000000-0000-4000-8000-000000000001',
+                'terms_accepted' => true,
+            ])
+                ->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
+                ->assertSessionHasErrors('support_contact_value');
+        }
 
         $this->assertNoLocalCheckoutRowsCreated('missing Sakurupiah customer phone');
         Http::assertNothingSent();
+    }
+
+    public function test_signed_in_checkout_uses_the_account_name_instead_of_a_buyer_name_field(): void
+    {
+        $this->manualPaymentModeIsActive();
+        $customer = Customer::factory()->create(['first_name' => 'Rizká', 'email_verified_at' => now()]);
+        $product = $this->availableProduct(['stock' => 1, 'image_path' => 'products/checkout.webp']);
+        $this->actingAs($customer, 'customer')->withSession(['customer_auth_version' => (int) $customer->auth_version]);
+
+        $this->get(route('storefront.shop.checkout.product', $product))
+            ->assertOk()
+            ->assertSee('Rizká')
+            ->assertSee('/storage/products/checkout.webp')
+            ->assertDontSee('name="buyer_name"', false);
+
+        $this->postStorefrontShopCheckout($product, 1, 'Tampered Name')->assertRedirect();
+
+        $this->assertSame('Rizká', Customer::query()->findOrFail(Order::query()->sole()->customer_id)->first_name);
     }
 
     public function test_checkout_service_rejects_unaccepted_terms_before_any_side_effect(): void
@@ -655,15 +678,13 @@ class StorefrontShopCheckoutTest extends TestCase
 
         $this->get($response->headers->get('Location'))
             ->assertOk()
-            ->assertSee('PENTING')
             ->assertSee('Kirim tepat 3 USDT, termasuk semua angka desimal.')
             ->assertSee('Jangan membulatkan atau mengubah nominal.')
-            ->assertSee('Setelah membayar, kirim Binance Pay Order ID.', false)
-            ->assertSee('Buka pembayaran selesai di Binance Pay, lihat Order Details, lalu salin Order ID persis.', false)
+            ->assertSee('Order ID atau Transaction ID Binance Pay')
             ->assertDontSee('/payment '.$order->invoice_number);
     }
 
-    public function test_binance_amount_unique_auto_verification_does_not_route_to_screenshot_proof(): void
+    public function test_new_website_binance_invoice_uses_order_id_even_when_default_is_amount_unique(): void
     {
         Queue::fake([SendAdminOrderPendingNotification::class]);
         config()->set('services.binance.pay_id', '987654321');
@@ -687,13 +708,13 @@ class StorefrontShopCheckoutTest extends TestCase
         $order = Order::with('payments')->sole();
         $payment = $order->payments->sole();
         $this->assertTrue($payment->binance_auto_verification_enabled);
-        $this->assertSame('amount_unique', $payment->binance_verification_mode);
+        $this->assertSame('order_id', $payment->binance_verification_mode);
+        $this->assertSame('amount_unique', ManualPaymentSetting::current()->binance_verification_mode);
 
         $this->get($response->headers->get('Location'))
             ->assertOk()
-            ->assertSee('Mengecek pembayaran otomatis')
-            ->assertSee('Kami akan mengecek riwayat Binance untuk nominal dan penerima yang tepat.')
-            ->assertDontSee('Setelah membayar, kirim Binance Pay Order ID.')
+            ->assertSee('Order ID atau Transaction ID Binance Pay')
+            ->assertDontSee('kirim screenshot pembayaran ke bot Telegram')
             ->assertDontSee('/payment '.$order->invoice_number);
     }
 
@@ -712,7 +733,7 @@ class StorefrontShopCheckoutTest extends TestCase
     public function test_shop_checkout_rechecks_binance_availability_after_the_payment_option_was_rendered(): void
     {
         config()->set('services.binance.pay_id', '987654321');
-        $settings = ManualPaymentSetting::create([
+        ManualPaymentSetting::create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,
             'is_active' => true,
@@ -722,7 +743,10 @@ class StorefrontShopCheckoutTest extends TestCase
         $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertOk()
             ->assertSee('Buat invoice Binance Pay');
-        $settings->update(['binance_pay_enabled' => false]);
+        config()->set('services.binance.api_secret', null);
+        $this->get(route('storefront.shop.checkout.product', ['product' => $product]))
+            ->assertOk()
+            ->assertDontSee('Buat invoice Binance Pay');
 
         $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
@@ -730,7 +754,7 @@ class StorefrontShopCheckoutTest extends TestCase
             'payment_method' => 'binance_pay', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', ])->assertRedirect(route('storefront.shop.checkout.product', ['product' => $product]))
             ->assertSessionHas('storefront_checkout_error', 'Binance Pay belum tersedia untuk produk ini.');
 
-        $this->assertNoLocalCheckoutRowsCreated('disabled Binance Pay after render');
+        $this->assertNoLocalCheckoutRowsCreated('Binance Pay API credentials missing after render');
     }
 
     public function test_repeated_binance_checkout_from_the_same_session_reuses_the_existing_order(): void

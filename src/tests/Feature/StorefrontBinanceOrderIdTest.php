@@ -37,6 +37,12 @@ class StorefrontBinanceOrderIdTest extends TestCase
             'expired_at' => now()->addMinutes(20),
         ]);
 
+        $this->post(URL::signedRoute('storefront.shop.orders.binance-order-id', $order, null, false), [
+            'binance_order_id' => 'bad',
+        ])->assertRedirect(app(StorefrontInvoiceUrl::class)->show($order))
+            ->assertSessionHasErrors('binance_order_id');
+        Queue::assertNothingPushed();
+
         $response = $this->post(URL::signedRoute('storefront.shop.orders.binance-order-id', $order, null, false), [
             'binance_order_id' => '445011487581044736',
         ]);

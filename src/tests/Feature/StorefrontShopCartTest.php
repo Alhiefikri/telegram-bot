@@ -219,6 +219,8 @@ class StorefrontShopCartTest extends TestCase
     {
         Queue::fake();
         config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'test-only-key');
+        config()->set('services.binance.api_secret', 'test-only-secret');
         ManualPaymentSetting::query()->create([
             'payment_mode' => 'manual',
             'binance_pay_enabled' => true,

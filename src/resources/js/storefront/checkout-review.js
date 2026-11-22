@@ -229,35 +229,16 @@ export default function checkoutReview(initialConfig = {}) {
 
     syncContact() {
       const form = this.$refs.checkoutForm;
-      if (!form) {
+      const phone = this.$refs.sakurupiahPhone;
+      if (!form || !phone) {
         return;
       }
       const method = form.querySelector(
         'input[name="payment_method"]:is(:checked, [type="hidden"])'
       );
       const required = method?.dataset.paymentProvider === "sakurupiah";
-      const channel = form.elements.namedItem("support_contact_channel");
-      const contact = form.elements.namedItem("support_contact_value");
-      if (!channel || !contact) {
-        return;
-      }
-
-      if (required) {
-        this.$refs.contactDetails.open = true;
-      }
-      channel.required = contact.required = required;
-      channel.setCustomValidity(
-        required && channel.value !== "whatsapp"
-          ? (copy.selectWhatsapp ?? "")
-          : ""
-      );
-      if (required) {
-        contact.pattern = "\\+?[0-9][0-9 .\\-]{7,19}";
-        contact.title = copy.validWhatsapp ?? "";
-      } else {
-        contact.removeAttribute("pattern");
-        contact.removeAttribute("title");
-      }
+      phone.required = required;
+      phone.disabled = !required;
     },
 
     openInvalidDetails(event) {

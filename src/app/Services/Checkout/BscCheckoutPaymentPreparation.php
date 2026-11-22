@@ -77,7 +77,9 @@ final readonly class BscCheckoutPaymentPreparation implements CheckoutPaymentPre
             requiresFinalizedBlock: (bool) ($context->lockedSetting?->bsc_require_finalized_block ?? false),
             confirmationGraceMinutes: $context->lockedSetting?->bscConfirmationGraceMinutes()
                 ?? ManualPaymentSetting::DEFAULT_BSC_CONFIRMATION_GRACE_MINUTES,
-            verificationMode: PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+            verificationMode: $context->intent instanceof UsdtBep20CheckoutIntent && $context->intent->requiresTransactionHash
+                ? PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH
+                : PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
         );
 
         return new CheckoutPaymentPlan(

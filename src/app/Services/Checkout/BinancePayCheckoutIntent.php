@@ -8,6 +8,8 @@ final readonly class BinancePayCheckoutIntent implements CheckoutPaymentIntent
 {
     public const METHOD = 'BINANCE_PAY_ID';
 
+    public function __construct(public bool $requiresOrderId = false) {}
+
     public function provider(): string
     {
         return PaymentProvider::MANUAL;

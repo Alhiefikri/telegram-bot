@@ -8,6 +8,7 @@ use App\Enums\PaymentStatus;
 use App\Models\ManualPaymentSetting;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Services\Binance\BinancePayClient;
 use App\Services\Bsc\BscReadiness;
 use App\Services\Catalog\CatalogFamilyIconResolver;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
@@ -44,6 +45,7 @@ class StorefrontProductPresenter
         private readonly StorefrontProductPlaceholder $placeholder,
         private readonly ProductQuantityPricing $pricing,
         private readonly CatalogFamilyIconResolver $familyIcons,
+        private readonly BinancePayClient $binance,
     ) {}
 
     public function present(
@@ -318,6 +320,7 @@ class StorefrontProductPresenter
     {
         if ($this->binancePayEnabled === null) {
             $this->binancePayEnabled = (bool) $setting?->binance_pay_enabled
+                && $this->binance->configured()
                 && (filled(config('services.binance.pay_id')) || filled(config('services.binance.pay_uid')));
         }
 

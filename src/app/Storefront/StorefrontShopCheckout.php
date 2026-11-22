@@ -13,10 +13,13 @@ use App\Models\ManualPaymentSetting;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Services\Binance\BinancePayClient;
 use App\Services\CartService;
+use App\Services\Checkout\BinancePayCheckoutIntent;
 use App\Services\Checkout\CheckoutPaymentIntent;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\Checkout\PaymentProviderResolver;
+use App\Services\Checkout\UsdtBep20CheckoutIntent;
 use App\Services\CheckoutMaintenance\CheckoutMaintenance;
 use App\Services\GuestOrderNotificationService;
 use App\Services\KlikQris\KlikQrisNativeQrisOutcome;
@@ -51,6 +54,7 @@ class StorefrontShopCheckout
         private readonly CheckoutMaintenance $maintenance,
         private readonly TelegramOutboundEffectService $outboundEffects,
         private readonly TelegramOutboundEffectDispatcher $dispatcher,
+        private readonly BinancePayClient $binance,
     ) {}
 
     public function start(
@@ -340,22 +344,26 @@ class StorefrontShopCheckout
         if (CheckoutPaymentIntents::isBinancePayIdRail($paymentRail)) {
             $settings = ManualPaymentSetting::current();
             if (! $settings?->binance_pay_enabled
+                || ! $this->binance->configured()
                 || (! filled(config('services.binance.pay_id')) && ! filled(config('services.binance.pay_uid')))
                 || $product->usdt_price_amount === null) {
                 throw new StorefrontCheckoutError('binance_unavailable');
             }
 
-            return $this->providerResolver->resolve($paymentRail)->paymentIntent;
+            return new BinancePayCheckoutIntent(requiresOrderId: true);
         }
 
         if (CheckoutPaymentIntents::isUsdtBep20Rail($paymentRail)) {
             if ($product->usdt_price_amount === null) {
                 throw new StorefrontCheckoutError('bsc_unavailable');
             }
+            if (! ManualPaymentSetting::current()?->bsc_payment_enabled) {
+                throw new StorefrontCheckoutError('bsc_unavailable');
+            }
 
             // Readiness is deliberately checked by OrderCheckoutService after
             // it locks the authoritative checkout setting inside its transaction.
-            return $this->providerResolver->resolve($paymentRail)->paymentIntent;
+            return new UsdtBep20CheckoutIntent(requiresTransactionHash: true);
         }
 
         if (ManualPaymentSetting::current() === null) {

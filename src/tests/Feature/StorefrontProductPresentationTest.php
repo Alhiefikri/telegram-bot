@@ -256,6 +256,8 @@ class StorefrontProductPresentationTest extends TestCase
     public function test_binance_choice_exposes_only_configured_binance_pay_id_rail(): void
     {
         config()->set('services.binance.pay_id', '987654321');
+        config()->set('services.binance.api_key', 'test-only-key');
+        config()->set('services.binance.api_secret', 'test-only-secret');
         ManualPaymentSetting::current()->update(['binance_pay_enabled' => true]);
         $product = $this->availableProduct([
             'name' => 'Binance Pay Product',

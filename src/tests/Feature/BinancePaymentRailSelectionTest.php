@@ -39,6 +39,8 @@ class BinancePaymentRailSelectionTest extends TestCase
         config()->set('services.bsc.usdt_contract', self::CONTRACT);
         config()->set('services.bsc.expected_token_decimals', 18);
         config()->set('services.storefront.telegram_reservation_floor', 0);
+        config()->set('services.binance.api_key', 'test-only-key');
+        config()->set('services.binance.api_secret', 'test-only-secret');
 
         app()->instance(BscRpcClientInterface::class, new class implements BscRpcClientInterface, BscTransferLogRpcClientInterface
         {
@@ -134,7 +136,7 @@ class BinancePaymentRailSelectionTest extends TestCase
         $this->post(route('storefront.shop.checkout'), ['product_id' => $product->id,
             'quantity' => 1,
             'buyer_name' => 'bsc_disabled', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ])->assertRedirect()
-            ->assertSessionHas('storefront_checkout_error', fn (string $message): bool => str_contains($message, 'BSC payment rail is not ready.'));
+            ->assertSessionHas('storefront_checkout_error', 'BSC payment rail is not available for this product.');
 
         $this->assertSame(0, Order::count());
         $this->assertSame(0, Payment::count());
@@ -192,8 +194,8 @@ class BinancePaymentRailSelectionTest extends TestCase
             ->assertSee('BNB Smart Chain (BEP20)')
             ->assertSee('ERC20, TRC20, opBNB')
             ->assertSee('Batas pembayaran:')
-            ->assertSee('Sistem mendeteksi transfer otomatis')
-            ->assertDontSee('Kirim Hash TX BSC')
+            ->assertSee('TX hash / TXID BSC')
+            ->assertDontSee('Sistem mendeteksi transfer otomatis')
             ->assertSee('Sisa waktu pembayaran');
     }
 
@@ -335,13 +337,11 @@ class BinancePaymentRailSelectionTest extends TestCase
             'buyer_name' => 'bsc_hash', 'checkout_attempt' => '73000000-0000-4000-8000-000000000001', 'terms_accepted' => '1', 'payment_method' => 'usdt_bep20', ]);
         $order = Order::with('payments.bscDetail')->sole();
         $payment = $order->payments->sole();
-        $payment->bscDetail()->update([
-            'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH,
-        ]);
+        $this->assertSame(PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH, $payment->bscDetail->verification_mode);
         $url = app(StorefrontInvoiceUrl::class)->bscTxHash($order);
 
         $this->post($url, ['bsc_tx_hash' => 'not-a-hash'])
-            ->assertRedirect()
+            ->assertRedirect(app(StorefrontInvoiceUrl::class)->show($order))
             ->assertSessionHasErrors(['bsc_tx_hash' => 'Masukkan hash transaksi BSC yang diawali 0x dan berisi 64 karakter heksadesimal.']);
 
         $hash = '0x'.str_repeat('a', 64);
