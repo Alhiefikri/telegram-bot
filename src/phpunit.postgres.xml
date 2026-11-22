@@ -86,6 +86,10 @@
             <file>tests/Feature/PakasirWebhookTest.php</file>
             <file>tests/Feature/Telegram/TelegramNavigationRootPostgresConcurrencyTest.php</file>
             <file>tests/Feature/TelegramReceiptPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/TelegramStarsCheckoutPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/TelegramStarsRefundPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/TelegramStarsSettlementPostgresConcurrencyTest.php</file>
+            <file>tests/Feature/TelegramStarsTransportPostgresConcurrencyTest.php</file>
             <file>tests/Feature/CustomerAuthContractPostgresTest.php</file>
             <file>tests/Feature/CustomerPasswordAuthenticationPostgresTest.php</file>
             <file>tests/Feature/CustomerEmailOtpPostgresTest.php</file>

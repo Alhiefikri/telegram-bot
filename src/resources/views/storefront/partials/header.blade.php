@@ -21,11 +21,11 @@
 @endphp
 
 <header class="storefront-header sticky top-0 z-50 border-b border-[var(--sf-border)] bg-[var(--sf-surface)]" data-storefront-header data-account-identity-url="{{ route('customer.identity') }}" x-data="mobileMenu">
-    <x-storefront.frame as="nav" data-storefront-nav-frame class="flex min-h-16 items-center justify-between gap-2 py-2 lg:gap-5" aria-label="{{ __('storefront_funnel.primary_nav') }}">
+    <x-storefront.frame as="nav" data-storefront-nav-frame class="flex min-h-16 flex-wrap items-center justify-between gap-2 py-2 lg:flex-nowrap lg:gap-5" aria-label="{{ __('storefront_funnel.primary_nav') }}">
         <a href="{{ $homeUrl }}" class="inline-flex min-h-11 min-w-0 shrink-0 items-center rounded-lg" aria-label="{{ __('storefront_funnel.brand_home', ['brand' => $brand]) }}">
             @include('storefront.components.brand-mark', ['brand' => $brand])
         </a>
-        <div class="flex min-w-0 items-center justify-end gap-1 text-sm font-semibold sm:gap-2 lg:gap-4">
+        <div class="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-1 text-sm font-semibold sm:gap-2 lg:flex-nowrap lg:gap-4">
             <div class="hidden items-center gap-4 lg:flex">
                 @include('storefront.partials.navigation.links')
             </div>
