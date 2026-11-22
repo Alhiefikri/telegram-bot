@@ -21,7 +21,7 @@
 @endphp
 
 <header class="storefront-header sticky top-0 z-50 border-b border-[var(--sf-border)] bg-[var(--sf-surface)]" data-storefront-header data-account-identity-url="{{ route('customer.identity') }}" x-data="mobileMenu">
-    <x-storefront.frame as="nav" data-storefront-nav-frame class="flex min-h-16 flex-wrap items-center justify-between gap-2 py-2 lg:flex-nowrap lg:gap-5" aria-label="{{ __('storefront_funnel.primary_nav') }}">
+    <x-storefront.frame as="nav" data-storefront-nav-frame class="relative flex min-h-16 flex-wrap items-center justify-between gap-2 py-2 lg:flex-nowrap lg:gap-5" aria-label="{{ __('storefront_funnel.primary_nav') }}">
         <a href="{{ $homeUrl }}" class="inline-flex min-h-11 min-w-0 shrink-0 items-center rounded-lg" aria-label="{{ __('storefront_funnel.brand_home', ['brand' => $brand]) }}">
             @include('storefront.components.brand-mark', ['brand' => $brand])
         </a>
@@ -41,16 +41,19 @@
             </div>
             @include('storefront.partials.locale-selector')
             <x-theme-toggle class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg" />
-            <button id="mobile-menu-btn" type="button" class="grid size-11 shrink-0 place-items-center rounded-lg border border-[var(--sf-border)] lg:hidden" aria-label="{{ __('storefront_funnel.open_navigation') }}" aria-controls="mobile-menu" aria-expanded="false" :aria-expanded="isOpen ? 'true' : 'false'" @click="toggle($event)">
+            <button id="mobile-menu-btn" type="button" x-cloak class="grid size-11 shrink-0 place-items-center rounded-lg border border-[var(--sf-border)] lg:hidden" aria-label="{{ __('storefront_funnel.open_navigation') }}" aria-controls="mobile-menu" aria-expanded="false" :aria-expanded="isOpen ? 'true' : 'false'" @click="toggle($event)">
                 <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
         </div>
     </x-storefront.frame>
     @include('storefront.partials.navigation.mobile-menu')
     <noscript>
-        <nav class="storefront-layout-frame flex flex-wrap gap-3 pb-2 text-sm lg:hidden" aria-label="{{ __('storefront_funnel.no_script_nav') }}">
-            @include('storefront.partials.navigation.links')
-            @include('storefront.partials.navigation.account')
-        </nav>
+        <details class="storefront-layout-frame pb-2 text-sm lg:hidden">
+            <summary class="min-h-[44px] cursor-pointer rounded-lg py-2 font-semibold">{{ __('storefront_funnel.no_script_nav') }}</summary>
+            <nav class="flex flex-wrap gap-2" aria-label="{{ __('storefront_funnel.no_script_nav') }}">
+                @include('storefront.partials.navigation.links')
+                @include('storefront.partials.navigation.account')
+            </nav>
+        </details>
     </noscript>
 </header>

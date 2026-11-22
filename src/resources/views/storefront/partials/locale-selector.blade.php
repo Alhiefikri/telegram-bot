@@ -11,8 +11,8 @@
             <span class="font-bold">{{ strtoupper($activeLocale) }}</span>
             <span aria-hidden="true">▾</span>
         </summary>
-        {{-- Bound the width by the header. The shared header anchors vertically to the summary, above its other rows. --}}
-        <div data-storefront-locale-panel class="absolute end-2 top-[var(--locale-panel-top,100%)] z-[60] w-[min(16rem,calc(100%-1rem))] rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] p-1 shadow-lg">
+        {{-- Anchor to the primary nav, independently of the no-script navigation below it. --}}
+        <div data-storefront-locale-panel class="absolute end-2 top-full z-[60] w-[min(16rem,calc(100%-1rem))] rounded-lg border border-[var(--sf-border)] bg-[var(--sf-surface)] p-1 shadow-lg">
             @if ($catalogLocaleSwitcher)
                 @foreach ($localeLabels as $locale => $label)
                     <a href="{{ route('storefront.locale.catalog', ['locale' => $locale, 'return' => $localeCatalogReturn], absolute: false) }}" lang="{{ $locale }}" hreflang="{{ $locale }}" @if ($locale === $activeLocale) aria-current="true" @endif class="flex min-h-[44px] items-center gap-2 rounded-md px-3 wrap-anywhere hover:bg-[var(--sf-surface-warm)]"><span>{{ $label }}</span> @if ($locale === $activeLocale)<span aria-hidden="true">✓</span>@endif</a>

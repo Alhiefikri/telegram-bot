@@ -255,11 +255,9 @@ test("PAID history paginates 25 accounts within 30 days without replacing ready 
   const card = await getAdminProductCard(page, "Audit Pagination Product");
   await card.getByRole("button", { name: "Kelola akun", exact: true }).click();
   const modal = page.locator("#manage-stock-modal");
-  const paid = modal
-    .locator("section")
-    .filter({
-      has: page.getByRole("navigation", { name: "Halaman riwayat PAID" }),
-    });
+  const paid = modal.locator("section").filter({
+    has: page.getByRole("navigation", { name: "Halaman riwayat PAID" }),
+  });
   const next = paid.getByRole("button", { name: "Berikutnya", exact: true });
   const previous = paid.getByRole("button", {
     name: "Sebelumnya",
@@ -1033,6 +1031,14 @@ test("customer checkout: switches home and signed invoice locale by keyboard wit
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.locator("#catalog-family")).toHaveValue(family);
     await expect(page.locator("#catalog-search")).toHaveValue("browser");
+    const fallbackNavigation = page.locator(
+      "[data-storefront-header] noscript"
+    );
+    await fallbackNavigation.locator("summary").press("Enter");
+    await fallbackNavigation
+      .getByRole("link", { name: "Guides", exact: true })
+      .press("Enter");
+    await expect(page).toHaveURL(new URL("/panduan", baseUrl).href);
     await enlargeText();
     await page.locator("#cara-beli summary").press("Enter");
     await expect(
@@ -1089,10 +1095,10 @@ test("customer checkout: keeps the catalog above the fold and sticky anchors cle
       path: testInfo.outputPath(`home-${viewport.width}.png`),
     });
     await page
-      .locator("#cara-beli")
+      .locator("#support")
       .evaluate((element) => element.scrollIntoView({ behavior: "instant" }));
-    const header = await page.locator("[data-home-header]").boundingBox();
-    const anchor = await page.locator("#cara-beli").boundingBox();
+    const header = await page.locator("[data-storefront-header]").boundingBox();
+    const anchor = await page.locator("#support").boundingBox();
     expect(header.y).toBeCloseTo(0, 0);
     expect(anchor.y).toBeGreaterThanOrEqual(header.y + header.height);
     await expectNoDocumentOverflow(page);
@@ -1149,11 +1155,12 @@ test("customer checkout: keeps storefront card actions separate and keyboard rea
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
 
   const card = page.locator("article.product-card").filter({
     hasText: "Browser QA Produk A",
   });
+  await expect(card).toBeVisible();
   await card.evaluate((element) =>
     element.scrollIntoView({
       block: "center",
@@ -1973,7 +1980,7 @@ test("customer checkout: keeps checkout back links source-aware at mobile widths
 
     await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
     const homeCard = page
-      .locator("article.product-card")
+      .locator("[data-home-plan]")
       .filter({ hasText: "Browser QA Produk B" })
       .first();
     await expect(homeCard).toBeVisible();
@@ -2330,12 +2337,14 @@ test("customer checkout: proves final public URL, SEO, and fallback asset contra
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${baseUrl}/?family=browser-responsive-family`, {
+    waitUntil: "domcontentloaded",
+  });
 
   const familyCard = page
-    .locator("a.family-card")
-    .filter({ hasText: "Browser QA Product Family" })
-    .first();
+    .locator("[data-catalog-results]")
+    .getByRole("link", { name: /Browser QA Product Family/ });
+  await expect(familyCard).toBeVisible();
   const familyHref = await familyCard.getAttribute("href");
   expect(familyHref).not.toBeNull();
 
@@ -2488,6 +2497,13 @@ test("customer checkout: proves the Storefront release matrix at required viewpo
   page,
 }) => {
   test.setTimeout(180_000);
+  runArtisan([
+    "tinker",
+    "--execute",
+    `App\\Models\\StorefrontSetting::current()->update(['homepage_banners' => [
+      ['path' => '/assets/product-placeholder.svg', 'title' => 'Banner Browser QA', 'link' => '/shop'],
+    ]]);`,
+  ]);
 
   let productHref;
   let familyHref;
@@ -2518,24 +2534,20 @@ test("customer checkout: proves the Storefront release matrix at required viewpo
 
     const searchTerm = "Browser QA Produk A";
     await search.fill(searchTerm);
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.getByRole("button", { name: "Cari", exact: true }).click(),
-    ]);
+    await page.getByRole("button", { name: "Terapkan", exact: true }).click();
     await expect(page).toHaveURL(
-      (url) =>
-        url.pathname === "/shop" && url.searchParams.get("q") === searchTerm
+      (url) => url.pathname === "/" && url.searchParams.get("q") === searchTerm
     );
-    const searchResults = page.locator("#storefront-product-grid");
+    const searchResults = page.locator("[data-catalog-results]");
     await expect(
       searchResults
-        .locator("article.product-card")
+        .locator("[data-home-plan]")
         .filter({ hasText: searchTerm })
         .first()
     ).toBeVisible();
     await expect(
       searchResults
-        .locator("article.product-card")
+        .locator("[data-home-plan]")
         .filter({ hasText: "Browser QA Produk B" })
     ).toHaveCount(0);
     await expectNoDocumentOverflow(page);
@@ -3603,14 +3615,12 @@ test("workspace returns to the same family and its product options", async ({
   for (const width of [1280, 375]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${baseUrl}/admin?tab=produk`);
-    const group = page
-      .locator('[id^="admin-product-family-group-"]')
-      .filter({
-        has: page.getByRole("heading", {
-          name: "Browser QA Product Family",
-          exact: true,
-        }),
-      });
+    const group = page.locator('[id^="admin-product-family-group-"]').filter({
+      has: page.getByRole("heading", {
+        name: "Browser QA Product Family",
+        exact: true,
+      }),
+    });
     await group.getByRole("button", { name: "Lihat product" }).click();
     const first = group
       .locator('article[id^="product-"]')
@@ -7347,7 +7357,7 @@ async function emulate200PercentCheckoutScale(context, page, viewport) {
 
 async function navigateToCheckoutFromProductCard(page, productName) {
   const card = page
-    .locator("article.product-card")
+    .locator("[data-home-plan], article.product-card")
     .filter({ hasText: productName })
     .first();
   const checkoutLink = card
