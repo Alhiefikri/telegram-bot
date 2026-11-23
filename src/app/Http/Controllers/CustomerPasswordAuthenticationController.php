@@ -78,7 +78,7 @@ class CustomerPasswordAuthenticationController extends Controller
 
     public function security(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response
     {
-        $metadata = $seo->privatePage('Keamanan akun | '.$storefront->brand(), 'Lengkapi password akun pelanggan.');
+        $metadata = $seo->privatePage(__('customer_account.security').' | '.$storefront->brand(), __('customer_account.security_page.description'));
         $authEnabled = app(CustomerAuthAvailability::class)->enabled();
 
         return response()->view('customer.security', [

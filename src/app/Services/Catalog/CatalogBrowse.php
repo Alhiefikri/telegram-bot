@@ -16,6 +16,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductFamily;
+use App\Storefront\StorefrontMediaUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
@@ -467,7 +468,7 @@ final class CatalogBrowse
             familySortOrder: (int) ($product->family_sort_order ?? 0),
             optionLabel: $optionLabel,
             imagePath: $product->image_path,
-            imageUrl: $this->publicImageUrl($product->image_path),
+            imageUrl: StorefrontMediaUrl::fromPath($product->image_path),
             telegramImagePath: $product->telegram_image_path,
             createdAt: $product->created_at?->toISOString(),
             icon: $icon->icon,
@@ -492,7 +493,7 @@ final class CatalogBrowse
             slug: (string) $family->slug,
             description: $family->description,
             imagePath: $family->image_path,
-            imageUrl: $this->publicImageUrl($family->image_path),
+            imageUrl: StorefrontMediaUrl::fromPath($family->image_path),
             telegramImagePath: $family->telegram_image_path,
             sortOrder: (int) $family->sort_order,
             categoryId: $firstMember?->categoryId,
@@ -509,7 +510,7 @@ final class CatalogBrowse
             icon: $icon->icon,
             customEmojiId: $icon->customEmojiId,
             matchesSearch: $matchesSearch || ($search !== '' && $this->matchesFamily($family, $search)),
-            sidebarIconUrl: $this->publicImageUrl($family->sidebar_icon_path),
+            sidebarIconUrl: StorefrontMediaUrl::fromPath($family->sidebar_icon_path),
         );
     }
 
@@ -708,21 +709,6 @@ final class CatalogBrowse
             matchesSearch: $matches,
             manualUnlimited: $product->manualUnlimited,
         );
-    }
-
-    private function publicImageUrl(?string $path): ?string
-    {
-        if (! $path) {
-            return null;
-        }
-
-        if (str_starts_with($path, '/')) {
-            $publicPath = parse_url($path, PHP_URL_PATH);
-
-            return is_string($publicPath) && $publicPath !== '' && ! str_starts_with($publicPath, '//') ? $publicPath : null;
-        }
-
-        return '/storage/'.ltrim($path, '/');
     }
 
     private function coerceQuery(CatalogBrowseQuery|string|null $query): CatalogBrowseQuery

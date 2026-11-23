@@ -11,13 +11,23 @@ final class CustomerOwnedOrderQuery
 {
     private const FILTERS = ['all', 'waiting', 'processing', 'completed', 'issue'];
 
-    public function paginateHistory(Customer $customer, string $filter = 'all', int $perPage = 20): LengthAwarePaginator
+    public function paginateHistory(Customer $customer, string $filter = 'all', int $perPage = 10): LengthAwarePaginator
     {
         $statuses = $this->statusesForFilter($this->normalizeFilter($filter));
 
         return Order::query()
             ->where('customer_id', $customer->getKey())
             ->select(['id', 'customer_id', 'invoice_number', 'order_status', 'payment_status', 'total_amount', 'currency', 'created_at'])
+            ->withSum('orderItems as item_quantity', 'quantity')
+            ->with([
+                'orderItems' => fn ($items) => $items
+                    ->select(['id', 'order_id', 'product_id', 'family_id', 'product_name', 'product_icon'])
+                    ->orderBy('id')
+                    ->limit(1),
+                'orderItems.family:id,sidebar_icon_path,icon',
+                'orderItems.product:id,product_family_id',
+                'orderItems.product.family:id,sidebar_icon_path,icon',
+            ])
             ->when($statuses !== null, fn ($query) => $query->whereIn('order_status', array_map(
                 static fn (OrderStatus $status): string => $status->value,
                 $statuses,

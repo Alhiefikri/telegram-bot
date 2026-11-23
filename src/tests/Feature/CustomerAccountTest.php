@@ -13,6 +13,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Notifications\CustomerLoginLinkNotification;
 use App\Services\Credentials\StructuredCredentialPayload;
@@ -30,6 +31,91 @@ use Tests\TestCase;
 class CustomerAccountTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_customer_can_edit_and_reset_only_their_own_web_display_name(): void
+    {
+        $customer = Customer::factory()->create(['first_name' => 'Nadia', 'email' => 'nadia@example.test', 'email_verified_at' => now(), 'locale' => 'id']);
+        $other = Customer::factory()->create(['first_name' => 'Other']);
+        $profile = route('customer.profile.edit');
+        $update = route('customer.profile.update');
+
+        $this->get($profile)->assertRedirect(route('customer.account'));
+        $this->patch($update, ['display_name' => 'Not signed in'])->assertRedirect(route('customer.account'));
+        $this->assertNull($customer->fresh()->display_name);
+
+        $this->actingAs($customer, 'customer')->withCookie('storefront_locale', 'en');
+        $this->get($profile)->assertOk()->assertHeader('Cache-Control', 'no-store, private')
+            ->assertHeader('Referrer-Policy', 'no-referrer')->assertSee('Display name');
+        $this->patch($update, ['display_name' => ['bad']])->assertRedirect($profile)
+            ->assertSessionHasErrors(['display_name' => 'Enter a single-line name of up to 80 characters, or leave it blank.']);
+        $this->patch($update, ['display_name' => str_repeat('x', 81)])->assertRedirect($profile)->assertSessionHasErrors('display_name');
+        $this->patch($update, ['display_name' => "First\nSecond"])->assertRedirect($profile)->assertSessionHasErrors('display_name');
+        $this->assertNull($customer->fresh()->display_name);
+
+        $this->patch($update, [
+            'display_name' => '  Nadia <web>  ',
+            'customer_id' => $other->id,
+            'first_name' => 'Ignored',
+            'email' => 'changed@example.test',
+            'telegram_id' => $other->telegram_id,
+            'locale' => 'ms',
+        ])->assertRedirect($profile)->assertSessionHas('customer_profile_saved', true);
+        $this->assertDatabaseHas('customers', [
+            'id' => $customer->id, 'display_name' => 'Nadia <web>', 'first_name' => 'Nadia',
+            'email' => 'nadia@example.test', 'telegram_id' => $customer->telegram_id, 'locale' => 'id',
+        ]);
+        $this->assertNull($other->fresh()->display_name);
+        $this->get($profile)->assertOk()->assertSee('Nadia <web>')->assertDontSee('Nadia <web>', false);
+        $this->get(route('customer.identity'))->assertJsonPath('name', 'Nadia <web>');
+
+        $this->patch($update, ['display_name' => ''])->assertRedirect($profile);
+        $this->assertNull($customer->fresh()->display_name);
+        $this->get(route('customer.identity'))->assertJsonPath('name', 'Nadia');
+    }
+
+    public function test_customer_history_uses_family_icon_and_legacy_fallbacks_without_changing_order_ownership(): void
+    {
+        $customer = Customer::factory()->create(['email_verified_at' => now()]);
+        $family = ProductFamily::factory()->create(['sidebar_icon_path' => 'family-icons/fixture.webp', 'icon' => '🧩']);
+        $currentFamily = ProductFamily::factory()->create(['sidebar_icon_path' => null, 'icon' => '🖥️']);
+        $product = Product::factory()->create(['product_family_id' => $currentFamily->id]);
+        $order = Order::factory()->for($customer)->create();
+        OrderItem::factory()->for($order)->for($product)->create([
+            'family_id' => $family->id, 'product_name' => 'Historical plan', 'quantity' => 2,
+        ]);
+        OrderItem::factory()->for($order)->create(['product_name' => 'Second plan', 'quantity' => 3]);
+        $legacy = Order::factory()->for($customer)->create();
+        OrderItem::factory()->for($legacy)->for($product)->create(['family_id' => null, 'product_name' => 'Legacy plan']);
+        $noFamily = Order::factory()->for($customer)->create();
+        OrderItem::factory()->for($noFamily)->create(['family_id' => null, 'product_icon' => '🎁']);
+        Order::factory()->for($customer)->create();
+        $otherOrder = Order::factory()->create();
+        OrderItem::factory()->for($otherOrder)->create(['product_name' => 'Foreign plan']);
+
+        $this->actingAs($customer, 'customer')->get(route('customer.orders.index'))
+            ->assertOk()->assertSee('Historical plan')->assertSee('/storage/family-icons/fixture.webp')
+            ->assertSee('5 item')->assertSee('Legacy plan')->assertSee('🖥️')->assertSee('🎁')
+            ->assertSee('m12 3 8 4.5', false)
+            ->assertSee(route('customer.orders.show', $order))
+            ->assertDontSee('Foreign plan');
+    }
+
+    public function test_account_locale_switch_keeps_safe_history_context_and_translates_account_sections(): void
+    {
+        $customer = Customer::factory()->create(['email_verified_at' => now()]);
+        $this->actingAs($customer, 'customer')->post(route('storefront.locale.update'), [
+            'locale' => 'ms', 'return' => '/akun/pesanan?status=completed&page=2&extra=discard',
+        ])->assertStatus(303)->assertHeader('Location', '/akun/pesanan?status=completed&page=2')
+            ->assertCookie('storefront_locale', 'ms');
+
+        $this->withCookie('storefront_locale', 'ms');
+        $this->get(route('customer.orders.index'))->assertOk()->assertSee('<html lang="ms"', false)
+            ->assertSee('Pesanan anda')->assertSee('10 setiap halaman');
+        $this->get(route('customer.profile.edit'))->assertOk()->assertSee('Sunting profil')->assertSee('Nama paparan');
+        $this->get(route('customer.balance.show'))->assertOk()->assertSee('Aktiviti baki');
+        $this->get(route('customer.security'))->assertOk()->assertSee('Keselamatan akaun');
+        $this->get(route('customer.claim.create'))->assertOk()->assertSee('Tuntut pesanan tetamu');
+    }
 
     public function test_account_overview_counts_only_the_authenticated_customers_orders(): void
     {

@@ -33,5 +33,11 @@
         @case('logout')
             <path d="M9 4H4v16h5m5-12 4 4-4 4m-5-4h13" />
             @break
+        @case('chevron')
+            <path d="m9 6 6 6-6 6" />
+            @break
+        @case('package')
+            <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm-8 4.5 8 4.5 8-4.5M12 12v9m4-15.75-8 4.5" />
+            @break
     @endswitch
 </svg>

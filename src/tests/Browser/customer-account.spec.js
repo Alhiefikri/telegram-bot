@@ -104,6 +104,65 @@ const noOverflow = async (page) =>
     )
   ).toBe(true);
 
+test("account sidebar, editable profile, languages and family history icons work on desktop and mobile", async ({
+  page,
+}) => {
+  run("profile-history");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await account(page);
+  await page
+    .getByLabel("Alamat email", { exact: true })
+    .fill("profile-browser@example.test");
+  await page.getByRole("button", { name: "Lanjutkan", exact: true }).click();
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill("Browser profile password 123");
+  await page.getByRole("button", { name: "Masuk dengan password" }).click();
+
+  const sidebar = page.locator(".account-sidebar");
+  const heading = page.getByRole("heading", { level: 1 });
+  await expect(heading).toHaveText("Pesanan saya");
+  await expect(
+    sidebar.getByRole("link", { name: "Pesanan saya" })
+  ).toHaveAttribute("aria-current", "page");
+  expect((await sidebar.boundingBox()).x).toBeLessThan(
+    (await heading.boundingBox()).x
+  );
+  await expect(page.locator(".account-order-row")).toHaveCount(10);
+  const familyIcon = page.locator(".account-order-icon img").first();
+  await expect(familyIcon).toHaveAttribute("src", "/chibi.png");
+  await expect
+    .poll(() => familyIcon.evaluate((image) => image.naturalWidth))
+    .toBeGreaterThan(0);
+  await expect(familyIcon).toHaveCSS("width", "24px");
+  await expect(familyIcon).toHaveCSS("height", "24px");
+
+  await sidebar.getByRole("link", { name: "Edit profil" }).click();
+  await page.getByLabel("Nama tampilan").fill("Nama Baru");
+  await page.getByRole("button", { name: "Simpan profil" }).click();
+  await expect(sidebar).toContainText("Nama Baru");
+  await expect(page.getByRole("status")).toContainText(
+    "Profil berhasil disimpan."
+  );
+
+  await page.locator("#account-language").selectOption("en");
+  await page.getByRole("button", { name: "Simpan bahasa" }).click();
+  await expect(heading).toHaveText("Edit profile");
+  await page.locator("#account-language").selectOption("ms");
+  await page.getByRole("button", { name: "Save language" }).click();
+  await expect(heading).toHaveText("Sunting profil");
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  await noOverflow(page);
+  await sidebar.getByRole("link", { name: "Pesanan anda" }).click();
+  await expect(heading).toHaveText("Pesanan anda");
+  await expect(familyIcon).toHaveCSS("width", "24px");
+  await noOverflow(page);
+  await page.getByRole("link", { name: "Seterusnya" }).click();
+  await expect(page.locator(".account-order-row")).toHaveCount(1);
+  await expect(page.getByText("Halaman 2 daripada 2")).toBeVisible();
+});
+
 test("registration, verification, password login, OTP, reset and retained magic link use real forms", async ({
   page,
 }) => {
@@ -617,7 +676,7 @@ test("paid invoice credentials require access and reveal only on explicit reques
   const field = page
     .locator("[data-credential-secret]")
     .filter({
-      has: page.locator('[data-secret-toggle][data-secret-label^="Password"]'),
+      has: page.locator('[data-secret-toggle][aria-controls$="-password"]'),
     })
     .first();
   const value = field.locator("[data-secret-value]");

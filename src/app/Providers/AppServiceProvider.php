@@ -37,7 +37,6 @@ use App\Services\Checkout\TelegramStarsCheckoutPaymentPreparation;
 use App\Services\Checkout\UsdtBalanceCheckoutPaymentPreparation;
 use App\Services\Checkout\WijayaPayCheckoutPaymentPreparation;
 use App\Services\Customer\CustomerAccountOverviewReader;
-use App\Services\Customer\CustomerBalanceOverview;
 use App\Services\EloquentInventoryLedger;
 use App\Services\InventoryLedger;
 use App\Services\KlikQris\KlikQrisClient;
@@ -232,16 +231,20 @@ class AppServiceProvider extends ServiceProvider
         Vite::createAssetPathsUsing(fn (string $path, ?bool $secure): string => '/'.ltrim($path, '/'));
         View::composer([
             'customer.dashboard', 'customer.orders', 'customer.balance',
-            'customer.security', 'customer.claim',
+            'customer.security', 'customer.claim', 'customer.profile',
         ], function (\Illuminate\View\View $view): void {
             $customer = request()->user('customer');
             if ($customer === null) {
                 return;
             }
-            $data = $view->getData();
-            $overview = $data['overview'] ?? null;
-            $view->with('customer', $customer)->with('accountSummary', app(CustomerAccountOverviewReader::class)
-                ->forCustomer($customer, $overview instanceof CustomerBalanceOverview ? $overview : null));
+            $accounts = app(CustomerAccountOverviewReader::class);
+            $view->with('customer', $customer);
+            if ($view->name() === 'customer.dashboard') {
+                $summary = $accounts->forCustomer($customer);
+                $view->with('accountSummary', $summary)->with('accountProfile', $summary['profile']);
+            } else {
+                $view->with('accountProfile', $accounts->identity($customer));
+            }
         });
 
         Product::observe(ProductAuditObserver::class);

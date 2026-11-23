@@ -45,6 +45,11 @@ class OrderItem extends Model
         return $this->belongsTo(Product::class)->withTrashed();
     }
 
+    public function family()
+    {
+        return $this->belongsTo(ProductFamily::class, 'family_id')->withTrashed();
+    }
+
     public function stockItems()
     {
         return $this->hasMany(ProductStockItem::class);

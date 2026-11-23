@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\CustomerLoginLinkRequest;
 use App\Http\Requests\CustomerOrderClaimRequest;
+use App\Http\Requests\UpdateCustomerProfileRequest;
 use App\Models\Order;
 use App\Services\Customer\CustomerAuthAvailability;
 use App\Services\Customer\CustomerAuthenticationService;
@@ -17,6 +18,7 @@ use App\Services\Customer\CustomerTelegramAuthenticationService;
 use App\Services\StoreBalance\StoreBalanceActivityService;
 use App\Services\UsdtBalance\CustomerUsdtActivityService;
 use App\Services\UsdtBalance\UsdtMicroAmount;
+use App\Storefront\StorefrontLocale;
 use App\Storefront\StorefrontPresenter;
 use App\Storefront\StorefrontSeo;
 use App\Storefront\StorefrontShopOrderPresenter;
@@ -32,8 +34,8 @@ class CustomerAccountController extends Controller
     {
         if ($request->user('customer')) {
             $metadata = $seo->privatePage(
-                'Akun saya | '.$storefront->brand(),
-                'Profil, ringkasan pesanan, dan saldo akun pelanggan.',
+                __('customer_account.overview').' | '.$storefront->brand(),
+                __('customer_account.overview_description'),
             );
 
             return $this->view($request, 'customer.dashboard', [
@@ -144,25 +146,39 @@ class CustomerAccountController extends Controller
         return redirect()->route('customer.account');
     }
 
+    public function profile(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response
+    {
+        return $this->view($request, 'customer.profile', [
+            'storefront' => $storefront,
+            'brand' => $storefront->brand(),
+            'metadata' => $seo->privatePage(__('customer_account.edit_profile').' | '.$storefront->brand(), __('customer_account.profile_description')),
+        ]);
+    }
+
+    public function updateProfile(UpdateCustomerProfileRequest $request): RedirectResponse
+    {
+        $customer = $request->user('customer');
+        $customer->display_name = $request->validated('display_name');
+        $customer->save();
+
+        return redirect()->route('customer.profile.edit')->with('customer_profile_saved', true);
+    }
+
     public function orders(Request $request, StorefrontPresenter $storefront, CustomerOwnedOrderQuery $ordersQuery, StorefrontSeo $seo): Response
     {
         $customer = $request->user('customer');
         $activeFilter = $ordersQuery->normalizeFilter($request->query('status'));
         $orders = $ordersQuery->paginateHistory($customer, $activeFilter);
-        $filters = collect([
-            ['key' => 'all', 'label' => 'Semua'],
-            ['key' => 'waiting', 'label' => 'Menunggu'],
-            ['key' => 'processing', 'label' => 'Diproses'],
-            ['key' => 'completed', 'label' => 'Selesai'],
-            ['key' => 'issue', 'label' => 'Masalah'],
-        ])->map(fn (array $filter): array => $filter + [
-            'active' => $filter['key'] === $activeFilter,
-            'url' => route('customer.orders.index', ['status' => $filter['key']]),
+        $filters = collect(['all', 'waiting', 'processing', 'completed', 'issue'])->map(fn (string $filter): array => [
+            'key' => $filter,
+            'label' => __('customer_account.filters.'.$filter),
+            'active' => $filter === $activeFilter,
+            'url' => route('customer.orders.index', ['status' => $filter]),
         ])->all();
 
         $metadata = $seo->privatePage(
-            'Pesanan Saya | '.$storefront->brand(),
-            'Riwayat pesanan milik Anda. Halaman ini hanya tersedia setelah login.',
+            __('customer_account.orders').' | '.$storefront->brand(),
+            __('customer_account.orders_description'),
         );
 
         return $this->view($request, 'customer.orders', [
@@ -220,33 +236,13 @@ class CustomerAccountController extends Controller
                 ? $activityTokens->storeBalanceToken((int) $customer->getKey(), $page->newerCursor)
                 : null;
             $activityRows = array_map(fn ($item): array => [
-                'kind' => match ($item->kind) {
-                    'top_up' => 'Top-up',
-                    'compensation' => 'Kompensasi',
-                    'adjustment' => 'Penyesuaian',
-                    'adjustment_reversal' => 'Pembalikan penyesuaian',
-                    'purchase' => 'Pembelian',
-                    'refund' => 'Pengembalian',
-                    default => 'Aktivitas saldo',
-                },
-                'state' => match ($item->state) {
-                    'credited' => 'Dikreditkan',
-                    'recovered' => 'Dipulihkan',
-                    'compensated' => 'Dikompensasi',
-                    'pending' => 'Menunggu',
-                    'uncertain' => 'Perlu pemeriksaan',
-                    'expired' => 'Kedaluwarsa',
-                    'review' => 'Sedang ditinjau',
-                    'failed' => 'Gagal',
-                    'debited' => 'Didebit',
-                    'refunded' => 'Dikembalikan',
-                    default => 'Status tidak diketahui',
-                },
+                'kind' => $this->balanceLabel('kinds', $item->kind),
+                'state' => $this->balanceLabel('states', $item->state),
                 'amount' => $item->signedAmount === null
-                    ? 'Nominal '.$this->formatIdr($item->amount)
+                    ? __('customer_account.balance_page.amount', ['amount' => $this->formatIdr($item->amount)])
                     : (($item->signedAmount < 0 ? '−' : '+').$this->formatIdr(abs($item->signedAmount))),
                 'reference' => $item->reference,
-                'occurred_at' => $item->occurredAt->format('d M Y H:i'),
+                'occurred_at' => $item->occurredAt->locale(StorefrontLocale::code())->translatedFormat('d M Y H:i'),
             ], $page->items);
         } else {
             $cursor = $token === null
@@ -273,26 +269,13 @@ class CustomerAccountController extends Controller
                 ? $activityTokens->usdtToken((int) $customer->getKey(), $page->newerCursor)
                 : null;
             $activityRows = array_map(fn ($item): array => [
-                'kind' => $item->kind === 'top_up' ? 'Top-up' : match ($item->kind) {
-                    'funding_credit' => 'Saldo masuk',
-                    'owner_adjustment_credit' => 'Penyesuaian saldo oleh Owner',
-                    'purchase_debit' => 'Pembelian',
-                    'refund_credit' => 'Pengembalian',
-                    'reversal_debit' => 'Pembalikan',
-                    default => 'Aktivitas saldo',
-                },
-                'state' => match ($item->state) {
-                    'credited' => 'Dikreditkan',
-                    'debited' => 'Didebit',
-                    'refunded' => 'Dikembalikan',
-                    'reversed' => 'Dibalik',
-                    default => 'Menunggu',
-                },
+                'kind' => $this->balanceLabel('kinds', $item->kind),
+                'state' => $this->balanceLabel('states', $item->state, 'pending'),
                 'amount' => $item->signedMicro === null
-                    ? 'Nominal '.UsdtMicroAmount::formatUnits($item->amountMicro).' USDT'
+                    ? __('customer_account.balance_page.amount', ['amount' => UsdtMicroAmount::formatUnits($item->amountMicro).' USDT'])
                     : (($item->signedMicro < 0 ? '−' : '+').UsdtMicroAmount::formatUnits(abs($item->signedMicro)).' USDT'),
                 'reference' => $item->reference,
-                'occurred_at' => $item->occurredAt->format('d M Y H:i'),
+                'occurred_at' => $item->occurredAt->locale(StorefrontLocale::code())->translatedFormat('d M Y H:i'),
             ], $page->items);
         }
 
@@ -308,8 +291,8 @@ class CustomerAccountController extends Controller
             ? UsdtMicroAmount::formatUnits($balanceOverview->usdtBalance->balanceMicro()).' USDT'
             : null;
         $metadata = $seo->privatePage(
-            'Saldo saya | '.$storefront->brand(),
-            'Ringkasan dan riwayat saldo milik akun pelanggan yang sedang masuk.',
+            __('customer_account.balance').' | '.$storefront->brand(),
+            __('customer_account.balance_page.description'),
         );
 
         return $this->view($request, 'customer.balance', [
@@ -362,8 +345,8 @@ class CustomerAccountController extends Controller
     public function claimForm(Request $request, StorefrontPresenter $storefront, StorefrontSeo $seo): Response
     {
         $metadata = $seo->privatePage(
-            'Klaim Pesanan | '.$storefront->brand(),
-            'Hubungkan pesanan guest ke akun pelanggan secara pribadi.',
+            __('customer_account.claim').' | '.$storefront->brand(),
+            __('customer_account.claim_page.description'),
         );
 
         return $this->view($request, 'customer.claim', [
@@ -391,6 +374,13 @@ class CustomerAccountController extends Controller
         $grouped = preg_replace('/\\B(?=(?:\\d{3})+(?!\\d))/', '.', $digits);
 
         return 'Rp '.($grouped ?? $digits);
+    }
+
+    private function balanceLabel(string $group, string $value, string $fallback = 'unknown'): string
+    {
+        $labels = __('customer_account.balance_page.'.$group);
+
+        return $labels[$value] ?? $labels[$fallback];
     }
 
     private function view(Request $request, string $view, array $data): Response

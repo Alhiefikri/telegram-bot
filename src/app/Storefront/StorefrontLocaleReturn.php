@@ -13,6 +13,8 @@ final class StorefrontLocaleReturn
         'storefront.products.show', 'storefront.product-families.show', 'storefront.guides.index',
         'storefront.login-guide', 'storefront.policies.privacy', 'storefront.policies.terms',
         'storefront.policies.refund', 'storefront.policies.recovery',
+        'customer.account', 'customer.profile.edit', 'customer.orders.index',
+        'customer.balance.show', 'customer.security', 'customer.claim.create',
     ];
 
     public function __construct(private readonly StorefrontUrl $urls) {}
@@ -27,6 +29,8 @@ final class StorefrontLocaleReturn
         $query = match ($route) {
             'storefront.shop.index' => StorefrontCatalogQuery::fromRequest($request)->toUrlParameters(),
             'storefront.login-guide' => $request->only(['return', 'invoice']),
+            'customer.orders.index' => array_filter($request->query->all(), fn ($value, $key) => is_string($value) && in_array($key, ['status', 'page'], true), ARRAY_FILTER_USE_BOTH),
+            'customer.balance.show' => array_filter($request->query->all(), fn ($value, $key) => is_string($value) && in_array($key, ['currency', 'direction', 'cursor'], true), ARRAY_FILTER_USE_BOTH),
             'storefront.products.show', 'storefront.product-families.show',
             'storefront.shop.checkout.product', 'storefront.shop.checkout.start' => $this->purchaseQuery($request),
             default => [],

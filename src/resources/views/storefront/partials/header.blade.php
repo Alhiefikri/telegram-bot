@@ -4,11 +4,11 @@
     $isHome = request()->routeIs('storefront.home');
     $cartCount = isset($cartItemCount) ? max(0, (int) $cartItemCount) : null;
     $headerCustomer = request()->routeIs(
-        'customer.account', 'customer.orders.*', 'customer.balance.show', 'customer.security', 'customer.claim.*',
+        'customer.account', 'customer.orders.*', 'customer.balance.show', 'customer.security', 'customer.claim.*', 'customer.profile.edit',
     ) && ($customer ?? null) instanceof \App\Models\Customer ? $customer : null;
     $headerIdentity = $headerCustomer === null
         ? null
-        : app(\App\Services\Customer\CustomerAccountOverviewReader::class)->identity($headerCustomer);
+        : ($accountProfile ?? app(\App\Services\Customer\CustomerAccountOverviewReader::class)->identity($headerCustomer));
     $navLinks = [
         ['href' => $homeUrl.'#kategori', 'label' => __('storefront_funnel.products')],
         ['href' => route('storefront.guides.index'), 'label' => __('storefront_funnel.guides')],

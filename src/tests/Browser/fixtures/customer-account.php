@@ -11,9 +11,11 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductFamily;
 use App\Models\ProductStockItem;
 use App\Services\Credentials\StructuredCredentialPayload;
 use App\Services\Customer\CustomerAuthAvailability;
+use App\Services\Customer\CustomerPasswordHasher;
 use App\Services\Customer\CustomerTelegramAuthenticationService;
 use App\Storefront\StorefrontInvoiceUrl;
 use App\Storefront\StorefrontOrderAccess;
@@ -48,6 +50,30 @@ if ($operation === 'prepare') {
 } elseif ($operation === 'reset-limits') {
     Cache::flush();
     echo json_encode(['reset' => true]);
+} elseif ($operation === 'profile-history') {
+    $customer = Customer::factory()->create([
+        'first_name' => 'Browser Shopper',
+        'email' => 'profile-browser@example.test',
+        'email_verified_at' => now(),
+    ]);
+    $customer->forceFill([
+        'password' => app(CustomerPasswordHasher::class)->make('Browser profile password 123'),
+        'password_scheme' => CustomerPasswordHasher::SCHEME,
+    ])->save();
+    $family = ProductFamily::factory()->create(['sidebar_icon_path' => '/chibi.png']);
+    $product = Product::factory()->create(['product_family_id' => $family->id]);
+    for ($index = 1; $index <= 11; $index++) {
+        $order = Order::factory()->for($customer)->create([
+            'created_at' => now()->subMinutes($index),
+            'order_status' => OrderStatus::Completed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        OrderItem::factory()->for($order)->for($product)->create([
+            'family_id' => $family->id,
+            'product_name' => 'Example Family — Premium Digital Access Plan '.$index,
+        ]);
+    }
+    echo json_encode(['prepared' => true]);
 } elseif ($operation === 'providers-on' || $operation === 'providers-off') {
     $flag = dirname((string) config('database.connections.sqlite.database')).'/providers-configured';
     if ($operation === 'providers-on') {

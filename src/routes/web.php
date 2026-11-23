@@ -176,8 +176,8 @@ Route::prefix('auth/google')->name('customer.google.')->middleware([ValidateCust
 });
 
 Route::prefix('akun')->name('customer.')->middleware([ValidateCustomerSession::class, EnsureCustomerAuthAvailable::class])->group(function (): void {
-    Route::get('/', [CustomerAccountController::class, 'landing'])->name('account');
-    Route::get('identitas', CustomerIdentityController::class)->name('identity');
+    Route::get('/', [CustomerAccountController::class, 'landing'])->middleware('storefront.locale:private')->name('account');
+    Route::get('identitas', CustomerIdentityController::class)->middleware('storefront.locale:private')->name('identity');
     Route::post('register', [CustomerPasswordAuthenticationController::class, 'register'])->name('register');
     Route::post('login', [CustomerPasswordAuthenticationController::class, 'login'])->name('login');
     Route::post('login-code', [CustomerEmailOtpController::class, 'requestCode'])->name('login-code.request');
@@ -199,13 +199,15 @@ Route::prefix('akun')->name('customer.')->middleware([ValidateCustomerSession::c
         Route::post('google/link', [CustomerGoogleAuthenticationController::class, 'link'])->name('google.link');
         Route::post('google/unlink', [CustomerGoogleAuthenticationController::class, 'unlink'])->name('google.unlink');
         Route::post('telegram/email', [CustomerPasswordAuthenticationController::class, 'enrollTelegramEmail'])->name('telegram.email');
-        Route::get('keamanan', [CustomerPasswordAuthenticationController::class, 'security'])->name('security');
+        Route::get('profil', [CustomerAccountController::class, 'profile'])->middleware('storefront.locale:private')->name('profile.edit');
+        Route::patch('profil', [CustomerAccountController::class, 'updateProfile'])->middleware('storefront.locale:private')->name('profile.update');
+        Route::get('keamanan', [CustomerPasswordAuthenticationController::class, 'security'])->middleware('storefront.locale:private')->name('security');
         Route::post('keamanan/password', [CustomerPasswordAuthenticationController::class, 'setPassword'])->middleware('throttle:customer-login-consume')->name('password.enroll');
-        Route::get('pesanan', [CustomerAccountController::class, 'orders'])->name('orders.index');
-        Route::get('saldo', [CustomerAccountController::class, 'balance'])->name('balance.show');
+        Route::get('pesanan', [CustomerAccountController::class, 'orders'])->middleware('storefront.locale:private')->name('orders.index');
+        Route::get('saldo', [CustomerAccountController::class, 'balance'])->middleware('storefront.locale:private')->name('balance.show');
         Route::post('pesanan/{order}/status', [CustomerAccountController::class, 'status'])->middleware(['storefront.locale:private', 'throttle:automatic-payment-status-refresh'])->name('orders.status');
         Route::get('pesanan/{order}', [CustomerAccountController::class, 'show'])->middleware('storefront.locale:private')->name('orders.show');
-        Route::get('klaim-pesanan', [CustomerAccountController::class, 'claimForm'])->name('claim.create');
+        Route::get('klaim-pesanan', [CustomerAccountController::class, 'claimForm'])->middleware('storefront.locale:private')->name('claim.create');
         Route::post('klaim-pesanan', [CustomerAccountController::class, 'claim'])->middleware('throttle:customer-order-claim')->name('claim.store');
     });
 });
