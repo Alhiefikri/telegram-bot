@@ -20,8 +20,8 @@
         </div>
 
         <div data-catalog-results class="min-w-0 md:min-h-72">
-            <form action="{{ $homeUrl }}" method="GET" role="search" data-catalog-form class="mb-4 grid grid-cols-1 gap-2">
-                <div class="md:hidden">
+            <form action="{{ $homeUrl }}" method="GET" role="search" data-catalog-form class="mb-4 grid grid-cols-[minmax(0,1fr)_minmax(0,auto)] items-end gap-x-4 gap-y-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,21rem)]">
+                <div class="col-span-2 md:hidden">
                     <label for="catalog-family" class="mb-1 flex items-center gap-2 text-sm font-bold">
                         @if ($family?->sidebarIconUrl)
                             <img src="{{ $family->sidebarIconUrl }}" alt="" width="24" height="24" class="size-6 rounded-md object-contain">
@@ -35,13 +35,32 @@
                         @endforeach
                     </select>
                 </div>
-                <div>
+                <div class="col-span-2 xl:col-span-1">
                     <label for="catalog-search" class="mb-1 block text-sm font-bold">{{ __('storefront_funnel.search_products') }}</label>
                     <div class="flex flex-wrap gap-2">
-                        <input id="catalog-search" type="search" name="q" value="{{ $search }}" maxlength="{{ $searchMaxLength }}" placeholder="{{ __('storefront_funnel.search_placeholder') }}" class="home-catalog-control min-h-11 min-w-0 flex-1 basis-28 rounded-lg px-3 py-2">
+                        <div class="relative min-w-0 flex-1 basis-28">
+                            <svg aria-hidden="true" class="pointer-events-none absolute start-3 top-1/2 size-5 -translate-y-1/2 text-[var(--sf-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                <circle cx="11" cy="11" r="6.5" />
+                                <path d="m16 16 4 4" />
+                            </svg>
+                            <input id="catalog-search" type="search" name="q" value="{{ $search }}" maxlength="{{ $searchMaxLength }}" placeholder="{{ __('storefront_funnel.catalog_search_placeholder') }}" class="home-catalog-control min-h-11 w-full min-w-0 rounded-lg py-2 ps-10 pe-3">
+                        </div>
                         <x-storefront.button type="submit" size="compact">{{ __('storefront_funnel.apply') }}</x-storefront.button>
                     </div>
                 </div>
+                <div class="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 xl:col-span-1">
+                    <label for="catalog-sort" class="text-sm text-[var(--sf-muted)]">{{ __('storefront_funnel.catalog_sort_by') }}</label>
+                    <select id="catalog-sort" name="sort" data-catalog-auto-submit class="home-catalog-control min-h-11 min-w-0 flex-1 basis-40 rounded-lg px-3 py-2 text-sm font-semibold">
+                        @foreach ($sortLabels as $value => $label)
+                            <option value="{{ $loop->first ? '' : $value }}" @selected($filters->sort === $value)>{{ __("storefront_funnel.$label") }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <label for="catalog-in-stock" class="col-start-2 row-start-4 flex min-h-11 w-fit max-w-full cursor-pointer items-center gap-2 text-sm text-[var(--sf-muted)] md:row-start-3 xl:row-start-2 xl:justify-self-end">
+                    <input id="catalog-in-stock" name="in_stock" value="1" type="checkbox" data-catalog-auto-submit @checked($filters->inStockOnly) class="home-catalog-control size-4 shrink-0 accent-[var(--sf-accent)]">
+                    <span class="wrap-anywhere">{{ __('storefront_funnel.in_stock_only') }}</span>
+                </label>
+                <p data-catalog-count role="status" class="col-start-1 row-start-4 self-center text-sm text-[var(--sf-muted)] md:row-start-3 xl:row-start-2">{{ trans_choice('storefront_funnel.catalog_result_count', $totalPlans) }}</p>
             </form>
             <p data-catalog-loading role="status" hidden class="mb-3 text-sm font-semibold text-[var(--sf-muted)]">{{ __('storefront_funnel.loading_catalog') }}</p>
 
@@ -67,7 +86,7 @@
 
             @if ($plans->isEmpty())
                 <div class="rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface)] p-4">
-                    @if ($family || $search !== '')
+                    @if ($family || $search !== '' || $filters->inStockOnly)
                         <h2 class="font-bold">{{ __('storefront_funnel.no_matching_plans') }}</h2>
                         <x-storefront.button :href="$homeUrl" variant="secondary" size="compact" class="mt-2" data-catalog-link>{{ __('storefront_funnel.clear_filters') }}</x-storefront.button>
                     @else
@@ -80,7 +99,7 @@
                     @foreach ($plans as $plan)
                         @php($product = $plan['presentation'])
                         <article id="product-{{ $product->id }}" class="storefront-card-hover home-plan-card flex min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-sm" data-home-plan>
-                            <div class="relative grid aspect-[16/10] place-items-center overflow-hidden bg-[var(--sf-surface-warm)]">
+                            <div class="relative grid aspect-[16/6] place-items-center overflow-hidden bg-[var(--sf-surface-warm)] min-[420px]:aspect-[16/10]">
                                 @if ($plan['imageUrl'])
                                     <img src="{{ $plan['imageUrl'] }}" alt="" width="320" height="200" loading="lazy" decoding="async" class="storefront-card-hover-media absolute inset-0 h-full w-full object-contain">
                                 @else

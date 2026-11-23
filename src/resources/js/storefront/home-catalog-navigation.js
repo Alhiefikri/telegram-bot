@@ -125,7 +125,11 @@ export default function initHomeCatalogNavigation() {
         window.history.pushState(null, "", url);
       }
       renderedUrl = url.href;
-      const restoreFocus = catalog.contains(document.activeElement);
+      const active = document.activeElement;
+      const restoreFocus = catalog.contains(active);
+      const filterId = active?.matches("[data-catalog-auto-submit]")
+        ? active.id
+        : null;
       locale.replaceWith(nextLocale);
       maintenance.replaceWith(nextMaintenance);
       const activeSidebar = syncSidebar(sidebar, nextSidebar);
@@ -137,9 +141,10 @@ export default function initHomeCatalogNavigation() {
         const selection = activeSidebar.querySelector(
           '[data-catalog-link][aria-current="true"]'
         );
-        (selection?.getClientRects().length ? selection : catalog).focus({
-          preventScroll: true,
-        });
+        const filter = filterId ? document.getElementById(filterId) : null;
+        const focusTarget =
+          filter ?? (selection?.getClientRects().length ? selection : catalog);
+        focusTarget.focus({ preventScroll: true });
       }
     } catch {
       if (pending !== controller) return;
@@ -193,7 +198,11 @@ export default function initHomeCatalogNavigation() {
   });
 
   document.addEventListener("change", (event) => {
-    if (event.target.matches?.(`${catalogSelector} select[name="family"]`)) {
+    if (
+      event.target.matches?.(
+        `${catalogSelector} :is(select[name="family"], [data-catalog-auto-submit])`
+      )
+    ) {
       event.target.form?.requestSubmit();
     }
   });

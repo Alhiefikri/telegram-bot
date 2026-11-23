@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Customer;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductFamily;
 use App\Models\User;
@@ -135,6 +138,64 @@ class StorefrontHomeCatalogTest extends TestCase
         }
 
         $this->get('/?family[]=private-family&q[]=visible')->assertOk()->assertSee('Reset pilihan produk')->assertDontSee('Private Family');
+    }
+
+    public function test_home_sort_uses_available_stock_and_todays_paid_units(): void
+    {
+        $this->travelTo(now()->setTime(14, 0));
+        $alpha = $this->plan('Alpha', null, 5);
+        $alpha->update(['price_amount' => 12000]);
+        $zulu = $this->plan('Zulu', null, 4);
+        $zulu->update(['price_amount' => 24000]);
+        $reserved = $this->plan('Middle', null, 2);
+        $reserved->forceFill(['reserved_stock' => 2, 'price_amount' => 6000])->save();
+        $this->recordSale($alpha, 20, now()->subDay());
+        $this->recordSale($alpha, 1, now()->startOfDay());
+        $this->recordSale($alpha, 20, now(), 'pending');
+        $this->recordSale($zulu, 3, now());
+        $this->recordSale($reserved, 10, now());
+
+        $this->get('/')->assertOk()->assertSeeInOrder(['>Zulu</a>', '>Alpha</a>', '>Middle</a>'], false);
+        $this->get('/?sort=price_asc')->assertOk()->assertSeeInOrder(['>Middle</a>', '>Alpha</a>', '>Zulu</a>'], false);
+        $this->get('/?sort=price_desc')->assertOk()->assertSeeInOrder(['>Zulu</a>', '>Alpha</a>', '>Middle</a>'], false);
+        $this->get('/?sort=name_asc')->assertOk()->assertSeeInOrder(['>Alpha</a>', '>Middle</a>', '>Zulu</a>'], false);
+        $this->get('/?sort[]=invalid&in_stock[]=1')->assertOk()
+            ->assertSeeInOrder(['>Zulu</a>', '>Alpha</a>', '>Middle</a>'], false);
+
+        $this->get('/?sort=name_asc&in_stock=1', ['X-Storefront-Catalog' => '1'])->assertOk()
+            ->assertHeader('X-Storefront-Catalog', '1')
+            ->assertSee('2 produk')->assertSeeInOrder(['>Alpha</a>', '>Zulu</a>'], false)
+            ->assertDontSee('>Middle</a>', false);
+        $this->get('/?q=middle&in_stock=1')->assertOk()
+            ->assertSee('0 produk')->assertSee('Hapus semua filter');
+
+        $this->travelTo(now()->endOfDay()->subMinute());
+        $this->get('/')->assertOk()->assertSeeInOrder(['>Zulu</a>', '>Alpha</a>'], false);
+        $this->travelTo(now()->addDay()->startOfDay());
+        $this->get('/')->assertOk()->assertSeeInOrder(['>Alpha</a>', '>Zulu</a>'], false);
+    }
+
+    public function test_home_filters_are_applied_before_pagination_and_survive_navigation(): void
+    {
+        $family = ProductFamily::factory()->create(['slug' => 'sorted']);
+        $this->plan('Plan 00 sold out', $family, 0);
+        foreach (range(25, 1) as $number) {
+            $this->plan(sprintf('Plan %02d', $number), $family, 1);
+        }
+        $query = 'family=sorted&q=plan&sort=name_asc&in_stock=1';
+        $next = 'family=sorted&q=plan&page=2&sort=name_asc&in_stock=1';
+        $this->get('/?'.$query)->assertOk()
+            ->assertSee('25 produk')
+            ->assertSee('href="'.url('/').'?'.str_replace('&', '&amp;', $next).'#products"', false)
+            ->assertDontSee('Plan 00 sold out')
+            ->assertDontSee('>Plan 25</a>', false);
+        $this->get('/?'.$next)->assertOk()
+            ->assertSee('25 produk')
+            ->assertSee('>Plan 25</a>', false)
+            ->assertSee('from='.rawurlencode(url('/').'?'.$next.'#product-'), false)
+            ->assertDontSee('>Plan 01</a>', false);
+        $this->get(route('storefront.locale.catalog', ['locale' => 'en', 'return' => '/?'.$next]))
+            ->assertRedirect('/?'.$next);
     }
 
     public function test_home_cache_is_neutral_and_variants_do_not_read_or_poison_it(): void
@@ -278,5 +339,12 @@ class StorefrontHomeCatalogTest extends TestCase
             'reserved_stock' => 0,
             'is_active' => true,
         ]);
+    }
+
+    private function recordSale(Product $product, int $quantity, \DateTimeInterface $date, string $status = 'paid'): void
+    {
+        $order = Order::factory()->create(['order_status' => 'completed', 'payment_status' => $status]);
+        OrderItem::factory()->for($order)->for($product)->create(['quantity' => $quantity]);
+        Payment::factory()->for($order)->create(['status' => $status, 'paid_at' => $date]);
     }
 }

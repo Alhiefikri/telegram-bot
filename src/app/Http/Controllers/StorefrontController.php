@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Catalog\CatalogBrowseQuery;
 use App\Storefront\StorefrontCatalogSearch;
+use App\Storefront\StorefrontHomeCatalogFilters;
 use App\Storefront\StorefrontResponseCache;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -25,10 +26,11 @@ class StorefrontController extends Controller
         $isVariant = $query !== [];
         $family = $family === '' ? null : $family;
         $fragment = $request->header(self::CATALOG_FRAGMENT_HEADER) === '1';
+        $filters = StorefrontHomeCatalogFilters::fromQuery($query);
 
         $response = response($fragment
-            ? $this->storefrontResponseCache->fragment($search, $family, $page, $isVariant)
-            : $this->storefrontResponseCache->get($search, $family, $page, $isVariant))
+            ? $this->storefrontResponseCache->fragment($search, $family, $page, $isVariant, $filters)
+            : $this->storefrontResponseCache->get($search, $family, $page, $isVariant, $filters))
             ->header('Content-Type', 'text/html; charset=UTF-8')
             ->setVary(self::CATALOG_FRAGMENT_HEADER, false);
 

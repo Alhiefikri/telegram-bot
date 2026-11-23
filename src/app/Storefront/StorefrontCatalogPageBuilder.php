@@ -22,6 +22,7 @@ class StorefrontCatalogPageBuilder
         private readonly StorefrontSeo $seo,
         private readonly CatalogBrowse $catalog,
         private readonly StorefrontBanners $banners,
+        private readonly StorefrontHomeCatalogOrdering $homeOrdering,
     ) {}
 
     public function home(StorefrontCatalogQuery|string|null $query): StorefrontCatalogPage
@@ -37,7 +38,7 @@ class StorefrontCatalogPageBuilder
     /**
      * @return array<string, mixed>
      */
-    public function homeViewData(string $search, ?string $family, int $page, bool $isVariant, CheckoutMaintenanceState $maintenance, bool $withBanners = false): array
+    public function homeViewData(string $search, ?string $family, int $page, bool $isVariant, CheckoutMaintenanceState $maintenance, StorefrontHomeCatalogFilters $filters, bool $withBanners = false): array
     {
         $entries = collect($this->catalog->allPublicEntries());
         $families = $entries->pluck('family')->filter()->keyBy('slug');
@@ -49,9 +50,10 @@ class StorefrontCatalogPageBuilder
         $results = $entries
             ->when($family !== null, fn (Collection $entries) => $entries->filter(fn (CatalogBrowseEntry $entry) => $entry->family?->slug === $family))
             ->flatMap(fn (CatalogBrowseEntry $entry) => $this->catalog->matchingPlans($entry, $search));
+        $results = $this->homeOrdering->apply($results, $filters);
         $perPage = StorefrontCatalogQuery::PRODUCTS_PER_PAGE;
         $page = min($page, max(1, (int) ceil($results->count() / $perPage)));
-        $returnUrl = $this->urls->homeCatalogUrl($search, $family, $page);
+        $returnUrl = $this->urls->homeCatalogUrl($search, $family, $page, filters: $filters);
 
         return [
             'storefront' => $this->storefront,
@@ -67,16 +69,19 @@ class StorefrontCatalogPageBuilder
                 'name' => $option->name,
                 'icon' => $option->icon,
                 'sidebarIconUrl' => $option->sidebarIconUrl,
-                'url' => $this->urls->homeCatalogUrl($search, $option->slug),
+                'url' => $this->urls->homeCatalogUrl($search, $option->slug, filters: $filters),
             ]),
             'family' => $selectedFamily,
             'familyUnavailable' => $familyUnavailable,
-            'localeCatalogReturn' => $this->urls->homeCatalogUrl($search, $family, $page, absolute: false),
+            'localeCatalogReturn' => $this->urls->homeCatalogUrl($search, $family, $page, absolute: false, filters: $filters),
             'familyPageUrl' => $family === null ? null : $this->urls->familyUrl($family, $returnUrl.'#products'),
             'search' => $search,
             'searchMaxLength' => StorefrontCatalogSearch::MAX_LENGTH,
-            'resetFamilyUrl' => $this->urls->homeCatalogUrl($search),
-            'resetSearchUrl' => $this->urls->homeCatalogUrl('', $family),
+            'filters' => $filters,
+            'sortLabels' => StorefrontHomeCatalogFilters::SORT_LABELS,
+            'totalPlans' => $results->count(),
+            'resetFamilyUrl' => $this->urls->homeCatalogUrl($search, filters: $filters),
+            'resetSearchUrl' => $this->urls->homeCatalogUrl('', $family, filters: $filters),
             'plans' => $results->forPage($page, $perPage)->map(function (CatalogProductReadModel $plan) use ($returnUrl, $familyImages): array {
                 $planReturnUrl = $returnUrl === route('storefront.home')
                     ? $this->urls->catalogUrl($plan->id)
@@ -94,8 +99,8 @@ class StorefrontCatalogPageBuilder
                     'checkoutUrl' => $this->urls->checkoutProductUrlForId($plan->id, $planReturnUrl),
                 ];
             }),
-            'previousUrl' => $page > 1 ? $this->urls->homeCatalogUrl($search, $family, $page - 1).'#products' : null,
-            'nextUrl' => $results->count() > $page * $perPage ? $this->urls->homeCatalogUrl($search, $family, $page + 1).'#products' : null,
+            'previousUrl' => $page > 1 ? $this->urls->homeCatalogUrl($search, $family, $page - 1, filters: $filters).'#products' : null,
+            'nextUrl' => $results->count() > $page * $perPage ? $this->urls->homeCatalogUrl($search, $family, $page + 1, filters: $filters).'#products' : null,
         ] + ($withBanners ? $this->bannerViewData() : []);
     }
 

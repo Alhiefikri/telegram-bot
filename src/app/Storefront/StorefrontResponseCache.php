@@ -22,27 +22,27 @@ class StorefrontResponseCache
 
     private const LOCK_WAIT_SECONDS = 5;
 
-    private const DESIGN_VERSION = 36;
+    private const DESIGN_VERSION = 37;
 
     public function __construct(
         private readonly StorefrontCatalogPageBuilder $catalogPages,
         private readonly CheckoutMaintenance $maintenance,
     ) {}
 
-    public function fragment(string $search, ?string $family, int $page, bool $isVariant): string
+    public function fragment(string $search, ?string $family, int $page, bool $isVariant, StorefrontHomeCatalogFilters $filters): string
     {
-        return view('storefront.partials.home-catalog-fragment', $this->catalogPages->homeViewData(StorefrontCatalogSearch::normalize($search), $family, $page, $isVariant, $this->maintenance->current()))->render();
+        return view('storefront.partials.home-catalog-fragment', $this->catalogPages->homeViewData(StorefrontCatalogSearch::normalize($search), $family, $page, $isVariant, $this->maintenance->current(), $filters))->render();
     }
 
-    public function get(string $search, ?string $family = null, int $page = 1, bool $isVariant = false): string
+    public function get(string $search, ?string $family = null, int $page = 1, bool $isVariant = false, StorefrontHomeCatalogFilters $filters = new StorefrontHomeCatalogFilters): string
     {
         $search = StorefrontCatalogSearch::normalize($search);
         $startedAt = DogfoodTiming::now();
         $querySnapshot = DogfoodTiming::querySnapshot();
         $maintenance = $this->maintenance->current();
 
-        if ($isVariant || $search !== '' || $family !== null || $page > 1) {
-            $html = $this->render($maintenance, $search, $family, $page, isVariant: true);
+        if ($isVariant || $search !== '' || $family !== null || $page > 1 || $filters->toUrlParameters() !== []) {
+            $html = $this->render($maintenance, $search, $family, $page, isVariant: true, filters: $filters);
             $this->log($startedAt, $querySnapshot, $search, false, strlen($html), 'catalog_variant_uncached');
 
             return $html;
@@ -112,6 +112,7 @@ class StorefrontResponseCache
         $context = [
             'checkout_maintenance_version' => $maintenanceVersion,
             'search' => $search,
+            'sales_day' => now()->toDateString(),
             'storefront_locale' => StorefrontLocale::code(),
             'app_url' => config('app.url'),
             // The rendered HTML can contain absolute URLs from the current request.
@@ -137,9 +138,9 @@ class StorefrontResponseCache
         return File::exists($path) ? hash_file('sha256', $path) : 'missing';
     }
 
-    private function render(CheckoutMaintenanceState $maintenance, string $search, ?string $family = null, int $page = 1, bool $isVariant = false): string
+    private function render(CheckoutMaintenanceState $maintenance, string $search, ?string $family = null, int $page = 1, bool $isVariant = false, StorefrontHomeCatalogFilters $filters = new StorefrontHomeCatalogFilters): string
     {
-        $viewData = $this->catalogPages->homeViewData($search, $family, $page, $isVariant, $maintenance, withBanners: true);
+        $viewData = $this->catalogPages->homeViewData($search, $family, $page, $isVariant, $maintenance, $filters, withBanners: true);
         $viewData['isPublicHomepage'] = true;
 
         return view('storefront', $viewData)->render();

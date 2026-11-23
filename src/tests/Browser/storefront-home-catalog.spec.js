@@ -830,7 +830,7 @@ for (const [
 }
 for (const [width, height] of sizes) {
   for (const theme of ["light", "dark"]) {
-    test(`${width}x${height} ${theme}: search, picker and first buy action fit`, async ({
+    test(`${width}x${height} ${theme}: search and filters fit, and buy action is reachable`, async ({
       page,
     }, info) => {
       await page.setViewportSize({ width, height });
@@ -842,15 +842,17 @@ for (const [width, height] of sizes) {
       const search = page.getByRole("searchbox", { name: "Cari produk" });
       const picker =
         width >= 768
-          ? page.getByRole("navigation", { name: "Pilih produk" })
+          ? page
+              .getByRole("navigation", { name: "Pilih produk" })
+              .getByRole("link", { name: "Semua produk" })
           : page.getByRole("combobox", { name: "Pilih produk" });
       const first = page.locator("[data-home-plan]").first();
-      for (const element of [search, picker, first]) {
+      const sort = page.getByRole("combobox", { name: "Urutkan" });
+      const stock = page.getByText("Hanya yang tersedia", { exact: true });
+      for (const element of [search, picker, sort, stock]) {
         await expect(element).toBeInViewport({ ratio: 1 });
       }
-      await expect(
-        first.getByRole("link", { name: "Beli sekarang" })
-      ).toBeInViewport({ ratio: 1 });
+      await expect(first).toBeInViewport();
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth)
@@ -858,6 +860,9 @@ for (const [width, height] of sizes) {
       await page.screenshot({
         path: info.outputPath(`${width}-${height}-${theme}.png`),
       });
+      const buy = first.getByRole("link", { name: "Beli sekarang" });
+      if (width < 390) await buy.scrollIntoViewIfNeeded();
+      await expect(buy).toBeInViewport({ ratio: 1 });
 
       await search.focus();
       await page.keyboard.press("Tab");
@@ -911,7 +916,7 @@ test("native Family and search controls restore history without JavaScript", asy
     await expect(picker).toHaveValue("creative");
     await search.fill("bulanan");
     await search.press("Enter");
-    await expect(page).toHaveURL(/\?family=creative&q=bulanan$/);
+    await expect(page).toHaveURL(/\?family=creative&q=bulanan&sort=$/);
     await expect(plans).toHaveCount(1);
     await expect(plans.first()).toContainText("Desain Bulanan");
     await page.screenshot({
@@ -936,16 +941,62 @@ test("native Family and search controls restore history without JavaScript", asy
       .press("Enter");
     await expect(page).toHaveURL(/\?family=creative&q=bulanan$/);
     await expect(plans).toHaveCount(1);
-    await page.getByRole("link", { name: "Desain Bulanan" }).click();
+    await page
+      .getByRole("link", { name: "Desain Bulanan", exact: true })
+      .click();
     await expect(page).toHaveURL(/\/produk\/\d+/);
     await page
       .getByRole("link", { name: "Kembali ke katalog" })
       .first()
       .click();
     await expect(page).toHaveURL(/\?family=creative&q=bulanan#product-\d+$/);
+
+    await page
+      .getByRole("combobox", { name: "Urutkan" })
+      .selectOption("price_desc");
+    await page
+      .getByRole("checkbox", { name: "Hanya yang tersedia" })
+      .press("Space");
+    await page
+      .getByRole("search")
+      .getByRole("button", { name: "Terapkan" })
+      .press("Enter");
+    await expect(page).toHaveURL(
+      /\?family=creative&q=bulanan&sort=price_desc&in_stock=1$/
+    );
+    await expect(plans).toHaveCount(1);
   } finally {
     await context.close();
   }
+});
+
+test("catalog sort and stock controls update results and restore browser history", async ({
+  page,
+}) => {
+  await page.goto(baseUrl);
+  const sort = page.getByRole("combobox", { name: "Urutkan" });
+  const stock = page.getByRole("checkbox", { name: "Hanya yang tersedia" });
+  const count = page.locator("[data-catalog-count]");
+  const names = page.locator("[data-home-plan] h2");
+  await expect(count).toHaveText("4 produk");
+  await expect(sort.locator("option")).toHaveCount(4);
+  await sort.focus();
+  await sort.selectOption("name_asc");
+  await expect(page).toHaveURL(/\?sort=name_asc$/);
+  await expect(sort).toBeFocused();
+  await expect(names).toHaveText([
+    "Desain Bulanan",
+    "Desain Tahunan",
+    "Musik Bulanan",
+    "Penyimpanan Bulanan",
+  ]);
+  await stock.check();
+  await expect(page).toHaveURL(/\?sort=name_asc&in_stock=1$/);
+  await expect(count).toHaveText("3 produk");
+  await expect(stock).toBeFocused();
+  await page.goBack();
+  await expect(stock).not.toBeChecked();
+  await expect(count).toHaveText("4 produk");
 });
 
 test("320px catalog still fits at 200% root text size", async ({
@@ -956,7 +1007,7 @@ test("320px catalog still fits at 200% root text size", async ({
   await page.addStyleTag({ content: "html { font-size: 200% }" });
   for (const control of await page
     .locator(
-      "#products select, #products input, #products button, [data-home-plan] a"
+      '#products select, #products input:not([type="checkbox"]), #products label[for="catalog-in-stock"], #products button, [data-home-plan] a'
     )
     .all()) {
     if (!(await control.isVisible())) continue;

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Catalog\CatalogBrowseQuery;
 use App\Http\Middleware\ValidateStorefrontSignedInvoice;
 use App\Storefront\StorefrontCatalogSearch;
+use App\Storefront\StorefrontHomeCatalogFilters;
 use App\Storefront\StorefrontLocale;
 use App\Storefront\StorefrontLocaleReturn;
 use Illuminate\Http\Request;
@@ -24,7 +25,8 @@ class StorefrontLocaleController extends Controller
             'family' => is_string($family) && preg_match('/\A[a-z0-9-]{1,255}\z/i', $family) ? strtolower($family) : null,
             'q' => StorefrontCatalogSearch::fromRequestQuery($target->query('q')),
             'page' => CatalogBrowseQuery::fromValues(page: $target->query('page'))->page,
-        ], fn ($value, $key) => $key === 'page' ? $value > 1 : filled($value), ARRAY_FILTER_USE_BOTH);
+        ], fn ($value, $key) => $key === 'page' ? $value > 1 : filled($value), ARRAY_FILTER_USE_BOTH)
+            + StorefrontHomeCatalogFilters::fromQuery($target->query())->toUrlParameters();
 
         return $this->redirect($request, $locale, route('storefront.home', $query, absolute: false));
     }
