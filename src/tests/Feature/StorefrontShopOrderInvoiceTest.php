@@ -809,9 +809,11 @@ class StorefrontShopOrderInvoiceTest extends TestCase
 
         $this->get(URL::signedRoute('storefront.shop.orders.show', $order, null, false))
             ->assertOk()
-            ->assertSee('Produk diproses manual')
-            ->assertSee('Hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.')
-            ->assertSee('https://wa.me/6281299990000?text=', false);
+            ->assertSee('Butuh bantuan pengiriman?')
+            ->assertSee('Hubungi WhatsApp Support dengan nomor invoice jika akun atau kode redeem belum diterima.')
+            ->assertSee('https://wa.me/6281299990000?text='.rawurlencode(
+                "Halo Admin Lhie Store, saya ingin mendapatkan akun atau kode redeem untuk invoice {$order->invoice_number}.",
+            ), false);
     }
 
     public function test_paid_invoice_without_allocated_stock_items_renders_admin_follow_up_copy(): void
