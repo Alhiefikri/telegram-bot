@@ -18,7 +18,7 @@ final class SupplierCatalogSync
 
     public function __construct(private readonly SupplierClient $client, private readonly SupplierAvailability $availability) {}
 
-    public function sync(Supplier $supplier, bool $force = false, ?int $expectedVersion = null): bool
+    public function sync(Supplier $supplier, bool $force = false, ?int $expectedVersion = null, ?int $deadline = null): bool
     {
         $connection = Supplier::query()->find($supplier->id);
         if ($connection === null || ! $connection->is_active
@@ -38,7 +38,7 @@ final class SupplierCatalogSync
             return false;
         }
         try {
-            $snapshot = $this->client->snapshot($connection);
+            $snapshot = $deadline === null ? $this->client->snapshot($connection) : $this->client->snapshot($connection, $deadline);
             if ($snapshot->currency !== $connection->currency) {
                 $this->fail($connection->id, $version, $token, 'currency_mismatch');
                 $this->releaseLease($connection->id, $token);

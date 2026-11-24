@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Enums\UserRole;
 use App\Exceptions\InvalidOrderTransition;
 use App\Http\Controllers\Controller;
 use App\Models\ManualFulfillmentReview;
@@ -11,6 +14,7 @@ use App\Models\TelegramOutboundEffect;
 use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Admin\SupplierOperationConfirmation;
 use App\Services\Credentials\UniqueCredentialEmailPolicy;
+use App\Services\Suppliers\SupplierFulfillmentService;
 use App\Services\Telegram\TelegramOutboundEffectService;
 use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
@@ -37,13 +41,25 @@ class AdminManualFulfillmentReviewController extends Controller
         return view('admin.manual-fulfillment-reviews.index', compact('reviews'));
     }
 
-    public function show(Request $request, ManualFulfillmentReview $review, UniqueCredentialEmailPolicy $emailPolicy): View
+    public function show(Request $request, ManualFulfillmentReview $review, UniqueCredentialEmailPolicy $emailPolicy, SupplierFulfillmentService $suppliers): View
     {
         Gate::authorize('view', $review);
 
         $review->load(['order.customer', 'order.orderItems.product', 'payment', 'actor']);
-        $handoffFulfillments = $review->reason === 'supplier_fulfillment'
-            ? SupplierFulfillment::query()->where('order_id', $review->order_id)->with('manualHandoffs.actor')->orderBy('id')->get()
+        $activePaid = $review->state === ManualFulfillmentReview::STATE_PENDING
+            && $review->order->order_status === OrderStatus::Processing
+            && $review->order->payment_status === PaymentStatus::Paid
+            && $review->payment->status === PaymentStatus::Paid;
+        $handoffFulfillments = in_array($review->reason, ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE, true)
+            ? SupplierFulfillment::query()->where('order_id', $review->order_id)
+                ->with(['manualHandoffs.actor', 'purchases' => fn ($query) => $query->whereNull('warranty_claim_id')
+                    ->select(['id', 'supplier_fulfillment_id', 'state', 'committed_at', 'supplier_order_id', 'actual_cost_micros', 'claim_token', 'lease_expires_at'])])
+                ->orderBy('id')->get()
+            : collect();
+        $retryItems = $activePaid && $review->reason === ManualFulfillmentReview::REASON_MANUAL_UNLIMITED
+            && $request->attributes->get('adminUser')?->role === UserRole::Owner
+            ? $suppliers->unassignedUnlimitedItems($review->order)->filter(fn ($item) => $item->product?->supplierSources()
+                ->where('is_active', true)->whereHas('catalogItem.supplier', fn ($supplier) => $supplier->where('is_active', true))->exists())
             : collect();
         $localCredentialItems = $review->acceptsLocalCredentials()
             ? $review->order->orderItems->map(function ($item): array {
@@ -75,11 +91,37 @@ class AdminManualFulfillmentReviewController extends Controller
             'review' => $review,
             'amount' => $this->amount($review->amount, $review->currency),
             'handoffFulfillments' => $handoffFulfillments,
+            'supplierRetryIds' => $activePaid && $request->attributes->get('adminUser')?->role === UserRole::Owner
+                ? $handoffFulfillments->filter($suppliers->canOfferInvoiceRetry(...))->pluck('id')->all()
+                : [],
+            'retryItems' => $retryItems,
+            'activePaid' => $activePaid,
             'handoffKey' => (string) Str::uuid(),
             'localCredentialItems' => $localCredentialItems,
             'credentialEmailHistory' => $credentialEmailHistory,
             'receiptEffect' => $receiptEffect,
         ]);
+    }
+
+    public function retryUnlimitedSupplier(Request $request, ManualFulfillmentReview $review, SupplierFulfillmentService $suppliers): RedirectResponse
+    {
+        $actor = $request->attributes->get('adminUser');
+        abort_unless($actor?->role === UserRole::Owner, 403);
+        $url = route('admin.manual-fulfillment-reviews.show', $review);
+        $confirmed = (int) $request->session()->get('auth.password_confirmed_at', 0);
+        if ($confirmed <= 0 || $confirmed > time() || time() - $confirmed > 900) {
+            $request->session()->put('url.intended', $url);
+
+            return redirect()->route('password.confirm');
+        }
+        $data = $request->validate(['item_id' => ['required', 'integer', 'min:1']]);
+        $result = $suppliers->retryUnlimitedReview($review, (int) $data['item_id'], $actor);
+
+        return $result === 'queued'
+            ? redirect($url)->with('status', 'Pembelian supplier dijadwalkan. Akun akan dikirim otomatis setelah semua unit siap.')
+            : redirect($url)->withErrors(['supplier' => $result === 'unavailable'
+                ? 'Supplier belum bisa memenuhi pesanan dalam batas harga, stok dan saldo yang tersedia. Anda masih bisa mengisi akun manual.'
+                : 'Status invoice berubah atau pembelian belum aman. Muat ulang sebelum melanjutkan.']);
     }
 
     public function resolve(Request $request, ManualFulfillmentReview $review, ManualFulfillmentResolutionService $resolutions): RedirectResponse

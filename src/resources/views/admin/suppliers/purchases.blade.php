@@ -112,9 +112,6 @@
                         <x-admin-dashboard.field-label>
                             Tindakan
                             <x-admin-dashboard.select class="mt-1" name="action">
-                                @if($fulfillment->state !== 'delivered')
-                                    <option value="retry">Coba setelah isi saldo (hanya belum terkirim / terbukti ditolak)</option>
-                                @endif
                                 <option value="recover">Pulihkan dengan ID supplier order yang terverifikasi (GET)</option>
                                 @if($fulfillment->currentPurchase && in_array($fulfillment->currentPurchase->state, ['ambiguous', 'review'], true) && $fulfillment->currentPurchase->supplier_order_id === null && in_array($fulfillment->currentPurchase->supplier?->provider, ['toolorax', 'csxstore'], true))
                                     <option value="history">Baca riwayat order {{ $fulfillment->currentPurchase->supplier->provider === 'csxstore' ? 'CSxStore (halaman pertama)' : 'ToolOraX' }} (GET, maks. 100)</option>

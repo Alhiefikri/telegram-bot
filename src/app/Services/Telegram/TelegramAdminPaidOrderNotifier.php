@@ -44,7 +44,7 @@ class TelegramAdminPaidOrderNotifier
      *
      * @return array<string, mixed>
      */
-    public function sendEffect(Order $order, string $chatId, bool $reviewNotice = false, ?array $outcome = null): array
+    public function sendEffect(Order $order, string $chatId, bool $reviewNotice = false, ?array $outcome = null, ?string $reviewId = null, bool $fixedReview = false, ?int $replaceMessageId = null): array
     {
         if (blank(config('services.telegram.token'))
             || preg_match('/^[1-9][0-9]*$/', $chatId) !== 1) {
@@ -56,13 +56,24 @@ class TelegramAdminPaidOrderNotifier
             ->where('order_id', $claimed->getKey())->orderBy('id')->get();
         $review = $this->fulfillmentLink->reviewFor($claimed);
         $fulfillmentUrl = $review === null ? null : $this->fulfillmentLink->url($review);
+        $monitor = $fixedReview && $reviewId === null ? null : ManualFulfillmentReview::query()->where('order_id', $claimed->id)
+            ->when($reviewId !== null, fn ($query) => $query->whereKey($reviewId), fn ($query) => $query->open()
+                ->whereIn('reason', ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE)
+                ->whereHas('payment', fn ($payment) => $payment->where('status', PaymentStatus::Paid)->whereNull('manual_alternative_at')))
+            ->oldest('id')->first();
+        $monitorUrl = $monitor === null ? null : $this->fulfillmentLink->reviewUrl($monitor);
 
         return DogfoodTiming::time('dogfood.telegram.checkout_step', [
             'step' => 'admin_paid_order_notification',
             'payment_mode' => $this->paymentMode($claimed),
             'order_correlation_id' => DogfoodTiming::correlation($claimed->id),
             'customer_correlation_id' => DogfoodTiming::correlation($claimed->customer?->telegram_id ?: $claimed->customer_id),
-        ], fn () => $this->bot->sendMessage($chatId, $this->truncateMessage($this->paidMessage($claimed, $reviewNotice, $outcome, $fulfillments, $fulfillmentUrl !== null)), $this->dashboardReplyMarkup($claimed, $fulfillments, $fulfillmentUrl)));
+        ], fn () => $this->bot->editMessageTextOrSend(
+            $chatId,
+            $this->truncateMessage($this->paidMessage($claimed, $reviewNotice, $outcome, $fulfillments, $fulfillmentUrl !== null)),
+            $this->dashboardReplyMarkup($claimed, $fulfillments, $fulfillmentUrl, $monitorUrl),
+            $replaceMessageId,
+        ));
     }
 
     private function paidMessage(Order $order, bool $reviewNotice, ?array $outcome, Collection $fulfillments, bool $canFillAccounts): string
@@ -343,12 +354,13 @@ class TelegramAdminPaidOrderNotifier
         return $date->copy()->timezone((string) config('app.timezone'))->format('d M Y, H:i');
     }
 
-    private function dashboardReplyMarkup(Order $order, Collection $fulfillments, ?string $fulfillmentUrl): array
+    private function dashboardReplyMarkup(Order $order, Collection $fulfillments, ?string $fulfillmentUrl, ?string $monitorUrl): array
     {
         $rows = $fulfillmentUrl === null ? [] : [[['text' => '🔐 Isi akun pesanan', 'url' => $fulfillmentUrl, 'style' => 'primary']]];
         if ($order->payment_status === PaymentStatus::Paid) {
             foreach ($fulfillments->where('state', 'review') as $fulfillment) {
-                if ($fulfillment->manual_takeover_at !== null || $fulfillment->manualHandoffs->isNotEmpty()
+                if ($order->orderItems->firstWhere('id', $fulfillment->order_item_id)?->manual_unlimited
+                    || $fulfillment->manual_takeover_at !== null || $fulfillment->manualHandoffs->isNotEmpty()
                     || ($fulfillment->purchases->isEmpty() && ($fulfillment->current_purchase_id !== null || $fulfillment->reserved_catalog_item_id === null))
                     || ! $fulfillment->purchases->every(fn ($purchase) => $purchase->state === 'rejected'
                         && $purchase->committed_at === null && $purchase->supplier_order_id === null
@@ -363,7 +375,9 @@ class TelegramAdminPaidOrderNotifier
                 ]];
             }
         }
-        if ($fulfillments->isNotEmpty()) {
+        if ($monitorUrl !== null) {
+            $rows[] = [['text' => '🔎 Monitor pembelian', 'url' => $monitorUrl, 'style' => 'primary']];
+        } elseif ($fulfillments->isNotEmpty()) {
             $rows[] = [['text' => 'Tangani invoice', 'url' => route('admin.suppliers.purchases', ['invoice' => $order->invoice_number]), 'style' => 'primary']];
         }
         $rows[] = [['text' => '🧾 Buka detail invoice', 'url' => route('admin.orders.show', $order), 'style' => 'primary']];

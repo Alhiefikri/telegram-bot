@@ -65,13 +65,20 @@ final class SupplierFulfillmentService
         if (DB::transactionLevel() === 0 || $externalQuantity <= 0 || $externalQuantity !== $item->supplier_quantity) {
             throw new InvalidOrderTransition('Invalid external reservation context.');
         }
+
+        return $this->reserveEligible($item, $product, $externalQuantity, $retailSubtotal)
+            ?? throw new InsufficientStock('Ordered product is not available.');
+    }
+
+    private function reserveEligible(OrderItem $item, Product $product, int $externalQuantity, int $retailSubtotal, bool $fromUnlimited = false, ?int $refreshedSupplierId = null, bool $refreshAvailability = true): ?SupplierFulfillment
+    {
         $existing = SupplierFulfillment::query()->where('order_item_id', $item->id)->first();
         if ($existing !== null) {
             return $existing;
         }
         $policy = SupplierPricePolicy::query()->where('product_id', $product->id)->first();
         if ($policy === null) {
-            throw new InsufficientStock('Ordered product is not available.');
+            return null;
         }
         $externalRetail = intdiv($retailSubtotal, $item->quantity) * $externalQuantity
             + intdiv(($retailSubtotal % $item->quantity) * $externalQuantity, $item->quantity);
@@ -87,12 +94,25 @@ final class SupplierFulfillmentService
             $snapshot[] = ['source_id' => $source->id, 'supplier_id' => $supplier->id, 'catalog_item_id' => $sku->id, 'external_id' => $sku->external_id, 'currency' => $supplier->currency, 'exchange_rate_idr' => $supplier->exchange_rate_idr, 'unit_price_micros' => $sku->unit_price_micros, 'expected_cost_micros' => $this->pricing->costMicros($sku, $externalQuantity)];
         }
         if ($snapshot === []) {
-            throw new InsufficientStock('Ordered product is not available.');
+            return null;
+        }
+        if ($refreshedSupplierId !== null) {
+            $candidates = array_values(array_filter($snapshot, fn (array $candidate) => $candidate['supplier_id'] === $refreshedSupplierId));
+            if ($candidates === []) {
+                return null;
+            }
+            $snapshot = array_merge($candidates, array_values(array_filter($snapshot, fn (array $candidate) => $candidate['supplier_id'] !== $refreshedSupplierId)));
+        }
+        if ($fromUnlimited) {
+            // Move the deferred units to the supplier without changing owned stock or sale proof.
+            $item->update(['local_quantity' => 0, 'deferred_local_quantity' => 0, 'supplier_quantity' => $externalQuantity]);
         }
         $first = $snapshot[0];
         $fulfillment = SupplierFulfillment::create(['order_id' => $item->order_id, 'order_item_id' => $item->id, 'quantity' => $externalQuantity, 'state' => 'reserved', 'maximum_cost_idr' => $this->pricing->maximumCostIdr($policy, $externalRetail, $externalQuantity), 'sources_snapshot' => $snapshot]);
-        $this->hold($fulfillment, $suppliers->get($first['supplier_id']), $catalog->get($first['catalog_item_id']), $first['expected_cost_micros']);
-        $this->availability->refreshProducts([$product->id]);
+        $this->hold($fulfillment, $suppliers->get($first['supplier_id']), $catalog->get($first['catalog_item_id']), $first['expected_cost_micros'], refreshAvailability: $refreshAvailability);
+        if ($refreshAvailability) {
+            $this->availability->refreshProducts([$product->id]);
+        }
 
         return $fulfillment;
     }
@@ -118,15 +138,128 @@ final class SupplierFulfillmentService
 
     public function paid(Order $order): void
     {
+        $items = $this->unassignedUnlimitedItems($order);
+        $supplierIds = [];
+        if ($items->isNotEmpty()) {
+            $this->lockedOrderResources($order);
+            foreach ($items as $item) {
+                $product = $item->product;
+                if ($product !== null && ! $product->trashed()) {
+                    $fulfillment = $this->reserveEligible($item, $product, $item->quantity, $item->subtotal, fromUnlimited: true, refreshAvailability: false);
+                    if ($fulfillment !== null) {
+                        $supplierIds[$fulfillment->reserved_supplier_id] = true;
+                    }
+                }
+            }
+        }
+
         SupplierFulfillment::query()->where('order_id', $order->id)->where('state', 'reserved')->update(['state' => 'pending', 'next_attempt_at' => now()]);
         foreach (SupplierFulfillment::query()->where('order_id', $order->id)->where('state', 'pending')->pluck('id') as $id) {
             DB::afterCommit(fn () => ProcessSupplierFulfillment::dispatch($id));
         }
+        if ($supplierIds !== []) {
+            $products = ProductSupplierSource::query()->whereHas('catalogItem', fn ($sku) => $sku->whereIn('supplier_id', array_keys($supplierIds)))
+                ->distinct()->pluck('product_id')->all();
+            DB::afterCommit(fn () => $this->availability->refreshProducts($products));
+        }
+    }
+
+    /** @return Collection<int, OrderItem> */
+    public function unassignedUnlimitedItems(Order $order): Collection
+    {
+        return $order->orderItems()->where('manual_unlimited', true)->where('supplier_quantity', 0)
+            ->whereColumn('deferred_local_quantity', 'quantity')->where('quantity', '>', 0)
+            ->whereDoesntHave('stockItems')->whereDoesntHave('supplierFulfillment')
+            ->with('product')->orderBy('product_id')->orderBy('id')->get();
+    }
+
+    public function retryUnlimitedReview(ManualFulfillmentReview $review, int $itemId, User $owner): string
+    {
+        if ($owner->role !== UserRole::Owner || DB::transactionLevel() !== 0) {
+            throw new InvalidOrderTransition('Supplier retry requires an Owner and no active transaction.');
+        }
+        $order = $review->order;
+        $item = $this->unassignedUnlimitedItems($order)->find($itemId);
+        if ($item === null || ! $this->canRetryUnlimitedReview($review, $order)) {
+            return 'unsafe';
+        }
+        $sources = ProductSupplierSource::query()->where('product_id', $item->product_id)->where('is_active', true)
+            ->whereHas('catalogItem.supplier', fn ($query) => $query->where('is_active', true))
+            ->with('catalogItem.supplier')->orderBy('priority')->orderBy('id')->get();
+        $deadline = hrtime(true) + 8_000_000_000;
+        $sync = app(SupplierCatalogSync::class);
+        foreach ($sources->pluck('catalogItem.supplier')->filter()->unique('id') as $supplier) {
+            if (hrtime(true) >= $deadline) {
+                break;
+            }
+            if ($sync->sync($supplier, deadline: $deadline)) {
+                $result = $this->reserveUnlimitedReview($review, $itemId, $owner, $supplier->id);
+                if ($result !== 'unavailable') {
+                    return $result;
+                }
+            }
+        }
+
+        return 'unavailable';
+    }
+
+    private function reserveUnlimitedReview(ManualFulfillmentReview $review, int $itemId, User $owner, int $refreshedSupplierId): string
+    {
+        return DB::transaction(function () use ($review, $itemId, $owner, $refreshedSupplierId): string {
+            $order = Order::query()->lockForUpdate()->findOrFail($review->order_id);
+            Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            $this->lockedOrderResources($order);
+            $review = ManualFulfillmentReview::query()->where('order_id', $order->id)->lockForUpdate()->findOrFail($review->id);
+            $item = $this->unassignedUnlimitedItems($order)->find($itemId);
+            if (! User::query()->whereKey($owner->id)->where('role', UserRole::Owner->value)->lockForUpdate()->first()
+                || $item === null || ! $this->canRetryUnlimitedReview($review, $order)) {
+                return 'unsafe';
+            }
+            $product = $item->product;
+            $fulfillment = $product !== null && ! $product->trashed()
+                ? $this->reserveEligible($item, $product, $item->quantity, $item->subtotal, fromUnlimited: true, refreshedSupplierId: $refreshedSupplierId)
+                : null;
+            if ($fulfillment === null) {
+                return 'unavailable';
+            }
+            if (! $this->hasMissingLocalCredentials($order)) {
+                $review->update(['reason' => 'supplier_fulfillment']);
+            }
+            $this->audit->log('supplier_fulfillment.unlimited_retry_queued', $fulfillment, null, ['review_id' => $review->id], $owner);
+            $fulfillment->update(['state' => 'pending', 'next_attempt_at' => now()]);
+            DB::afterCommit(fn () => ProcessSupplierFulfillment::dispatch($fulfillment->id));
+
+            return 'queued';
+        }, 5);
+    }
+
+    private function canRetryUnlimitedReview(ManualFulfillmentReview $review, Order $order): bool
+    {
+        return $review->reason === ManualFulfillmentReview::REASON_MANUAL_UNLIMITED
+            && $review->state === ManualFulfillmentReview::STATE_PENDING
+            && $order->payment_status === PaymentStatus::Paid && $order->order_status === OrderStatus::Processing
+            && $order->payments()->whereKey($review->payment_id)->where('status', PaymentStatus::Paid)
+                ->whereNotNull('paid_at')->whereNull('manual_alternative_at')->exists()
+            && ! ManualFulfillmentReview::query()->where('order_id', $order->id)->whereKeyNot($review->id)->open()->exists()
+            && ! OrderRefund::query()->where('order_id', $order->id)->exists();
     }
 
     public function lockForReview(Order $order): void
     {
         $this->lockedOrderResources($order);
+    }
+
+    public function hasMissingLocalCredentials(Order $order): bool
+    {
+        return $order->orderItems()->withCount(['stockItems as local_allocated' => fn ($stock) => $stock
+            ->whereNull('supplier_purchase_id')->whereNull('retired_at')])
+            ->get()->contains(fn (OrderItem $item) => $item->local_allocated < $item->localQuantity());
+    }
+
+    private function refundUncertain(Order $order): bool
+    {
+        return ManualFulfillmentReview::query()->where('order_id', $order->id)
+            ->where('state', ManualFulfillmentReview::STATE_REFUND_UNCERTAIN)->exists();
     }
 
     /** Order and Payment locks must precede this operation, including before any refund credit. */
@@ -193,6 +326,9 @@ final class SupplierFulfillmentService
     {
         $due = SupplierFulfillment::query()
             ->select('supplier_fulfillments.id')
+            ->whereNotExists(fn ($review) => $review->selectRaw('1')->from('manual_fulfillment_reviews')
+                ->whereColumn('manual_fulfillment_reviews.order_id', 'supplier_fulfillments.order_id')
+                ->where('manual_fulfillment_reviews.state', ManualFulfillmentReview::STATE_REFUND_UNCERTAIN))
             ->whereNull('manual_takeover_at')
             ->where(fn ($query) => $query->whereIn('state', ['pending', 'purchasing', 'awaiting_delivery'])
                 ->orWhere(fn ($review) => $review->where('state', 'review')->whereHas('currentPurchase', fn ($purchase) => $purchase
@@ -228,6 +364,7 @@ final class SupplierFulfillmentService
             $locked = SupplierPurchase::query()->lockForUpdate()->findOrFail($purchase->id);
             if ($f->manual_takeover_at !== null || $f->current_purchase_id !== $locked->id
                 || $order->payment_status !== PaymentStatus::Paid
+                || $this->refundUncertain($order)
                 || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)
                 || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)
                 || $locked->claim_token !== $token || ! $locked->lease_expires_at?->isFuture()) {
@@ -260,7 +397,7 @@ final class SupplierFulfillmentService
         $payments = Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
         [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
         $f = $fulfillments->get($id);
-        if ($order->payment_status !== PaymentStatus::Paid || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)
+        if ($order->payment_status !== PaymentStatus::Paid || $this->refundUncertain($order) || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)
             || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true) || $f === null || $f->manual_takeover_at !== null || ! in_array($f->state, ['pending', 'purchasing', 'awaiting_delivery'], true)) {
             return null;
         }
@@ -602,13 +739,15 @@ final class SupplierFulfillmentService
         $purchase->committed_at = now();
     }
 
-    private function hold(SupplierFulfillment $f, Supplier $supplier, SupplierCatalogItem $sku, int $cost, ?int $quantity = null): void
+    private function hold(SupplierFulfillment $f, Supplier $supplier, SupplierCatalogItem $sku, int $cost, ?int $quantity = null, bool $refreshAvailability = true): void
     {
         $quantity ??= $f->quantity;
         $supplier->increment('reserved_balance_micros', $cost);
         $supplier->increment('version');
         $sku->increment('reserved_quantity', $quantity);
-        $this->refreshSharedWalletAfterCommit($supplier->id);
+        if ($refreshAvailability) {
+            $this->refreshSharedWalletAfterCommit($supplier->id);
+        }
         $f->update(['reserved_supplier_id' => $supplier->id, 'reserved_catalog_item_id' => $sku->id, 'reserved_cost_micros' => $cost, 'reserved_quantity' => $quantity]);
     }
 
@@ -672,7 +811,7 @@ final class SupplierFulfillmentService
         $payment = $order->payments()->whereNull('manual_alternative_at')->where('status', PaymentStatus::Paid)->first();
         if ($payment !== null) {
             $review = ManualFulfillmentReview::query()->firstOrCreate(['payment_id' => $payment->id], ['order_id' => $order->id, 'amount' => $payment->amount, 'currency' => $payment->currency, 'reason' => 'supplier_fulfillment', 'state' => ManualFulfillmentReview::STATE_PENDING]);
-            if (in_array($review->reason, [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)
+            if (in_array($review->reason, ManualFulfillmentReview::DEFERRED_CREDENTIAL_REASONS, true)
                 && $review->state === ManualFulfillmentReview::STATE_FULFILLED) {
                 $before = $review->only(['state', 'reason', 'resolution_reason', 'actor_user_id', 'resolved_at']);
                 $review->update([
@@ -743,6 +882,15 @@ final class SupplierFulfillmentService
             && ! $purchase->lease_expires_at?->isFuture();
     }
 
+    /** A UI hint only. Retry always rechecks the purchase history under lock. */
+    public function canOfferInvoiceRetry(SupplierFulfillment $fulfillment): bool
+    {
+        return $fulfillment->state === 'review' && $fulfillment->manual_takeover_at === null
+            && $fulfillment->reserved_catalog_item_id !== null && $fulfillment->manualHandoffs->isEmpty()
+            && ($fulfillment->current_purchase_id === null || $fulfillment->purchases->contains('id', $fulfillment->current_purchase_id))
+            && $fulfillment->purchases->every($this->rejectedPurchaseIsSafe(...));
+    }
+
     public function completeMissingRefund(SupplierFulfillment $initial, OrderRefund $refund): void
     {
         if (DB::transactionLevel() === 0 || $refund->state !== 'confirmed' || (int) $refund->supplier_fulfillment_id !== (int) $initial->id) {
@@ -769,11 +917,11 @@ final class SupplierFulfillmentService
 
     private function finish(SupplierFulfillment $f, Order $order): void
     {
-        if ($this->hasPending($order)) {
+        if ($this->hasPending($order) || $this->refundUncertain($order)) {
             return;
         }
         if (ManualFulfillmentReview::query()->where('order_id', $order->id)
-            ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED])
+            ->whereIn('reason', ManualFulfillmentReview::DEFERRED_CREDENTIAL_REASONS)
             ->where('state', ManualFulfillmentReview::STATE_PENDING)->exists()) {
             return;
         }
@@ -782,6 +930,25 @@ final class SupplierFulfillmentService
                 && $item->stockItems()->whereNull('supplier_purchase_id')->whereNull('retired_at')->count() < $item->localQuantity()) {
                 return;
             }
+        }
+        if ($order->orderItems()->where('manual_unlimited', true)->exists() && $this->hasMissingLocalCredentials($order)) {
+            $payment = $order->payments()->whereNull('manual_alternative_at')->where('status', PaymentStatus::Paid)->first();
+            if ($payment !== null) {
+                $review = ManualFulfillmentReview::query()->firstOrCreate(['payment_id' => $payment->id], [
+                    'order_id' => $order->id, 'amount' => $payment->amount, 'currency' => $payment->currency,
+                    'reason' => ManualFulfillmentReview::REASON_MIXED_LOCAL_CREDENTIALS_MISSING,
+                    'state' => ManualFulfillmentReview::STATE_PENDING,
+                ]);
+                if ($review->state === ManualFulfillmentReview::STATE_PENDING && $review->reason === 'supplier_fulfillment') {
+                    $review->update(['reason' => ManualFulfillmentReview::REASON_MIXED_LOCAL_CREDENTIALS_MISSING]);
+                }
+                $effect = app(TelegramOutboundEffectService::class)->recordAdminOrderReviewNotification($review);
+                if ($effect !== null) {
+                    app(TelegramOutboundEffectDispatcher::class)->dispatch($effect);
+                }
+            }
+
+            return;
         }
         ManualFulfillmentReview::query()->where('order_id', $order->id)->whereIn('reason', ['supplier_fulfillment', ManualFulfillmentReview::REASON_LATE_PAYMENT])->where('state', ManualFulfillmentReview::STATE_PENDING)->update(['state' => ManualFulfillmentReview::STATE_FULFILLED, 'resolved_at' => now()]);
         $order->update(['order_status' => OrderStatus::Completed]);
@@ -822,12 +989,12 @@ final class SupplierFulfillmentService
      * An owner retry may reuse a rejected source, but never an uncertain dispatch.
      * No provider transport is performed while the order resources are locked.
      */
-    public function retryInvoice(int $id, bool $forceSync = false): array
+    public function retryInvoice(int $id, bool $forceSync = false, ?int $expectedPurchaseId = null, ?int $reviewId = null, ?User $owner = null): array
     {
         if (DB::transactionLevel() !== 0) {
             throw new InvalidOrderTransition('Supplier retry cannot run inside a transaction.');
         }
-        $prepared = $this->invoiceRetryTransaction($id, 'prepare');
+        $prepared = $this->invoiceRetryTransaction($id, 'prepare', $owner, expectedPurchaseId: $expectedPurchaseId, reviewId: $reviewId);
         if ($prepared['status'] !== 'ready') {
             return $prepared;
         }
@@ -836,7 +1003,7 @@ final class SupplierFulfillmentService
             return ['status' => 'sync_failed'];
         }
 
-        return $this->invoiceRetryTransaction($id, 'attempt');
+        return $this->invoiceRetryTransaction($id, 'attempt', $owner, expectedPurchaseId: $expectedPurchaseId, reviewId: $reviewId);
     }
 
     /** Retire only capacity whose purchase is known not to have debited the supplier. */
@@ -883,27 +1050,27 @@ final class SupplierFulfillmentService
         }, 5);
     }
 
-    public function previewInvoiceRetry(int $id, User $owner): array
+    public function previewInvoiceRetry(int $id, User $owner, ?int $expectedPurchaseId = null, ?int $reviewId = null): array
     {
         if (User::query()->whereKey($owner->id)->where('role', UserRole::Owner->value)->doesntExist()) {
             throw new InvalidOrderTransition('Owner access required.');
         }
 
-        return $this->invoiceRetryTransaction($id, 'preview', $owner);
+        return $this->invoiceRetryTransaction($id, 'preview', $owner, expectedPurchaseId: $expectedPurchaseId, reviewId: $reviewId);
     }
 
-    public function confirmInvoiceRetry(int $id, User $owner, string $token): array
+    public function confirmInvoiceRetry(int $id, User $owner, string $token, ?int $reviewId = null): array
     {
         if (User::query()->whereKey($owner->id)->where('role', UserRole::Owner->value)->doesntExist()) {
             throw new InvalidOrderTransition('Owner access required.');
         }
 
-        return $this->invoiceRetryTransaction($id, 'confirm', $owner, $token);
+        return $this->invoiceRetryTransaction($id, 'confirm', $owner, $token, reviewId: $reviewId);
     }
 
-    private function invoiceRetryTransaction(int $id, string $mode, ?User $owner = null, ?string $token = null): array
+    private function invoiceRetryTransaction(int $id, string $mode, ?User $owner = null, ?string $token = null, ?int $expectedPurchaseId = null, ?int $reviewId = null): array
     {
-        return DB::transaction(function () use ($id, $mode, $owner, $token): array {
+        return DB::transaction(function () use ($id, $mode, $owner, $token, $expectedPurchaseId, $reviewId): array {
             $initial = SupplierFulfillment::find($id);
             if ($initial === null) {
                 return ['status' => 'invalid_order'];
@@ -919,6 +1086,8 @@ final class SupplierFulfillmentService
                 return ['status' => 'manual_takeover'];
             }
             if ($order->payment_status !== PaymentStatus::Paid
+                || $this->refundUncertain($order)
+                || ($reviewId !== null && ! $this->isPendingPaidFulfillmentReview($order, $reviewId))
                 || ! $payments->contains(fn (Payment $payment) => $payment->status === PaymentStatus::Paid && $payment->paid_at !== null)
                 || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
                 return ['status' => 'invalid_order'];
@@ -926,7 +1095,7 @@ final class SupplierFulfillmentService
             if (in_array($f->state, ['pending', 'purchasing', 'awaiting_delivery'], true)) {
                 return ['status' => 'already_processing'];
             }
-            if ($f->state !== 'review') {
+            if ($f->state !== 'review' || ($expectedPurchaseId !== null && (int) $f->current_purchase_id !== $expectedPurchaseId)) {
                 return ['status' => 'unsafe'];
             }
             $purchase = $f->current_purchase_id === null ? null : SupplierPurchase::find($f->current_purchase_id);
@@ -1045,47 +1214,6 @@ final class SupplierFulfillmentService
             DB::afterCommit(fn () => ProcessSupplierFulfillment::dispatch($id));
 
             return ['status' => 'queued'] + $quote;
-        }, 5);
-    }
-
-    public function retryAfterTopup(int $id): void
-    {
-        DB::transaction(function () use ($id): void {
-            $initial = SupplierFulfillment::findOrFail($id);
-            $order = Order::query()->lockForUpdate()->findOrFail($initial->order_id);
-            Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
-            [$fulfillments, $suppliers, $catalog] = $this->lockedOrderResources($order);
-            $f = $fulfillments->get($id);
-            $this->assertActive($order);
-            if ($f->state !== 'review' || $f->manual_takeover_at !== null
-                || SupplierManualHandoff::query()->where('supplier_fulfillment_id', $id)->exists()) {
-                throw new InvalidOrderTransition('This fulfillment is not eligible for a new attempt.');
-            }
-            $purchase = $f->current_purchase_id ? SupplierPurchase::findOrFail($f->current_purchase_id) : null;
-            if (($purchase && ($purchase->supplier_fulfillment_id !== $id || ! $this->rejectedPurchaseIsSafe($purchase)))
-                || SupplierPurchase::query()->where('supplier_fulfillment_id', $id)->whereNull('warranty_claim_id')
-                    ->where(fn ($q) => $q->where('state', '!=', 'rejected')->orWhereNotNull('committed_at')
-                        ->orWhereNotNull('supplier_order_id')->orWhereNotNull('actual_cost_micros')
-                        ->orWhereNotNull('claim_token')->orWhere('lease_expires_at', '>', now()))->exists()) {
-                throw new InvalidOrderTransition('An unconfirmed purchase cannot be retried. Recover its matching order first.');
-            }
-            $this->unhold($f, $suppliers, $catalog);
-            // A deliberate operator retry may reuse a proven-rejected source, but never a dispatched intent.
-            $candidate = collect($f->sources_snapshot)->first(fn ($c) => $c['catalog_item_id'] === $f->reserved_catalog_item_id);
-            if (! $candidate) {
-                throw new InvalidOrderTransition('The original source is unavailable.');
-            }
-            $sku = $catalog->get($candidate['catalog_item_id']);
-            $supplier = $suppliers->get($candidate['supplier_id']);
-            $quantity = $this->outstandingQuantity($f);
-            $cost = $this->pricing->costMicros($sku, $quantity);
-            $provider = SupplierProvider::tryFrom($supplier->provider);
-            if ($quantity < 1 || $provider === null || $quantity > $provider->maxOrderQuantity() || ! $supplier->is_active || ! $supplier->currency_confirmed || ! $supplier->sync_expires_at?->isFuture() || ! $sku->orderable || $sku->requires_input || $supplier->currency !== $candidate['currency'] || $sku->external_id !== $candidate['external_id'] || $cost === null || SupplierMoney::costIdr($cost, $candidate['exchange_rate_idr']) > $this->remainingCostLimit($f) || ($supplier->balance_micros ?? 0) - $supplier->reserved_balance_micros < $cost || ($sku->stock ?? 0) - $sku->reserved_quantity < $quantity) {
-                throw new InsufficientStock('The original order cannot currently be fulfilled within its purchase limit.');
-            }
-            $this->hold($f, $supplier, $sku, $cost, $quantity);
-            $f->update(['state' => 'pending', 'current_purchase_id' => null, 'next_attempt_at' => now(), 'last_error' => null]);
-            DB::afterCommit(fn () => ProcessSupplierFulfillment::dispatch($id));
         }, 5);
     }
 
@@ -1433,6 +1561,12 @@ final class SupplierFulfillmentService
             if ($purchase?->lease_expires_at?->isFuture()) {
                 throw new InvalidOrderTransition('A purchase is still in flight.');
             }
+            if ($item->manual_unlimited && $f->reserved_quantity > 0
+                && ($purchase === null || $this->rejectedPurchaseIsSafe($purchase))) {
+                // Release only proven unused capacity, before creating the
+                // manual delivery record. An ambiguous debit keeps its hold.
+                $this->releaseProvenRejectedHold($f->id);
+            }
             if ($purchase === null || $purchase->state === 'rejected' || ($quantity < $f->quantity && $purchase->committed_at !== null)) {
                 $candidate = collect($f->sources_snapshot)->first(fn ($c) => $c['catalog_item_id'] === $f->reserved_catalog_item_id);
                 $purchase = SupplierPurchase::create(['supplier_fulfillment_id' => $f->id, 'supplier_id' => $candidate['supplier_id'], 'supplier_catalog_item_id' => $candidate['catalog_item_id'], 'reference' => (string) Str::uuid(), 'quantity' => $quantity, 'expected_cost_micros' => 0, 'exchange_rate_idr' => $candidate['exchange_rate_idr'], 'state' => 'delivered', 'delivery_payload' => $credentials, 'last_error' => 'manual_delivery']);
@@ -1451,8 +1585,19 @@ final class SupplierFulfillmentService
 
     private function assertActive(Order $order): void
     {
-        if ($order->payment_status !== PaymentStatus::Paid || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
+        if ($order->payment_status !== PaymentStatus::Paid || $this->refundUncertain($order)
+            || ! in_array($order->order_status, [OrderStatus::Processing, OrderStatus::Completed], true)) {
             throw new InvalidOrderTransition('Only active paid orders can be fulfilled.');
         }
+    }
+
+    /** Called under the Order and Payment locks by mutation paths. */
+    public function isPendingPaidFulfillmentReview(Order $order, int $reviewId): bool
+    {
+        return ManualFulfillmentReview::query()->where('order_id', $order->id)->whereKey($reviewId)
+            ->where('state', ManualFulfillmentReview::STATE_PENDING)
+            ->whereIn('reason', ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE)
+            ->whereHas('payment', fn ($payment) => $payment->where('status', PaymentStatus::Paid)
+                ->whereNotNull('paid_at')->whereNull('manual_alternative_at'))->exists();
     }
 }

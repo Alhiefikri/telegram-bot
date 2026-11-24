@@ -357,6 +357,8 @@ Route::middleware('admin.no-cache')->group(function (): void {
                 Route::get('{review}', [AdminManualFulfillmentReviewController::class, 'show'])->name('show');
                 Route::post('{review}/resolve', [AdminManualFulfillmentReviewController::class, 'resolve'])->name('resolve');
                 Route::post('{review}/credentials', [AdminManualFulfillmentReviewController::class, 'provideCredentials'])->name('credentials');
+                Route::post('{review}/retry-supplier', [AdminManualFulfillmentReviewController::class, 'retryUnlimitedSupplier'])->middleware('throttle:10,1')->name('retry-supplier');
+                Route::post('{review}/supplier/{fulfillment}', [AdminSupplierInvoiceRecoveryController::class, 'fromReview'])->middleware('throttle:10,1')->name('supplier');
             });
 
             Route::prefix('telegram-outbound-effects')->name('telegram-outbound-effects.')->group(function (): void {

@@ -119,7 +119,7 @@
                 @elseif ($isPaid)
                     <div class="invoice-paid-workspace">
                         <div class="invoice-paid-primary">
-                            @if ($hasManualUnlimited)
+                            @if ($hasManualUnlimited && $order->order_status === \App\Enums\OrderStatus::Processing)
                                 <section class="invoice-delivery-panel mt-5 rounded-lg border-2 border-[var(--sf-border)] bg-[var(--sf-surface)] p-4 text-sm leading-6 text-[var(--sf-ink)]">
                                     <h2 class="font-display text-xl font-bold">{{ __('storefront_funnel.manual_products') }}</h2>
                                     <p class="mt-2">{{ __('storefront_funnel.manual_paid_help') }}</p>

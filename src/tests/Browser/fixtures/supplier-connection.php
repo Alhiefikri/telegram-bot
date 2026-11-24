@@ -1,6 +1,10 @@
 <?php
 
 use App\Enums\UserRole;
+use App\Models\Cart;
+use App\Models\CartItem;
+use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Product;
 use App\Models\ProductSupplierSource;
 use App\Models\Supplier;
@@ -8,6 +12,9 @@ use App\Models\SupplierCatalogItem;
 use App\Models\SupplierCurrencyRate;
 use App\Models\SupplierPricePolicy;
 use App\Models\User;
+use App\Services\Checkout\CheckoutPaymentIntents;
+use App\Services\OrderCheckoutService;
+use App\Services\OrderLifecycle;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -26,6 +33,20 @@ if (($argv[1] ?? null) === 'prepare') {
         throw new RuntimeException('Disposable supplier connection migrations failed.');
     }
     echo '{"prepared":true}';
+    exit;
+}
+if (($argv[1] ?? null) === 'unlimited-review') {
+    $product = Product::factory()->create(['name' => 'Unlimited Browser', 'manual_unlimited' => true, 'stock' => 0]);
+    $customer = Customer::factory()->create(['telegram_id' => 790011]);
+    $cart = Cart::factory()->create(['customer_id' => $customer->id, 'expires_at' => now()->addHour()]);
+    CartItem::factory()->create(['cart_id' => $cart->id, 'product_id' => $product->id, 'quantity' => 1]);
+    $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+    app(OrderLifecycle::class)->applyManualCompletion($order);
+    $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
+    echo json_encode([
+        'path' => route('admin.manual-fulfillment-reviews.show', $review, absolute: false),
+        'invoice' => $order->invoice_number,
+    ], JSON_THROW_ON_ERROR);
     exit;
 }
 if (($argv[1] ?? null) === 'margins') {

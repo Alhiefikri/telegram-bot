@@ -2,6 +2,7 @@
 
 namespace App\Services\Telegram\Callbacks;
 
+use App\Models\SupplierFulfillment;
 use App\Services\Suppliers\SupplierInvoiceRetry;
 use App\Services\Telegram\TelegramAdminAccess;
 use App\Services\Telegram\TelegramBotClient;
@@ -60,6 +61,12 @@ class TelegramSupplierRetryCallbackHandler implements TelegramCallbackHandler
         $this->bot->answerCallbackQuery($context->callbackQueryId, 'Memeriksa stok dan saldo. Hasil akan dikirim di sini.');
 
         try {
+            if (SupplierFulfillment::query()->whereKey((int) $matches[1])
+                ->whereHas('orderItem', fn ($item) => $item->where('manual_unlimited', true))->exists()) {
+                $this->bot->sendMessage($context->chatId, 'Buka Monitor pembelian di dashboard untuk mencoba ulang invoice Unlimited.');
+
+                return true;
+            }
             $result = $this->retry->attempt((int) $matches[1]);
             $message = match ($result['status'] ?? '') {
                 'queued' => 'Pembelian dijadwalkan. Periksa hasil pembelian dan pengiriman; jangan menekan ulang.',

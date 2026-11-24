@@ -250,12 +250,38 @@ credentials cannot block delivery. Supplier and late-payment reviews keep their
 existing workflows. Tests: `ManualFulfillmentCommandTest` and
 `LocalCredentialFulfillmentReviewTest`.
 
-For Telegram buyers, `local_credentials_missing` uses the paid admin notice
-instead of sending an additional review card. Once the result is acknowledged,
-outbound recovery can delete the superseded paid card and known legacy review
-cards in the same chat; a lost cleanup wakeup does not resend the result.
-Telegram may refuse to delete old messages. The legacy unlimited-stock ceiling
-is formatted as `∞` for display; checkout and API quantities stay numeric.
+Fulfillment reviews on the paid Payment share the paid admin notice across
+checkout channels. The paid effect records the exact review it covers. If
+review opens after the paid card is acknowledged, edit the acknowledged card;
+if it was never delivered, the review effect can send its own card. After acknowledged
+completion, outbound recovery can delete superseded notices for local and
+unlimited reviews. Telegram may refuse to delete old messages.
+
+An unlimited order item initially records all units as deferred (no local
+stock reservation). On normal payment confirmation, the supplier service moves
+the entire item to the first eligible mapped source using fresh cached
+availability, retail cost limits and the existing wallet/SKU hold. Provider
+transport runs after commit. Otherwise, the units remain manual. An Owner can
+refresh mapped suppliers and queue a purchase from the review; the service
+rechecks the review and item under the same Order and supplier locks used for
+manual credentials. For a previously attempted purchase, the review reuses
+invoice retry and prevents a second purchase while debit is uncertain. Manual
+replacement can fulfill the buyer without releasing an ambiguous debit hold;
+an unused or proven rejected hold is released. Dashboard retry validates the
+purchase ID and scoped review before and after supplier sync so an old form
+cannot authorize a new attempt. The Order lock serializes refund uncertainty
+with retry, transport claims, and dispatch intent. Mixed Unlimited orders
+remain in review until local account obligations are filled. Manual retry
+uses a shared transport deadline and stops at the first eligible source;
+paid checkout coalesces shared-wallet refresh work.
+
+Verification: `SupplierInvoiceRetryTest` and `LocalCredentialFulfillmentReviewTest`
+exercise checkout, paid and retry flows, receipt delivery, and the owner notice
+with fake suppliers and Telegram. `SupplierInvoiceRetryEligibilityTest` covers
+retry presentation rules, and `SupplierPostgresConcurrencyTest` checks race
+outcomes for payment, supplier retry, and manual credential submission.
+`tests/Browser/supplier-connection.spec.js` covers Owner login, validation,
+and manual completion in Chromium against an isolated local application.
 
 ## Read-only notification retention (#676)
 
@@ -858,9 +884,9 @@ No new financial architecture, queue or production activation gate is introduced
 
 Gunakan `Product::publicVisible()`, `availableForPurchase()`, `withAvailability()`, dan `availableStock()` daripada mengulang query visibility/stock di caller. Perubahan stok lokal direkam lewat `InventoryLedger`/`EloquentInventoryLedger` dan menghasilkan `InventoryMovement` bertipe `reservation`, `sale`, `release`, atau `adjustment`. Tipe `availability` adalah sinyal transisi kapasitas eksternal untuk pipeline restock, bukan Stock Intake atau mutasi stok lokal.
 
-`Product.manual_unlimited` adalah pilihan Admin, default nonaktif. Katalog bot menampilkan `∞`; tidak ada kredensial atau stok fisik yang perlu diinput sebelum checkout. `availableStock()` memakai batas integer untuk perbandingan kapasitas, bukan jumlah stok fisik; gunakan `finiteAvailableStock()` untuk snapshot inventori. Mode disalin ke `OrderItem.manual_unlimited`: kuantitas manual dicatat sebagai `deferred_local_quantity`, tanpa reservasi stok fisik atau pembelian supplier. Mematikan mode tidak mengubah kewajiban pesanan yang sudah dibuat.
+`Product.manual_unlimited` adalah pilihan Admin, default nonaktif. Katalog bot menampilkan `∞`; tidak ada kredensial atau stok fisik yang perlu diinput sebelum checkout. `availableStock()` memakai batas integer untuk perbandingan kapasitas, bukan jumlah stok fisik; gunakan `finiteAvailableStock()` untuk snapshot inventori. Mode disalin ke `OrderItem.manual_unlimited`: saat checkout, kuantitas dicatat sebagai `deferred_local_quantity` tanpa reservasi stok fisik atau pembelian supplier. Saat pembayaran normal terkonfirmasi, sistem mengutamakan supplier yang layak. Mematikan mode tidak mengubah kewajiban pesanan yang sudah dibuat.
 
-Checkout manual-unlimited tersedia pada bot, Web Storefront, dan Customer API tanpa mewajibkan Telegram untuk checkout web. API tetap menggunakan jalur pembayaran saldo yang sudah ada. Payment sukses membuat review `manual_unlimited` dan Order Processing. Pembeli website diarahkan ke WhatsApp support yang dikonfigurasi; pembeli API diarahkan ke @Alhie02 untuk akun atau kode redeem. Operator wajib memverifikasi kepemilikan pesanan sebelum menyerahkan kredensial. Pada monitor `/admin/suppliers/monitor/purchases`, operator mencari invoice dan mengisi semua unit yang kurang; kredensial terenkripsi disimpan untuk pesanan dan pengiriman mengikuti kanal yang tersedia. Audit tidak boleh menyimpan isi akun. Payment, pemenuhan, dan konfirmasi receipt adalah fakta terpisah: status internal Completed berarti akun siap, sedangkan tampilan bot mempertahankan Processing sampai receipt terkonfirmasi. Kegagalan atau hasil Telegram ambigu ditangani melalui Manual Delivery Review. Late Payment pada Order terminal tetap melalui review/refund yang ada, bukan otomatis dipenuhi.
+Checkout Unlimited tersedia pada bot, Web Storefront, dan Customer API tanpa mewajibkan Telegram untuk checkout web. API tetap menggunakan jalur pembayaran saldo yang sudah ada. Jika supplier tidak bisa memenuhi semua unit satu item, pesanan tetap Paid dan masuk review. Operator membuka `/admin/manual-fulfillment-reviews/{review}` untuk melengkapi unit yang kurang; retry supplier untuk Unlimited dilakukan oleh Owner dari dashboard. Kredensial terenkripsi disimpan untuk pesanan dan pengiriman mengikuti kanal yang tersedia. Audit tidak boleh menyimpan isi akun. Payment, pemenuhan, dan konfirmasi receipt adalah fakta terpisah: status internal Completed berarti akun siap, sedangkan tampilan bot mempertahankan Processing sampai receipt terkonfirmasi. Kegagalan atau hasil Telegram ambigu ditangani melalui Manual Delivery Review. Late Payment pada Order terminal tetap melalui review/refund yang ada, bukan otomatis dipenuhi.
 
 Saat melengkapi akun manual, Admin tidak perlu mengisi catatan resolusi. Sistem tetap mencatat aktor dan waktu; alasan historis dipertahankan. Keputusan refund, reject, dan handoff tetap membutuhkan alasan.
 

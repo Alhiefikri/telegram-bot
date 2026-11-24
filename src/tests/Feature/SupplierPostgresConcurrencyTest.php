@@ -14,6 +14,7 @@ use App\Models\AuditLog;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductStockItem;
@@ -26,6 +27,7 @@ use App\Models\SupplierPurchase;
 use App\Models\SupplierPurchaseEvidence;
 use App\Models\TelegramOutboundEffect;
 use App\Models\User;
+use App\Services\Admin\ManualFulfillmentResolutionService;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
@@ -51,6 +53,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\Support\PostgresTestDatabase;
@@ -178,6 +181,86 @@ final class SupplierPostgresConcurrencyTest extends TestCase
         $this->assertSame(1, $this->process($fulfillment->id)['posts']);
         $this->assertSame(1, SupplierPurchase::count());
         $this->assertSame(1, ProductStockItem::whereNotNull('supplier_purchase_id')->count());
+    }
+
+    public static function unlimitedReviewRaces(): array
+    {
+        return ['three supplier retries' => [false], 'supplier retry versus manual credentials' => [true]];
+    }
+
+    #[Group('postgres-release')]
+    public function test_concurrent_unlimited_payments_do_not_overspend_last_supplier_unit(): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $product->update(['manual_unlimited' => true]);
+        $supplier->forceFill(['balance_micros' => 1_000_000])->save();
+        $sku->update(['stock' => 1]);
+        $first = $this->checkout($cart);
+        $second = $this->checkout($this->cart($product->id, 790002));
+        $confirm = fn (Order $order): array => [
+            'outcome' => app(OrderLifecycle::class)->applyManualCompletion($order)->paymentStatus()->value,
+        ];
+        $results = $this->race([fn () => $confirm($first), fn () => $confirm($second)]);
+        $this->assertSame(['paid', 'paid'], array_column($results, 'outcome'));
+        $fulfillment = SupplierFulfillment::sole();
+        $review = ManualFulfillmentReview::sole();
+        $this->assertNotSame($fulfillment->order_id, $review->order_id);
+        $this->assertSame(ManualFulfillmentReview::REASON_MANUAL_UNLIMITED, $review->reason);
+        $this->assertSame(1, $sku->fresh()->reserved_quantity);
+        $this->assertSame(1_000_000, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, $product->fresh()->reserved_stock);
+        $this->assertSame(0, SupplierPurchase::count());
+        Http::assertNothingSent();
+    }
+
+    #[DataProvider('unlimitedReviewRaces')]
+    #[Group('postgres-release')]
+    public function test_unlimited_review_selects_only_one_fulfillment_path_under_concurrency(bool $withManual): void
+    {
+        [$product, $supplier, $sku, $cart] = $this->fixture();
+        $product->update(['manual_unlimited' => true]);
+        $supplier->forceFill(['balance_micros' => 0])->save();
+        $order = $this->checkout($cart);
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $review = ManualFulfillmentReview::sole();
+        $item = $order->orderItems()->sole();
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $retry = function () use ($review, $item, $owner): array {
+            Http::fake(fn ($request) => Http::response(str_ends_with($request->url(), '/balance')
+                ? ['balance' => '10', 'currency' => 'USDT']
+                : ['products' => [['id' => 'fixture-sku', 'name' => 'Private', 'price' => '1', 'stock' => 10]], 'currency' => 'USDT']));
+
+            return ['outcome' => app(SupplierFulfillmentService::class)->retryUnlimitedReview($review, $item->id, $owner)];
+        };
+        $manual = function () use ($review, $item, $owner): array {
+            try {
+                app(ManualFulfillmentResolutionService::class)->provideLocalCredentials($review, $owner, [$item->id => ['manual-race-key']]);
+
+                return ['outcome' => 'manual'];
+            } catch (InvalidOrderTransition) {
+                return ['outcome' => 'unsafe'];
+            }
+        };
+        $results = $this->race([$retry, $retry, $withManual ? $manual : $retry]);
+        $outcomes = array_column($results, 'outcome');
+        $winner = array_values(array_intersect($outcomes, ['queued', 'manual']));
+        $this->assertCount(1, $winner);
+        if ($winner[0] === 'queued') {
+            $fulfillment = SupplierFulfillment::sole();
+            $this->assertSame(1, $sku->fresh()->reserved_quantity);
+            $this->assertSame(1, $this->process($fulfillment->id)['posts']);
+            $this->assertSame(1, SupplierPurchase::count());
+            $this->assertSame('race-owned-key', $item->stockItems()->sole()->secret);
+        } else {
+            $this->assertTrue($withManual);
+            $this->assertSame(0, SupplierFulfillment::count());
+            $this->assertSame(0, SupplierPurchase::count());
+            $this->assertSame('manual-race-key', $item->stockItems()->sole()->secret);
+        }
+        $this->assertSame(0, $supplier->fresh()->reserved_balance_micros);
+        $this->assertSame(0, $sku->fresh()->reserved_quantity);
+        $this->assertSame(OrderStatus::Completed, $order->fresh()->order_status);
+        $this->assertSame(ManualFulfillmentReview::STATE_FULFILLED, $review->fresh()->state);
     }
 
     #[Group('postgres-release')]

@@ -69,7 +69,7 @@ final readonly class CustomerApiOrderResult
 
         return ['manual_support' => [
             'telegram' => '@Alhie02',
-            'instructions' => 'Contact @Alhie02 on Telegram with your invoice number to obtain your account or redeem code.',
+            'instructions' => 'If your account or redeem code is not ready, contact @Alhie02 on Telegram with your invoice number.',
         ]];
     }
 

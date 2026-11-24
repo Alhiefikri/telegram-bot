@@ -376,15 +376,10 @@ class ManualFulfillmentResolutionService
             throw new InvalidOrderTransition('Superseded automatic payment money must be reviewed separately; it cannot fulfill the Order again.');
         }
         if ($review->reason === 'supplier_fulfillment') {
-            $fulfillments = SupplierFulfillment::query()->where('order_id', $review->order_id)->where('state', 'review')->pluck('id');
-            foreach ($fulfillments as $id) {
-                app(SupplierFulfillmentService::class)->retryAfterTopup($id);
-            }
-
-            return $review->fresh();
+            throw new InvalidOrderTransition('Gunakan tombol Coba beli dari supplier pada item yang terkait.');
         }
         $order = Order::query()->lockForUpdate()->findOrFail($review->order_id);
-        if (in_array($review->reason, [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)
+        if (in_array($review->reason, ManualFulfillmentReview::DEFERRED_CREDENTIAL_REASONS, true)
             || $order->orderItems()->where('deferred_local_quantity', '>', 0)->exists()) {
             throw new InvalidOrderTransition('Provide all missing local credentials through the account submission form.');
         }

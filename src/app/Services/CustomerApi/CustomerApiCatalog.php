@@ -103,7 +103,7 @@ final class CustomerApiCatalog
                 'stock' => ['available' => $stock, 'is_available' => $stock === null || $stock > 0, 'quantity_available' => $stock === null || $stock >= $quantity],
                 ...($product->manual_unlimited ? ['manual_support' => [
                     'telegram' => '@Alhie02',
-                    'instructions' => 'After payment, contact @Alhie02 on Telegram with your invoice number to obtain your account or redeem code. Fulfillment is manual.',
+                    'instructions' => 'After payment, check delivery. If your account or redeem code is not ready, contact @Alhie02 on Telegram with your invoice number.',
                 ]] : []),
                 'quantity' => $quantity, 'quotes' => [$this->money($quote, false), $this->money($quote, true)],
                 'input_requirements' => [], 'metadata' => $metadata, 'informational' => true,

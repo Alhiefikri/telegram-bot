@@ -1,11 +1,11 @@
 <?php
 
 return [
-    'manual_stock' => '∞ · Fulfilled manually',
-    'manual_products' => 'Products fulfilled manually',
-    'manual_after_payment' => 'Manually fulfilled products are processed after payment',
-    'manual_after_payment_help' => 'Once payment is verified, contact WhatsApp support with your invoice number to receive the account or redemption code for manually fulfilled products.',
-    'manual_paid_help' => 'Contact WhatsApp support with your invoice number to receive the account or redemption code for manually fulfilled products.',
+    'manual_stock' => '∞ · Unlimited stock',
+    'manual_products' => 'Need delivery help?',
+    'manual_after_payment' => 'Orders are processed after payment',
+    'manual_after_payment_help' => 'Once payment is verified, check this invoice for the account or redemption code delivery status.',
+    'manual_paid_help' => 'If you have not received your account or redemption code, contact WhatsApp support with your invoice number.',
     'contact_whatsapp' => 'Contact WhatsApp support',
     'manual_whatsapp_unavailable' => 'The WhatsApp support number has not been configured.',
     'manual_order_message' => 'Hello Lhie Store, I would like the account or redemption code for invoice :invoice.',

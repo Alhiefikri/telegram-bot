@@ -97,7 +97,7 @@ final class SupplierAdminRequest extends FormRequest
                 'quantity' => ['nullable', 'integer', 'min:1', 'max:10000'],
             ],
             'operate' => [
-                'action' => ['required', Rule::in(['retry', 'recover', 'manual', 'no_debit', 'debit_confirmed', 'history', 'history_confirm'])],
+                'action' => ['required', Rule::in(['recover', 'manual', 'no_debit', 'debit_confirmed', 'history', 'history_confirm'])],
                 'purchase_id' => ['required_if:action,no_debit,debit_confirmed,history,history_confirm', 'nullable', 'integer', 'min:1'],
                 'purchase_version' => [Rule::requiredIf(fn () => $this->input('action') === 'history_confirm' || ($this->input('action') === 'history' && $this->route('fulfillment')?->currentPurchase?->supplier?->provider === 'csxstore')), 'nullable', 'date_format:Y-m-d H:i:s'],
                 'supplier_order_id' => ['required_if:action,recover,debit_confirmed,history_confirm', 'nullable', 'string', 'max:128', 'regex:/\A[A-Za-z0-9_.:\-]+\z/'],

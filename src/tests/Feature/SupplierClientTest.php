@@ -58,6 +58,21 @@ class SupplierClientTest extends TestCase
         return json_decode(file_get_contents(__DIR__.'/../Unit/Suppliers/fixtures/'.$provider.'.json'), true, 32, JSON_THROW_ON_ERROR);
     }
 
+    public function test_catalog_snapshot_respects_the_callers_expired_transport_budget(): void
+    {
+        $this->fake(fn () => Http::response(['unexpected' => true]));
+        foreach (['prodseller', 'akunding'] as $provider) {
+            $supplier = $this->supplier($provider)->forceFill(['currency' => 'USDT']);
+            try {
+                app(SupplierClient::class)->snapshot($supplier, hrtime(true) - 1);
+                $this->fail('An expired transport budget cannot start supplier HTTP.');
+            } catch (SupplierUnavailable $exception) {
+                $this->assertSame('snapshot_timeout', $exception->errorCode);
+            }
+        }
+        Http::assertNothingSent();
+    }
+
     public function test_csxstore_completed_purchase_and_exact_order_read_are_trusted(): void
     {
         $supplier = $this->supplier('csxstore');

@@ -75,6 +75,15 @@ final class TelegramWebAuthenticationAdapter
         }
 
         if ($confirmed) {
+            $messageId = Arr::get($callback, 'message.message_id');
+            if ($login && is_int($messageId) && $messageId > 0) {
+                try {
+                    $this->bot->deleteMessage((string) $chat['id'], $messageId);
+                } catch (Throwable) {
+                    // A stale or unavailable message must not interrupt the confirmed login.
+                }
+            }
+
             $this->send(
                 (string) $chat['id'],
                 $login ? 'Telegram dikonfirmasi. Kembali ke tab situs yang tadi dibuka. Anda akan masuk otomatis.'

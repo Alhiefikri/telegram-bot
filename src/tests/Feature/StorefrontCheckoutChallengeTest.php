@@ -68,6 +68,44 @@ class StorefrontCheckoutChallengeTest extends TestCase
         ];
     }
 
+    public function test_official_dummy_widget_can_create_a_manual_invoice_in_local(): void
+    {
+        $this->app->instance('env', 'local');
+        config([
+            'services.turnstile.site_key' => '1x00000000000000000000AA',
+            'services.turnstile.secret_key' => '1x0000000000000000000000000000000AA',
+        ]);
+        Http::fake(fn () => Http::response(['success' => true, 'hostname' => 'example.com']));
+        $product = $this->availableProduct(['stock' => 2]);
+
+        $this->withSession(['_token' => 'fixture-csrf'])
+            ->post(route('storefront.shop.checkout'), $this->payload($product, 'XXXX.DUMMY.TOKEN.XXXX') + ['_token' => 'fixture-csrf'])
+            ->assertRedirect()
+            ->assertSessionMissing('storefront_checkout_error');
+
+        $this->assertDatabaseHas('payments', ['provider' => 'manual', 'status' => 'pending']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_official_dummy_secret_is_unavailable_in_production(): void
+    {
+        $this->app->instance('env', 'production');
+        config([
+            'services.turnstile.site_key' => '1x00000000000000000000AA',
+            'services.turnstile.secret_key' => '1x0000000000000000000000000000000AA',
+        ]);
+        Http::fake(fn () => Http::response(['success' => true, 'hostname' => 'example.com']));
+        $product = $this->availableProduct(['stock' => 2]);
+
+        $this->withSession(['_token' => 'fixture-csrf'])
+            ->post(route('storefront.shop.checkout'), $this->payload($product, 'XXXX.DUMMY.TOKEN.XXXX') + ['_token' => 'fixture-csrf'])
+            ->assertRedirect()
+            ->assertSessionHas('storefront_checkout_error', StorefrontCheckoutChallenge::UNAVAILABLE_MESSAGE);
+
+        $this->assertNoPurchase($product);
+        Http::assertNothingSent();
+    }
+
     #[DataProvider('invalidProof')]
     public function test_missing_or_malformed_proof_never_calls_siteverify(mixed $proof): void
     {

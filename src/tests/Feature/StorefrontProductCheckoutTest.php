@@ -127,18 +127,18 @@ class StorefrontProductCheckoutTest extends TestCase
         config()->set('services.support.whatsapp_url', 'https://wa.me/6280000000000');
         $product = Product::factory()->create(['manual_unlimited' => true, 'stock' => 0]);
 
-        $this->get('/')->assertOk()->assertSee('Diproses manual')->assertDontSee('Perlu akun Telegram');
+        $this->get('/')->assertOk()->assertSee('Stok tak terbatas')->assertDontSee('Perlu akun Telegram');
         $this->get(route('storefront.products.show', $product))
-            ->assertOk()->assertSee('Diproses manual')->assertDontSee('Perlu akun Telegram');
+            ->assertOk()->assertSee('Stok tak terbatas')->assertDontSee('Perlu akun Telegram');
         $this->get(route('storefront.shop.checkout.product', $product))
             ->assertOk()
-            ->assertSee('Setelah pembayaran terverifikasi, hubungi WhatsApp Support')
+            ->assertSee('Setelah pembayaran terverifikasi, cek halaman invoice')
             ->assertSee('https://wa.me/6281299990000?text=', false)
             ->assertDontSee('Perlu akun Telegram');
 
         $normal = Product::factory()->create(['manual_unlimited' => false, 'stock' => 1]);
         $this->get(route('storefront.shop.checkout.product', $normal))
-            ->assertOk()->assertDontSee('Produk diproses manual');
+            ->assertOk()->assertDontSee('Pesanan diproses setelah pembayaran');
     }
 
     public function test_direct_checkout_review_exposes_bounded_tier_estimates_without_changing_server_inputs(): void

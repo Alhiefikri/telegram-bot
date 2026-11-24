@@ -19,6 +19,7 @@ use App\Services\Suppliers\SupplierInvoiceRetry;
 use App\Services\Suppliers\SupplierManualTakeover;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -27,9 +28,27 @@ final class AdminSupplierInvoiceRecoveryController extends Controller
 {
     public function __invoke(Request $request, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service)
     {
+        return $this->operate($request, $fulfillment, $service);
+    }
+
+    public function fromReview(Request $request, ManualFulfillmentReview $review, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service)
+    {
+        Gate::authorize('resolve', $review);
+        abort_unless((string) $review->order_id === (string) $fulfillment->order_id, 404);
+        abort_unless($review->state === ManualFulfillmentReview::STATE_PENDING
+            && in_array($review->reason, ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE, true), 409);
+        abort_unless(in_array($request->input('action'), ['retry', 'approve_price', 'send_accounts'], true), 422);
+
+        return $this->operate($request, $fulfillment, $service, $review);
+    }
+
+    private function operate(Request $request, SupplierFulfillment $fulfillment, SupplierFulfillmentService $service, ?ManualFulfillmentReview $review = null)
+    {
         $actor = $request->attributes->get('adminUser');
         abort_unless($actor?->role?->canManageStoreOperations() === true, 403);
-        $url = route('admin.suppliers.purchases', ['invoice' => $fulfillment->order->invoice_number]);
+        $url = $review === null
+            ? route('admin.suppliers.purchases', ['invoice' => $fulfillment->order->invoice_number])
+            : route('admin.manual-fulfillment-reviews.show', $review);
         $confirmed = (int) $request->session()->get('auth.password_confirmed_at', 0);
         if ($confirmed <= 0 || $confirmed > time() || time() - $confirmed > 900) {
             $request->session()->put('url.intended', $url);
@@ -61,10 +80,10 @@ final class AdminSupplierInvoiceRecoveryController extends Controller
             }
             try {
                 $result = $action === 'approve_price'
-                    ? $retry->confirm((int) $fulfillment->id, $actor, $request->string('approval_token')->toString())
-                    : $retry->attempt((int) $fulfillment->id, $action === 'retry_force');
+                    ? $retry->confirm((int) $fulfillment->id, $actor, $request->string('approval_token')->toString(), $review?->id)
+                    : $retry->attempt((int) $fulfillment->id, $action === 'retry_force', expectedPurchaseId: $request->integer('purchase_id'), reviewId: $review?->id, owner: $actor);
                 if (($result['status'] ?? null) === 'price_approval_required') {
-                    $result = $retry->preview((int) $fulfillment->id, $actor);
+                    $result = $retry->preview((int) $fulfillment->id, $actor, $request->integer('purchase_id'), $review?->id);
                     if (($result['status'] ?? null) === 'price_approval_required') {
                         return redirect($url)->with('supplier_retry_preview', $result + ['fulfillment_id' => $fulfillment->id]);
                     }
@@ -123,7 +142,7 @@ final class AdminSupplierInvoiceRecoveryController extends Controller
             return redirect($url)->with('status', $message)->with('supplier_sync_warning', $warning);
         }
         try {
-            $supplierId = DB::transaction(function () use ($request, $fulfillment, $service, $actor): ?int {
+            $supplierId = DB::transaction(function () use ($request, $fulfillment, $service, $actor, $review): ?int {
                 $order = Order::query()->lockForUpdate()->findOrFail($fulfillment->order_id);
                 Payment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
                 $service->lockForReview($order);
@@ -134,7 +153,10 @@ final class AdminSupplierInvoiceRecoveryController extends Controller
                 $supplierId = $f->reserved_supplier_id ?? $f->currentPurchase?->supplier_id;
                 switch ($request->input('action')) {
                     case 'send_accounts':
-                        if ($order->customer?->telegram_id === null) {
+                        if ($review !== null && ! $service->isPendingPaidFulfillmentReview($order, $review->id)) {
+                            throw new InvalidOrderTransition('Manual review is no longer open.');
+                        }
+                        if ($review === null && $order->customer?->telegram_id === null) {
                             throw new InvalidOrderTransition('This customer has no Telegram destination.');
                         }
                         $credentials = array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $request->string('credentials')->toString())), fn (string $line): bool => $line !== ''));

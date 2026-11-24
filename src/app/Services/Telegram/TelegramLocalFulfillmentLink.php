@@ -37,6 +37,13 @@ final class TelegramLocalFulfillmentLink
 
     public function url(ManualFulfillmentReview $review): ?string
     {
+        $url = $this->reviewUrl($review);
+
+        return $url === null ? null : $url.'#local-credentials';
+    }
+
+    public function reviewUrl(ManualFulfillmentReview $review): ?string
+    {
         // Use the configured origin, not the webhook request Host. This URL grants no authority.
         $origin = rtrim((string) config('app.url'), '/');
         $parts = parse_url($origin);
@@ -45,6 +52,6 @@ final class TelegramLocalFulfillmentLink
             return null;
         }
 
-        return $origin.route('admin.manual-fulfillment-reviews.show', $review, absolute: false).'#local-credentials';
+        return $origin.route('admin.manual-fulfillment-reviews.show', $review, absolute: false);
     }
 }

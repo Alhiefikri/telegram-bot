@@ -279,7 +279,7 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         $this->assertSame(2, Product::query()->withAvailability()->findOrFail($product->id)->localAvailableStock());
     }
 
-    public function test_fresh_confirmation_allows_original_source_retry_without_buying_in_request(): void
+    public function test_fresh_confirmation_does_not_enable_legacy_review_retry(): void
     {
         [$order, $fulfillment] = $this->paidSupplierOrder();
         $sku = SupplierCatalogItem::findOrFail($fulfillment->reserved_catalog_item_id);
@@ -291,9 +291,9 @@ final class SupplierIndependentRegressionTest extends NonTransactionalDatabaseTe
         Queue::fake();
         $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()])
             ->post(route('admin.manual-fulfillment-reviews.resolve', $review), ['action' => 'fulfill', 'reason' => 'Confirmed original source retry'])
-            ->assertRedirect();
-        $this->assertSame('pending', $fulfillment->fresh()->state);
-        Queue::assertPushed(ProcessSupplierFulfillment::class);
+            ->assertRedirect()->assertSessionHasErrors('review');
+        $this->assertSame('review', $fulfillment->fresh()->state);
+        Queue::assertNotPushed(ProcessSupplierFulfillment::class);
         Http::assertNothingSent();
     }
 

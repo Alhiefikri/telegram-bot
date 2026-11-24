@@ -23,6 +23,8 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
 
     private bool $callbackUnavailable = false;
 
+    private bool $deleteUnavailable = false;
+
     private string $providerEcho = '';
 
     protected function setUp(): void
@@ -30,6 +32,9 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         parent::setUp();
         Http::preventStrayRequests();
         Http::fake(function (ClientRequest $request) {
+            if ($this->deleteUnavailable && str_ends_with($request->url(), '/deleteMessage')) {
+                return Http::response(['ok' => false, 'description' => 'Message cannot be deleted'], 400);
+            }
             if ($this->botUnavailable || ($this->callbackUnavailable && str_ends_with($request->url(), '/answerCallbackQuery'))) {
                 $confirmation = $request['reply_markup']['inline_keyboard'][0][0]['callback_data'] ?? $this->providerEcho;
 
@@ -60,7 +65,8 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
             && str_contains((string) $request['text'], 'Jika bukan Anda')
             && $request['reply_markup']['inline_keyboard'][0][0]['style'] === 'primary');
 
-        $this->postTelegramWebhook($this->callbackUpdate(61002, 'confirm-link', $confirmation, ['is_bot' => false]))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(61002, 'confirm-link', $confirmation, ['is_bot' => false], messageId: 61000))->assertOk();
+        Http::assertNotSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/deleteMessage'));
         Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
             && (string) $request['chat_id'] === '12345'
             && $request['text'] === 'Telegram dikonfirmasi. Kembali ke situs toko di browser yang memulai permintaan, lalu klik "Periksa konfirmasi Telegram" untuk menyelesaikannya.'
@@ -95,7 +101,10 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $choice = collect($buttons)->firstWhere('text', $number);
         $this->assertNotNull($choice);
         $this->assertGuest('customer');
-        $this->postTelegramWebhook($this->callbackUpdate(61004, 'confirm-login', $choice['callback_data'], ['is_bot' => false]))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(61004, 'confirm-login', $choice['callback_data'], ['is_bot' => false], messageId: 61000))->assertOk();
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/deleteMessage')
+            && (string) $request['chat_id'] === '12345'
+            && $request['message_id'] === 61000);
         $this->assertGuest('customer');
         $this->assertTrue($this->authentication()->consume($browser));
 
@@ -103,6 +112,23 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $this->assertSame(1, Customer::count());
         $this->assertNull(TelegramUpdate::firstOrFail()->customer_id);
         $this->assertEncryptedUpdates($payload, $choice['callback_data']);
+    }
+
+    public function test_login_remains_confirmed_if_the_telegram_prompt_cannot_be_deleted(): void
+    {
+        $customer = Customer::factory()->create(['telegram_id' => 12345]);
+        [$browser, $payload, $number] = $this->start();
+        $this->postTelegramWebhook($this->messageUpdate(61201, '/start '.$payload, ['is_bot' => false]))->assertOk();
+        $choice = collect($this->choices())->firstWhere('text', $number);
+        $this->deleteUnavailable = true;
+
+        $this->postTelegramWebhook($this->callbackUpdate(61202, 'confirm-login-without-cleanup', $choice['callback_data'], ['is_bot' => false], messageId: 61000))->assertOk();
+
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/deleteMessage'));
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/sendMessage')
+            && str_starts_with((string) $request['text'], 'Telegram dikonfirmasi.'));
+        $this->assertTrue($this->authentication()->consume($browser));
+        $this->assertAuthenticatedAs($customer, 'customer');
     }
 
     public function test_wrong_number_ends_the_login_attempt_without_allowing_a_second_guess(): void
@@ -114,11 +140,12 @@ class WebAuthenticationWebhookTest extends TelegramBotTestSupport
         $wrong = $buttons->first(fn (array $choice): bool => $choice['text'] !== $number)['callback_data'];
         $right = $buttons->firstWhere('text', $number)['callback_data'];
 
-        $this->postTelegramWebhook($this->callbackUpdate(61102, 'wrong-number', $wrong, ['is_bot' => false]))->assertOk();
+        $this->postTelegramWebhook($this->callbackUpdate(61102, 'wrong-number', $wrong, ['is_bot' => false], messageId: 61000))->assertOk();
         $this->assertSame('invalid', $this->authentication()->status($browser));
         $this->postTelegramWebhook($this->callbackUpdate(61103, 'second-guess', $right, ['is_bot' => false]))->assertOk();
         $this->assertFalse($this->authentication()->consume($browser));
         $this->assertGuest('customer');
+        Http::assertNotSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), '/deleteMessage'));
     }
 
     public function test_expired_login_number_cannot_confirm(): void

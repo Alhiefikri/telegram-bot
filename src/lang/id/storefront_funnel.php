@@ -1,11 +1,11 @@
 <?php
 
 return [
-    'manual_stock' => '∞ · Diproses manual',
-    'manual_products' => 'Produk diproses manual',
-    'manual_after_payment' => 'Produk manual diproses setelah pembayaran',
-    'manual_after_payment_help' => 'Setelah pembayaran terverifikasi, hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.',
-    'manual_paid_help' => 'Hubungi WhatsApp Support dengan nomor invoice untuk mendapatkan akun atau kode redeem produk manual.',
+    'manual_stock' => '∞ · Stok tak terbatas',
+    'manual_products' => 'Butuh bantuan pengiriman?',
+    'manual_after_payment' => 'Pesanan diproses setelah pembayaran',
+    'manual_after_payment_help' => 'Setelah pembayaran terverifikasi, cek halaman invoice untuk melihat status pengiriman akun atau kode redeem.',
+    'manual_paid_help' => 'Hubungi WhatsApp Support dengan nomor invoice jika akun atau kode redeem belum diterima.',
     'contact_whatsapp' => 'Hubungi WhatsApp Support',
     'manual_whatsapp_unavailable' => 'Nomor WhatsApp Support belum dikonfigurasi.',
     'manual_order_message' => 'Halo Admin Lhie Store, saya ingin mendapatkan akun atau kode redeem untuk invoice :invoice.',

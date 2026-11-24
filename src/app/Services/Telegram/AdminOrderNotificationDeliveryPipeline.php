@@ -50,6 +50,12 @@ final class AdminOrderNotificationDeliveryPipeline
             return;
         }
 
+        $coverage = $effect->effect_type === TelegramOutboundEffectType::AdminOrderReviewNotification->value
+            ? $this->paidReviewCoverage($effect) : 'none';
+        if ($coverage === 'waiting') {
+            return;
+        }
+
         $claimed = $this->ledger->claim((string) $effect->getKey());
         if ($claimed === null) {
             return;
@@ -76,13 +82,8 @@ final class AdminOrderNotificationDeliveryPipeline
                 return;
             }
 
-            // Local credential reviews for Telegram buyers share the paid
-            // notice. Keep legacy effect history, but do not send a second card.
-            if ($claimed->effect_type === TelegramOutboundEffectType::AdminOrderReviewNotification->value
-                && app(AdminPaidOrderOutcome::class)->applies($order)
-                && ManualFulfillmentReview::query()->whereKey($claimed->source_id)
-                    ->where('reason', ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)->exists()) {
-                $this->finalizeNotDeliverable($claimed, 'admin_notification_not_eligible', 'Local credential review is covered by the paid order notice.');
+            if ($coverage === 'covered') {
+                $this->finalizeNotDeliverable($claimed, 'admin_notification_not_eligible', 'Fulfillment review is covered by the paid order notice.');
 
                 return;
             }
@@ -100,12 +101,17 @@ final class AdminOrderNotificationDeliveryPipeline
                 TelegramOutboundEffectType::AdminOrderPaidNotification->value => $this->adminPaidOrderNotifier->sendEffect(
                     $order,
                     (string) $claimed->telegram_chat_id,
+                    reviewNotice: isset($claimed->outcome_metadata['covered_review_id']) && ! isset($claimed->outcome_metadata['paid_outcome']),
                     outcome: $claimed->outcome_metadata['paid_outcome'] ?? null,
+                    reviewId: $claimed->outcome_metadata['covered_review_id'] ?? null,
+                    fixedReview: true,
                 ),
                 TelegramOutboundEffectType::AdminOrderReviewNotification->value => $this->adminPaidOrderNotifier->sendEffect(
                     $order,
                     (string) $claimed->telegram_chat_id,
                     reviewNotice: true,
+                    reviewId: (string) $claimed->source_id,
+                    replaceMessageId: $this->supersededPaidMessageId($order, $claimed),
                 ),
                 TelegramOutboundEffectType::AdminOrderExpiredNotification->value => $this->adminOrderNotifier->sendExpiredEffect(
                     $order,
@@ -125,6 +131,9 @@ final class AdminOrderNotificationDeliveryPipeline
                 $this->synchronizeSentProjection($finalized);
                 if ($finalized->outcome_metadata['clean_up_local_review'] ?? false) {
                     $this->cleanUpLocalReviewNotices($finalized);
+                }
+                if ($claimed->effect_type === TelegramOutboundEffectType::AdminOrderReviewNotification->value) {
+                    $this->deleteSupersededPaidCard($order, $finalized);
                 }
             }
 
@@ -223,23 +232,25 @@ final class AdminOrderNotificationDeliveryPipeline
             if (! $this->eligible($order, (string) $locked->effect_type)) {
                 return true;
             }
-            if (isset($locked->outcome_metadata['paid_outcome'])) {
+            if (isset($locked->outcome_metadata['paid_notice_prepared']) || isset($locked->outcome_metadata['paid_outcome'])) {
                 return true;
             }
             $reader = app(AdminPaidOrderOutcome::class);
-            if (! $reader->applies($order)) {
-                return true;
-            }
-            $outcome = $reader->read($order);
-            if (! $outcome['ready'] || ($locked->supersedes_effect_id !== null && ! $outcome['resolved'])) {
+            $outcome = $reader->applies($order) ? $reader->read($order) : null;
+            if ($outcome !== null && (! $outcome['ready'] || ($locked->supersedes_effect_id !== null && ! $outcome['resolved']))) {
                 return false;
             }
             if (in_array($locked->state, [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed], true)) {
+                $review = $this->activeFulfillmentReview($order);
                 $locked->outcome_metadata = array_merge($locked->outcome_metadata ?? [], [
-                    'paid_outcome' => $outcome,
-                    'clean_up_local_review' => $outcome['resolved'] && $order->order_status === OrderStatus::Completed
+                    'paid_notice_prepared' => true,
+                    'covered_review_id' => $review === null ? null : (string) $review->getKey(),
+                    ...($outcome === null ? [] : ['paid_outcome' => $outcome]),
+                    'clean_up_local_review' => ($outcome['resolved'] ?? false) && $order->order_status === OrderStatus::Completed
                         && ManualFulfillmentReview::query()->where('order_id', $order->id)
-                            ->where('reason', ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)
+                            ->whereIn('reason', ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE)
+                            ->where(fn ($review) => $review->where('reason', ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)
+                                ->orWhereHas('order.orderItems', fn ($item) => $item->where('manual_unlimited', true)))
                             ->where('state', ManualFulfillmentReview::STATE_FULFILLED)->exists(),
                 ]);
                 $locked->save();
@@ -247,6 +258,84 @@ final class AdminOrderNotificationDeliveryPipeline
 
             return true;
         });
+    }
+
+    private function activeFulfillmentReview(Order $order): ?ManualFulfillmentReview
+    {
+        return ManualFulfillmentReview::query()->where('order_id', $order->id)->open()
+            ->whereIn('reason', ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE)
+            ->whereHas('payment', fn ($payment) => $payment->where('status', PaymentStatus::Paid)->whereNull('manual_alternative_at'))
+            ->oldest('id')->first();
+    }
+
+    private function paidRoot(Order $order, TelegramOutboundEffect $notice): ?TelegramOutboundEffect
+    {
+        return TelegramOutboundEffect::query()->where('source_type', Order::class)->where('source_id', $order->id)
+            ->where('effect_type', TelegramOutboundEffectType::AdminOrderPaidNotification->value)
+            ->where('telegram_chat_id', $notice->telegram_chat_id)->whereNull('supersedes_effect_id')
+            ->orderByDesc('sequence')->first();
+    }
+
+    private function paidReviewCoverage(TelegramOutboundEffect $notice): string
+    {
+        $review = ManualFulfillmentReview::query()->with('order')->find($notice->source_id);
+        if ($review === null || ! in_array($review->reason, ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE, true)) {
+            return 'none';
+        }
+        $paid = $this->paidRoot($review->order, $notice);
+        if ($paid === null || ! $this->eligible($review->order, TelegramOutboundEffectType::AdminOrderPaidNotification->value)) {
+            return 'none';
+        }
+        if (in_array($paid->state, [TelegramOutboundEffectState::Pending, TelegramOutboundEffectState::Failed], true)
+            && ! $this->ledger->isTerminalFailure($paid) && $this->preparePaidOutcome($paid)) {
+            $paid->refresh();
+            if (($paid->outcome_metadata['covered_review_id'] ?? null) === (string) $review->id) {
+                try {
+                    $this->deliver($paid);
+                } catch (Throwable $exception) {
+                    report($exception);
+                }
+                $paid->refresh();
+            }
+        }
+        if ($paid->state === TelegramOutboundEffectState::Sending) {
+            return 'waiting';
+        }
+        if (($paid->outcome_metadata['covered_review_id'] ?? null) !== (string) $review->id
+            || $this->ledger->isTerminalFailure($paid)) {
+            return 'none';
+        }
+
+        return in_array($paid->state, [TelegramOutboundEffectState::Sent, TelegramOutboundEffectState::Unknown, TelegramOutboundEffectState::ManualReview], true)
+            ? 'covered' : 'waiting';
+    }
+
+    private function supersededPaidMessageId(Order $order, TelegramOutboundEffect $notice): ?int
+    {
+        $review = ManualFulfillmentReview::find($notice->source_id);
+        if ($review === null || ! in_array($review->reason, ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE, true)) {
+            return null;
+        }
+        $paid = $this->paidRoot($order, $notice);
+        if ($paid?->state !== TelegramOutboundEffectState::Sent || isset($paid->outcome_metadata['covered_review_id'])
+            || ! $this->responseValidator->isValidMessageId((string) $paid->telegram_message_id)) {
+            return null;
+        }
+
+        return (int) $paid->telegram_message_id;
+    }
+
+    private function deleteSupersededPaidCard(Order $order, TelegramOutboundEffect $notice): void
+    {
+        $messageId = $this->supersededPaidMessageId($order, $notice);
+        if ($messageId === null || $messageId === (int) $notice->telegram_message_id) {
+            return;
+        }
+        try {
+            $this->bot->deleteMessage($notice->telegram_chat_id, $messageId);
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     public function wakePaidOrder(string $orderId): void
@@ -315,7 +404,7 @@ final class AdminOrderNotificationDeliveryPipeline
     {
         try {
             $reviewIds = ManualFulfillmentReview::query()->where('order_id', $result->source_id)
-                ->where('reason', ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)->pluck('id')->map(fn ($id) => (string) $id);
+                ->whereIn('reason', ManualFulfillmentReview::REASONS_COVERED_BY_PAID_NOTICE)->pluck('id')->map(fn ($id) => (string) $id);
             $notices = TelegramOutboundEffect::query()->where('state', TelegramOutboundEffectState::Sent)
                 ->where('telegram_chat_id', $result->telegram_chat_id)
                 ->whereNotNull('telegram_message_id')->where('telegram_message_id', '!=', $result->telegram_message_id)

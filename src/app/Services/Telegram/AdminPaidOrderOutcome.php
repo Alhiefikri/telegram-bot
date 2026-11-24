@@ -67,18 +67,21 @@ final class AdminPaidOrderOutcome
             $supplierResolved = true;
             $allRejected = $f !== null && $f->state === 'review' && $f->purchases->isNotEmpty()
                 && $f->purchases->every(fn ($purchase) => $purchase->state === 'rejected' && $purchase->committed_at === null);
+            $intervention = $intervention || $f?->state === 'review';
             $purchases = [];
             foreach ($f?->purchases ?? [] as $purchase) {
                 $acquired = $purchase->committed_at !== null && filled($purchase->supplier_order_id)
                     && $purchase->actual_cost_micros !== null && $purchase->observed_quantity !== null;
                 $rejected = $purchase->state === 'rejected' && $purchase->committed_at === null;
-                $supplierResolved = $supplierResolved && (($acquired && ! in_array($purchase->state, ['ambiguous', 'review'], true)) || $rejected);
+                $manual = $purchase->state === 'delivered' && $purchase->last_error === 'manual_delivery' && $purchase->dispatched_at === null;
+                $supplierResolved = $supplierResolved && (($acquired && ! in_array($purchase->state, ['ambiguous', 'review'], true)) || $rejected || $manual);
                 $intervention = $intervention || in_array($purchase->state, ['ambiguous', 'review'], true) || $f->state === 'review';
                 $purchases[] = $purchase->supplier->name.' · '.($acquired
                     ? 'pembelian berhasil ('.$purchase->observed_quantity.'/'.$purchase->quantity.' unit)'
                         .(in_array($purchase->state, ['ambiguous', 'review'], true) ? '; perlu diperiksa' : '')
-                    : ($rejected ? 'pembelian ditolak; tidak ada debit'
-                        : 'hasil pembelian belum dapat dipastikan; jangan beli ulang'));
+                    : ($manual ? 'akun pengganti diisi manual'
+                        : ($rejected ? 'pembelian ditolak; tidak ada debit'
+                            : 'hasil pembelian belum dapat dipastikan; jangan beli ulang')));
             }
             if ($f !== null && $purchases === []) {
                 $supplierResolved = false;
@@ -89,7 +92,7 @@ final class AdminPaidOrderOutcome
             $delivered = $deliveryProven ? $allocated : 0;
             $refunded = (int) ($f?->refunded_quantity ?? 0);
             $buyerResolved = ($deliveryProven && $delivered + $refunded === (int) $item->quantity)
-                || $handoff + $refunded >= $item->quantity || $failed || ($allRejected && $allocated === 0);
+                || $handoff + $refunded >= $item->quantity || $failed || ($allRejected && $allocated === 0 && ! $item->manual_unlimited);
             $buyer = $deliveryProven ? $delivered.'/'.$item->quantity.' unit terkirim'
                 : ($complete ? 'receipt terkirim; jumlah unit belum terbukti'
                 : ($handoff > 0 ? $handoff.'/'.$item->quantity.' unit diserahkan di luar bot'

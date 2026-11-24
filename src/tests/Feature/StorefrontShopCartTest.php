@@ -131,11 +131,11 @@ class StorefrontShopCartTest extends TestCase
 
         $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->get(route('storefront.shop.cart'))
-            ->assertOk()->assertSee('Diproses manual')->assertDontSee('Perlu akun Telegram');
+            ->assertOk()->assertSee('Stok tak terbatas')->assertDontSee('Perlu akun Telegram');
         $review = $this->withSession(['storefront.checkout_client_key' => $sessionKey])
             ->get(route('storefront.shop.checkout.start'))
             ->assertOk()
-            ->assertSee('Setelah pembayaran terverifikasi, hubungi WhatsApp Support')
+            ->assertSee('Setelah pembayaran terverifikasi, cek halaman invoice')
             ->assertSee('https://wa.me/6281299990000?text=', false);
         preg_match('/name="cart_snapshot" value="([a-f0-9]+)"/', $review->getContent(), $matches);
         $this->assertNotEmpty($matches[1] ?? null);

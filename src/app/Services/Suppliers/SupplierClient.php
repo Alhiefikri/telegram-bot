@@ -33,13 +33,13 @@ final class SupplierClient
 
     public const TOOL_ORAX_ORDER_HISTORY_LIMIT = 100;
 
-    public function snapshot(Supplier $supplier): SupplierCatalogSnapshot
+    public function snapshot(Supplier $supplier, ?int $deadline = null): SupplierCatalogSnapshot
     {
         $provider = $this->ready($supplier);
+        $deadline = min($deadline ?? PHP_INT_MAX, hrtime(true) + 40_000_000_000);
         if ($provider === SupplierProvider::Akunding) {
-            return $this->akundingSnapshot($supplier);
+            return $this->akundingSnapshot($supplier, $deadline);
         }
-        $deadline = hrtime(true) + 40_000_000_000;
         $account = $this->read($supplier, in_array($provider, [SupplierProvider::ProdSeller, SupplierProvider::Canboso, SupplierProvider::Nastele, SupplierProvider::MiraiApi], true) ? '/balance' : '/me', $deadline);
         $catalog = $this->read($supplier, $provider === SupplierProvider::MiraiApi ? '/packages' : '/products', $deadline);
         if ($provider === SupplierProvider::Canboso) {
@@ -832,9 +832,8 @@ final class SupplierClient
         return $payload;
     }
 
-    private function akundingSnapshot(Supplier $supplier): SupplierCatalogSnapshot
+    private function akundingSnapshot(Supplier $supplier, int $deadline): SupplierCatalogSnapshot
     {
-        $deadline = hrtime(true) + 40_000_000_000;
         $account = $this->read($supplier, '/v1/me', $deadline);
         $rows = $this->read($supplier, '/v1/products?include_out_of_stock=true', $deadline);
         $accountId = $this->integer($account['user_id'] ?? null, 1, 2_147_483_647);

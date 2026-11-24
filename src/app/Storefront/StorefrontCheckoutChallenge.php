@@ -14,10 +14,18 @@ class StorefrontCheckoutChallenge
 
     public const FAILED_MESSAGE = 'Verifikasi keamanan belum berhasil atau sudah kedaluwarsa. Muat ulang halaman, selesaikan verifikasi, lalu coba checkout kembali.';
 
+    private const TEST_SITE_KEY = '1x00000000000000000000AA';
+
+    private const TEST_SECRET_KEY = '1x0000000000000000000000000000000AA';
+
     public function siteKey(): ?string
     {
         $siteKey = config('services.turnstile.site_key');
         $secretKey = config('services.turnstile.secret_key');
+
+        if (self::TEST_SITE_KEY === $siteKey || self::TEST_SECRET_KEY === $secretKey) {
+            return $this->usesLocalTestKeys() ? self::TEST_SITE_KEY : null;
+        }
 
         return is_string($siteKey) && trim($siteKey) !== ''
             && is_string($secretKey) && trim($secretKey) !== ''
@@ -55,10 +63,28 @@ class StorefrontCheckoutChallenge
         if (! $response->successful()
             || ! is_array($result)
             || ($result['success'] ?? null) !== true
-            || ($result['action'] ?? null) !== self::ACTION
-            || ($result['hostname'] ?? null) !== $this->expectedHostname()) {
+            || ! $this->matchesChallenge($result)) {
             throw new StorefrontCheckoutError('challenge_failed');
         }
+    }
+
+    private function matchesChallenge(array $result): bool
+    {
+        if ($this->usesLocalTestKeys()) {
+            // Cloudflare Siteverify returns a synthetic hostname and no action for dummy tokens.
+            return ($result['hostname'] ?? null) === 'example.com' && ! array_key_exists('action', $result);
+        }
+
+        return ($result['action'] ?? null) === self::ACTION
+            && ($result['hostname'] ?? null) === $this->expectedHostname();
+    }
+
+    private function usesLocalTestKeys(): bool
+    {
+        return app()->environment('local')
+            && config('services.turnstile.site_key') === self::TEST_SITE_KEY
+            && config('services.turnstile.secret_key') === self::TEST_SECRET_KEY
+            && $this->expectedHostname() !== null;
     }
 
     private function expectedHostname(): ?string

@@ -33,8 +33,14 @@
                 <x-admin-dashboard.notice tone="warning" class="mt-4">Pembayaran dan pengiriman adalah status terpisah. Lengkapi seluruh akun lokal yang kurang; bot mengirim setelah semua unit siap.</x-admin-dashboard.notice>
             @elseif ($review->reason === \App\Models\ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)
                 <x-admin-dashboard.notice tone="warning" class="mt-4">Pembayaran sudah diterima. Cek invoice, pembeli, dan jumlah unit sebelum mengisi akun.</x-admin-dashboard.notice>
+            @elseif ($review->reason === \App\Models\ManualFulfillmentReview::REASON_MIXED_LOCAL_CREDENTIALS_MISSING)
+                <x-admin-dashboard.notice tone="warning" class="mt-4">Lengkapi unit lokal yang masih kurang. Akun dikirim setelah unit lokal dan supplier siap.</x-admin-dashboard.notice>
             @else
-                <x-admin-dashboard.notice tone="warning" class="mt-4">Evidence pembayaran ini membutuhkan keputusan manual. Fulfillment tidak dijalankan otomatis.</x-admin-dashboard.notice>
+                @if ($review->reason === 'supplier_fulfillment')
+                    <x-admin-dashboard.notice tone="warning" class="mt-4">Pembayaran sudah diterima. Periksa status pembelian di bawah. Jika debit supplier belum jelas, jangan beli ulang; akun pengganti tetap dapat dikirim manual.</x-admin-dashboard.notice>
+                @else
+                    <x-admin-dashboard.notice tone="warning" class="mt-4">Evidence pembayaran ini membutuhkan keputusan manual. Fulfillment tidak dijalankan otomatis.</x-admin-dashboard.notice>
+                @endif
             @endif
             <dl class="mt-5 grid gap-3 sm:grid-cols-2">
                 <div><dt class="text-xs font-medium text-admin-muted">Pembeli</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->order->customer?->first_name ?: 'Pelanggan' }} @if ($review->order->customer?->telegram_id) · Telegram ID {{ $review->order->customer->telegram_id }} @endif</dd></div>
@@ -61,6 +67,19 @@
                     <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Refund provider</dt><dd class="text-sm font-semibold text-admin-ink">{{ $review->refund_provider_reference }} ({{ $review->refund_provider_result }})</dd></div>
                 @endif
             </dl>
+            @if ($retryItems->isNotEmpty())
+                <section class="mt-5 rounded-lg border border-admin-line bg-admin-surface-muted p-3">
+                    <h2 class="text-lg font-semibold text-admin-ink">Beli dari supplier</h2>
+                    <p class="mt-1 text-sm text-admin-muted">Cek saldo dan stok supplier, lalu beli dan kirim otomatis. Jika belum tersedia, isi akun manual di bawah.</p>
+                    @foreach ($retryItems as $item)
+                        <form method="POST" action="{{ route('admin.manual-fulfillment-reviews.retry-supplier', $review) }}" class="mt-3">
+                            @csrf
+                            <input type="hidden" name="item_id" value="{{ $item->id }}">
+                            <x-admin-dashboard.button type="submit" variant="primary">Coba beli dari supplier · {{ $item->product_name }}</x-admin-dashboard.button>
+                        </form>
+                    @endforeach
+                </section>
+            @endif
             @if ($handoffFulfillments->isNotEmpty())
                 <section class="mt-5 rounded-lg border border-admin-line bg-admin-surface-muted p-3">
                     <h2 class="text-lg font-semibold text-admin-ink">Pengiriman pelanggan & pembelian supplier</h2>
@@ -68,13 +87,45 @@
                     <div class="mt-3 grid gap-3">
                         @foreach ($handoffFulfillments as $fulfillment)
                             <article class="rounded-lg border border-admin-line bg-admin-surface p-3 text-sm">
-                                <p><span class="font-semibold text-admin-ink">Fulfillment #{{ $fulfillment->id }}</span> · pelanggan: <span class="font-semibold text-admin-ink">{{ $fulfillment->state === 'delivered' ? 'selesai' : 'belum selesai' }}</span> · {{ $fulfillment->quantity }} unit</p>
+                                <p><span class="font-semibold text-admin-ink">{{ $review->order->orderItems->firstWhere('id', $fulfillment->order_item_id)?->product_name }}</span> · Fulfillment #{{ $fulfillment->id }} · {{ $fulfillment->state }} · {{ $fulfillment->quantity }} unit</p>
+                                @if ($activePaid && $fulfillment->state === 'review' && $fulfillment->manual_takeover_at === null)
+                                    @if (in_array($fulfillment->id, $supplierRetryIds, true))
+                                        <form method="POST" action="{{ route('admin.manual-fulfillment-reviews.supplier', [$review, $fulfillment]) }}" class="mt-3">
+                                            @csrf
+                                            <input type="hidden" name="purchase_id" value="{{ $fulfillment->current_purchase_id ?? 0 }}">
+                                            <x-admin-dashboard.button type="submit" name="action" value="retry" variant="primary">Coba beli dari supplier</x-admin-dashboard.button>
+                                        </form>
+                                        @php($preview = session('supplier_retry_preview'))
+                                        @if ((int) ($preview['fulfillment_id'] ?? 0) === $fulfillment->id)
+                                            <form method="POST" action="{{ route('admin.manual-fulfillment-reviews.supplier', [$review, $fulfillment]) }}" class="mt-3 grid gap-2">
+                                                @csrf
+                                                <input type="hidden" name="purchase_id" value="{{ $fulfillment->current_purchase_id ?? 0 }}">
+                                                <input type="hidden" name="approval_token" value="{{ $preview['token'] }}">
+                                                <label><input type="checkbox" name="confirmed" value="1" required> Setujui biaya supplier {{ \App\Support\Money::idr($preview['cost_idr']) }} (batas awal {{ \App\Support\Money::idr($preview['maximum_cost_idr']) }})</label>
+                                                <x-admin-dashboard.button type="submit" name="action" value="approve_price" variant="primary">Setujui harga dan beli</x-admin-dashboard.button>
+                                            </form>
+                                        @endif
+                                    @endif
+                                    @can('resolve', $review)
+                                        <form method="POST" action="{{ route('admin.manual-fulfillment-reviews.supplier', [$review, $fulfillment]) }}" class="mt-3 grid gap-2" autocomplete="off">
+                                            @csrf
+                                            <input type="hidden" name="purchase_id" value="{{ $fulfillment->current_purchase_id ?? 0 }}">
+                                            <x-admin-dashboard.field-label>
+                                                Akun pengganti untuk unit yang masih kurang (satu per baris)
+                                                <x-admin-dashboard.textarea name="credentials" required rows="3" spellcheck="false" />
+                                            </x-admin-dashboard.field-label>
+                                            <label><input type="checkbox" name="confirmed" value="1" required> Kirim akun ini ke pembeli. Ini tidak membatalkan transaksi atau hold di supplier.</label>
+                                            <x-admin-dashboard.button type="submit" name="action" value="send_accounts" variant="primary">Simpan dan kirim akun manual</x-admin-dashboard.button>
+                                        </form>
+                                    @endcan
+                                @endif
                                 @foreach ($fulfillment->manualHandoffs as $handoff)
                                     <p class="mt-2 text-admin-muted">Handoff {{ $handoff->quantity }} unit oleh {{ $handoff->actor?->name ?? 'operator dihapus' }} pada {{ $handoff->handed_off_at?->format('d M Y H:i') }}: {{ $handoff->note }}</p>
                                 @endforeach
                             </article>
                         @endforeach
                     </div>
+                    <a href="{{ route('admin.suppliers.purchases', ['invoice' => $review->order->invoice_number]) }}" class="mt-3 inline-block text-sm font-medium text-admin-accent-strong hover:underline">Periksa transaksi dan saldo supplier</a>
                 </section>
             @endif
         </x-admin-dashboard.card>
@@ -149,7 +200,7 @@
                         <x-admin-dashboard.field-label>
                             Decision
                             <x-admin-dashboard.select name="action" class="mt-1">
-                                @if (! in_array($review->reason, [\App\Models\ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, \App\Models\ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true))
+                                @if (! in_array($review->reason, [...\App\Models\ManualFulfillmentReview::DEFERRED_CREDENTIAL_REASONS, 'supplier_fulfillment'], true))
                                     <option value="fulfill">Fulfill</option>
                                 @endif
                                 @if ($review->reason === 'supplier_fulfillment')

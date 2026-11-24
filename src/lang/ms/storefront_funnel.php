@@ -1,11 +1,11 @@
 <?php
 
 return [
-    'manual_stock' => '∞ · Diproses secara manual',
-    'manual_products' => 'Produk diproses secara manual',
-    'manual_after_payment' => 'Produk manual diproses selepas bayaran',
-    'manual_after_payment_help' => 'Selepas bayaran disahkan, hubungi bantuan WhatsApp dengan nombor invois untuk mendapatkan akaun atau kod tebus bagi produk manual.',
-    'manual_paid_help' => 'Hubungi bantuan WhatsApp dengan nombor invois untuk mendapatkan akaun atau kod tebus bagi produk manual.',
+    'manual_stock' => '∞ · Stok tanpa had',
+    'manual_products' => 'Perlukan bantuan penghantaran?',
+    'manual_after_payment' => 'Pesanan diproses selepas bayaran',
+    'manual_after_payment_help' => 'Selepas bayaran disahkan, semak halaman invois untuk status penghantaran akaun atau kod tebus.',
+    'manual_paid_help' => 'Jika akaun atau kod tebus belum diterima, hubungi bantuan WhatsApp dengan nombor invois.',
     'contact_whatsapp' => 'Hubungi bantuan WhatsApp',
     'manual_whatsapp_unavailable' => 'Nombor bantuan WhatsApp belum dikonfigurasi.',
     'manual_order_message' => 'Hai admin Lhie Store, saya ingin mendapatkan akaun atau kod tebus untuk invois :invoice.',

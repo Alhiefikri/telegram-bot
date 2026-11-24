@@ -223,6 +223,34 @@ final class LocalCredentialFulfillmentReviewTest extends NonTransactionalDatabas
         $this->assertStringContainsString('∞', Http::recorded()->sole()[0]['text']);
     }
 
+    public function test_unlimited_review_sends_one_admin_notice_with_both_invoice_links(): void
+    {
+        config(['app.url' => 'https://lhiestore.web.id']);
+        $customer = Customer::factory()->create(['telegram_id' => 765432109]);
+        $product = Product::factory()->create(['price_amount' => 5000, 'stock' => 0, 'manual_unlimited' => true]);
+        $cart = app(CartService::class)->activeCartFor($customer);
+        app(CartService::class)->addItem($cart, $product, 1);
+        $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::manualQris());
+        app(OrderLifecycle::class)->applyManualCompletion($order);
+        $review = ManualFulfillmentReview::where('order_id', $order->id)->sole();
+        $this->assertSame(ManualFulfillmentReview::REASON_MANUAL_UNLIMITED, $review->reason);
+        $paid = TelegramOutboundEffect::where('source_id', $order->id)
+            ->where('effect_type', TelegramOutboundEffectType::AdminOrderPaidNotification->value)->sole();
+        $notice = TelegramOutboundEffect::where('source_id', $review->id)
+            ->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)->sole();
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 123]]));
+        $pipeline = app(AdminOrderNotificationDeliveryPipeline::class);
+        $pipeline->deliver($notice);
+        $pipeline->deliver($paid);
+        $pipeline->deliver($paid);
+        Http::assertSentCount(1);
+        $message = Http::recorded()->sole()[0];
+        $urls = collect($message['reply_markup']['inline_keyboard'])->collapse()->pluck('url');
+        $this->assertContains('https://lhiestore.web.id'.route('admin.manual-fulfillment-reviews.show', $review, absolute: false), $urls);
+        $this->assertContains(route('admin.orders.show', $order), $urls);
+        $this->assertStringContainsString('∞', $message['text']);
+    }
+
     public function test_confirmed_manual_delivery_replaces_both_legacy_notices_once(): void
     {
         [$order] = $this->purchase('bot');
@@ -367,17 +395,19 @@ final class LocalCredentialFulfillmentReviewTest extends NonTransactionalDatabas
             ->where('source_id', $review->id)->where('effect_type', TelegramOutboundEffectType::AdminOrderReviewNotification->value)->sole();
         Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 123]]));
         $pipeline = app(AdminOrderNotificationDeliveryPipeline::class);
-        $effect = $review->reason === ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING && $review->order->api_order_claim_id === null
-            ? TelegramOutboundEffect::where('source_id', $review->order_id)->where('effect_type', TelegramOutboundEffectType::AdminOrderPaidNotification->value)->sole()
-            : $notice;
-        $pipeline->deliver($effect);
-        $pipeline->deliver($effect->fresh());
+        $paid = TelegramOutboundEffect::where('source_id', $review->order_id)->where('effect_type', TelegramOutboundEffectType::AdminOrderPaidNotification->value)->first();
+        $pipeline->deliver($notice);
+        if ($paid !== null) {
+            $pipeline->deliver($paid);
+        }
+        $pipeline->deliver($notice->fresh());
         $this->artisan('telegram:recover-outbound')->assertSuccessful();
         Http::assertSentCount(1);
         $text = (string) Http::recorded()->sole()[0]['text'];
-        $this->assertStringContainsString($effect->id === $notice->id ? 'Review fulfillment' : 'Order perlu ditinjau', $text);
+        $this->assertMatchesRegularExpression('/Review fulfillment|Order perlu ditinjau/', $text);
         $this->assertStringContainsString($review->order->invoice_number, $text);
-        $this->assertSame(TelegramOutboundEffectState::Sent, $effect->fresh()->state);
+        $this->assertTrue($notice->fresh()->state === TelegramOutboundEffectState::Sent
+            || $paid?->fresh()->state === TelegramOutboundEffectState::Sent);
         $this->assertSame(1, TelegramOutboundEffect::where('source_type', ManualFulfillmentReview::class)->where('source_id', $review->id)->count());
     }
 

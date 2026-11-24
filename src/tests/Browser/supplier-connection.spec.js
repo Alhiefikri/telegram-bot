@@ -304,6 +304,43 @@ test("supplier margins can be edited and reviewed inline on mobile", async ({
   await expect(second.getByText("Rp22.000", { exact: true })).toBeVisible();
 });
 
+test("Owner can finish an unlimited invoice with manual accounts after a validation error", async ({
+  page,
+}) => {
+  const { path: reviewPath, invoice } = JSON.parse(
+    run([
+      path.join(directory, "fixtures/supplier-connection.php"),
+      "unlimited-review",
+    ])
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(environment.APP_URL + "/admin/login");
+  await page.locator('[name="email"]').fill("supplier-browser@example.test");
+  await page.locator('[name="password"]').fill("synthetic-browser-password");
+  await page.getByRole("button", { name: "Masuk Dashboard" }).click();
+  await page.waitForURL(environment.APP_URL + "/admin");
+  await page.goto(environment.APP_URL + reviewPath);
+  await expect(page.getByRole("heading", { name: invoice })).toBeVisible();
+  const accounts = page.getByRole("textbox", { name: /Data 1 akun/ });
+  const save = page.getByRole("button", {
+    name: "Simpan akun dan lanjutkan pengiriman",
+  });
+  await accounts.fill("synthetic-extra-1\nsynthetic-extra-2");
+  await save.click();
+  await expect(page.getByText("jumlah akun harus 1 unit.")).toBeVisible();
+  await expect(accounts).toHaveValue("");
+  await accounts.fill("synthetic-customer-account");
+  await save.click();
+  await expect(
+    page.getByText("Akun lokal disimpan.", { exact: false })
+  ).toBeVisible();
+  await expect(page.getByText("akun siap", { exact: true })).toBeVisible();
+  await expect(save).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(
+    "synthetic-customer-account"
+  );
+});
+
 function supplierState(keys) {
   return JSON.parse(
     run(

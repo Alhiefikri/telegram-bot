@@ -313,7 +313,6 @@ final class AdminSupplierController extends Controller
         app(SupplierOperationConfirmation::class)->requireRecent($request);
         try {
             match ($request->input('action')) {
-                'retry' => $service->retryAfterTopup((int) $fulfillment->id),
                 'recover' => $service->recoverOrder((int) $fulfillment->id, $request->string('supplier_order_id')->toString()),
                 'manual' => $service->provideManualCredentials((int) $fulfillment->id, array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $request->string('credentials')->toString())), fn (string $value): bool => $value !== ''))),
                 'no_debit' => $service->confirmNoDebit(

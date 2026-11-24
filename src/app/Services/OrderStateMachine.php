@@ -142,7 +142,7 @@ class OrderStateMachine implements OrderLifecycle
                 $lockedOrder->refresh();
                 if ($this->supplierFulfillment()->hasPending($lockedOrder)
                     || ManualFulfillmentReview::query()->where('order_id', $lockedOrder->id)
-                        ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED])->open()->exists()) {
+                        ->whereIn('reason', ManualFulfillmentReview::DEFERRED_CREDENTIAL_REASONS)->open()->exists()) {
                     return $paidOrder;
                 }
                 $lockedOrder->update(['order_status' => OrderStatus::Completed]);
@@ -443,7 +443,9 @@ class OrderStateMachine implements OrderLifecycle
         ]);
         $manualUnlimitedHold = $order->orderItems()->where('manual_unlimited', true)->where('deferred_local_quantity', '>', 0)->exists();
         $uniqueEmailHold = $order->orderItems()->where('deferred_local_quantity', '>', 0)->exists();
-        if ($uniqueEmailHold || $this->needsLocalCredentialReview($order)) {
+        $mixedLocalHold = $order->orderItems()->where('manual_unlimited', true)->where('supplier_quantity', '>', 0)->exists()
+            && $this->supplierFulfillment()->hasMissingLocalCredentials($order);
+        if ($uniqueEmailHold || $mixedLocalHold || $this->needsLocalCredentialReview($order)) {
             $review = ManualFulfillmentReview::query()->firstOrCreate(
                 ['payment_id' => $payment->id],
                 [
@@ -454,7 +456,9 @@ class OrderStateMachine implements OrderLifecycle
                         ? ManualFulfillmentReview::REASON_MANUAL_UNLIMITED
                         : ($uniqueEmailHold
                             ? ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE
-                            : ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING),
+                            : ($mixedLocalHold
+                                ? ManualFulfillmentReview::REASON_MIXED_LOCAL_CREDENTIALS_MISSING
+                                : ManualFulfillmentReview::REASON_LOCAL_CREDENTIALS_MISSING)),
                     'state' => ManualFulfillmentReview::STATE_PENDING,
                     'provider_reference' => $payment->provider_reference ?: $payment->merchant_ref,
                 ],
@@ -504,7 +508,7 @@ class OrderStateMachine implements OrderLifecycle
     private function uniqueEmailReviewOpen(Order $order): bool
     {
         return ManualFulfillmentReview::query()->where('order_id', $order->id)
-            ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED])->open()->exists();
+            ->whereIn('reason', ManualFulfillmentReview::DEFERRED_CREDENTIAL_REASONS)->open()->exists();
     }
 
     private function needsLocalCredentialReview(Order $order): bool

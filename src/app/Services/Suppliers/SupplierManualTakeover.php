@@ -77,7 +77,7 @@ final class SupplierManualTakeover
                 'reason' => 'supplier_fulfillment', 'state' => ManualFulfillmentReview::STATE_PENDING,
             ]);
             if ($review->state === ManualFulfillmentReview::STATE_FULFILLED
-                && in_array($review->reason, [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED], true)) {
+                && in_array($review->reason, ManualFulfillmentReview::DEFERRED_CREDENTIAL_REASONS, true)) {
                 $review->update([
                     'reason' => 'supplier_fulfillment', 'state' => ManualFulfillmentReview::STATE_PENDING,
                     'resolution_reason' => null, 'actor_user_id' => null, 'resolved_at' => null,

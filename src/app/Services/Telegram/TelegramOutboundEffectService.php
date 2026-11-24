@@ -2931,7 +2931,8 @@ class TelegramOutboundEffectService
     public function manualReceiptReady(Order $order): bool
     {
         if (ManualFulfillmentReview::query()->where('order_id', $order->getKey())
-            ->whereIn('reason', [ManualFulfillmentReview::REASON_UNIQUE_EMAIL_UNAVAILABLE, ManualFulfillmentReview::REASON_MANUAL_UNLIMITED])
+            ->where(fn ($review) => $review->whereIn('reason', ManualFulfillmentReview::DEFERRED_CREDENTIAL_REASONS)
+                ->orWhere('state', ManualFulfillmentReview::STATE_REFUND_UNCERTAIN))
             ->open()->exists()) {
             return false;
         }
