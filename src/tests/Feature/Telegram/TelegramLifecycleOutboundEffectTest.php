@@ -207,6 +207,12 @@ class TelegramLifecycleOutboundEffectTest extends TelegramBotTestSupport
             ->where('source_type', ManualFulfillmentReview::class)
             ->where('source_id', (string) $review->id)
             ->sole();
+        // Simulate a crash after the paid card covering this review was acknowledged,
+        // but before the sent ledger entry was projected onto the order.
+        $paidEffect->update(['outcome_metadata' => array_merge($paidEffect->outcome_metadata ?? [], [
+            'paid_notice_prepared' => true,
+            'covered_review_id' => (string) $review->id,
+        ])]);
         $paidFinalized = $this->finalizeSentEffect($paidEffect, '907');
 
         Queue::fake();

@@ -23,7 +23,7 @@ class StorefrontCheckoutChallenge
         $siteKey = config('services.turnstile.site_key');
         $secretKey = config('services.turnstile.secret_key');
 
-        if (self::TEST_SITE_KEY === $siteKey || self::TEST_SECRET_KEY === $secretKey) {
+        if ($siteKey === self::TEST_SITE_KEY || $secretKey === self::TEST_SECRET_KEY) {
             return $this->usesLocalTestKeys() ? self::TEST_SITE_KEY : null;
         }
 
