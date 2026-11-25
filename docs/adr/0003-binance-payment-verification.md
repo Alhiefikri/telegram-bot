@@ -38,3 +38,18 @@ remain in manual review. The actual on-chain amount is retained in the receipt
 and payment evidence. Receiver, token, block, confirmation, deadline and
 one-time receipt claim checks remain in force. This tolerance does not apply
 to Binance Pay.
+
+## BSC checkout hash fallback and amount reservation (2026-11-25)
+
+Automatic BEP20 checkout still discovers transfers by amount and receiver. A
+customer may submit a transaction hash as a lookup hint for an owned pending
+invoice. A direct lookup can settle only an exact-amount, in-window canonical
+receipt that satisfies the invoice's confirmation policy, has no competing
+invoice, and wins the global receipt and BSC parent transaction claim. A hash
+can distinguish multiple discovered transactions, but cannot establish ownership
+when one transfer fits several invoices.
+
+New shared-address amounts stay reserved for the attribution lookback (24 hours
+from creation), or longer while still pending/unresolved. This supersedes
+immediate reuse on checkout closure. Shared-address payments still cannot assign
+a sufficiently late transfer to its original invoice after its amount is reused.

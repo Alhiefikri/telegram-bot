@@ -74,13 +74,11 @@ final class ReconcileBscPayments extends Command
                                     ->whereNotNull('current_tx_hash');
                             });
                     })
-                    ->whereNotIn('verification_status', [
-                        'confirmed',
-                        'expired',
-                        'manual_review',
-                        'mismatch',
-                        'transaction_already_used',
-                    ])
+                    ->whereNotIn('verification_status', ['confirmed', 'expired'])
+                    ->where(function ($state): void {
+                        $state->where('submitted_tx_pending', true)
+                            ->orWhereNotIn('verification_status', ['manual_review', 'mismatch', 'transaction_already_used']);
+                    })
                     ->where(function ($retry): void {
                         $retry
                             ->whereNull('last_verified_at')

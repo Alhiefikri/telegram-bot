@@ -3,10 +3,12 @@
 namespace App\Services\Bsc;
 
 use App\Enums\ExternalMoneyReceiptClaimOutcome;
+use App\Enums\ExternalMoneyReceiptTargetType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentEventType;
 use App\Enums\PaymentStatus;
 use App\Models\BscPaymentTransferEvidence;
+use App\Models\ExternalMoneyReceiptParentClaim;
 use App\Models\ExternalMoneyReceiptReservation;
 use App\Models\InventoryMovement;
 use App\Models\ManualFulfillmentReview;
@@ -19,13 +21,20 @@ use App\Models\Product;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptReservations;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\OrderLifecycle;
+use App\Services\OrderLifecycleResult;
+use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
 final class BscPaymentVerification
 {
+    private const LOOKUP_LEASE_SECONDS = 600;
+
+    private const SCAN_BUDGET_SECONDS = 80;
+
     public function __construct(
         private readonly BscVerificationRpcClientInterface $rpc,
         private readonly BscTokenTransferReader $reader,
@@ -67,7 +76,7 @@ final class BscPaymentVerification
     }
 
     /**
-     * Queue a targeted receipt lookup for interactive status refreshes. The
+     * Queue verification for interactive status refreshes. The
      * caller receives only persisted state; authoritative RPC reads remain in
      * VerifyBscPayment on the shared verification queue.
      */
@@ -83,13 +92,18 @@ final class BscPaymentVerification
             return false;
         }
 
-        if (! in_array($detail->verification_status, [
+        if (! $detail->submitted_tx_pending && ! in_array($detail->verification_status, [
             PaymentBscDetail::STATUS_AWAITING_TRANSFER,
             PaymentBscDetail::STATUS_TX_SUBMITTED,
             PaymentBscDetail::STATUS_CONFIRMING,
             PaymentBscDetail::STATUS_NOT_FOUND,
             PaymentBscDetail::STATUS_PROVIDER_ERROR,
         ], true)) {
+            return false;
+        }
+
+        $cooldown = $detail->verification_status === PaymentBscDetail::STATUS_PROVIDER_ERROR ? 5 : 1;
+        if ($detail->last_verified_at?->gt(now()->subMinutes($cooldown))) {
             return false;
         }
 
@@ -134,10 +148,6 @@ final class BscPaymentVerification
             if (! $detail) {
                 return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::NotConfigured);
             }
-            if ($this->isAmountUnique($detail)) {
-                return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::NotConfigured, $payment->fresh());
-            }
-
             if ($payment->status === PaymentStatus::Paid) {
                 return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::AlreadyPaid, $payment->fresh());
             }
@@ -161,7 +171,14 @@ final class BscPaymentVerification
                 return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::Expired, $payment->fresh());
             }
 
-            $sameHash = BscTransactionHash::normalize((string) $detail->current_tx_hash) === $normalized;
+            if ($this->isAmountUnique($detail) && $order->manualFulfillmentReviews()->where('payment_id', $payment->id)
+                ->where('state', '!=', ManualFulfillmentReview::STATE_PENDING)->exists()) {
+                return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::OrderNotPending, $payment->fresh());
+            }
+
+            $amountUnique = $this->isAmountUnique($detail);
+            $lastSubmittedHash = $amountUnique ? $detail->submitted_tx_hash : $detail->current_tx_hash;
+            $sameHash = BscTransactionHash::normalize((string) $lastSubmittedHash) === $normalized;
             if ($sameHash && (int) $detail->tx_submission_version > 0) {
                 return BscVerificationSubmissionResult::of(
                     BscVerificationSubmissionOutcome::Accepted,
@@ -176,6 +193,11 @@ final class BscPaymentVerification
                 ->lockForUpdate()
                 ->first();
             if ($existingEvidence !== null && (string) $existingEvidence->payment_id !== (string) $payment->id) {
+                if ($amountUnique) {
+                    // A pasted historical hash must not put this invoice on hold.
+                    return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::TransactionAlreadyUsed, $payment->fresh());
+                }
+
                 $detail->update([
                     'verification_status' => PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
                     'last_verified_at' => now(),
@@ -197,6 +219,10 @@ final class BscPaymentVerification
                 );
             }
 
+            if ($amountUnique && $this->transactionClaimedByAnotherTarget($payment, $detail, $normalized)) {
+                return BscVerificationSubmissionResult::of(BscVerificationSubmissionOutcome::TransactionAlreadyUsed, $payment->fresh());
+            }
+
             $attemptLimit = ManualPaymentSetting::current()?->bscHashAttemptLimit()
                 ?? ManualPaymentSetting::DEFAULT_BSC_HASH_ATTEMPT_LIMIT;
             if ((int) $detail->tx_attempts >= $attemptLimit) {
@@ -205,10 +231,11 @@ final class BscPaymentVerification
 
             $version = (int) $detail->tx_submission_version + 1;
             $detail->update([
-                'current_tx_hash' => $normalized,
+                ...($amountUnique
+                    ? ['submitted_tx_hash' => $normalized, 'submitted_tx_pending' => true]
+                    : ['current_tx_hash' => $normalized, 'verification_status' => PaymentBscDetail::STATUS_TX_SUBMITTED]),
                 'tx_submission_version' => $version,
                 'tx_attempts' => (int) $detail->tx_attempts + 1,
-                'verification_status' => PaymentBscDetail::STATUS_TX_SUBMITTED,
                 'last_verified_at' => null,
             ]);
 
@@ -249,13 +276,67 @@ final class BscPaymentVerification
 
     public function verify(Payment|string $payment, ?string $submittedHash = null, ?int $submissionVersion = null): BscVerificationResult
     {
+        $paymentId = $payment instanceof Payment ? $payment->getKey() : $payment;
+
+        return $this->withLookupLease($paymentId, fn () => $this->verifyUnderLease($payment, $submittedHash, $submissionVersion))
+            ?? BscVerificationResult::of(BscVerificationOutcome::VerificationInProgress);
+    }
+
+    public function expirePendingOrder(Payment $payment): ?OrderLifecycleResult
+    {
+        return $this->withLookupLease($payment->id, function () use ($payment): ?OrderLifecycleResult {
+            $fresh = Payment::query()->with(['order', 'bscDetail'])->findOrFail($payment->id);
+            $version = (int) $fresh->bscDetail?->tx_submission_version;
+            $verification = $this->verifyUnderLease($fresh, null, null);
+            if (in_array($verification->outcome, [
+                BscVerificationOutcome::ProviderError,
+                BscVerificationOutcome::NotConfigured,
+                BscVerificationOutcome::StaleSubmission,
+            ], true)) {
+                return null;
+            }
+
+            return DB::transaction(function () use ($fresh, $version): ?OrderLifecycleResult {
+                $order = Order::query()->whereKey($fresh->order_id)->lockForUpdate()->firstOrFail();
+                if ($order->order_status !== OrderStatus::PendingPayment
+                    || ! $this->submissionIsCurrent($fresh->id, $version)) {
+                    return null;
+                }
+
+                return $this->orders->applyPendingExpiry($order);
+            }, 5);
+        });
+    }
+
+    /**
+     * @template T
+     *
+     * @param  Closure(): T  $action
+     * @return T|null
+     */
+    private function withLookupLease(string $paymentId, Closure $action): mixed
+    {
+        $lock = Cache::lock('bsc:payment:verify:'.$paymentId, self::LOOKUP_LEASE_SECONDS);
+        if (! $lock->get()) {
+            return null;
+        }
+
+        try {
+            return $action();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function verifyUnderLease(Payment|string $payment, ?string $submittedHash, ?int $submissionVersion): BscVerificationResult
+    {
         $submissionVersionBound = $submissionVersion !== null;
         $payment = is_string($payment)
             ? Payment::query()->findOrFail($payment)
             : $payment;
-        $payment->load('order');
+        $payment->loadMissing(['order', 'bscDetail']);
 
-        $detail = $payment->bscDetail()->first();
+        $detail = $payment->bscDetail;
         $submissionVersion ??= (int) ($detail?->tx_submission_version ?? 0);
         $lateHash = $submittedHash !== null
             ? BscTransactionHash::normalize($submittedHash)
@@ -337,12 +418,49 @@ final class BscPaymentVerification
             );
         }
 
+        $hint = $this->isAmountUnique($detail) && $detail->submitted_tx_pending
+            ? BscTransactionHash::normalize((string) $detail->submitted_tx_hash)
+            : null;
+        $reviewHeld = in_array($detail->verification_status, [
+            PaymentBscDetail::STATUS_MANUAL_REVIEW,
+            PaymentBscDetail::STATUS_MISMATCH,
+            PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
+        ], true);
+        if ($hint === null && $reviewHeld && $this->isAmountUnique($detail)) {
+            return BscVerificationResult::of(BscVerificationOutcome::from($detail->verification_status), retryable: false);
+        }
+
         try {
             $chainId = $this->rpc->chainId();
             if ($chainId !== 56 || $chainId !== (int) $detail->chain_id) {
+                if ($hint !== null) {
+                    throw new BscRpcException('BSC RPC returned the wrong chain for the submitted transaction.');
+                }
                 $result = $this->mismatch($payment, $detail, $submissionVersion, $hash, null, 'wrong_chain');
 
                 return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
+            }
+
+            if ($hint !== null) {
+                $receipt = $this->rpc->transactionReceipt($hint);
+                if ($receipt !== null) {
+                    $result = $this->verifyCheckoutHashHint($payment, $detail, $hint, $receipt, $submissionVersion);
+                    if ($result?->outcome !== BscVerificationOutcome::Confirming) {
+                        $this->updateHintLookup($detail, $submissionVersion, ['submitted_tx_pending' => false]);
+                    }
+                    if ($result !== null && $result->outcome !== BscVerificationOutcome::TransactionAlreadyUsed) {
+                        return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
+                    }
+                }
+                if ($reviewHeld) {
+                    $this->updateHintLookup($detail, $submissionVersion, ['last_verified_at' => now()]);
+
+                    return $this->staleIfSubmissionChanged(
+                        $detail,
+                        $submissionVersion,
+                        BscVerificationResult::of(BscVerificationOutcome::from($detail->verification_status)),
+                    );
+                }
             }
 
             if ($hash === null) {
@@ -393,9 +511,7 @@ final class BscPaymentVerification
             return $this->staleIfSubmissionChanged($detail, $submissionVersion, $result);
         } catch (BscRpcException $exception) {
             report($exception);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, $hash, [
-                'reason' => 'rpc_error',
-            ]);
+            $this->recordVerificationError($payment, $detail, $submissionVersion, $hash, 'rpc_error', $hint !== null && $reviewHeld);
 
             return $this->staleIfSubmissionChanged(
                 $detail,
@@ -404,9 +520,7 @@ final class BscPaymentVerification
             );
         } catch (Throwable $exception) {
             report($exception);
-            $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $submissionVersion, $hash, [
-                'reason' => 'unexpected_verification_error',
-            ]);
+            $this->recordVerificationError($payment, $detail, $submissionVersion, $hash, 'unexpected_verification_error', $hint !== null && $reviewHeld);
 
             return $this->staleIfSubmissionChanged(
                 $detail,
@@ -414,6 +528,69 @@ final class BscPaymentVerification
                 BscVerificationResult::of(BscVerificationOutcome::ProviderError, retryable: false),
             );
         }
+    }
+
+    private function recordVerificationError(
+        Payment $payment,
+        PaymentBscDetail $detail,
+        int $version,
+        ?string $hash,
+        string $reason,
+        bool $preserveReview,
+    ): void {
+        if ($preserveReview) {
+            $this->updateHintLookup($detail, $version, ['last_verified_at' => now()]);
+
+            return;
+        }
+
+        $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_PROVIDER_ERROR, $version, $hash, ['reason' => $reason]);
+    }
+
+    private function updateHintLookup(PaymentBscDetail $detail, int $version, array $updates): void
+    {
+        PaymentBscDetail::query()->whereKey($detail->payment_id)
+            ->where('tx_submission_version', $version)
+            ->update($updates);
+    }
+
+    private function verifyCheckoutHashHint(
+        Payment $payment,
+        PaymentBscDetail $detail,
+        string $hash,
+        array $receipt,
+        int $submissionVersion,
+    ): ?BscVerificationResult {
+        if ($this->transactionClaimedByAnotherTarget($payment, $detail, $hash)) {
+            return BscVerificationResult::of(BscVerificationOutcome::TransactionAlreadyUsed, retryable: false);
+        }
+        if (BscTransactionHash::normalize((string) ($receipt['transactionHash'] ?? '')) !== $hash) {
+            return null;
+        }
+        $inspection = $this->reader->inspectReceipt(
+            receipt: $receipt,
+            expectedContract: (string) $detail->token_contract,
+            expectedReceiver: (string) $detail->receiver_address,
+            expectedAmountUnits: (string) $detail->expected_token_units,
+            submittedHash: $hash,
+        );
+        if (! $inspection->successfulReceipt() || count($inspection->exactTransfers) !== 1) {
+            return null;
+        }
+
+        return $this->evaluateExactTransfer(
+            $payment, $detail, $inspection->exactTransfers[0], $receipt, $submissionVersion, checkoutHint: true,
+        );
+    }
+
+    private function transactionClaimedByAnotherTarget(Payment $payment, PaymentBscDetail $detail, string $hash): bool
+    {
+        return ExternalMoneyReceiptParentClaim::query()
+            ->where('chain_id', $detail->chain_id)
+            ->where('tx_hash', $hash)
+            ->where(fn ($target) => $target->where('target_type', '!=', ExternalMoneyReceiptTargetType::OrderPayment->value)
+                ->orWhere('target_id', '!=', $payment->getKey()))
+            ->exists();
     }
 
     public function verifyPayment(string $paymentId, ?int $submissionVersion = null): BscVerificationResult
@@ -437,6 +614,7 @@ final class BscPaymentVerification
             BscVerificationOutcome::StaleSubmission,
             BscVerificationOutcome::OrderNotPending,
             BscVerificationOutcome::AlreadyPaid,
+            BscVerificationOutcome::VerificationInProgress,
         ], true)) {
             return;
         }
@@ -825,7 +1003,7 @@ final class BscPaymentVerification
             $inspection->exactTransfers[0],
             $receipt,
             $submissionVersion,
-        );
+        ) ?? BscVerificationResult::of(BscVerificationOutcome::NotConfigured, retryable: false);
     }
 
     /** @param array<string, mixed> $receipt */
@@ -835,7 +1013,8 @@ final class BscPaymentVerification
         BscTransferEvidence $evidence,
         array $receipt,
         int $submissionVersion,
-    ): BscVerificationResult {
+        bool $checkoutHint = false,
+    ): ?BscVerificationResult {
         $block = $this->rpc->blockByNumber($evidence->blockNumber);
         $latest = $this->rpc->blockByNumber('latest');
         $blockNumber = $this->blockNumber($block['number'] ?? null);
@@ -845,6 +1024,10 @@ final class BscPaymentVerification
             throw new BscRpcException('BSC RPC returned incomplete block facts.');
         }
         if ($blockNumber !== $evidence->blockNumber || $latestNumber < $blockNumber) {
+            if ($checkoutHint) {
+                throw new BscRpcException('BSC RPC returned inconsistent block numbers for the submitted transaction.');
+            }
+
             return $this->flagForManualReview(
                 payment: $payment,
                 detail: $detail,
@@ -860,6 +1043,10 @@ final class BscPaymentVerification
 
         $receiptBlockHash = BscTransactionHash::normalize((string) ($receipt['blockHash'] ?? ''));
         $blockHash = BscTransactionHash::normalize((string) ($block['hash'] ?? ''));
+        if ($checkoutHint && ($receiptBlockHash === null || $blockHash === null
+            || ! hash_equals($receiptBlockHash, $blockHash))) {
+            throw new BscRpcException('BSC RPC could not establish the canonical block for the submitted transaction.');
+        }
         if ($receiptBlockHash !== null && $blockHash !== null && ! hash_equals($receiptBlockHash, $blockHash)) {
             return $this->flagForManualReview(
                 payment: $payment,
@@ -886,6 +1073,9 @@ final class BscPaymentVerification
         if ($blockTimestamp->timestamp < $createdAt->timestamp
             || $blockTimestamp->timestamp > $deadline->timestamp
             || $blockTimestamp->isFuture()) {
+            if ($checkoutHint) {
+                return null;
+            }
             if ($blockTimestamp->timestamp > $deadline->timestamp
                 && $payment->status === PaymentStatus::Pending
                 && $payment->order?->order_status === OrderStatus::PendingPayment) {
@@ -915,6 +1105,9 @@ final class BscPaymentVerification
             );
         }
         if ($this->evidenceBelongsToAnotherPayment($payment, $evidence)) {
+            if ($checkoutHint) {
+                return BscVerificationResult::of(BscVerificationOutcome::TransactionAlreadyUsed, retryable: false);
+            }
             $this->receipts->reservePayment(
                 $payment,
                 ExternalMoneyReceiptReservation::REASON_REGISTRY_CONFLICT,
@@ -935,6 +1128,12 @@ final class BscPaymentVerification
         }
 
         if ($this->attributionConflict($payment, $detail, $evidence)) {
+            if ($checkoutHint && ! $this->readyForAttributionReview($detail, $evidence)) {
+                $this->updateHintLookup($detail, $submissionVersion, ['last_verified_at' => now()]);
+
+                return BscVerificationResult::of(BscVerificationOutcome::Confirming, $evidence);
+            }
+
             return $this->flagForManualReview(
                 payment: $payment,
                 detail: $detail,
@@ -944,7 +1143,10 @@ final class BscPaymentVerification
                 reason: ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
                 hash: null,
                 evidence: null,
-                metadata: ['reason' => 'transfer_matches_another_invoice'],
+                metadata: [
+                    'reason' => 'transfer_matches_another_invoice',
+                    ...($checkoutHint ? ['verified_review_candidate' => $evidence->sanitizedPayload()] : []),
+                ],
             );
         }
 
@@ -980,11 +1182,14 @@ final class BscPaymentVerification
             );
         }
 
-        if ($evidence->amountUnits === (string) $detail->expected_token_units) {
+        if ($evidence->amountUnits === (string) $detail->expected_token_units && ! $checkoutHint) {
             $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion);
         }
 
         if (($evidence->confirmations ?? 0) < $this->minimumConfirmations($detail)) {
+            if ($checkoutHint) {
+                $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion);
+            }
             $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion, $evidence->txHash, [
                 'reason' => 'confirmation_threshold_not_reached',
                 'required_confirmations' => $this->minimumConfirmations($detail),
@@ -997,6 +1202,9 @@ final class BscPaymentVerification
             $finalized = $this->rpc->blockByNumber('finalized');
             $finalizedNumber = $this->blockNumber($finalized['number'] ?? null);
             if ($finalized === null || $finalizedNumber === null || $finalizedNumber < $blockNumber) {
+                if ($checkoutHint) {
+                    $this->persistEvidence($payment, $evidence, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion);
+                }
                 $this->persistStatus($payment, $detail, PaymentBscDetail::STATUS_CONFIRMING, $submissionVersion, $evidence->txHash, [
                     'reason' => 'finalized_block_not_reached',
                     'required_confirmations' => $this->minimumConfirmations($detail),
@@ -1022,7 +1230,22 @@ final class BscPaymentVerification
             );
         }
 
-        return $this->claim($payment, $detail, $evidence, $submissionVersion);
+        return $this->claim($payment, $detail, $evidence, $submissionVersion, $checkoutHint);
+    }
+
+    private function readyForAttributionReview(PaymentBscDetail $detail, BscTransferEvidence $evidence): bool
+    {
+        if ($evidence->confirmations < $this->minimumConfirmations($detail)) {
+            return false;
+        }
+        if (! $this->requiresFinalizedBlock($detail)) {
+            return true;
+        }
+
+        $finalized = $this->rpc->blockByNumber('finalized');
+        $finalizedNumber = $this->blockNumber($finalized['number'] ?? null);
+
+        return $finalizedNumber !== null && $finalizedNumber >= $evidence->blockNumber;
     }
 
     private function applyPendingExpiryForSubmission(Payment $payment, int $submissionVersion): bool
@@ -1193,6 +1416,7 @@ final class BscPaymentVerification
         Payment $locked,
         PaymentBscDetail $lockedDetail,
         BscTransferEvidence $evidence,
+        bool $checkoutHint = false,
     ): ?BscVerificationOutcome {
         $receipt = $this->receipts->receiptForBscPayment(
             $locked,
@@ -1209,9 +1433,13 @@ final class BscPaymentVerification
             ExternalMoneyReceiptReservations::SOURCE_RUNTIME,
             ExternalMoneyReceiptReservation::LEGACY_TYPE_PAYMENT,
             (string) $locked->getKey(),
+            reserveConflict: ! $checkoutHint,
         );
 
         if ($claim === ExternalMoneyReceiptClaimOutcome::Conflict) {
+            if ($checkoutHint) {
+                return BscVerificationOutcome::TransactionAlreadyUsed;
+            }
             $lockedDetail->update([
                 'verification_status' => PaymentBscDetail::STATUS_TRANSACTION_ALREADY_USED,
                 'last_verified_at' => now(),
@@ -1257,9 +1485,10 @@ final class BscPaymentVerification
         PaymentBscDetail $detail,
         BscTransferEvidence $evidence,
         int $submissionVersion,
+        bool $checkoutHint = false,
     ): BscVerificationResult {
         try {
-            $outcome = DB::transaction(function () use ($payment, $evidence, $submissionVersion): BscVerificationOutcome {
+            $outcome = DB::transaction(function () use ($payment, $evidence, $submissionVersion, $checkoutHint): BscVerificationOutcome {
                 $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->firstOrFail();
                 $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
                 $lockedDetail = PaymentBscDetail::query()->whereKey($locked->id)->lockForUpdate()->firstOrFail();
@@ -1269,6 +1498,9 @@ final class BscPaymentVerification
                 }
                 if ((int) $lockedDetail->tx_submission_version !== $submissionVersion) {
                     return BscVerificationOutcome::StaleSubmission;
+                }
+                if ($checkoutHint && $locked->manualFulfillmentReview()->where('state', '!=', ManualFulfillmentReview::STATE_PENDING)->exists()) {
+                    return BscVerificationOutcome::OrderNotPending;
                 }
                 if ($locked->status !== PaymentStatus::Pending || $order->order_status !== OrderStatus::PendingPayment) {
                     $existingLateEvidence = BscPaymentTransferEvidence::query()
@@ -1311,7 +1543,10 @@ final class BscPaymentVerification
                     $lockedDetail->update([
                         'verification_status' => PaymentBscDetail::STATUS_MANUAL_REVIEW,
                         'last_verified_at' => now(),
-                        'evidence_payload' => ['reason' => 'transfer_matches_another_invoice'],
+                        'evidence_payload' => [
+                            'reason' => 'transfer_matches_another_invoice',
+                            ...($checkoutHint ? ['verified_review_candidate' => $evidence->sanitizedPayload()] : []),
+                        ],
                     ]);
                     $this->ensureManualFulfillmentReview($locked, ManualFulfillmentReview::REASON_BSC_AMBIGUOUS, $evidence->txHash);
 
@@ -1323,6 +1558,9 @@ final class BscPaymentVerification
                     ->lockForUpdate()
                     ->first();
                 if ($existing !== null && (string) $existing->payment_id !== (string) $locked->id) {
+                    if ($checkoutHint) {
+                        return BscVerificationOutcome::TransactionAlreadyUsed;
+                    }
                     $this->receipts->reservePayment(
                         $locked,
                         ExternalMoneyReceiptReservation::REASON_REGISTRY_CONFLICT,
@@ -1346,7 +1584,7 @@ final class BscPaymentVerification
                     return BscVerificationOutcome::TransactionAlreadyUsed;
                 }
 
-                $held = $this->claimBscReceipt($locked, $lockedDetail, $evidence);
+                $held = $this->claimBscReceipt($locked, $lockedDetail, $evidence, $checkoutHint);
                 if ($held !== null) {
                     return $held;
                 }
@@ -1373,7 +1611,21 @@ final class BscPaymentVerification
                     'current_block_number' => $evidence->blockNumber,
                     'current_from_address' => $evidence->fromAddress,
                     'evidence_payload' => $evidence->sanitizedPayload(),
+                    'submitted_tx_pending' => false,
                 ]);
+
+                // Replace a provisional chain-evidence review with the normal
+                // paid lifecycle. That lifecycle may need its own review row.
+                $supersededReview = ManualFulfillmentReview::query()
+                    ->where('payment_id', $locked->id)
+                    ->where('state', ManualFulfillmentReview::STATE_PENDING)
+                    ->whereIn('reason', [
+                        ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+                        ManualFulfillmentReview::REASON_BSC_MANUAL_REVIEW,
+                        ManualFulfillmentReview::REASON_BSC_MISMATCH,
+                        ManualFulfillmentReview::REASON_BSC_TRANSACTION_ALREADY_USED,
+                    ])->lockForUpdate()->first();
+                $supersededReview?->delete();
 
                 $this->orders->applyPaymentPaid($locked);
 
@@ -1385,7 +1637,13 @@ final class BscPaymentVerification
                     'merchant_ref' => $locked->merchant_ref,
                     'provider_reference' => $evidence->txHash,
                     'provider_status' => 'CONFIRMED',
-                    'raw_payload' => $evidence->sanitizedPayload(),
+                    'raw_payload' => [
+                        ...$evidence->sanitizedPayload(),
+                        ...($supersededReview === null ? [] : [
+                            'superseded_review_id' => $supersededReview->id,
+                            'superseded_review_reason' => $supersededReview->reason,
+                        ]),
+                    ],
                     'idempotency_key' => $this->eventIdempotencyKey($evidence->txHash),
                     'received_at' => $receivedAt,
                     'last_received_at' => $receivedAt,
@@ -1428,6 +1686,7 @@ final class BscPaymentVerification
         Payment $payment,
         PaymentBscDetail $detail,
     ): BscTransferInspection {
+        $stopAt = hrtime(true) + self::SCAN_BUDGET_SECONDS * 1_000_000_000;
         if (! $this->rpc instanceof BscTransferLogRpcClientInterface) {
             throw new BscRpcException('BSC RPC client does not support transfer log scanning.', retryable: false);
         }
@@ -1457,6 +1716,7 @@ final class BscPaymentVerification
         $fromBlock = max(0, $latestNumber - $requiredBlocks);
         $logs = [];
         for ($chunkStart = $fromBlock; $chunkStart <= $latestNumber; $chunkStart += $chunkSize) {
+            $this->assertScanTimeRemaining($stopAt);
             $chunkEnd = min($latestNumber, $chunkStart + $chunkSize - 1);
             $logs = [...$logs, ...$this->rpc->transferLogs(
                 tokenContract: (string) $detail->token_contract,
@@ -1473,8 +1733,8 @@ final class BscPaymentVerification
             expectedAmountUnits: (string) $detail->expected_token_units,
         );
 
-        // Closed invoices release their amount. Older transfers in the scan's
-        // clock-skew window must not compete with this invoice's deposit.
+        // Older transfers in the scan's clock-skew window must not compete
+        // with this invoice's deposit, even when an amount is eventually reused.
         $blockTimestamps = [];
         $exactTransfers = [];
         foreach ($inspection->transfers as $transfer) {
@@ -1484,6 +1744,7 @@ final class BscPaymentVerification
                 continue;
             }
             if (! isset($blockTimestamps[$transfer->blockNumber])) {
+                $this->assertScanTimeRemaining($stopAt);
                 $block = $this->rpc->blockByNumber($transfer->blockNumber);
                 $timestamp = $this->blockTimestamp($block['timestamp'] ?? null);
                 if ($timestamp === null || $this->blockNumber($block['number'] ?? null) !== $transfer->blockNumber) {
@@ -1497,6 +1758,13 @@ final class BscPaymentVerification
         }
 
         return $this->withTolerantMatches(new BscTransferInspection($inspection->receiptState, $exactTransfers, []), $detail);
+    }
+
+    private function assertScanTimeRemaining(int $stopAt): void
+    {
+        if (hrtime(true) >= $stopAt) {
+            throw new BscRpcException('BSC transfer discovery exceeded its verification time budget.');
+        }
     }
 
     private function withTolerantMatches(BscTransferInspection $inspection, PaymentBscDetail $detail): BscTransferInspection
@@ -1611,26 +1879,30 @@ final class BscPaymentVerification
         ?BscTransferEvidence $evidence,
         array $metadata = [],
     ): BscVerificationResult {
-        if ($evidence !== null) {
-            $this->persistEvidence($payment, $evidence, $detailStatus, $submissionVersion);
-        }
-
-        $persisted = $this->persistStatus(
-            payment: $payment,
-            detail: $detail,
-            status: $detailStatus,
-            submissionVersion: $submissionVersion,
-            hash: $hash,
-            metadata: $metadata,
-            evidence: $evidence,
-        );
-        if ($persisted) {
-            $this->ensureManualFulfillmentReview(
+        DB::transaction(function () use ($payment, $detail, $detailStatus, $submissionVersion, $hash, $metadata, $evidence, $reason): void {
+            // Keep the provisional review and its status atomic with respect to
+            // a concurrent settlement, which also locks this detail row.
+            Order::query()->whereKey($payment->order_id)->lockForUpdate()->firstOrFail();
+            if (Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail()->status === PaymentStatus::Paid) {
+                return;
+            }
+            $persisted = $this->persistStatus(
                 payment: $payment,
-                reason: $reason,
-                providerReference: $evidence?->txHash ?? $hash,
+                detail: $detail,
+                status: $detailStatus,
+                submissionVersion: $submissionVersion,
+                hash: $hash,
+                metadata: $metadata,
+                evidence: $evidence,
             );
-        }
+            if (! $persisted) {
+                return;
+            }
+            if ($evidence !== null) {
+                $this->persistEvidence($payment, $evidence, $detailStatus, $submissionVersion);
+            }
+            $this->ensureManualFulfillmentReview($payment, $reason, $evidence?->txHash ?? $hash);
+        }, 5);
 
         return BscVerificationResult::of($outcome, $evidence, retryable: false);
     }
@@ -1705,7 +1977,8 @@ final class BscPaymentVerification
                     ->whereKey($payment->id)
                     ->lockForUpdate()
                     ->first();
-                if ($detail === null || (int) $detail->tx_submission_version !== $submissionVersion) {
+                if ($detail === null || $detail->verification_status === PaymentBscDetail::STATUS_CONFIRMED
+                    || (int) $detail->tx_submission_version !== $submissionVersion) {
                     return null;
                 }
 
@@ -1790,6 +2063,7 @@ final class BscPaymentVerification
 
         $query = PaymentBscDetail::query()
             ->whereKey($detail->payment_id)
+            ->where('verification_status', '!=', PaymentBscDetail::STATUS_CONFIRMED)
             ->where('tx_submission_version', $submissionVersion);
 
         return $query->update($updates) === 1;

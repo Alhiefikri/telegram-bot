@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services\Bsc;
 
-use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use Illuminate\Support\Facades\DB;
@@ -12,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * Keeps the catalog amount when free, then tries 0.001-USDT steps.
  * Checkout holds the payment-setting row lock across allocation and insert.
- * Pending checkout Payments and recent shared top-up targets reserve an amount.
+ * Reserve amounts the verifier can still associate with another invoice.
  */
 final class BscUniquePaymentAmount
 {
@@ -27,13 +26,14 @@ final class BscUniquePaymentAmount
             return $baseAmountMicro;
         }
 
+        $recent = now()->subHours(BscInvoiceAttribution::LOOKBACK_HOURS);
         for ($rangeStart = $baseAmountMicro; ; $rangeStart += self::CANDIDATE_BATCH_SIZE * $increment) {
             $rangeEnd = $rangeStart + ((self::CANDIDATE_BATCH_SIZE - 1) * $increment);
             $occupied = Payment::query()
                 ->where('provider', 'manual')
                 ->where('method', 'USDT_BEP20')
-                ->where('status', PaymentStatus::Pending->value)
-                ->whereHas('order', fn ($order) => $order->where('order_status', OrderStatus::PendingPayment->value))
+                ->where('currency', 'USDT')
+                ->where(fn ($query) => $query->where('created_at', '>=', $recent)->orWhere('status', PaymentStatus::Pending->value))
                 ->whereHas('bscDetail')
                 ->whereBetween('amount', [$rangeStart, $rangeEnd])
                 ->orderBy('amount')
@@ -42,11 +42,14 @@ final class BscUniquePaymentAmount
                 ->all();
 
             $intents = DB::table('customer_usdt_funding_intents')
-                ->where('rail', 'bsc_shared')->where('state', 'pending')->where('expires_at', '>', now())
+                ->where('rail', 'bsc_shared')
+                ->where(fn ($query) => $query->where('created_at', '>=', $recent)->orWhere('state', 'pending'))
                 ->whereBetween('payable_micro', [$rangeStart, $rangeEnd])->pluck('payable_micro');
-            $topUps = DB::table('customer_usdt_top_ups')
-                ->where('rail', 'bsc_shared')->where('created_at', '>=', now()->subHours(24))
-                ->whereBetween('payable_micro', [$rangeStart, $rangeEnd])->pluck('payable_micro');
+            $topUps = DB::table('customer_usdt_top_ups as targets')
+                ->leftJoin('customer_usdt_top_up_resolutions as resolutions', 'resolutions.top_up_id', '=', 'targets.id')
+                ->where('targets.rail', 'bsc_shared')
+                ->where(fn ($query) => $query->where('targets.created_at', '>=', $recent)->orWhereNull('resolutions.top_up_id'))
+                ->whereBetween('targets.payable_micro', [$rangeStart, $rangeEnd])->pluck('targets.payable_micro');
             foreach ($intents->merge($topUps) as $amount) {
                 $occupied[(int) $amount] = true;
             }

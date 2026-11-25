@@ -19,7 +19,7 @@ final class TelegramUsdtFundingSessionTest extends TestCase
     public function test_switching_rail_replaces_old_amount_context(): void
     {
         $customer = $this->customer(991001);
-        $session = new TelegramUsdtFundingSession;
+        $session = app(TelegramUsdtFundingSession::class);
         $session->promptAmount($customer, '991001', 10, 20, 'bsc_usdt');
         $session->promptAmount($customer, '991001', 11, 21, 'binance_pay');
         $this->assertSame(['chat_id' => '991001', 'root_id' => 11, 'message_id' => 21, 'rail' => 'binance_pay'], $session->promptedAmount($customer));
@@ -29,7 +29,7 @@ final class TelegramUsdtFundingSessionTest extends TestCase
     {
         $one = $this->customer(991001);
         $two = $this->customer(991002);
-        $session = new TelegramUsdtFundingSession;
+        $session = app(TelegramUsdtFundingSession::class);
         $session->promptAmount($one, '991001', 10, 20, 'bsc_usdt');
         $session->promptHash($one, 'target-one');
         $session->promptAmount($two, '991002', 11, 21, 'binance_pay');
@@ -44,7 +44,7 @@ final class TelegramUsdtFundingSessionTest extends TestCase
     public function test_expired_amount_and_transaction_prompts_cannot_consume_later_messages(): void
     {
         $customer = $this->customer(991003);
-        $session = new TelegramUsdtFundingSession;
+        $session = app(TelegramUsdtFundingSession::class);
         $session->promptAmount($customer, '991003', 10, 20, 'binance_pay');
         $session->promptHash($customer, 'old-target');
         $this->travel(9)->minutes();
@@ -58,7 +58,7 @@ final class TelegramUsdtFundingSessionTest extends TestCase
     public function test_new_transaction_prompt_replaces_old_target(): void
     {
         $customer = $this->customer(991004);
-        $session = new TelegramUsdtFundingSession;
+        $session = app(TelegramUsdtFundingSession::class);
         $session->promptHash($customer, 'old-target');
         $session->promptHash($customer, 'new-target');
         $this->assertSame('new-target', $session->promptedTopUpId($customer));

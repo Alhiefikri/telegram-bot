@@ -18,4 +18,5 @@ enum BscVerificationOutcome: string
     case OrderNotPending = 'order_not_pending';
     case NotConfigured = 'not_configured';
     case StaleSubmission = 'stale_submission';
+    case VerificationInProgress = 'verification_in_progress';
 }

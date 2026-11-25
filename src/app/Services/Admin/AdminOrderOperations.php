@@ -36,6 +36,7 @@ class AdminOrderOperations
 
         return $projection->isPendingPayment
             && $payment?->provider === 'manual'
+            && $payment->method !== 'USDT_BEP20'
             && $payment->status === PaymentStatus::Pending;
     }
 
@@ -133,6 +134,7 @@ class AdminOrderOperations
 
         return $payment !== null
             && $payment->provider === 'manual'
+            && $payment->method !== 'USDT_BEP20'
             && $payment->status === PaymentStatus::Pending
             && trim((string) $payment->merchant_ref) !== ''
             && $this->receipts->claimOwnerAttestation($payment)->isHeld();

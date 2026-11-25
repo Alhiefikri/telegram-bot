@@ -14,8 +14,11 @@ final class TelegramUsdtFundingSession
 {
     private const TTL_MINUTES = 10;
 
+    public function __construct(private readonly TelegramBscVerifySession $checkoutSession) {}
+
     public function promptAmount(Customer $customer, string $chatId, int $rootId, int $messageId, string $rail): void
     {
+        $this->checkoutSession->forget($customer);
         Cache::put($this->amountKey($customer), [
             'chat_id' => $chatId,
             'root_id' => $rootId,
@@ -40,11 +43,13 @@ final class TelegramUsdtFundingSession
 
     public function promptHash(Customer $customer, string $topUpId): void
     {
+        $this->checkoutSession->forget($customer);
         Cache::put($this->hashKey($customer), $topUpId, now()->addMinutes(self::TTL_MINUTES));
     }
 
     public function promptBinanceOrderId(Customer $customer, string $topUpId): void
     {
+        $this->checkoutSession->forget($customer);
         Cache::put($this->hashKey($customer), $topUpId, now()->addMinutes(15));
     }
 

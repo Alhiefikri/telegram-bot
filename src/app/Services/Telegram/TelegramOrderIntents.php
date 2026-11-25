@@ -533,6 +533,21 @@ class TelegramOrderIntents
                     ]];
                 }
             }
+            if ($isLast && $payment?->provider === PaymentProvider::MANUAL && $payment->method === 'USDT_BEP20'
+                && $order->order_status === OrderStatus::PendingPayment && $paymentStatus === PaymentStatus::Pending) {
+                $markup = ['inline_keyboard' => [
+                    [[
+                        'text' => $this->locale->translate($customer, 'payment.bsc.check_status'),
+                        'callback_data' => 'bsc:check:'.$order->id,
+                        'style' => 'primary',
+                    ]],
+                    [[
+                        'text' => $this->locale->translate($customer, 'payment.bsc.submit_hash'),
+                        'callback_data' => 'bsc:submit:'.$order->id,
+                        'style' => 'primary',
+                    ]],
+                ]];
+            }
             $lastResponse = $this->bot->sendMessage(
                 $chatId,
                 $unit->text(),

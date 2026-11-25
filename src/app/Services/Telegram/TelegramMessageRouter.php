@@ -360,6 +360,10 @@ class TelegramMessageRouter
             return;
         }
 
+        if ($isPrivateChat && $this->bscVerify->handleHashInput($customer, $chatId, $text)) {
+            return;
+        }
+
         if ($isPrivateChat && $this->balanceFunding->handleUsdtAmountInput($customer, $chatId, $text)) {
             return;
         }

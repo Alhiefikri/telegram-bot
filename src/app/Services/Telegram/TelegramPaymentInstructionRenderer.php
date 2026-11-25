@@ -150,10 +150,8 @@ class TelegramPaymentInstructionRenderer
         ]);
 
         $buttons = [];
-        if ($detail->verification_mode !== PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE) {
-            $buttons[] = [['text' => $this->text($locale, 'payment.bsc.submit_hash'), 'callback_data' => 'bsc:submit:'.$order->id]];
-        }
         $buttons[] = [['text' => $this->text($locale, 'payment.bsc.check_status'), 'callback_data' => 'bsc:check:'.$order->id]];
+        $buttons[] = [['text' => $this->text($locale, 'payment.bsc.submit_hash'), 'callback_data' => 'bsc:submit:'.$order->id]];
         $buttons[] = [['text' => $this->text($locale, 'payment.action.cancel'), 'callback_data' => 'buyer:cancel-pending:'.$order->id]];
 
         return [

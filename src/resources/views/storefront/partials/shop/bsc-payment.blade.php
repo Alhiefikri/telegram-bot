@@ -58,7 +58,7 @@
 
     <div data-crypto-verification class="grid min-w-0 content-start gap-3">
 
-    @if ($isPendingPayment && ! $bscClosed && ! ($bscVerificationAutomatic ?? false))
+    @if ($isPendingPayment && (! $bscClosed || (($bscVerificationAutomatic ?? false) && $bscVerificationOutcome === 'manual_review')))
         <form method="POST" action="{{ $bscTxHashUrl }}" class="rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface-warm)] p-3 text-sm font-bold leading-6 text-[var(--sf-muted)] sm:p-4">
             @csrf
             <label for="bsc-tx-hash" class="font-black text-[var(--sf-ink)]">{{ __('storefront.invoice.bsc.tx_form.label', [], $storefrontLocale) }}</label>

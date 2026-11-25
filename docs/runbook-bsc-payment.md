@@ -20,7 +20,7 @@ Readiness covers the core RPC metadata, approved contract/18 decimals, at least 
 
 Rail qualification for a future USDT funding rail is recorded separately with `php artisan bsc:check-capabilities --json`. The command classifies chain, contract code, decimals, `finalized` block, canonical receipt, and bounded transfer-log capability as `verified`, `unsupported`, or `unknown`, and exits non-zero unless `rpc_qualified` is true. A qualified result is RPC evidence only: it does not prove token issuer/bridge provenance, custody, provisioning/recover-by-reference, or legal authorization, and funding remains no-go until #539 and the downstream rail tickets pass. See [balance-a1-bsc-capability.md](balance-a1-bsc-capability.md).
 
-Customer tidak perlu akun Binance untuk membayar. Wallet atau exchange yang mendukung BNB Smart Chain/BEP20 cukup; customer mengirim nominal unik yang tampil ke address yang ditampilkan. Sistem mencari transfer secara otomatis; tombol Check Payment hanya memicu pemeriksaan ulang. Payment legacy yang masih meminta hash tetap dapat diselesaikan melalui flow TX hash.
+Customer tidak perlu akun Binance untuk membayar. Wallet atau exchange yang mendukung BNB Smart Chain/BEP20 cukup; customer mengirim nominal unik yang tampil ke address yang ditampilkan. Sistem mencari transfer secara otomatis. Check Payment meminta pemeriksaan ulang sesuai cooldown; Kirim TX Hash adalah fallback opsional untuk invoice aktif. Payment legacy tetap memerlukan hash.
 
 The application uses the existing `BINANCE_VERIFICATION_QUEUE` / `binance-verification` worker. Do not add a second BSC worker or supervisor process.
 
@@ -46,11 +46,27 @@ The application uses the existing `BINANCE_VERIFICATION_QUEUE` / `binance-verifi
 
 4. In Admin → Mode pembayaran, leave `bsc_payment_enabled` off while adding receivers. Enter each public BEP20 address, re-authenticate as Owner, and save it. The address is normalized and becomes an active receiver immediately; the Owner is responsible for checking the destination before saving it.
 5. Confirm each receiver has the expected chain, approved contract, and decimals. Owner receiver mutations write audit records, send an owner notification, and invalidate the Storefront response-cache version after commit.
-6. Re-run `bsc:check-readiness --json`, confirm `ready=true`, then enable the BSC setting in the database-backed dashboard. Confirm the customer instructions visibly require the exact unique amount and explain automatic detection; new checkout instructions must not require a `Submit TX Hash` action. This affects new checkout selection only; existing Payments retain their immutable snapshots and legacy hash mode.
+6. Re-run `bsc:check-readiness --json`, confirm `ready=true`, then enable the BSC setting in the database-backed dashboard. Confirm new instructions show the exact unique amount, automatic detection and an optional `Submit TX Hash` action. Existing Payments retain their immutable snapshots and legacy hash mode.
 
 ## Verification and review
 
 `BscPaymentVerification` is the checkout authority for receipt decoding and claims; the separate USDT balance watch-only rail below does not invoke this Order lifecycle. For a new amount-unique Payment, a bounded server-side transfer-log match is only a lookup candidate; the verifier still requires a successful receipt, BNB Smart Chain chain ID 56, the approved USDT contract, the snapshotted receiver, the exact integer token amount, an inclusion block inside the Payment window, and the configured confirmation policy. A legacy submitted TX hash follows the same receipt predicate without the log-discovery step.
+
+The optional customer hint for an amount-unique checkout takes the direct
+receipt path. It requires the exact invoice amount; the automatic discovery
+path keeps its existing unambiguous tolerance policy. A supplied hash does not
+break a tie between invoices. The global receipt and parent transaction claims
+prevent reuse, including across checkout and top-up. New shared-address amounts
+are not reused within the 24-hour attribution lookback and can remain reserved
+longer for pending/unresolved payments. The Admin Order detail shows a submitted
+hash separately from verified receipt evidence.
+
+When review is required, a submitted hash alone cannot fulfill or record a
+refund on a pending BSC order. A verified on-chain candidate may be presented
+against multiple invoices, but an owner must identify the payer and the
+approved invoice must win the global transaction claim. Do not use generic
+manual-order completion for BSC. Do not refund using a screenshot or an
+unverified hash.
 Canonical ERC-20 `Transfer(address,address,uint256)` logs use topic0 `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`. The readiness probe accepts an empty `eth_getLogs` response and checks only a recent scanner chunk, so it verifies provider filter capability but not event-signature correctness or access to older blocks needed by a Payment scan. Use a provider that serves the full scan window and prove the automatic path with a controlled low-value Payment after release.
 
 An exact transfer included before the deadline may use the short technical confirmation grace. `orders:expire-pending` skips only when the detail contains matching authoritative confirming evidence. A future timestamp without that evidence is not a valid grace and the Order expires normally.
@@ -110,4 +126,4 @@ php artisan ops:health --db --queue-schema --queue-depth --bsc
 php artisan schedule:list
 ```
 
-If BSC is enabled, resolve RPC, token metadata, receiver, transfer-log, or other core readiness failures before re-enabling checkout. New customers do not need to submit a TX hash; the unique amount and receiver address drive automatic discovery. Historical legacy Payments retain their hash-submission compatibility.
+If BSC is enabled, resolve RPC, token metadata, receiver, transfer-log, or other core readiness failures before re-enabling checkout. New customers do not have to submit a TX hash; the unique amount and receiver address drive automatic discovery. Historical legacy Payments retain their hash-submission compatibility.

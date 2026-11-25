@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
+use App\Exceptions\InvalidOrderTransition;
 use App\Jobs\VerifyBscPayment;
 use App\Models\BscPaymentReceiver;
 use App\Models\BscPaymentTransferEvidence;
@@ -27,11 +28,14 @@ use App\Services\MoneyReceipts\ExternalMoneyReceiptClaims;
 use App\Services\MoneyReceipts\ExternalMoneyReceiptWriter;
 use App\Services\MoneyReceipts\MoneyReceiptTarget;
 use App\Services\MoneyReceipts\VerifiedMoneyReceipt;
+use App\Services\OrderLifecycle;
 use App\Storefront\StorefrontShopPaymentStatusRefresh;
 use App\Storefront\StorefrontShopSignedInvoice;
 use Brick\Math\BigInteger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -55,6 +59,8 @@ class BscPaymentVerificationTest extends TestCase
         $this->rpc = new class implements BscTransferLogRpcClientInterface, BscVerificationRpcClientInterface
         {
             public int $calls = 0;
+
+            public int $scanCalls = 0;
 
             public bool $failReceipts = false;
 
@@ -134,6 +140,7 @@ class BscPaymentVerificationTest extends TestCase
                 int $toBlock,
             ): array {
                 $this->calls++;
+                $this->scanCalls++;
 
                 return $this->logs;
             }
@@ -149,6 +156,211 @@ class BscPaymentVerificationTest extends TestCase
             'bsc_confirmation_grace_minutes' => 3,
             'bsc_hash_attempt_limit' => 5,
         ]);
+    }
+
+    public function test_customer_hint_resolves_multiple_discovered_transfers_and_cannot_be_reused(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $hash = '0x'.str_repeat('a', 64);
+        $otherHash = '0x'.str_repeat('b', 64);
+        foreach ([$hash, $otherHash] as $candidate) {
+            $this->configureReceipt($payment, $candidate);
+            $receipt = $this->rpc->receipts[$candidate];
+            $this->rpc->logs[] = [...$receipt['logs'][0], 'transactionHash' => $candidate, 'blockNumber' => $receipt['blockNumber']];
+        }
+        $verifier = app(BscPaymentVerification::class);
+        $this->assertSame(BscVerificationOutcome::ManualReview, $verifier->verify($payment)->outcome);
+        $this->assertFalse($verifier->queueForStatusRefresh($payment));
+        $scans = $this->rpc->scanCalls;
+        $submission = $verifier->submitTransactionHash($payment->order_id, $hash);
+        $this->assertTrue($submission->accepted());
+        $this->assertFalse($verifier->submitTransactionHash($payment->order_id, strtoupper($hash))->dispatchRequired);
+        (new VerifyBscPayment($payment->id, $submission->version))->handle($verifier);
+
+        $this->assertSame($scans, $this->rpc->scanCalls);
+        $this->assertSame(PaymentStatus::Paid, $payment->fresh()->status);
+        $this->assertSame($hash, $payment->fresh()->provider_reference);
+        $this->assertDatabaseMissing('manual_fulfillment_reviews', ['payment_id' => $payment->id, 'reason' => 'bsc_ambiguous']);
+
+        $second = $this->payment('0x3333333333333333333333333333333333333333');
+        $second->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $this->assertSame(BscVerificationSubmissionOutcome::TransactionAlreadyUsed, $verifier->submitTransactionHash($second->order_id, $hash)->outcome);
+        $this->assertSame(PaymentStatus::Pending, $second->fresh()->status);
+        $this->assertSame(PaymentBscDetail::STATUS_AWAITING_TRANSFER, $second->bscDetail()->firstOrFail()->verification_status);
+    }
+
+    public function test_wrong_customer_hash_does_not_disable_automatic_detection(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $wrong = '0x'.str_repeat('c', 64);
+        $right = '0x'.str_repeat('d', 64);
+        $this->configureReceipt($payment, $wrong, amountUnits: '1010000000000000000');
+        $this->configureReceipt($payment, $right);
+        $receipt = $this->rpc->receipts[$right];
+        $this->rpc->logs = [[...$receipt['logs'][0], 'transactionHash' => $right, 'blockNumber' => $receipt['blockNumber']]];
+
+        $verifier = app(BscPaymentVerification::class);
+        $submission = $verifier->submitTransactionHash($payment->order_id, $wrong);
+        $this->assertTrue($submission->accepted());
+        $this->assertSame(BscVerificationOutcome::Confirmed, $verifier->verify($payment, submissionVersion: $submission->version)->outcome);
+        $this->assertSame($right, $payment->fresh()->provider_reference);
+        $this->assertDatabaseMissing('bsc_payment_transfer_evidence', ['tx_hash' => $wrong]);
+    }
+
+    public function test_exact_hash_cannot_override_a_competing_invoice(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $other = $this->payment('0x3333333333333333333333333333333333333333');
+        $other->bscDetail()->update(['receiver_address' => $payment->bscDetail->receiver_address]);
+        $hash = '0x'.str_repeat('e', 64);
+        $this->configureReceipt($payment, $hash);
+
+        $verifier = app(BscPaymentVerification::class);
+        $submission = $verifier->submitTransactionHash($payment->order_id, $hash);
+        $this->assertTrue($submission->accepted());
+        $this->assertSame(BscVerificationOutcome::ManualReview, $verifier->verify($payment->id, submissionVersion: $submission->version)->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame('transfer_matches_another_invoice', $payment->bscDetail()->firstOrFail()->evidence_payload['reason']);
+        $this->assertDatabaseMissing('bsc_payment_transfer_evidence', ['tx_hash' => $hash]);
+    }
+
+    public function test_owner_cannot_resolve_a_bsc_review_without_verified_evidence(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $review = ManualFulfillmentReview::query()->create([
+            'order_id' => $payment->order_id,
+            'payment_id' => $payment->id,
+            'reason' => ManualFulfillmentReview::REASON_BSC_AMBIGUOUS,
+            'currency' => 'USDT',
+            'amount' => $payment->amount,
+            'state' => ManualFulfillmentReview::STATE_PENDING,
+        ]);
+
+        $this->expectException(InvalidOrderTransition::class);
+        app(ManualFulfillmentResolutionService::class)->resolve(
+            $review, User::factory()->create(['role' => UserRole::Owner]), 'fulfill', 'Test owner decision',
+        );
+    }
+
+    public function test_generic_manual_completion_cannot_bypass_the_bsc_receipt_claim(): void
+    {
+        $payment = $this->payment();
+
+        $this->expectException(InvalidOrderTransition::class);
+        app(OrderLifecycle::class)->applyManualCompletion($payment->order);
+    }
+
+    public function test_batch_snapshot_does_not_reload_order_or_bsc_detail(): void
+    {
+        $payment = $this->payment()->load(['order', 'bscDetail']);
+        DB::enableQueryLog();
+        try {
+            $this->assertSame(BscVerificationOutcome::AwaitingTransfer, app(BscPaymentVerification::class)->verify($payment)->outcome);
+            $queries = array_map(fn (array $entry): string => strtolower($entry['query']), DB::getQueryLog());
+            $this->assertSame([], array_values(array_filter($queries, fn (string $query): bool => str_starts_with($query, 'select * from "orders"')
+                || str_starts_with($query, 'select * from "payment_bsc_details"'))));
+        } finally {
+            DB::disableQueryLog();
+            DB::flushQueryLog();
+        }
+    }
+
+    public function test_two_ambiguous_reviews_cannot_fulfill_against_one_verified_candidate(): void
+    {
+        Queue::fake();
+        $first = $this->payment();
+        $second = $this->payment('0x3333333333333333333333333333333333333333');
+        foreach ([$first, $second] as $payment) {
+            $payment->bscDetail()->update([
+                'verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE,
+                'receiver_address' => $first->bscDetail->receiver_address,
+            ]);
+        }
+        $hash = '0x'.str_repeat('f', 64);
+        $this->configureReceipt($first, $hash);
+        $verifier = app(BscPaymentVerification::class);
+        foreach ([$first, $second] as $payment) {
+            $submission = $verifier->submitTransactionHash($payment->order_id, $hash);
+            $this->assertTrue($submission->accepted());
+            $this->assertSame(BscVerificationOutcome::ManualReview, $verifier->verify($payment->fresh(), submissionVersion: $submission->version)->outcome);
+        }
+
+        $owner = User::factory()->create(['role' => UserRole::Owner]);
+        $resolution = app(ManualFulfillmentResolutionService::class);
+        $this->assertSame(ManualFulfillmentReview::STATE_FULFILLED, $resolution->resolve(
+            $first->manualFulfillmentReview()->firstOrFail(), $owner, 'fulfill', 'Confirmed payer attribution',
+        )->state);
+        try {
+            $resolution->resolve($second->manualFulfillmentReview()->firstOrFail(), $owner, 'fulfill', 'Second attribution');
+            $this->fail('A second review cannot fulfill with the same transaction.');
+        } catch (InvalidOrderTransition) {
+            $this->assertSame(PaymentStatus::Pending, $second->fresh()->status);
+        }
+        $this->assertDatabaseHas('external_money_receipt_parent_claims', ['tx_hash' => $hash, 'target_id' => $first->id]);
+    }
+
+    public function test_expiry_does_not_release_a_payment_with_an_active_verification_lease(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $payment->order()->update(['expires_at' => now()->subMinute()]);
+        $payment->update(['expired_at' => now()->subMinute()]);
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $lock = Cache::lock('bsc:payment:verify:'.$payment->id, 60);
+        $this->assertTrue($lock->get());
+        try {
+            $this->artisan('orders:expire-pending')->assertSuccessful();
+            $this->assertSame(OrderStatus::PendingPayment, $payment->order()->firstOrFail()->order_status);
+            $this->assertSame(BscVerificationOutcome::VerificationInProgress, app(BscPaymentVerification::class)->verify($payment->id)->outcome);
+            $this->assertSame(0, $this->rpc->calls);
+        } finally {
+            $lock->release();
+        }
+
+        $this->rpc->blocks['latest'] = $this->block(102, now());
+        $this->artisan('orders:expire-pending')->assertSuccessful();
+        $this->assertSame(OrderStatus::Expired, $payment->order()->firstOrFail()->order_status);
+    }
+
+    public function test_old_unclaimed_hash_cannot_pay_a_new_invoice_after_amount_reuse(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $hash = '0x'.str_repeat('9', 64);
+        $this->configureReceipt($payment, $hash, blockTimestamp: $payment->created_at->copy()->subSecond());
+
+        $verifier = app(BscPaymentVerification::class);
+        $submission = $verifier->submitTransactionHash($payment->order_id, $hash);
+        $this->assertTrue($submission->accepted());
+        $this->assertSame(BscVerificationOutcome::NotFound, $verifier->verify($payment, submissionVersion: $submission->version)->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertDatabaseMissing('bsc_payment_transfer_evidence', ['tx_hash' => $hash]);
+    }
+
+    public function test_customer_hash_waits_for_confirmations_without_relying_on_transfer_scan(): void
+    {
+        Queue::fake();
+        $payment = $this->payment();
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $hash = '0x'.str_repeat('8', 64);
+        $this->configureReceipt($payment, $hash, latestBlock: 101);
+
+        $verifier = app(BscPaymentVerification::class);
+        $submission = $verifier->submitTransactionHash($payment->order_id, $hash);
+        $this->assertSame(BscVerificationOutcome::Confirming, $verifier->verify($payment, submissionVersion: $submission->version)->outcome);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertTrue($payment->bscDetail()->firstOrFail()->submitted_tx_pending);
+        $this->configureReceipt($payment, $hash, latestBlock: 102);
+        $this->assertSame(BscVerificationOutcome::Confirmed, $verifier->verify($payment, submissionVersion: $submission->version)->outcome);
+        $this->assertSame(0, $this->rpc->scanCalls);
     }
 
     public function test_hash_submission_is_strict_versioned_idempotent_and_does_no_rpc_work(): void
@@ -710,7 +922,14 @@ class BscPaymentVerificationTest extends TestCase
         );
         $this->assertTrue(app(ExternalMoneyReceiptClaims::class)->claim($fixture)->allowsMoneyEffect());
 
-        $result = app(BscPaymentVerification::class)->verify($payment, $hash);
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_AMOUNT_UNIQUE]);
+        $verifier = app(BscPaymentVerification::class);
+        $this->assertSame(BscVerificationSubmissionOutcome::TransactionAlreadyUsed, $verifier->submitTransactionHash($payment->order_id, $hash)->outcome);
+        $this->assertSame(0, $this->rpc->calls);
+        $this->assertDatabaseMissing('manual_fulfillment_reviews', ['payment_id' => $payment->id]);
+        $payment->bscDetail()->update(['verification_mode' => PaymentBscDetail::VERIFICATION_MODE_TRANSACTION_HASH]);
+
+        $result = $verifier->verify($payment, $hash);
 
         $this->assertSame(BscVerificationOutcome::TransactionAlreadyUsed, $result->outcome);
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);

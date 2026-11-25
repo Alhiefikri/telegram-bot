@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Enums\ExternalMoneyReceiptStatus;
+use App\Enums\ExternalMoneyReceiptTargetType;
 use App\Enums\GuestOrderNotificationEvent;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
@@ -13,6 +15,7 @@ use App\Jobs\SendAdminOrderExpiredNotification;
 use App\Jobs\SendAdminOrderPaidNotification;
 use App\Jobs\SendTelegramReceipt;
 use App\Models\Customer;
+use App\Models\ExternalMoneyReceiptParentClaim;
 use App\Models\ManualFulfillmentReview;
 use App\Models\Order;
 use App\Models\OrderRefund;
@@ -132,6 +135,14 @@ class OrderStateMachine implements OrderLifecycle
 
                 if (! $this->canTransitionManualOrder($lockedOrder, $payment)) {
                     throw new InvalidOrderTransition('Only pending manual orders can be completed.');
+                }
+                if ($payment->method === 'USDT_BEP20' && ! ExternalMoneyReceiptParentClaim::query()
+                    ->where('chain_id', 56)
+                    ->where('target_type', ExternalMoneyReceiptTargetType::OrderPayment->value)
+                    ->where('target_id', $payment->id)
+                    ->where('status', ExternalMoneyReceiptStatus::Claimed->value)
+                    ->exists()) {
+                    throw new InvalidOrderTransition('Complete this BSC payment through a verified on-chain review.');
                 }
 
                 $paidOrder = $this->applyPaidTransition($payment, $lockedOrder);

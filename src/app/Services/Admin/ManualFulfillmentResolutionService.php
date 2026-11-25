@@ -391,7 +391,7 @@ class ManualFulfillmentResolutionService
 
         if ($isPendingBscReview) {
             if ($this->claimPendingBscReceipt($payment)->isHeld()) {
-                throw new InvalidOrderTransition('The BSC payment receipt is held for review and cannot be completed.');
+                throw new InvalidOrderTransition('BSC fulfillment requires verified on-chain evidence that has not been used by another payment.');
             }
 
             $completion = $this->orders->applyManualCompletion($order);
@@ -434,43 +434,66 @@ class ManualFulfillmentResolutionService
         return $resolved;
     }
 
-    /**
-     * Owner-approved BSC evidence claims the chain receipt from the registry;
-     * legacy reviews without persisted evidence fall back to a per-payment
-     * owner attestation so no approval can move money without a claim.
-     */
+    /** Owner approval still needs a BSC receipt shared with every money rail. */
     private function claimPendingBscReceipt(Payment $payment): ExternalMoneyReceiptClaimOutcome
     {
+        $detail = PaymentBscDetail::query()->whereKey($payment->getKey())->first();
+        if ($detail === null) {
+            return ExternalMoneyReceiptClaimOutcome::Review;
+        }
+
+        // An ambiguous transfer can be presented against multiple invoices.
+        // Do not reserve it merely by showing it; the owner's decision below
+        // must compete for its real chain identity in the global registry.
+        $candidate = $detail->evidence_payload['verified_review_candidate'] ?? null;
         $evidence = BscPaymentTransferEvidence::query()
             ->where('payment_id', $payment->getKey())
+            ->where('receipt_status', 'success')
+            ->where('token_contract', strtolower((string) $detail->token_contract))
+            ->where('receiver_address', strtolower((string) $detail->receiver_address))
+            ->where('verification_status', '!=', PaymentBscDetail::STATUS_CONFIRMING)
             ->orderByDesc('id')
             ->first();
 
-        if ($evidence === null) {
-            return $this->receipts->claimOwnerAttestation($payment);
+        if (is_array($candidate)
+            && ($candidate['receipt_status'] ?? null) === 'success'
+            && ($candidate['token_contract'] ?? null) === strtolower((string) $detail->token_contract)
+            && ($candidate['receiver_address'] ?? null) === strtolower((string) $detail->receiver_address)
+            && ($candidate['amount_units'] ?? null) === (string) $detail->expected_token_units
+            && is_string($candidate['tx_hash'] ?? null)
+            && is_int($candidate['log_index'] ?? null)) {
+            $hash = $candidate['tx_hash'];
+            $logIndex = $candidate['log_index'];
+            $receiver = $candidate['receiver_address'];
+            $amount = $candidate['amount_units'];
+        } elseif ($evidence !== null) {
+            $hash = (string) $evidence->tx_hash;
+            $logIndex = $evidence->log_index;
+            $receiver = (string) $evidence->receiver_address;
+            $amount = (string) $evidence->amount_units;
+        } else {
+            return ExternalMoneyReceiptClaimOutcome::Review;
         }
 
-        if ($evidence->log_index === null) {
+        if ($logIndex === null) {
             $this->receipts->reservePayment(
                 $payment,
                 ExternalMoneyReceiptReservation::REASON_MISSING_CHAIN_IDENTITY,
-                ['tx_hash' => (string) $evidence->tx_hash],
+                ['tx_hash' => $hash],
             );
 
             return ExternalMoneyReceiptClaimOutcome::Review;
         }
 
-        $detail = PaymentBscDetail::query()->whereKey($payment->getKey())->first();
-
         try {
             $receipt = $this->receipts->receiptForBscPayment(
                 $payment,
-                (int) ($detail?->chain_id ?: config('services.bsc.chain_id', 56)),
-                (string) $evidence->tx_hash,
-                (int) $evidence->log_index,
-                (string) $evidence->receiver_address,
-                (string) $evidence->amount_units,
-                $detail?->token_decimals === null ? null : (int) $detail->token_decimals,
+                (int) $detail->chain_id,
+                $hash,
+                $logIndex,
+                $receiver,
+                $amount,
+                (int) $detail->token_decimals,
             );
         } catch (InvalidArgumentException $exception) {
             $this->receipts->reservePayment(
@@ -482,12 +505,17 @@ class ManualFulfillmentResolutionService
             return ExternalMoneyReceiptClaimOutcome::Review;
         }
 
-        return $this->receipts->claim(
+        $claim = $this->receipts->claim(
             $receipt,
             ExternalMoneyReceiptReservations::SOURCE_RUNTIME,
             ExternalMoneyReceiptReservation::LEGACY_TYPE_PAYMENT,
             (string) $payment->getKey(),
         );
+        if ($claim->allowsMoneyEffect()) {
+            $payment->update(['provider_reference' => $hash]);
+        }
+
+        return $claim;
     }
 
     private function assertNoStarsRefund(Order $order, Payment $payment): void
@@ -528,6 +556,11 @@ class ManualFulfillmentResolutionService
             $this->audit->log('manual_alternative.original_payment_refunded', $review, null, ['provider_reference' => $reference, 'amount' => $review->amount], $actor, $ip);
 
             return $resolved;
+        }
+
+        if ($payment->status === PaymentStatus::Pending && $payment->provider === 'manual'
+            && $payment->method === 'USDT_BEP20' && $this->claimPendingBscReceipt($payment)->isHeld()) {
+            throw new InvalidOrderTransition('Recording a BSC refund requires verified on-chain evidence that has not been used by another payment.');
         }
 
         $remainder = app(RemainderRefundService::class)->registerConfirmedExternal($actor, $order, $payment, $reference);

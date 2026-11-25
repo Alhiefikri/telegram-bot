@@ -145,7 +145,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
             && str_contains((string) ($request['text'] ?? ''), '0x1111111111111111111111111111111111111111')
             && str_contains((string) ($request['text'] ?? ''), 'BNB Smart Chain (BEP20) ONLY')
             && str_contains((string) ($request['text'] ?? ''), 'system detects the transfer automatically')
-            && ! str_contains((string) json_encode($request->data()), 'Submit TX Hash')
+            && str_contains((string) json_encode($request->data()), 'bsc:submit:'.$order->id)
             && str_contains((string) json_encode($request->data()), 'Check Payment Status'));
     }
 
@@ -168,7 +168,9 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         $payment = Payment::query()->sole();
         $this->assertSame('USDT_BEP20', $payment->method);
         $this->assertNull($payment->order->support_contact_value);
-        $this->get($response->headers->get('Location'))->assertOk()->assertSee('0x1111111111111111111111111111111111111111');
+        $this->get($response->headers->get('Location'))->assertOk()
+            ->assertSee('0x1111111111111111111111111111111111111111')
+            ->assertSee('name="bsc_tx_hash"', false);
     }
 
     public function test_valid_bsc_transfer_claims_payment_and_delivers_product_receipt(): void
@@ -398,7 +400,7 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         $this->assertSame(0, Cart::count());
     }
 
-    public function test_bsc_amount_unique_checkout_does_not_prompt_for_or_accept_a_hash(): void
+    public function test_bsc_amount_unique_checkout_accepts_a_hash_only_from_the_invoice_owner(): void
     {
         Queue::fake([VerifyBscPayment::class]);
         $this->fakeTelegramHttp();
@@ -409,14 +411,21 @@ final class BscCheckoutRailTest extends TelegramBotTestSupport
         $cartService->addItem($cart, $product, 1);
         $order = app(OrderCheckoutService::class)->checkout($cart, CheckoutPaymentIntents::usdtBep20());
         $payment = $order->payments()->with('bscDetail')->sole();
+        Customer::factory()->create(['telegram_id' => 44504, 'locale' => 'en']);
+        $hash = '0x'.str_repeat('d', 64);
+
+        $this->postTelegramWebhook($this->callbackUpdate(9018, 'foreign-submit', 'bsc:submit:'.$order->id, ['id' => 44504], 44504, 'private', 9200))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(9019, $hash, ['id' => 44504], 44504))->assertOk();
+        Queue::assertNotPushed(VerifyBscPayment::class);
 
         $this->postTelegramWebhook($this->callbackUpdate(9020, 'bsc-submit', 'bsc:submit:'.$order->id, ['id' => 44503], 44503, 'private', 9200))->assertOk();
-        $this->postTelegramWebhook($this->messageUpdate(9021, '0x'.str_repeat('d', 64), ['id' => 44503], 44503))->assertOk();
+        $this->postTelegramWebhook($this->messageUpdate(9021, $hash, ['id' => 44503], 44503))->assertOk();
 
-        $this->assertSame(0, (int) $payment->bscDetail->fresh()->tx_attempts);
-        Queue::assertNotPushed(VerifyBscPayment::class);
+        $this->assertSame(1, (int) $payment->bscDetail->fresh()->tx_attempts);
+        $this->assertSame($hash, $payment->bscDetail->fresh()->submitted_tx_hash);
+        Queue::assertPushed(VerifyBscPayment::class, fn (VerifyBscPayment $job): bool => $job->paymentId === $payment->id);
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/sendMessage')
-            && str_contains((string) ($request['text'] ?? ''), 'no transaction hash is needed'));
+            && str_contains((string) ($request['text'] ?? ''), 'Send your BSC transaction hash'));
     }
 
     public function test_payment_screenshot_triggers_chain_verification_not_manual_approval(): void

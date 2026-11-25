@@ -38,10 +38,11 @@ final class ExternalMoneyReceiptWriter
         string $source,
         string $legacyType,
         string $legacyId,
+        bool $reserveConflict = true,
     ): ExternalMoneyReceiptClaimOutcome {
         $outcome = $this->claims->claim($receipt);
 
-        if ($outcome->isHeld()) {
+        if ($outcome->isHeld() && ($reserveConflict || $outcome !== ExternalMoneyReceiptClaimOutcome::Conflict)) {
             $this->reservations->reserve(
                 source: $source,
                 legacyType: $legacyType,

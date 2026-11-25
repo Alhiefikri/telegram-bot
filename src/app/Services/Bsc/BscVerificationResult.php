@@ -31,6 +31,7 @@ final readonly class BscVerificationResult
             BscVerificationOutcome::Confirming,
             BscVerificationOutcome::NotFound,
             BscVerificationOutcome::ProviderError,
+            BscVerificationOutcome::VerificationInProgress,
         ], true);
     }
 

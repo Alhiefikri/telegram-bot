@@ -2,6 +2,7 @@
 
 namespace App\Services\UsdtFunding;
 
+use App\Services\Bsc\BscInvoiceAttribution;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -18,8 +19,6 @@ final class SharedBscTopUpAmountAllocator
 {
     private const MAX_SUFFIX_MICRO = 999_999;
 
-    private const LOOKBACK_HOURS = 24;
-
     public function allocate(int $baseMicro, int $feeMicro = 0): int
     {
         if ($baseMicro < 1 || $feeMicro < 0 || $feeMicro > PHP_INT_MAX - $baseMicro) {
@@ -29,7 +28,7 @@ final class SharedBscTopUpAmountAllocator
         // Keep the matching suffix under 1% of the requested amount, with a
         // small floor so low-value top-ups still have a usable tag range.
         $maxSuffix = min(PHP_INT_MAX - $baseMicro - $feeMicro, max(9, min(self::MAX_SUFFIX_MICRO, intdiv($baseMicro, 100))));
-        $minimumCreatedAt = now()->subHours(self::LOOKBACK_HOURS);
+        $minimumCreatedAt = now()->subHours(BscInvoiceAttribution::LOOKBACK_HOURS);
 
         $occupied = $this->occupiedAmounts($baseMicro + $feeMicro, $baseMicro + $feeMicro + $maxSuffix, $minimumCreatedAt);
         for ($suffix = 0; $suffix <= $maxSuffix; $suffix++) {
@@ -47,16 +46,16 @@ final class SharedBscTopUpAmountAllocator
     {
         $intents = DB::table('customer_usdt_funding_intents')
             ->where('rail', 'bsc_shared')
-            ->where('state', 'pending')
-            ->where('expires_at', '>', now())
+            ->where(fn ($query) => $query->where('created_at', '>=', $minimumCreatedAt)->orWhere('state', 'pending'))
             ->whereBetween('payable_micro', [$fromMicro, $toMicro])
             ->pluck('payable_micro');
 
-        $topUps = DB::table('customer_usdt_top_ups')
-            ->where('rail', 'bsc_shared')
-            ->where('created_at', '>=', $minimumCreatedAt)
-            ->whereBetween('payable_micro', [$fromMicro, $toMicro])
-            ->pluck('payable_micro');
+        $topUps = DB::table('customer_usdt_top_ups as targets')
+            ->leftJoin('customer_usdt_top_up_resolutions as resolutions', 'resolutions.top_up_id', '=', 'targets.id')
+            ->where('targets.rail', 'bsc_shared')
+            ->where(fn ($query) => $query->where('targets.created_at', '>=', $minimumCreatedAt)->orWhereNull('resolutions.top_up_id'))
+            ->whereBetween('targets.payable_micro', [$fromMicro, $toMicro])
+            ->pluck('targets.payable_micro');
 
         $checkouts = DB::table('payments')
             ->where('provider', 'manual')->where('method', 'USDT_BEP20')->where('currency', 'USDT')

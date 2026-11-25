@@ -14,6 +14,7 @@ use App\Models\PaymentBscDetail;
 use App\Models\Product;
 use App\Services\Bsc\BscRpcClientInterface;
 use App\Services\Bsc\BscTransferLogRpcClientInterface;
+use App\Services\Bsc\BscUniquePaymentAmount;
 use App\Services\Checkout\CheckoutPaymentIntents;
 use App\Services\OrderCheckoutService;
 use App\Services\OrderLifecycle;
@@ -146,7 +147,7 @@ class BscPaymentAllocationTest extends TestCase
     }
 
     #[DataProvider('closedOrderTransitions')]
-    public function test_a_closed_bsc_order_releases_its_amount_for_a_new_checkout(string $transition): void
+    public function test_a_recent_closed_bsc_order_reserves_its_amount_for_attribution(string $transition): void
     {
         $this->activeReceiver('0x2222222222222222222222222222222222222222');
         $product = Product::factory()->create([
@@ -174,7 +175,10 @@ class BscPaymentAllocationTest extends TestCase
             CheckoutPaymentIntents::usdtBep20(),
         );
 
-        $this->assertSame(1_000_000, $second->payments()->sole()->amount);
+        $this->assertSame(1_001_000, $second->payments()->sole()->amount);
+
+        $first->payments()->sole()->forceFill(['created_at' => now()->subHours(25)])->save();
+        $this->assertSame(1_000_000, app(BscUniquePaymentAmount::class)->allocate(1_000_000));
     }
 
     public static function closedOrderTransitions(): array

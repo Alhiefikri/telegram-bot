@@ -178,6 +178,15 @@
                         <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Token contract</dt><dd class="break-all font-mono text-xs">{{ $bscReview['contract'] }}</dd></div>
                         <div class="sm:col-span-2"><dt class="text-xs font-medium text-admin-muted">Receiving address snapshot</dt><dd class="break-all font-mono text-xs">{{ $bscReview['receiver'] }}</dd></div>
                         <div><dt class="text-xs font-medium text-admin-muted">TX hash</dt><dd class="break-all font-mono text-xs">{{ $bscReview['tx_hash'] }}</dd></div>
+                        @if ($bscReview['submitted_tx_hash'])
+                            <div><dt class="text-xs font-medium text-admin-muted">Customer-submitted TX hash (not proof of payment)</dt><dd class="break-all font-mono text-xs">{{ $bscReview['submitted_tx_hash'] }}</dd></div>
+                        @endif
+                        @if ($bscReview['verified_review_tx_hash'])
+                            <div><dt class="text-xs font-medium text-admin-muted">Verified on-chain; invoice attribution requires review</dt><dd class="break-all font-mono text-xs">{{ $bscReview['verified_review_tx_hash'] }}</dd></div>
+                        @endif
+                        @if ($bscReview['reason'])
+                            <div><dt class="text-xs font-medium text-admin-muted">Verification reason</dt><dd class="break-all font-mono text-xs">{{ $bscReview['reason'] }}</dd></div>
+                        @endif
                         <div><dt class="text-xs font-medium text-admin-muted">Confirmations</dt><dd class="text-sm font-semibold text-admin-ink">{{ $bscReview['confirmations'] }}</dd></div>
                         <div><dt class="text-xs font-medium text-admin-muted">Sender</dt><dd class="break-all font-mono text-xs">{{ $bscReview['sender'] }}</dd></div>
                         <div><dt class="text-xs font-medium text-admin-muted">Block</dt><dd class="text-sm font-semibold text-admin-ink">{{ $bscReview['block'] }}</dd></div>
